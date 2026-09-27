@@ -142,6 +142,12 @@ TEST_F(Draft21CatalogPart03Test, NamespaceBoundsSeparateEmittedFieldsAndReceiver
     ASSERT_EQ(emitted.size(), 1u);
     EXPECT_EQ(emitted.front()->evaluators,
               std::vector<std::string>{"d21-emitted-namespace-fields-nonempty"});
+    for (const auto line : {3107u, 3109u}) {
+        const auto rows = at(line);
+        ASSERT_EQ(rows.size(), 1u);
+        EXPECT_NE(rows.front()->rationale.find("Section 2.4.1"), std::string::npos);
+        EXPECT_EQ(rows.front()->rationale.find("session namespace"), std::string::npos);
+    }
     const std::map<std::size_t, std::string> evaluators = {
         {3109, "d21-empty-namespace-field-protocol-violation"},
         {3113, "d21-too-many-namespace-fields-protocol-violation"}};

@@ -505,14 +505,14 @@
       "source": {"section": "8.7", "first_line": 3107, "last_line": 3110, "occurrence": 1, "clause": 1},
       "actor": "endpoint encoding a Track Namespace", "summary": "Encode at least one byte in every Track Namespace Field Value.",
       "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-emitted-namespace-fields"], "evaluators": ["d21-emitted-namespace-fields-nonempty"],
-      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids empty fields, not an empty namespace tuple: a namespace may contain zero fields as used by the session namespace. Receiver rejection is a separate anchor."
+      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 818-819) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
     },
     {
       "id": "D21-8-7-MUST-251", "strength": "Must",
       "source": {"section": "8.7", "first_line": 3109, "last_line": 3110, "occurrence": 1, "clause": 1},
       "actor": "endpoint receiving a Track Namespace", "summary": "Close the session with PROTOCOL_VIOLATION when a received Track Namespace Field has length zero.",
       "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-empty-namespace-field"], "evaluators": ["d21-empty-namespace-field-protocol-violation"],
-      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing an empty field, without confusing it with a legal zero-field session namespace."
+      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 818-819)."
     },
     {
       "id": "D21-8-7-MUST-252", "strength": "Must",
