@@ -140,10 +140,8 @@
       "id": "D21-5-2-MUST-123", "strength": "Must",
       "source": {"section": "5.2", "first_line": 1862, "last_line": 1865, "occurrence": 1, "clause": 1},
       "actor": "MOQT implementation", "summary": "If a Subgroup Object's elapsed time exceeds its effective nonzero OBJECT_DELIVERY_TIMEOUT before handoff to the transport, reset the underlying stream using DELIVERY_TIMEOUT.",
-      "applicability": "Applicable", "testability": "Testable",
-      "scenarios": ["d21-subgroup-object-expiry-before-transport"],
-      "evaluators": ["d21-expired-object-subgroup-delivery-timeout-reset"],
-      "rationale": "A driven fixture needs recorded header-provision time and independently established pre-transport admission control before releasing an expired Object and observing DELIVERY_TIMEOUT. Peer flow control alone cannot establish this precondition because the transport may buffer bytes without sending them. Without that independent evidence the scenario is not scored; ordinary late arrival is insufficient. Effective timeouts use the first Object's override or Track value and the smaller nonzero subscriber value. Section 11.3.2 supplies closure context; Section 12.5 defines DELIVERY_TIMEOUT as 0x2."
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The required reset depends on expiry before transport handoff, an internal condition unavailable to the approved external harness. Peer flow control cannot prove that condition because the transport may buffer bytes without sending them, and late arrival does not establish when admission occurred. Publisher instrumentation or internal adapter diagnostics do not count as external protocol evidence. Effective timeouts use the first Object's override or Track value and the smaller nonzero subscriber value. Section 11.3.2 supplies closure context; Section 12.5 defines DELIVERY_TIMEOUT as 0x2."
     },
     {
       "id": "D21-5-2-SHOULD-NOT-124", "strength": "ShouldNot",
@@ -172,10 +170,8 @@
       "id": "D21-5-2-MUST-127", "strength": "Must",
       "source": {"section": "5.2", "first_line": 1872, "last_line": 1877, "occurrence": 1, "clause": 1},
       "actor": "MOQT implementation", "summary": "Drop Object datagrams when their elapsed time exceeds the effective nonzero OBJECT_DELIVERY_TIMEOUT.",
-      "applicability": "Applicable", "testability": "Testable",
-      "scenarios": ["d21-datagram-expiry-before-transport"],
-      "evaluators": ["d21-expired-object-datagram-dropped"],
-      "rationale": "A driven fixture needs known header-provision times and independent admission evidence establishing that expired Object bytes have not entered the transport queue. With that precondition, release expired and fresh identified Objects and inspect delivery; absent that evidence the scenario is not scored. Packet loss or ordinary late arrival alone is insufficient, and a fresh control only establishes continued delivery. For Datagram forwarding, SUBGROUP_DELIVERY_TIMEOUT also acts as an Object timeout and the smaller nonzero value applies; data already queued in transport is excluded by this section's buffering caveat."
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The approved external harness cannot determine whether a datagram expired before entering the underlying transport queue. Peer flow control does not expose admission, late arrival can result from permitted transport buffering, and non-arrival can result from packet loss rather than a timeout drop. Publisher instrumentation or internal adapter diagnostics do not count as external protocol evidence. For Datagram forwarding, SUBGROUP_DELIVERY_TIMEOUT also acts as an Object timeout and the smaller nonzero value applies; data already queued in transport is excluded by this section's buffering caveat."
     },
     {
       "id": "D21-5-2-SHOULD-128", "strength": "Should",

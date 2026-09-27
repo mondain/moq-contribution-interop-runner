@@ -91,11 +91,9 @@ TEST_F(Draft21CatalogPart02Test, TimerBookkeepingAndTransportQueueAdviceRemainIn
     EXPECT_NE(start.front()->summary.find("application"), std::string::npos);
 }
 
-TEST_F(Draft21CatalogPart02Test, ExpiredDeliveryHasDistinctResetDropAndReopenOutcomes) {
+TEST_F(Draft21CatalogPart02Test, ObjectExpiryNeedsInternalEvidenceButSubgroupResetAndReopenAreObservable) {
     const std::map<std::size_t, std::string> evaluators = {
-        {1862, "d21-expired-object-subgroup-delivery-timeout-reset"},
         {1863, "d21-no-reopen-after-object-delivery-timeout"},
-        {1872, "d21-expired-object-datagram-dropped"},
         {1887, "d21-uncommitted-subgroup-timeout-reset"}};
     for (const auto& [line, evaluator] : evaluators) {
         const auto rows = at(line);
@@ -105,13 +103,22 @@ TEST_F(Draft21CatalogPart02Test, ExpiredDeliveryHasDistinctResetDropAndReopenOut
     }
     const auto subgroup = at(1887);
     ASSERT_EQ(subgroup.size(), 1u);
+    EXPECT_EQ(subgroup.front()->id, "D21-5-2-MUST-130");
+    EXPECT_EQ(subgroup.front()->scenarios,
+              std::vector<std::string>{"d21-subgroup-completion-withheld-acknowledgments"});
     EXPECT_NE(subgroup.front()->rationale.find("does not specify a reset code"), std::string::npos);
-    const auto object = at(1862);
-    ASSERT_EQ(object.size(), 1u);
-    EXPECT_NE(object.front()->rationale.find("flow control alone cannot"), std::string::npos);
-    const auto datagram = at(1872);
-    ASSERT_EQ(datagram.size(), 1u);
-    EXPECT_NE(datagram.front()->rationale.find("independent admission evidence"), std::string::npos);
+    const std::map<std::size_t, std::string> internal = {
+        {1862, "D21-5-2-MUST-123"}, {1872, "D21-5-2-MUST-127"}};
+    for (const auto& [line, id] : internal) {
+        const auto rows = at(line);
+        ASSERT_EQ(rows.size(), 1u);
+        EXPECT_EQ(rows.front()->id, id);
+        EXPECT_EQ(rows.front()->applicability, Applicability::Applicable);
+        EXPECT_EQ(rows.front()->testability, Testability::NotTestable);
+        EXPECT_TRUE(rows.front()->scenarios.empty());
+        EXPECT_TRUE(rows.front()->evaluators.empty());
+        EXPECT_NE(rows.front()->rationale.find("internal adapter diagnostics"), std::string::npos);
+    }
 }
 
 TEST_F(Draft21CatalogPart02Test, SlowSubscriberTerminationUsesPublishDoneTooFarBehind) {
