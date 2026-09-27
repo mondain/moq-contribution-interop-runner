@@ -17,3 +17,12 @@ CMakeUserPresets.json
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #cmake-build-*
+
+.superpowers/
+docs/superpowers
+
+graphify-out/*
+graphify-work/*
+!graphify-out/graph.html
+!graphify-out/graph.json
+!graphify-out/GRAPH_REPORT.md
