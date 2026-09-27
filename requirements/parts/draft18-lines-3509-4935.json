@@ -1,0 +1,2509 @@
+{
+  "draft": 18,
+  "source_sha256": "9e6b32cb7797c151e9e127374c1291af3ed546b2d453cd5bbb15946977eeeeb6",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D18-10-3-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.3",
+        "first_line": 3515,
+        "last_line": 3516,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Pipeline other control messages after SETUP without waiting for peer SETUP when not offering extensions that modify control-message semantics.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "withhold-peer-setup-without-control-semantic-extensions"
+      ],
+      "evaluators": [
+        "publisher-control-messages-pipelined-after-setup"
+      ],
+      "rationale": "The permission concerns the endpoint sending SETUP; observe its control stream while the listener delays its own SETUP. Optional pipelining is not mandatory support."
+    },
+    {
+      "id": "D18-10-3-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.3",
+        "first_line": 3521,
+        "last_line": 3521,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Ignore unknown Setup Options.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-setup-with-unknown-option"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "A contribution publisher receives peer SETUP; use otherwise valid options and continue a valid request to establish that the unknown option did not alter semantics."
+    },
+    {
+      "id": "D18-10-3-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.3",
+        "first_line": 3544,
+        "last_line": 3545,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Ignore unrecognized Setup Options in their version-independent namespace.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-setup-with-unknown-option"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "This repeats the extensibility requirement at line 3521 and remains a separate lexical anchor; Message Parameter unknown-value rules do not apply."
+    },
+    {
+      "id": "D18-10-3-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3",
+        "first_line": 3545,
+        "last_line": 3547,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not repeat a Setup Option Type unless its definition explicitly permits multiple instances.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-setup-options"
+      ],
+      "evaluators": [
+        "setup-option-types-unique-except-defined-repeatable-options"
+      ],
+      "rationale": "Inspect the publisher SETUP. Section 10.3.1.4 permits multiple authorization tokens; this sender constraint does not prescribe a receiver error for duplicate known options."
+    },
+    {
+      "id": "D18-10-3-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.3",
+        "first_line": 3547,
+        "last_line": 3548,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Allow duplicate instances of unknown Setup Options.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-setup-with-duplicate-unknown-options"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "Exercise duplicate unknown Option Types, independently of known-option repetition and Message Parameter validation."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3558,
+        "last_line": 3559,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Do not send AUTHORITY as a transport server.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Publisher and server are independent roles, so this is conditionally applicable. The listener-only runner accepts a publishing transport client and cannot observe a publisher acting as server."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3558,
+        "last_line": 3559,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Do not send AUTHORITY over WebTransport.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-webtransport-publisher-setup"
+      ],
+      "evaluators": [
+        "setup-omits-authority"
+      ],
+      "rationale": "The publisher is the WebTransport client; AUTHORITY is supplied by the transport and cannot be repeated as a Setup Option."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3562,
+        "last_line": 3563,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Close the session with INVALID_AUTHORITY on receiving AUTHORITY from a server.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-server-setup-with-authority"
+      ],
+      "evaluators": [
+        "session-closed-invalid-authority"
+      ],
+      "rationale": "Send a syntactically valid AUTHORITY from the listener to isolate the prohibited sender role."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3562,
+        "last_line": 3563,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with INVALID_AUTHORITY on receiving AUTHORITY over WebTransport.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-webtransport-setup-with-authority"
+      ],
+      "evaluators": [
+        "session-closed-invalid-authority"
+      ],
+      "rationale": "The publisher as WebTransport client can receive this invalid option from the runner; use a syntactically valid value."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3562,
+        "last_line": 3563,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "server",
+      "summary": "Close the session with INVALID_AUTHORITY when the client's specified authority is unsupported.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The supported-authority check is a transport-server duty. A publishing server is conditionally covered, but the listener-only runner cannot connect as its client."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3567,
+        "last_line": 3568,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Set AUTHORITY to the authority component of the moqt connection URI.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "connect-publisher-to-native-uri-with-authority"
+      ],
+      "evaluators": [
+        "setup-authority-matches-connection-uri"
+      ],
+      "rationale": "Configure a native QUIC publisher URI and compare the emitted AUTHORITY with that URI component, using the Section 3.1.4 mapping."
+    },
+    {
+      "id": "D18-10-3-1-1-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.1",
+        "first_line": 3569,
+        "last_line": 3569,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with MALFORMED_AUTHORITY when AUTHORITY violates its URI formatting rules.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A role-valid AUTHORITY travels from native QUIC client to server. This runner only receives publisher connections; sending malformed AUTHORITY to its client also violates the sender-role rule requiring INVALID_AUTHORITY, and the draft defines no error precedence."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3574,
+        "last_line": 3575,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Do not send PATH as a transport server.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The transport-server role is conditionally applicable to a publisher, but cannot be exercised by the listener-only runner."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3574,
+        "last_line": 3575,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Do not send PATH over WebTransport.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-webtransport-publisher-setup"
+      ],
+      "evaluators": [
+        "setup-omits-path"
+      ],
+      "rationale": "The contribution publisher's WebTransport SETUP can be inspected directly for the prohibited option."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3579,
+        "last_line": 3579,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Close the session with INVALID_PATH on receiving PATH from a server.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-server-setup-with-path"
+      ],
+      "evaluators": [
+        "session-closed-invalid-path"
+      ],
+      "rationale": "Use a well-formed PATH sent by the listener to isolate the prohibited server role."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3579,
+        "last_line": 3579,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with INVALID_PATH on receiving PATH over WebTransport.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-webtransport-setup-with-path"
+      ],
+      "evaluators": [
+        "session-closed-invalid-path"
+      ],
+      "rationale": "A well-formed PATH over WebTransport is invalid independently of its contents."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3579,
+        "last_line": 3579,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "server",
+      "summary": "Close the session with INVALID_PATH when the client's specified path is unsupported.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a server validation duty, conditionally applicable to a publishing server. The approved runner listens for client publishers and cannot exercise that role."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3591,
+        "last_line": 3591,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Set PATH to the path-abempty component when connecting to a moqt URI.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "connect-publisher-to-native-uri-with-path"
+      ],
+      "evaluators": [
+        "setup-path-matches-uri-path-component"
+      ],
+      "rationale": "Configure a native QUIC URI with a known path; compare the publisher SETUP PATH against that component, including an empty path case."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3592,
+        "last_line": 3593,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Append a question mark followed by the query component to PATH when the moqt URI has a query.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "connect-publisher-to-native-uri-with-query"
+      ],
+      "evaluators": [
+        "setup-path-includes-question-mark-and-query"
+      ],
+      "rationale": "The query delimiter and query bytes are observable in the client publisher's SETUP, including a present but empty query."
+    },
+    {
+      "id": "D18-10-3-1-2-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.2",
+        "first_line": 3594,
+        "last_line": 3594,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with MALFORMED_PATH when PATH violates its URI formatting rules.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A role-valid PATH is received by a native QUIC server. The listener-only runner cannot exercise a publishing server; sending malformed PATH to the publisher client also triggers INVALID_PATH, with no specified precedence."
+    },
+    {
+      "id": "D18-10-3-1-4-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.3.1.4",
+        "first_line": 3620,
+        "last_line": 3620,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not fail SETUP with AUTH_TOKEN_CACHE_OVERFLOW when a REGISTER token exceeds MAX_AUTH_TOKEN_CACHE_SIZE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-setup-token-register-exceeding-cache-limit"
+      ],
+      "evaluators": [
+        "no-auth-token-cache-overflow-session-error"
+      ],
+      "rationale": "Section 10.3.1.4 explicitly overrides the general registration overflow rule in Section 10.2.2. Send a valid token exceeding the advertised or default zero limit."
+    },
+    {
+      "id": "D18-10-3-1-4-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.4",
+        "first_line": 3621,
+        "last_line": 3621,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Treat a SETUP REGISTER token exceeding the cache limit as USE_VALUE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-oversize-setup-register-then-use-its-alias"
+      ],
+      "evaluators": [
+        "setup-token-processed-as-value-without-alias-registration"
+      ],
+      "rationale": "Use known authorization policy and token bytes, then reference the would-be alias on a request. USE_VALUE authenticates using the value without registering that alias; Section 10.2.2 defines the subsequent unknown-alias outcome."
+    },
+    {
+      "id": "D18-10-3-1-4-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.3.1.4",
+        "first_line": 3623,
+        "last_line": 3626,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Purge locally remembered Token Aliases whose SETUP registration failed under the peer's advertised or default zero cache limit.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Purging sender memory is internal. A later value-based token use does not prove deletion, and the runner cannot require the application to reuse every failed alias."
+    },
+    {
+      "id": "D18-10-3-1-5-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.3.1.5",
+        "first_line": 3631,
+        "last_line": 3634,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Encode MOQT_IMPLEMENTATION as a UTF-8 string.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-implementation-option"
+      ],
+      "evaluators": [
+        "implementation-option-is-valid-utf8"
+      ],
+      "rationale": "When the optional identification value is sent, its byte encoding is directly observable; no language-tag or display-comprehension requirement is added."
+    },
+    {
+      "id": "D18-10-3-1-5-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.3.1.5",
+        "first_line": 3645,
+        "last_line": 3648,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send MOQT_IMPLEMENTATION unless specifically configured not to do so.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "connect-publisher-with-implementation-identification-enabled"
+      ],
+      "evaluators": [
+        "setup-includes-implementation-option"
+      ],
+      "rationale": "The driven scenario establishes that identification has not been disabled. Absence under unknown configuration is not a conformance failure."
+    },
+    {
+      "id": "D18-10-3-1-5-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "10.3.1.5",
+        "first_line": 3650,
+        "last_line": 3651,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Limit MOQT_IMPLEMENTATION to the implementation name and version, avoiding nonessential information.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The draft provides no grammar or objective boundary for names, versions, advertising and essential information; a wire evaluator must not invent one."
+    },
+    {
+      "id": "D18-10-3-1-5-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "10.3.1.5",
+        "first_line": 3652,
+        "last_line": 3654,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not use another implementation's identifier to declare compatibility.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The wire string alone does not establish ownership of an identifier or intent to claim compatibility. The draft supplies no authoritative identity registry."
+    },
+    {
+      "id": "D18-10-4-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3661,
+        "last_line": 3663,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Send a zero-length New Session URI in every client GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-client-goaway"
+      ],
+      "evaluators": [
+        "client-goaway-new-session-uri-empty"
+      ],
+      "rationale": "Applies to both control and request stream GOAWAY sent by the publishing transport client."
+    },
+    {
+      "id": "D18-10-4-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.4",
+        "first_line": 3665,
+        "last_line": 3666,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send GOAWAY on a request stream to initiate migration of that request.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "initiate-publisher-request-migration"
+      ],
+      "evaluators": [
+        "goaway-sent-on-selected-request-stream"
+      ],
+      "rationale": "The permission is observable when supported by the publisher; it does not require optional request migration support."
+    },
+    {
+      "id": "D18-10-4-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3667,
+        "last_line": 3670,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "On request-stream GOAWAY, reissue that specific request at the specified URI or on the current session if no URI is supplied.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-goaway-on-publisher-initiated-request"
+      ],
+      "evaluators": [
+        "same-publisher-request-reissued-at-goaway-destination"
+      ],
+      "rationale": "Use PUBLISH or PUBLISH_NAMESPACE initiated by the contribution publisher, so it owns the request. This sentence explicitly says current session for an empty request URI; do not replace it with the control-stream migration rule."
+    },
+    {
+      "id": "D18-10-4-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3667,
+        "last_line": 3670,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "On request-stream GOAWAY, close the old request stream using its appropriate completion or cancellation mechanism.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-goaway-on-publisher-initiated-request"
+      ],
+      "evaluators": [
+        "old-publisher-request-stream-closed"
+      ],
+      "rationale": "Observe FIN/reset for a namespace request or PUBLISH_DONE and closure for a publication. These are examples of suitable mechanisms, not a mandate to use every mechanism."
+    },
+    {
+      "id": "D18-10-4-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3673,
+        "last_line": 3673,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Individually unsubscribe existing subscriptions after GOAWAY.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The actor is the subscriber relinquishing subscriptions, not the contribution publisher. The draft's uppercase UNSUBSCRIBE is descriptive here; its cancellation mechanism is specified in Section 3.3.2."
+    },
+    {
+      "id": "D18-10-4-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.4",
+        "first_line": 3674,
+        "last_line": 3674,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject new requests after sending GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-new-request-after-publisher-goaway"
+      ],
+      "evaluators": [
+        "publisher-rejects-new-request-after-goaway"
+      ],
+      "rationale": "This general permission must be read with the mandatory GOING_AWAY rejections for a control-stream GOAWAY cutoff later in this section."
+    },
+    {
+      "id": "D18-10-4-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "10.4",
+        "first_line": 3676,
+        "last_line": 3679,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not initiate new requests to the peer after receiving control-stream GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-control-goaway-then-trigger-new-publication"
+      ],
+      "evaluators": [
+        "no-new-publisher-requests-on-draining-session"
+      ],
+      "rationale": "Observe publisher-originated PUBLISH and PUBLISH_NAMESPACE on the draining session; migrating requests to a replacement session remains permitted."
+    },
+    {
+      "id": "D18-10-4-SHOULD-004",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3682,
+        "last_line": 3683,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Avoid initiating new requests after sending GOAWAY unless required for migration.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-sends-goaway-then-trigger-nonmigration-publication"
+      ],
+      "evaluators": [
+        "no-new-nonmigration-publisher-requests"
+      ],
+      "rationale": "A driven scenario distinguishes a newly requested publication from requests required by migration. Sending GOAWAY does not absolutely prohibit new requests."
+    },
+    {
+      "id": "D18-10-4-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.4",
+        "first_line": 3684,
+        "last_line": 3686,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reject new requests with an appropriate error after receiving GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-request-after-peer-goaway-to-publisher"
+      ],
+      "evaluators": [
+        "new-request-rejected-after-received-goaway"
+      ],
+      "rationale": "GOING_AWAY is given as an example, not an exclusive mandatory code for this permission. Observe a valid request rejection."
+    },
+    {
+      "id": "D18-10-4-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3688,
+        "last_line": 3690,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION on a second GOAWAY on the control stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-two-goaways-on-control-stream"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Duplicate counting is per control stream; the publisher receives two GOAWAY messages on the same peer stream."
+    },
+    {
+      "id": "D18-10-4-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3688,
+        "last_line": 3690,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION on a second GOAWAY on one request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-two-goaways-on-same-request-stream"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Separate request streams may each carry one GOAWAY. The duplicate stimulus deliberately uses the same active request stream."
+    },
+    {
+      "id": "D18-10-4-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3714,
+        "last_line": 3716,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client",
+      "summary": "Use a provided GOAWAY New Session URI for the replacement session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-control-goaway-with-new-session-uri"
+      ],
+      "evaluators": [
+        "publisher-reconnects-to-provided-goaway-uri"
+      ],
+      "rationale": "Provide a reachable listener URI and observe the client publisher's replacement connection. This does not require migration to an unspecified destination."
+    },
+    {
+      "id": "D18-10-4-SHOULD-005",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3716,
+        "last_line": 3717,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Use the current URI scheme in the GOAWAY New Session URI.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Only a server can send a nonempty GOAWAY URI; clients must send an empty one. Publishing-server behavior is outside this listener-only harness."
+    },
+    {
+      "id": "D18-10-4-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3719,
+        "last_line": 3720,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION if GOAWAY New Session URI exceeds 8192 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-goaway-uri-length-8193"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Use a well-framed GOAWAY with a declared URI length above the explicit maximum, avoiding an unrelated framing error."
+    },
+    {
+      "id": "D18-10-4-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3723,
+        "last_line": 3723,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Close the session with PROTOCOL_VIOLATION on client GOAWAY with nonempty New Session URI.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publishing endpoint can in principle act as a server, but the runner accepts publishing clients and cannot send this client-only violation to a publisher server."
+    },
+    {
+      "id": "D18-10-4-SHOULD-006",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3729,
+        "last_line": 3730,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reset a GOAWAY request stream with GOING_AWAY after its nonzero Timeout expires.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-request-goaway-timeout-with-request-still-open"
+      ],
+      "evaluators": [
+        "request-stream-reset-going-away-at-timeout"
+      ],
+      "rationale": "Use an advertised nonzero timeout and leave the request open. The permission to close earlier in this paragraph means an earlier valid reset is not a timing failure."
+    },
+    {
+      "id": "D18-10-4-SHOULD-007",
+      "strength": "Should",
+      "source": {
+        "section": "10.4",
+        "first_line": 3731,
+        "last_line": 3732,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Migrate as quickly as possible when a GOAWAY Timeout is zero.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The draft provides no objective deadline for as quickly as possible, and local readiness and application migration costs are not visible at the protocol boundary."
+    },
+    {
+      "id": "D18-10-4-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "10.4",
+        "first_line": 3732,
+        "last_line": 3734,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session before the GOAWAY Timeout elapses.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-control-goaway-with-positive-timeout"
+      ],
+      "evaluators": [
+        "publisher-session-closed-before-advertised-timeout"
+      ],
+      "rationale": "The timeout is a hint, not a minimum guaranteed session lifetime. This optional behavior can be observed on the runner's transport."
+    },
+    {
+      "id": "D18-10-4-MAY-005",
+      "strength": "May",
+      "source": {
+        "section": "10.4",
+        "first_line": 3732,
+        "last_line": 3734,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Reset the request stream before its GOAWAY Timeout elapses.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-request-goaway-with-positive-timeout"
+      ],
+      "evaluators": [
+        "publisher-request-reset-before-advertised-timeout"
+      ],
+      "rationale": "This separate optional request-stream outcome does not imply the whole session must close."
+    },
+    {
+      "id": "D18-10-4-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3741,
+        "last_line": 3741,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with INVALID_REQUEST_ID if the control GOAWAY cutoff Request ID has the wrong receiver parity.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-control-goaway-with-wrong-receiver-request-id-parity"
+      ],
+      "evaluators": [
+        "session-closed-invalid-request-id"
+      ],
+      "rationale": "The GOAWAY field identifies the receiver's own requests, unlike ordinary incoming request IDs. For a client publisher its parity must be the client's parity from Section 10.1."
+    },
+    {
+      "id": "D18-10-4-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3743,
+        "last_line": 3744,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "goaway-sender",
+      "summary": "Reject requests at or above the sent control GOAWAY Request ID cutoff with REQUEST_ERROR GOING_AWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-control-goaway-with-pending-request-at-cutoff"
+      ],
+      "evaluators": [
+        "request-error-going-away"
+      ],
+      "rationale": "This clause governs the endpoint that sent the cutoff, not the endpoint receiving its own request IDs. Establish pending peer requests and inspect the responses."
+    },
+    {
+      "id": "D18-10-4-MUST-009",
+      "strength": "Must",
+      "source": {
+        "section": "10.4",
+        "first_line": 3743,
+        "last_line": 3744,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "goaway-sender",
+      "summary": "Reject requests arriving after sending control GOAWAY with REQUEST_ERROR GOING_AWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-new-request-after-publisher-control-goaway"
+      ],
+      "evaluators": [
+        "request-error-going-away"
+      ],
+      "rationale": "The post-GOAWAY arrival condition is independent of the numeric cutoff. The earlier general MAY does not remove this explicit control-stream requirement."
+    },
+    {
+      "id": "D18-10-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.5",
+        "first_line": 3786,
+        "last_line": 3787,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Close the session with PROTOCOL_VIOLATION if PUBLISH_OK carries Track Properties.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-request-ok-with-track-properties"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Section 10.5 defines PUBLISH_OK as REQUEST_OK in reply to PUBLISH. Use that wire message; Track Properties are only populated for TRACK_STATUS_OK in this format."
+    },
+    {
+      "id": "D18-10-5-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.5",
+        "first_line": 3786,
+        "last_line": 3787,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION if REQUEST_UPDATE_OK carries Track Properties.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-request-update-ok-with-track-properties"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Section 10.5 explicitly defines REQUEST_UPDATE_OK as REQUEST_OK responding to REQUEST_UPDATE. A publisher can initiate an update to its own PUBLISH or PUBLISH_NAMESPACE request under Section 10.9."
+    },
+    {
+      "id": "D18-10-5-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.5",
+        "first_line": 3786,
+        "last_line": 3787,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if SUBSCRIBE_NAMESPACE_OK carries Track Properties.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 10.5 defines SUBSCRIBE_NAMESPACE_OK as REQUEST_OK replying to namespace discovery; receiving it is the subscriber role. The enumerated sentence does not mention SUBSCRIBE_TRACKS_OK, so no extra prohibition is invented."
+    },
+    {
+      "id": "D18-10-5-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.5",
+        "first_line": 3786,
+        "last_line": 3787,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "publisher",
+      "summary": "Close the session with PROTOCOL_VIOLATION if PUBLISH_NAMESPACE_OK carries Track Properties.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-namespace-ok-with-track-properties"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Section 10.5 defines PUBLISH_NAMESPACE_OK as REQUEST_OK in reply to the publisher's namespace announcement. Do not confuse this with TRACK_STATUS_OK, where Track Properties are allowed."
+    },
+    {
+      "id": "D18-10-6-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3822,
+        "last_line": 3822,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester",
+      "summary": "Use the current session URI when a Redirect has zero-length Connect URI.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-namespace-redirect-with-empty-uri"
+      ],
+      "evaluators": [
+        "publisher-retries-redirect-at-current-session-uri"
+      ],
+      "rationale": "PUBLISH_NAMESPACE is a publisher-initiated request allowed to receive REDIRECT under Section 10.6.2. This URI recommendation does not require a new connection if the current one can be used."
+    },
+    {
+      "id": "D18-10-6-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3824,
+        "last_line": 3824,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Close the session with PROTOCOL_VIOLATION on a Redirect with nonempty Connect URI received as server.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The server-role restriction is conditionally applicable, but the listener-only harness receives a client publisher. A nonempty Redirect from this server to that client is allowed."
+    },
+    {
+      "id": "D18-10-6-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3833,
+        "last_line": 3833,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Leave Redirect Track Name empty when redirecting SUBSCRIBE_NAMESPACE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-redirects-subscribe-namespace"
+      ],
+      "evaluators": [
+        "namespace-redirect-track-name-empty"
+      ],
+      "rationale": "A publisher may respond to namespace discovery with a Redirect. This is a constraint on the serialized response when that optional redirection is used."
+    },
+    {
+      "id": "D18-10-6-1-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3833,
+        "last_line": 3833,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Leave Redirect Track Name empty when redirecting PUBLISH_NAMESPACE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "PUBLISH_NAMESPACE is received by the subscriber or relay; originating its redirect is not a contribution publisher duty."
+    },
+    {
+      "id": "D18-10-6-1-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3835,
+        "last_line": 3836,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION on a SUBSCRIBE_NAMESPACE Redirect with nonempty Track Name.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The receiving requester is the namespace subscriber, not the publisher serving discovery."
+    },
+    {
+      "id": "D18-10-6-1-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.6.1",
+        "first_line": 3835,
+        "last_line": 3836,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Close the session with PROTOCOL_VIOLATION on a PUBLISH_NAMESPACE Redirect with nonempty Track Name.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-namespace-redirect-with-nonempty-track-name"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The runner can return a correctly framed REDIRECT to the publisher's namespace announcement with the forbidden Track Name."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3854,
+        "last_line": 3854,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester",
+      "summary": "Wait at least Retry Interval minus one milliseconds before retrying a request when Retry Interval is nonzero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publisher-request-error-with-positive-retry-interval"
+      ],
+      "evaluators": [
+        "publisher-retry-respects-minimum-interval-minus-one"
+      ],
+      "rationale": "Use a publisher-originated namespace request and a Retry Interval larger than one. The encoded plus-one convention makes value 1 immediately retryable; no retry is mandated."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3855,
+        "last_line": 3855,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester",
+      "summary": "Do not retry a request rejected with Retry Interval zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publisher-request-error-with-zero-retry-interval"
+      ],
+      "evaluators": [
+        "same-publisher-request-not-retried"
+      ],
+      "rationale": "Drive the same publication intent after a terminal REQUEST_ERROR and observe whether the unchanged request is retried; a materially changed request is not the same retry."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3872,
+        "last_line": 3875,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "application",
+      "summary": "Select a relevant REQUEST_ERROR code from the defined and registered meanings.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is advice to the application. The generic choice of a relevant code depends on application failure reasons that the wire cannot establish. Explicit error mappings elsewhere remain separately testable."
+    },
+    {
+      "id": "D18-10-6-2-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3903,
+        "last_line": 3904,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reject new requests after receiving GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-request-after-peer-goaway-to-publisher"
+      ],
+      "evaluators": [
+        "new-request-rejected-after-received-goaway"
+      ],
+      "rationale": "The GOING_AWAY error description repeats the Section 10.4 permission and gets its own lexical record without turning it into a requirement to reject."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3907,
+        "last_line": 3908,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "responder",
+      "summary": "Use Retry Interval to indicate when an EXCESSIVE_LOAD request can be retried.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can emit this error, but the time at which its overload clears is an internal prediction. The draft specifies no fixed interval and the runner cannot infer the correct one from the response."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-004",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3927,
+        "last_line": 3931,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester",
+      "summary": "On REDIRECT, establish a session at the supplied Connect URI when one is present.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-namespace-redirect-with-new-uri"
+      ],
+      "evaluators": [
+        "publisher-connects-to-redirect-uri"
+      ],
+      "rationale": "PUBLISH_NAMESPACE is the listed contribution-publisher request to which REDIRECT can apply. Use a reachable replacement listener; do not extend REDIRECT to PUBLISH, which the list omits."
+    },
+    {
+      "id": "D18-10-6-2-SHOULD-005",
+      "strength": "Should",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3927,
+        "last_line": 3931,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "requester",
+      "summary": "Retry the redirected request using the supplied name components when present.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-publish-namespace-redirect-with-new-namespace"
+      ],
+      "evaluators": [
+        "publish-namespace-retried-with-redirect-namespace"
+      ],
+      "rationale": "For PUBLISH_NAMESPACE, Section 10.6.1 requires empty Track Name and supplies the new namespace. Empty namespace and name retain the original values."
+    },
+    {
+      "id": "D18-10-6-2-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3932,
+        "last_line": 3933,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Forward an upstream REDIRECT to matching downstream requests.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is relay fanout behavior, not an original publisher's handling of its own redirect."
+    },
+    {
+      "id": "D18-10-6-2-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.6.2",
+        "first_line": 3933,
+        "last_line": 3936,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Cache a Full Track Name REDIRECT for up to Retry Interval milliseconds and answer matching requests from it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an optional relay cache operation. Preserve the stated Retry Interval milliseconds cache limit without replacing it with the retry-wait minus-one encoding."
+    },
+    {
+      "id": "D18-10-7-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.7",
+        "first_line": 4014,
+        "last_line": 4016,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reply to a successful SUBSCRIBE with SUBSCRIBE_OK.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "accept-subscribe-for-known-publisher-track"
+      ],
+      "evaluators": [
+        "successful-subscribe-responds-subscribe-ok"
+      ],
+      "rationale": "The reply is on the SUBSCRIBE request stream and is exclusive with REQUEST_ERROR under Section 5.1; Section 10.8 identifies it as the first response."
+    },
+    {
+      "id": "D18-10-7-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.7",
+        "first_line": 4014,
+        "last_line": 4016,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Start sending Objects for a successful subscription when its Forward State and filter permit delivery.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "accept-forward-one-subscribe-then-publish-matching-object"
+      ],
+      "evaluators": [
+        "matching-new-object-delivered-on-established-subscription"
+      ],
+      "rationale": "The conjunction adds an independently observable delivery action. Section 5.1 prohibits data when Forward State is zero; do not turn this sentence into unconditional delivery or delivery of past Objects."
+    },
+    {
+      "id": "D18-10-9-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.9",
+        "first_line": 4063,
+        "last_line": 4065,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Respond to an individually processed REQUEST_UPDATE with exactly one REQUEST_OK or REQUEST_ERROR.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-one-request-update-on-established-publisher-request"
+      ],
+      "evaluators": [
+        "exactly-one-request-ok-or-request-error"
+      ],
+      "rationale": "A publisher receives subscriber updates to subscriptions and discovery requests. Section 10.9.1 expressly permits one error for a failed coalesced batch, so this single-update scenario does not contradict that exception."
+    },
+    {
+      "id": "D18-10-9-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4114,
+        "last_line": 4116,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "When a subscription REQUEST_UPDATE fails, also terminate that subscription with PUBLISH_DONE UPDATE_FAILED.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "reject-subscription-request-update"
+      ],
+      "evaluators": [
+        "publish-done-update-failed"
+      ],
+      "rationale": "Observe the request error and PUBLISH_DONE status on that subscription stream; do not merely accept an error response while the subscription remains live."
+    },
+    {
+      "id": "D18-10-9-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4117,
+        "last_line": 4117,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reset the FETCH data stream when its REQUEST_UPDATE fails.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "reject-request-update-for-open-fetch"
+      ],
+      "evaluators": [
+        "fetch-data-stream-reset"
+      ],
+      "rationale": "The independent data-stream cleanup is externally visible. The sentence does not prescribe a reset error code, so none is invented."
+    },
+    {
+      "id": "D18-10-9-1-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4119,
+        "last_line": 4119,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Close the bidirectional stream when a SUBSCRIBE_NAMESPACE REQUEST_UPDATE fails.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "reject-subscribe-namespace-request-update"
+      ],
+      "evaluators": [
+        "namespace-request-stream-closed"
+      ],
+      "rationale": "The contribution publisher is the namespace-discovery responder. This clause does not name SUBSCRIBE_TRACKS; its omission is retained rather than filled in."
+    },
+    {
+      "id": "D18-10-9-1-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4119,
+        "last_line": 4119,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Close the bidirectional stream when a PUBLISH_NAMESPACE REQUEST_UPDATE fails.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The responder to PUBLISH_NAMESPACE is the namespace receiver, not the publisher originating that request."
+    },
+    {
+      "id": "D18-10-9-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4121,
+        "last_line": 4123,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Coalesce REQUEST_UPDATE processing on one stream by applying the cumulative result with later values overriding earlier ones.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Whether intermediate states were processed is internal and not proved by the final state. The independent externally visible response requirement is recorded at line 4124; a coalesced failure has one REQUEST_ERROR per lines 4126-4129."
+    },
+    {
+      "id": "D18-10-9-1-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.9.1",
+        "first_line": 4124,
+        "last_line": 4129,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send REQUEST_OK for each successful update even when processing a cumulative batch.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-multiple-successful-request-updates-on-one-stream"
+      ],
+      "evaluators": [
+        "one-request-ok-per-successful-coalesced-update"
+      ],
+      "rationale": "Section 10.5 defines the REQUEST_UPDATE_OK shorthand as REQUEST_OK. The distinct failure case allows a single REQUEST_ERROR for a failed coalesced batch and is not evaluated as missing per-update successes."
+    },
+    {
+      "id": "D18-10-9-2-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.9.2",
+        "first_line": 4137,
+        "last_line": 4139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Do not update a SUBSCRIBE_NAMESPACE prefix to overlap another active SUBSCRIBE_NAMESPACE in the session.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sentence constrains the namespace subscriber's updated prefix. The publisher's required PREFIX_OVERLAP response is separately stated in Section 10.2.14; the two discovery types have independent overlap spaces."
+    },
+    {
+      "id": "D18-10-9-2-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.9.2",
+        "first_line": 4137,
+        "last_line": 4139,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Do not update a SUBSCRIBE_TRACKS prefix to overlap another active SUBSCRIBE_TRACKS in the session.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This parallel sender constraint concerns track-discovery subscribers. Do not prohibit overlap with SUBSCRIBE_NAMESPACE, whose overlap space is independent."
+    },
+    {
+      "id": "D18-10-10-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.10",
+        "first_line": 4192,
+        "last_line": 4194,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Respond to an unwanted PUBLISH with REQUEST_ERROR UNINTERESTED.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber rejects a contribution; this is not a duty of the publisher sending PUBLISH."
+    },
+    {
+      "id": "D18-10-10-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.10",
+        "first_line": 4192,
+        "last_line": 4194,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Abandon reading streams associated with an unwanted PUBLISH using STOP_SENDING.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This independent subscriber cancellation action is split from its request-error response. It is not a publisher obligation."
+    },
+    {
+      "id": "D18-10-11-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.11",
+        "first_line": 4227,
+        "last_line": 4229,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send PUBLISH_DONE until all data streams that will ever be opened for the subscription have been closed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 5.1.1 and the request-stream FIN rule at lines 4236-4237 establish the data-stream scope. Relative arrival order across independent streams cannot establish sender close-before-PUBLISH_DONE ordering; publisher-side transport evidence would be required. The prose at line 4217 inconsistently calls PUBLISH_DONE a control-stream message."
+    },
+    {
+      "id": "D18-10-11-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.11",
+        "first_line": 4227,
+        "last_line": 4229,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Do not send PUBLISH_DONE while any datagrams remain to be sent for the subscription.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Remaining sender datagram work is internal. Late datagram arrival is explicitly allowed by this section and cannot prove a datagram was sent after PUBLISH_DONE; absence cannot prove the queue was empty."
+    },
+    {
+      "id": "D18-10-11-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.11",
+        "first_line": 4234,
+        "last_line": 4236,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not destroy subscription state before sending PUBLISH_DONE.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The allocation lifetime of subscription state is internal. Observed protocol responsiveness is only a proxy and cannot prove the state was retained or destroyed at the required instant."
+    },
+    {
+      "id": "D18-10-11-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.11",
+        "first_line": 4236,
+        "last_line": 4237,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send FIN on the subscription bidirectional stream immediately after PUBLISH_DONE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-terminates-subscription"
+      ],
+      "evaluators": [
+        "publish-done-followed-by-request-stream-fin"
+      ],
+      "rationale": "Same-stream ordering and FIN are observable; immediate means the final response is followed by closure without an invented wall-clock threshold."
+    },
+    {
+      "id": "D18-10-11-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.11",
+        "first_line": 4239,
+        "last_line": 4242,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "After PUBLISH_DONE, set a timer at least as long as the larger subgroup or object delivery timeout.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is receiver retention for late Objects and does not constrain the publishing contribution endpoint."
+    },
+    {
+      "id": "D18-10-11-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.11",
+        "first_line": 4242,
+        "last_line": 4244,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Omit the late-object timer after unsubscribing or losing interest in the track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The permission belongs to the Object receiver's cleanup policy."
+    },
+    {
+      "id": "D18-10-11-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.11",
+        "first_line": 4246,
+        "last_line": 4248,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Discard subscription state early at the cost of losing late Objects.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The stated tradeoff belongs to the subscriber delivering Objects to its application, not the sender."
+    },
+    {
+      "id": "D18-10-11-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "10.11",
+        "first_line": 4248,
+        "last_line": 4250,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send STOP_SENDING on all related streams when deleting subscription state.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is subscriber stream cleanup following PUBLISH_DONE."
+    },
+    {
+      "id": "D18-10-11-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.11",
+        "first_line": 4281,
+        "last_line": 4282,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Set PUBLISH_DONE Stream Count to zero if no streams were opened for the subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-ends-subscription-with-no-data-streams"
+      ],
+      "evaluators": [
+        "publish-done-stream-count-zero"
+      ],
+      "rationale": "Use a driven subscription with Forward State zero and no data streams; inspect the Stream Count in its final PUBLISH_DONE."
+    },
+    {
+      "id": "D18-10-11-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.11",
+        "first_line": 4284,
+        "last_line": 4284,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Set PUBLISH_DONE Stream Count to 2^62 - 1 when unable to provide the exact opened-stream count.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The inability to compute an exact count is an internal condition the protocol cannot trigger or prove. Observing the sentinel alone does not establish whether it was required."
+    },
+    {
+      "id": "D18-10-11-SHOULD-004",
+      "strength": "Should",
+      "source": {
+        "section": "10.11",
+        "first_line": 4284,
+        "last_line": 4287,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Use a timeout or another mechanism to remove state despite an incorrect, unidentifiable-stream, or maximum Stream Count.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The second keyword on line 4284 advises the subscriber's cleanup mechanism; it is independent of the publisher sentinel requirement."
+    },
+    {
+      "id": "D18-10-11-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.11",
+        "first_line": 4289,
+        "last_line": 4289,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if received streams exceed PUBLISH_DONE Stream Count.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Object receiver may police the count; the publisher sending it is not the actor."
+    },
+    {
+      "id": "D18-10-11-SHOULD-005",
+      "strength": "Should",
+      "source": {
+        "section": "10.11",
+        "first_line": 4294,
+        "last_line": 4295,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "application",
+      "summary": "Choose a relevant PUBLISH_DONE status code for ending the subscription.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The generic application reason cannot be derived solely from the wire and the draft gives no exhaustive decision algorithm. Specific triggers such as UPDATE_FAILED are evaluated by their own requirements."
+    },
+    {
+      "id": "D18-10-12-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.12",
+        "first_line": 4355,
+        "last_line": 4355,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION on FETCH Type outside 0x1, 0x2 and 0x3.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-fetch-with-unknown-type"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The publisher receives Standalone, Relative Joining or Absolute Joining FETCH. Send an otherwise well-framed request with an unrecognized discriminator."
+    },
+    {
+      "id": "D18-10-12-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.2",
+        "first_line": 4430,
+        "last_line": 4431,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject a Joining FETCH with REQUEST_ERROR INVALID_RANGE unless the associated subscription has Forward State 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-joining-fetch-for-forward-zero-subscription"
+      ],
+      "evaluators": [
+        "request-error-invalid-range"
+      ],
+      "rationale": "Establish a valid subscription with Forward State zero before the fetch. Section 10.12.2 excludes this state even if the referenced subscription and requested Objects otherwise exist."
+    },
+    {
+      "id": "D18-10-12-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.2",
+        "first_line": 4431,
+        "last_line": 4433,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Process pending updates to the associated subscription before evaluating its Joining FETCH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-forward-state-update-then-joining-fetch"
+      ],
+      "evaluators": [
+        "joining-fetch-uses-updated-forward-state-and-joining-location"
+      ],
+      "rationale": "Deliver an update that changes Forward State before the joining request, retaining evidence that both complete messages reached the endpoint. Evaluate the updated state and Joining Location from Section 5.1; this does not require a particular inter-stream response arrival order."
+    },
+    {
+      "id": "D18-10-12-2-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.2",
+        "first_line": 4441,
+        "last_line": 4442,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject a Joining FETCH with REQUEST_ERROR INVALID_RANGE if no Objects have been published for the track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-joining-fetch-for-track-with-no-published-objects"
+      ],
+      "evaluators": [
+        "request-error-invalid-range"
+      ],
+      "rationale": "Use an existing Forward State one subscription with no published Objects, independently of the separate Forward State zero rejection."
+    },
+    {
+      "id": "D18-10-12-2-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.2",
+        "first_line": 4454,
+        "last_line": 4455,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject a Joining FETCH with REQUEST_ERROR INVALID_JOINING_REQUEST_ID unless its ID refers to a same-session subscription in Established or Pending (subscriber) state.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-joining-fetch-with-unrelated-or-wrong-state-request-id"
+      ],
+      "evaluators": [
+        "request-error-invalid-joining-request-id"
+      ],
+      "rationale": "Exercise a non-subscription ID, a different-session ID and a Pending (publisher) subscription. Preserve Pending (subscriber) as allowed: the error-description text at lines 3970-3971 mentions only Established, while this detailed rule and lines 4394-4400 expressly permit Pending."
+    },
+    {
+      "id": "D18-10-12-3-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4554,
+        "last_line": 4555,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Start delivering FETCH Objects immediately from the cached beginning of the range.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission requires a relay cache and does not define an original publisher's delivery schedule."
+    },
+    {
+      "id": "D18-10-12-3-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4557,
+        "last_line": 4558,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Pause later FETCH delivery at an uncached Object with unknown status until its upstream status is confirmed.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The actor resolves cache gaps from an upstream publisher; the contribution publisher is not that relay."
+    },
+    {
+      "id": "D18-10-12-3-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4567,
+        "last_line": 4569,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Specify an End Location no smaller than Start Location for a Standalone FETCH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber constructs both request fields. This sentence supplies a range validity constraint, not a specified publisher error response. Lines 4389-4390 define the encoded end as last Object plus one, despite this paragraph calling the range inclusive."
+    },
+    {
+      "id": "D18-10-12-3-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4567,
+        "last_line": 4569,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Choose an Absolute Joining FETCH whose derived End Location is no smaller than its Start Location.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber chooses Joining Start; Section 10.12.2.1 computes the corresponding locations from subscription state. The constraint does not prescribe a publisher error for violating it, and no such response is invented. Relative Joining underflow is also not specified here."
+    },
+    {
+      "id": "D18-10-12-3-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4577,
+        "last_line": 4578,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject FETCH with REQUEST_ERROR INVALID_RANGE if no Objects have been published for the track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-standalone-fetch-for-track-with-no-published-objects"
+      ],
+      "evaluators": [
+        "request-error-invalid-range"
+      ],
+      "rationale": "This general FETCH rule is distinct from the Joining FETCH no-content anchor at line 4441."
+    },
+    {
+      "id": "D18-10-12-3-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4577,
+        "last_line": 4578,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Reject FETCH with REQUEST_ERROR INVALID_RANGE if Start Location exceeds the Largest Object.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-fetch-start-beyond-largest-published-object"
+      ],
+      "evaluators": [
+        "request-error-invalid-range"
+      ],
+      "rationale": "Establish a known Largest Object through driven publication and request a lexicographically greater Start Location. Do not conflate this explicit rejection with the underspecified reversed-end case at line 4567."
+    },
+    {
+      "id": "D18-10-12-3-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "10.12.3",
+        "first_line": 4580,
+        "last_line": 4582,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send fetched groups in the requested ascending or descending Group Order.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-multiple-published-groups-in-each-explicit-order"
+      ],
+      "evaluators": [
+        "fetch-groups-follow-requested-ascending-or-descending-order"
+      ],
+      "rationale": "The single FETCH stream preserves observable byte order. Section 10.2.8 defines Group Order; within-group Object ID order is stated in the following sentence and Subgroup ID is not the ordering key."
+    },
+    {
+      "id": "D18-10-13-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.13",
+        "first_line": 4607,
+        "last_line": 4609,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send FETCH Objects before sending FETCH_OK.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional permission concerns send ordering between the data and request streams. Peer arrival ordering cannot establish which was sent first, so a protocol-only runner must not claim it proves this capability."
+    },
+    {
+      "id": "D18-10-13-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.13",
+        "first_line": 4609,
+        "last_line": 4609,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send FETCH_OK until its End Location is known.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher's knowledge at the send instant is internal. The reported End Location and delivered range can be validated elsewhere, but a plausible final value does not establish when it became known."
+    },
+    {
+      "id": "D18-10-13-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.13",
+        "first_line": 4639,
+        "last_line": 4640,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if FETCH_OK End Location is below the corresponding FETCH Start Location.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The receiver is the FETCH subscriber. This is not the publisher's response to an invalid incoming FETCH range."
+    },
+    {
+      "id": "D18-10-14-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.14",
+        "first_line": 4673,
+        "last_line": 4674,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Without an Established subscription, forward TRACK_STATUS to one or more publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an upstream relay request permission. The publisher's TRACK_STATUS response behavior at lines 4663-4671 contains no owned normative keyword; Section 10.5 nevertheless defines TRACK_STATUS_OK as REQUEST_OK, so it is not an undefined message."
+    },
+    {
+      "id": "D18-10-14-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.14",
+        "first_line": 4674,
+        "last_line": 4675,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Without an Established subscription, initiate an authorized subscription to determine a TRACK_STATUS response.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This alternative relay strategy is distinct from forwarding TRACK_STATUS. It does not require the original publisher to create a subscription in response to TRACK_STATUS; lines 4663-4667 say the opposite."
+    },
+    {
+      "id": "D18-10-18-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.18",
+        "first_line": 4787,
+        "last_line": 4788,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION if SUBSCRIBE_NAMESPACE has more than 32 namespace fields.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-subscribe-namespace-with-33-prefix-fields"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Send a structurally complete namespace-discovery request with a 33-field prefix; the example namespaces are explanatory and add no naming constraints."
+    },
+    {
+      "id": "D18-10-18-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.18",
+        "first_line": 4795,
+        "last_line": 4796,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first SUBSCRIBE_NAMESPACE response is neither REQUEST_OK nor REQUEST_ERROR.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This policing action belongs to the subscriber. The publisher's first-response exclusivity is separately normative in Section 6.1 lines 2223-2225, outside this partition."
+    },
+    {
+      "id": "D18-10-18-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.18",
+        "first_line": 4805,
+        "last_line": 4807,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject a SUBSCRIBE_NAMESPACE prefix overlapping an established SUBSCRIBE_NAMESPACE in the session with REQUEST_ERROR PREFIX_OVERLAP.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-overlapping-subscribe-namespace-in-same-session"
+      ],
+      "evaluators": [
+        "request-error-prefix-overlap"
+      ],
+      "rationale": "SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS have independent overlap spaces. Exercise exact, ancestor and descendant prefix overlap within the same request type without treating a cross-type match as this error trigger."
+    },
+    {
+      "id": "D18-10-18-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.18",
+        "first_line": 4809,
+        "last_line": 4810,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Ensure the subscriber is authorized for the requested namespace subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-subscribe-namespace-denied-by-configured-authorization-policy"
+      ],
+      "evaluators": [
+        "unauthorized-namespace-subscription-not-accepted"
+      ],
+      "rationale": "Use a driven publisher with a known deny policy and credentials to establish the condition. Observe no successful unauthorized namespace subscription; this clause does not specify a unique failure code or mandate a particular authorization backend."
+    },
+    {
+      "id": "D18-10-18-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.18",
+        "first_line": 4821,
+        "last_line": 4822,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send NAMESPACE_DONE for a suffix before its corresponding NAMESPACE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-and-withdraw-namespace-during-discovery"
+      ],
+      "evaluators": [
+        "namespace-precedes-corresponding-namespace-done"
+      ],
+      "rationale": "Both messages use the discovery response stream, so their ordering is directly observable. Match suffixes relative to the active prefix, including prefix updates defined in Section 10.9.2."
+    },
+    {
+      "id": "D18-10-18-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.18",
+        "first_line": 4823,
+        "last_line": 4824,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION on NAMESPACE_DONE before the corresponding NAMESPACE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber detects publisher ordering errors; it is not a response the contribution publisher must send."
+    },
+    {
+      "id": "D18-10-18-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.18",
+        "first_line": 4828,
+        "last_line": 4829,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reset the SUBSCRIBE_NAMESPACE response stream when flow control prevents timely NAMESPACE or NAMESPACE_DONE delivery.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "flow-control-block-namespace-response-while-namespace-changes"
+      ],
+      "evaluators": [
+        "blocked-namespace-response-stream-reset"
+      ],
+      "rationale": "The runner can withhold stream credit while driven namespace changes queue output and observe an optional reset. No fixed timeliness threshold, reset code or mandatory reset capability is imposed."
+    },
+    {
+      "id": "D18-10-18-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.18",
+        "first_line": 4831,
+        "last_line": 4834,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Treat reset or FIN of a SUBSCRIBE_NAMESPACE response stream as NAMESPACE_DONE for every active namespace.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This updates subscriber discovery state. The paragraph explicitly preserves subscriptions established on separate PUBLISH streams."
+    },
+    {
+      "id": "D18-10-19-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.19",
+        "first_line": 4860,
+        "last_line": 4861,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION if SUBSCRIBE_TRACKS has more than 32 namespace fields.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-subscribe-tracks-with-33-prefix-fields"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The contribution publisher receives track-discovery requests; the limit is independently stated for this request type."
+    },
+    {
+      "id": "D18-10-19-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.19",
+        "first_line": 4868,
+        "last_line": 4877,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first SUBSCRIBE_TRACKS response is neither REQUEST_OK nor REQUEST_ERROR.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The keyword's sentence crosses a page break. The subscriber enforces this rule; publisher response and subsequent PUBLISH behavior are stated here in lowercase prose and in Section 6.1's earlier normative anchor."
+    },
+    {
+      "id": "D18-10-19-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.19",
+        "first_line": 4884,
+        "last_line": 4886,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reject a SUBSCRIBE_TRACKS prefix overlapping an established SUBSCRIBE_TRACKS in the session with REQUEST_ERROR PREFIX_OVERLAP.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-overlapping-subscribe-tracks-in-same-session"
+      ],
+      "evaluators": [
+        "request-error-prefix-overlap"
+      ],
+      "rationale": "The overlap space is independent of SUBSCRIBE_NAMESPACE. Apply matching only against established track-discovery subscriptions in this session."
+    },
+    {
+      "id": "D18-10-19-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.19",
+        "first_line": 4888,
+        "last_line": 4889,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Ensure the subscriber is authorized for the SUBSCRIBE_TRACKS namespace subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-subscribe-tracks-denied-by-configured-authorization-policy"
+      ],
+      "evaluators": [
+        "unauthorized-namespace-subscription-not-accepted"
+      ],
+      "rationale": "The publisher's authorization duty applies before accepting track discovery. Use a known deny policy to observe rejection without requiring a particular backend or inventing an error code from this sentence."
+    }
+  ]
+}
