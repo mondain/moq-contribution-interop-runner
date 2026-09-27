@@ -20,6 +20,7 @@ CMakeUserPresets.json
 
 .superpowers/
 docs/superpowers
+.worktrees/
 
 graphify-out/*
 graphify-work/*
