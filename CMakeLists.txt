@@ -53,7 +53,11 @@ target_compile_definitions(moq-interop-app INTERFACE
     MOQ_INTEROP_SQLITE3_REVISION="${SQLite3_VERSION}"
 )
 
-add_library(moq-interop-requirements src/requirements/draft_source.cpp)
+add_library(moq-interop-requirements
+    src/requirements/draft_source.cpp
+    src/requirements/catalog.cpp
+    src/requirements/audit.cpp
+)
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
 
@@ -75,4 +79,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     )
     target_link_libraries(moq-interop-draft-source-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft-source COMMAND moq-interop-draft-source-tests)
+
+    add_executable(moq-interop-catalog-tests tests/unit/catalog_test.cpp tests/unit/catalog_audit_test.cpp)
+    target_compile_definitions(moq-interop-catalog-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    target_link_libraries(moq-interop-catalog-tests PRIVATE moq-interop-requirements
+                          nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME catalog COMMAND moq-interop-catalog-tests)
 endif()

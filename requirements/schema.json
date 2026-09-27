@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MoQT requirement catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["draft", "source_sha256", "complete", "requirements"],
+  "properties": {
+    "draft": {"type": "integer", "minimum": 1},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "complete": {"type": "boolean"},
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "strength", "source", "actor", "summary", "applicability", "testability", "scenarios", "evaluators", "rationale"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "strength": {"enum": ["Must", "MustNot", "Should", "ShouldNot", "May"]},
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["section", "first_line", "last_line", "occurrence", "clause"],
+            "properties": {
+              "section": {"type": "string", "minLength": 1},
+              "first_line": {"type": "integer", "minimum": 1},
+              "last_line": {"type": "integer", "minimum": 1},
+              "occurrence": {"type": "integer", "minimum": 1},
+              "clause": {"type": "integer", "minimum": 1}
+            }
+          },
+          "actor": {"type": "string", "minLength": 1},
+          "summary": {"type": "string", "minLength": 1},
+          "applicability": {"enum": ["Applicable", "NotApplicable", "Informative"]},
+          "testability": {"enum": ["Testable", "NotTestable", "NotApplicable"]},
+          "scenarios": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evaluators": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "rationale": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"applicability": {"const": "Applicable"}}, "required": ["applicability"]},
+            "then": {
+              "properties": {"testability": {"enum": ["Testable", "NotTestable"]}},
+              "allOf": [{
+                "if": {"properties": {"testability": {"const": "Testable"}}, "required": ["testability"]},
+                "then": {"properties": {"scenarios": {"minItems": 1}, "evaluators": {"minItems": 1}}}
+              }]
+            },
+            "else": {"properties": {"testability": {"const": "NotApplicable"}, "scenarios": {"maxItems": 0}, "evaluators": {"maxItems": 0}}}
+          }
+        ]
+      }
+    }
+  }
+}
