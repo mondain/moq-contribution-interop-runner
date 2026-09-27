@@ -1,0 +1,2727 @@
+{
+  "draft": 18,
+  "source_sha256": "9e6b32cb7797c151e9e127374c1291af3ed546b2d453cd5bbb15946977eeeeb6",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D18-9-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "9.1",
+        "first_line": 2586,
+        "last_line": 2586,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Optionally cache received Objects.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permits a relay cache; it imposes no caching requirement on the original contribution publisher."
+    },
+    {
+      "id": "D18-9-1-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "9.1",
+        "first_line": 2591,
+        "last_line": 2594,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Ignore subsequently received Objects with the same Full Track Name, Group ID and Object ID.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional duplicate-discard policy belongs to the caching relay receiving Objects from publishers, not the publisher producing them."
+    },
+    {
+      "id": "D18-9-1-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "9.1",
+        "first_line": 2591,
+        "last_line": 2600,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use duplicate Objects to update cached existence state or Object Properties only within the listed constraints.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay permission is limited to existing-to-nonexistent transitions and property-specific changes; it does not permit altering immutable publisher payloads."
+    },
+    {
+      "id": "D18-9-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.1",
+        "first_line": 2603,
+        "last_line": 2604,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "object-receiver",
+      "summary": "Treat a Track as Malformed when duplicate Objects differ in Forwarding Preference, Subgroup ID, Priority or Payload.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Although phrased as an endpoint duty, the trigger is receiving duplicate media Objects. It constrains the subscriber or receiving relay role described in Section 2.4.2, not the contribution publishing role."
+    },
+    {
+      "id": "D18-9-1-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "9.1",
+        "first_line": 2606,
+        "last_line": 2610,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Change the representation of nonexistent Object ranges to a semantically equivalent representation.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The End-of-Group and redundant FETCH gap examples delimit a relay representation permission; they do not prescribe a publisher encoding choice."
+    },
+    {
+      "id": "D18-9-1-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "9.1",
+        "first_line": 2614,
+        "last_line": 2614,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not cache an Object received after its nonexistence was already recorded.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 2.1 permits this arrival order without making the Track malformed. This clause advises the receiving caching relay, not the original publisher."
+    },
+    {
+      "id": "D18-9-1-SHOULD-NOT-002",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "9.1",
+        "first_line": 2614,
+        "last_line": 2614,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not forward an Object received after its nonexistence was already recorded.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Suppressing onward delivery is independently observable from cache insertion, but both duties in this sentence belong to a caching relay."
+    },
+    {
+      "id": "D18-9-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "9.1",
+        "first_line": 2616,
+        "last_line": 2618,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving-cache",
+      "summary": "Store all Object fields defined in Section 11.2.1 except Object Properties whose definitions allow otherwise.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This specifies the content of a relay cache, including canonical header fields and payload. It does not require the contribution publisher to implement a receiving cache."
+    },
+    {
+      "id": "D18-9-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 2622,
+        "last_line": 2627,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Set Forward to 1 on a new upstream subscription regardless of the downstream Forward value.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher observes this upstream SUBSCRIBE, but the recommendation governs the relay sending it. The explanation that publishers might deprioritize or reject Forward=0 requests is not an additional normative publisher obligation."
+    },
+    {
+      "id": "D18-9-3-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.3",
+        "first_line": 2652,
+        "last_line": 2653,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Handle Objects for the same Track received from multiple publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the relay's multi-source input obligation. The preceding paragraph allows resource-based rejection of additional publishers; it does not require an original publisher to accept competing publishers."
+    },
+    {
+      "id": "D18-9-3-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "9.3",
+        "first_line": 2652,
+        "last_line": 2653,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Forward Objects from the Track's multiple publishers to matching Established subscriptions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the downstream half of the relay's multiple-publisher interaction; it is separate from handling incoming Objects and does not constrain the original publisher's output logic."
+    },
+    {
+      "id": "D18-9-3-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "9.3",
+        "first_line": 2654,
+        "last_line": 2655,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Attempt to deduplicate Objects before forwarding, subject to implementation constraints.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Deduplicating multiple publishers' Objects is a relay responsibility and is qualified by implementation constraints; it is not a publisher promise that duplicates never reach subscribers."
+    },
+    {
+      "id": "D18-9-4-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.4",
+        "first_line": 2661,
+        "last_line": 2665,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Ensure subscribers are authorized to access content associated with the requested Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This section assigns access enforcement to the relay and leaves its policy outside the specification. It does not transfer that duty to an original publisher merely because the relay requests its Track."
+    },
+    {
+      "id": "D18-9-4-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "9.4",
+        "first_line": 2667,
+        "last_line": 2668,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Establish an upstream subscription before sending downstream SUBSCRIBE_OK.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The ordering joins two relay sessions; the original publisher supplies the upstream response but is not responsible for when the relay acknowledges its downstream subscriber."
+    },
+    {
+      "id": "D18-9-4-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "9.4",
+        "first_line": 2670,
+        "last_line": 2671,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Withhold FETCH_OK until sufficient information is available to send it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The trigger is a relay lacking information for a downstream FETCH response. This specific occurrence does not state a generic publisher FETCH obligation."
+    },
+    {
+      "id": "D18-9-4-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "9.4",
+        "first_line": 2671,
+        "last_line": 2672,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Follow Section 10.2.11 constraints on LARGEST_OBJECT.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay cross-reference requires the largest upstream-advertised or received Location. Section 10.2.11 separately states the publisher inclusion duty; that separate occurrence is cataloged as applicable."
+    },
+    {
+      "id": "D18-9-4-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.4",
+        "first_line": 2682,
+        "last_line": 2684,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not reorder Objects received on a multi-object stream when forwarding unless application-specific information permits it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The prohibition concerns preservation of an incoming stream by an intermediary; an original publisher is not forwarding a received multi-object stream."
+    },
+    {
+      "id": "D18-9-4-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.4",
+        "first_line": 2682,
+        "last_line": 2684,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not drop Objects received on a multi-object stream when forwarding unless application-specific information permits it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Dropping and reordering are independent relay behaviors. The exception is retained and this clause does not override the separate publisher timeout rules in Section 8."
+    },
+    {
+      "id": "D18-9-4-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "9.4",
+        "first_line": 2693,
+        "last_line": 2701,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Aggregate authorized downstream subscriptions for the same Track into one upstream subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Aggregation and sharing cached upstream content are optional relay behaviors. The Largest Object filter discussion advises the relay and does not require publisher-side aggregation."
+    },
+    {
+      "id": "D18-9-4-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "9.4.1",
+        "first_line": 2713,
+        "last_line": 2722,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Perform graceful relay switchover by establishing replacement subscriptions before cancelling old ones.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional GOAWAY or network-switch procedure explicitly belongs to a subscriber. Publisher switchover is separately specified in Section 9.5.1."
+    },
+    {
+      "id": "D18-9-5-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "9.5",
+        "first_line": 2729,
+        "last_line": 2730,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reply to PUBLISH with PUBLISH_OK and Forward State=0 until subscribers are known for the new Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an optional relay response to a publisher. The publisher's obligation to honor Forward State follows Section 5.1; this permission does not change the actor to publisher."
+    },
+    {
+      "id": "D18-9-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2737,
+        "last_line": 2739,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Verify publisher authorization for Tracks matching a PUBLISH_NAMESPACE namespace.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This branch concerns relay validation of namespace publication. The publisher is the subject of authorization, not the endpoint charged with enforcing it here."
+    },
+    {
+      "id": "D18-9-5-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2737,
+        "last_line": 2739,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Verify publisher authorization for the Full Track Name in PUBLISH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Single-Track publication has its own authorization check at the relay, independently of PUBLISH_NAMESPACE acceptance. Neither check is a contribution-publisher enforcement duty."
+    },
+    {
+      "id": "D18-9-5-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5",
+        "first_line": 2739,
+        "last_line": 2750,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not infer authorization to publish other Tracks from authorization for one Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The wrapped MUST NOT constrains relay authorization scope; it does not require the original publisher to enforce permissions on other publishers."
+    },
+    {
+      "id": "D18-9-5-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5",
+        "first_line": 2739,
+        "last_line": 2750,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not infer authorization to publish Track Namespaces from authorization for one Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Namespace authorization is a separate scope from an individual Track grant. The receiver enforcing that separation is explicitly the relay."
+    },
+    {
+      "id": "D18-9-5-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2751,
+        "last_line": 2753,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send an explicit PUBLISH_NAMESPACE when requesting that subscriptions in a namespace be routed to this publisher.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-namespace-for-relay-subscription-routing"
+      ],
+      "evaluators": [
+        "explicit-publish-namespace-sent"
+      ],
+      "rationale": "Unlike adjacent relay authorization rules, this conditional duty names the publisher. With namespace routing requested by the application, the peer can observe the explicit namespace publication; a PUBLISH for one Track is insufficient."
+    },
+    {
+      "id": "D18-9-5-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2778,
+        "last_line": 2780,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Send SUBSCRIBE to every publisher matching an Established Full Track Name subscription or a published namespace prefix.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Both matching paths govern relay upstream fanout. A publisher can receive the resulting SUBSCRIBE but cannot enforce distribution to other publishers."
+    },
+    {
+      "id": "D18-9-5-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2781,
+        "last_line": 2782,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Forward PUBLISH_NAMESPACE to all matching subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This clause assigns namespace publication fanout to a relay. Its PUBLISH_NAMESPACE wording is preserved even though Section 10.18 describes NAMESPACE on namespace-subscription response streams."
+    },
+    {
+      "id": "D18-9-5-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2781,
+        "last_line": 2782,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Forward PUBLISH to all matching subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Track publication fanout is the relay's downstream action. Section 9.5 later excludes forwarding PUBLISH to a subscriber with a held SUBSCRIBE for that Track."
+    },
+    {
+      "id": "D18-9-5-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "9.5",
+        "first_line": 2786,
+        "last_line": 2787,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Choose any available matching publisher for an upstream FETCH when more than one exists.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unlike SUBSCRIBE fanout, a relay may select one FETCH source. The original publisher's FETCH responder behavior does not include that source-selection choice."
+    },
+    {
+      "id": "D18-9-5-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2806,
+        "last_line": 2807,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reply SUBSCRIBE_OK to an authorized downstream SUBSCRIBE when at least one upstream subscription is Established.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay combines downstream authorization with upstream state; the contribution publisher does not hold this two-sided relay state."
+    },
+    {
+      "id": "D18-9-5-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2808,
+        "last_line": 2809,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Send REQUEST_UPDATE with Forward=1 to all publishers when a Forward=1 downstream SUBSCRIBE meets upstream subscriptions in Forward State=0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The update is observable at publishers, but the condition and all-publisher fanout are obligations of the relay. Publisher processing of a received update is specified separately in Sections 5.1 and 10.9."
+    },
+    {
+      "id": "D18-9-5-MUST-009",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2811,
+        "last_line": 2812,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "When no upstream subscription is Established, send SUBSCRIBE to every publisher of the requested namespace or its prefix.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Resolving a downstream request across known namespace publishers is relay routing. The publisher receives a request but does not select its peer's other upstream sessions."
+    },
+    {
+      "id": "D18-9-5-MUST-010",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2813,
+        "last_line": 2814,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use Forward=1 in the upstream SUBSCRIBE when the downstream SUBSCRIBE has Forward=1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This mandatory propagation for Forward=1 is narrower than Section 9.2's recommendation to request Forward=1 generally. Both constrain the relay creating the request, not its publishing recipient."
+    },
+    {
+      "id": "D18-9-5-MUST-011",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2816,
+        "last_line": 2821,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "On incoming PUBLISH, send PUBLISH to each matching SUBSCRIBE_TRACKS subscriber except one already waiting on a held SUBSCRIBE for that Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay fanout requirement is qualified by the following held-subscription exception. It does not require a contribution publisher to receive and forward another publisher's PUBLISH."
+    },
+    {
+      "id": "D18-9-5-MUST-012",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2820,
+        "last_line": 2821,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Proceed with a held downstream SUBSCRIBE when an incoming PUBLISH supplies its missing Track publisher.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay owns rendezvous state under Section 10.2.6 and resumes that request on publisher arrival; the arriving publisher does not own the held downstream request."
+    },
+    {
+      "id": "D18-9-5-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5",
+        "first_line": 2820,
+        "last_line": 2821,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not also forward PUBLISH to the subscriber whose held SUBSCRIBE is being satisfied.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This prevents duplicate downstream establishment by the relay in the held-SUBSCRIBE case; it is not a prohibition on the original publisher's initiating PUBLISH."
+    },
+    {
+      "id": "D18-9-5-MUST-013",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2825,
+        "last_line": 2826,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "After authorized PUBLISH_NAMESPACE matches existing subscriptions on other upstream sessions, send the new publisher SUBSCRIBE for each matching subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Adding a new source to relay subscriptions is a relay multiple-publisher duty. Receiving those subscriptions is a possible publisher interaction, not responsibility for the fanout."
+    },
+    {
+      "id": "D18-9-5-MUST-014",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2828,
+        "last_line": 2828,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reply PUBLISH_OK to an authorized PUBLISH for a Track with Established downstream subscriptions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay is the receiver and responder to this PUBLISH; the contribution publisher is the requester and cannot be assessed as the response sender."
+    },
+    {
+      "id": "D18-9-5-MUST-015",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 2830,
+        "last_line": 2830,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use Forward State=1 in PUBLISH_OK when any downstream subscriber for the Track has Forward State=1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher observes the PUBLISH_OK field, but computing it from downstream demand is explicitly the relay's duty. Publisher Forward behavior remains governed by Section 5.1."
+    },
+    {
+      "id": "D18-9-5-MUST-NOT-004",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5",
+        "first_line": 2833,
+        "last_line": 2836,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not propagate an unknown or invalid control message that caused its Session to close into another Session.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This isolates control-message failures across relay sessions; it does not authorize or require the original publisher to forward control messages."
+    },
+    {
+      "id": "D18-9-5-MUST-NOT-005",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5",
+        "first_line": 2833,
+        "last_line": 2836,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not propagate an unknown or invalid Object that caused its Session to close into another Session.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The media-object branch independently isolates downstream relay sessions from an upstream error. The original publisher is not this intermediary."
+    },
+    {
+      "id": "D18-9-5-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 2840,
+        "last_line": 2865,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Gracefully switch relays by beginning publication on a new Session while continuing Objects on the old Session until subscriptions migrate.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "goaway-during-active-publication-with-replacement-relay"
+      ],
+      "evaluators": [
+        "publication-overlaps-old-and-new-sessions-during-switchover"
+      ],
+      "rationale": "A two-peer scenario can observe new-session PUBLISH_NAMESPACE or PUBLISH and overlapping old-session Object delivery. This is an optional publisher capability; downstream deduplication and ideal seamlessness are relay expectations, not guaranteed by this MAY."
+    },
+    {
+      "id": "D18-9-6-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 2869,
+        "last_line": 2871,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Include all Track Properties in PUBLISH unless a property's specification permits omission.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 9.6 assigns preservation of received Track metadata to relays sending PUBLISH; it does not make this occurrence a new original-publisher obligation."
+    },
+    {
+      "id": "D18-9-6-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 2869,
+        "last_line": 2871,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Include all Track Properties in SUBSCRIBE_OK unless a property's specification permits omission.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Preserving Track metadata in a relay's subscription response is independent of its PUBLISH path; the stated actor remains the relay."
+    },
+    {
+      "id": "D18-9-6-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 2869,
+        "last_line": 2871,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "relay",
+      "summary": "Include all Track Properties in TRACK_STATUS_OK unless a property's specification permits omission.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay duty is retained as written. Section 10.14 names TRACK_STATUS_OK with SUBSCRIBE_OK-like parameters and Properties, but Table 5 gives TRACK_STATUS_OK no message type. The catalog does not silently assign it SUBSCRIBE_OK's encoding."
+    },
+    {
+      "id": "D18-9-6-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 2869,
+        "last_line": 2871,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "relay",
+      "summary": "Include all Track Properties in FETCH_OK unless a property's specification permits omission.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the relay FETCH response metadata-preservation branch, subject to the property-specific rules of Section 2.5."
+    },
+    {
+      "id": "D18-9-7-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.7",
+        "first_line": 2876,
+        "last_line": 2877,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not modify Object fields when forwarding except Object Properties as allowed by Section 2.5.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This constrains the relay forwarding a received canonical Object. It preserves the explicit property exception and does not prohibit an original publisher from initially choosing Object metadata."
+    },
+    {
+      "id": "D18-9-7-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "9.7",
+        "first_line": 2879,
+        "last_line": 2879,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Treat Object payloads as opaque.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Payload opacity is a relay handling rule. Section 2.1 explicitly makes the original publisher responsible for encoding and payload contents, so this duty does not forbid publisher payload processing."
+    },
+    {
+      "id": "D18-9-7-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.7",
+        "first_line": 2879,
+        "last_line": 2880,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not combine Object payloads while relaying.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Combining payloads is a specifically prohibited transformation by the relay; this is not the original publisher's content-generation role."
+    },
+    {
+      "id": "D18-9-7-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.7",
+        "first_line": 2879,
+        "last_line": 2880,
+        "occurrence": 2,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not split Object payloads while relaying.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Splitting one incoming payload into multiple Objects is separately forbidden for the relay; the original publisher still chooses initial Object boundaries."
+    },
+    {
+      "id": "D18-9-7-MUST-NOT-004",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.7",
+        "first_line": 2879,
+        "last_line": 2880,
+        "occurrence": 2,
+        "clause": 3
+      },
+      "actor": "relay",
+      "summary": "Do not otherwise modify Object payloads while relaying.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This residual prohibition covers relay payload transformations beyond combining and splitting. Publisher Object immutability is a separate rule in Section 2.1."
+    },
+    {
+      "id": "D18-9-7-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "9.7",
+        "first_line": 2880,
+        "last_line": 2881,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Prioritize forwarding Objects according to Section 7.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This cross-reference explicitly addresses relay scheduling. Section 7 independently applies publisher scheduling advice, including transport-dependent scheduling semantics; this occurrence remains relay-only."
+    },
+    {
+      "id": "D18-10-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBSCRIBE as the first message on a new bidirectional request stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Table 5 marks SUBSCRIBE as Request, First. This sending duty belongs to the subscriber; receiving-side rejection of invalid stream starters is separately specified in Section 3.3."
+    },
+    {
+      "id": "D18-10-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Send PUBLISH as the first message on a new bidirectional request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "initiate-track-publication"
+      ],
+      "evaluators": [
+        "request-is-first-message-on-new-bidirectional-stream"
+      ],
+      "rationale": "Table 5 puts PUBLISH on Request, First, not the unidirectional control stream used for SETUP. A peer can inspect the publisher's new stream and first message type."
+    },
+    {
+      "id": "D18-10-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Send FETCH as the first message on a new bidirectional request stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Table 5's FETCH sending rule applies to the Object-retrieving subscriber role. A contribution publisher is the FETCH responder in scope here."
+    },
+    {
+      "id": "D18-10-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "endpoint",
+      "summary": "Send TRACK_STATUS as the first message on a new bidirectional request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-queries-track-status-before-resuming-publication"
+      ],
+      "evaluators": [
+        "request-is-first-message-on-new-bidirectional-stream"
+      ],
+      "rationale": "Section 2.4.3 expressly identifies TRACK_STATUS as a publisher state-recovery option. If used, Table 5 requires its request to start a new bidirectional stream; the capability itself is not mandatory."
+    },
+    {
+      "id": "D18-10-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 5
+      },
+      "actor": "publisher",
+      "summary": "Send PUBLISH_NAMESPACE as the first message on a new bidirectional request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "initiate-namespace-publication"
+      ],
+      "evaluators": [
+        "request-is-first-message-on-new-bidirectional-stream"
+      ],
+      "rationale": "The namespace publication request is Request, First in Table 5. Its stream placement is observable independently of whether the relay authorizes the namespace."
+    },
+    {
+      "id": "D18-10-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 6
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBSCRIBE_NAMESPACE as the first message on a new bidirectional request stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The namespace-discovery requester sends this First message; a contribution publisher can respond to discovery without assuming the subscriber's sending duty."
+    },
+    {
+      "id": "D18-10-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2900,
+        "last_line": 2948,
+        "occurrence": 1,
+        "clause": 7
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBSCRIBE_TRACKS as the first message on a new bidirectional request stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Track-discovery subscriber initiates this request. Publisher PUBLISH responses use their own new bidirectional streams and are covered by the PUBLISH clause."
+    },
+    {
+      "id": "D18-10-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2973,
+        "last_line": 2974,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session after receiving an unknown message type.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-unknown-message-type"
+      ],
+      "evaluators": [
+        "session-closed"
+      ],
+      "rationale": "A publishing endpoint receives protocol messages on control and request streams. An unknown type is fatal even when its length is parseable; this sentence specifies no particular session error code."
+    },
+    {
+      "id": "D18-10-MUST-009",
+      "strength": "Must",
+      "source": {
+        "section": "10",
+        "first_line": 2978,
+        "last_line": 2979,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION when Message Length differs from the Message Payload length.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-known-message-with-mismatched-payload-length"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Send a fully delimited known message whose parsed payload does not match its 16-bit length. The publishing receiver's session error is observable; this avoids confusing truncated transport delivery with a completed malformed message."
+    },
+    {
+      "id": "D18-10-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.1",
+        "first_line": 2998,
+        "last_line": 2999,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with INVALID_REQUEST_ID for a Request ID with incorrect sender parity.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-request-id-wrong-peer-parity"
+      ],
+      "evaluators": [
+        "session-closed-invalid-request-id"
+      ],
+      "rationale": "Section 10.1 assigns even IDs to clients and odd IDs to servers independently of publishing role. A peer request with the wrong low bit exercises a publisher's receive validation."
+    },
+    {
+      "id": "D18-10-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.1",
+        "first_line": 2998,
+        "last_line": 2999,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with INVALID_REQUEST_ID after receiving a duplicate Request ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-duplicate-request-id-across-request-streams"
+      ],
+      "evaluators": [
+        "session-closed-invalid-request-id"
+      ],
+      "rationale": "Request IDs are allocated per endpoint across requests, including REQUEST_UPDATE, rather than per stream. Reusing an already received ID on another request stream must fail even when each stream's first message and Track are otherwise valid."
+    },
+    {
+      "id": "D18-10-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2",
+        "first_line": 3015,
+        "last_line": 3016,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Serialize Message Parameters in ascending Parameter Type order using Type Delta encoding.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-with-multiple-message-parameter-types"
+      ],
+      "evaluators": [
+        "message-parameters-encoded-in-ascending-type-order"
+      ],
+      "rationale": "PUBLISH and publisher responses carry Message Parameters. The peer can decode the first absolute type and subsequent deltas; explicitly repeatable types remain allowed under the separate duplicate rule."
+    },
+    {
+      "id": "D18-10-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.2",
+        "first_line": 3017,
+        "last_line": 3017,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION when accumulating a Message Parameter Type Delta would exceed 2^64-1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-message-parameter-type-delta-overflow"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "This is receive-side integer-bound validation for publishing endpoints. A valid FORWARD parameter of Type 0x10 followed by a Type Delta of 2^64-1 overflows accumulation without first encountering an unknown parameter type."
+    },
+    {
+      "id": "D18-10-2-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.2",
+        "first_line": 3041,
+        "last_line": 3042,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Use only Message Parameters defined by the negotiated MOQT version or negotiated through Setup Options.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-with-and-without-parameter-extension-negotiation"
+      ],
+      "evaluators": [
+        "sent-message-parameters-defined-or-negotiated"
+      ],
+      "rationale": "The publisher's outgoing parameters can be checked against the selected draft and exchanged Setup Options. Merely knowing a private parameter locally does not establish peer negotiation."
+    },
+    {
+      "id": "D18-10-2-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.2",
+        "first_line": 3043,
+        "last_line": 3047,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION after receiving an unknown Message Parameter.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-unnegotiated-unknown-message-parameter"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Parameters use a count and have no unknown-value skip mechanism. This differs from Setup Options, which have a separate namespace and are ignored when unknown under Section 10.3; the fatal rule must not be applied to unknown Setup Options."
+    },
+    {
+      "id": "D18-10-2-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2",
+        "first_line": 3052,
+        "last_line": 3054,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not repeat a Parameter Type in one message unless its definition explicitly permits multiple instances.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-with-multiple-configured-parameters"
+      ],
+      "evaluators": [
+        "no-unpermitted-duplicate-parameter-types-sent"
+      ],
+      "rationale": "Outgoing PUBLISH, PUBLISH_NAMESPACE and publisher responses are inspectable. AUTHORIZATION TOKEN is an explicit repeatability exception only when resolved Token Type and Value pairs are unique."
+    },
+    {
+      "id": "D18-10-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2",
+        "first_line": 3054,
+        "last_line": 3056,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Check received messages for unexpected duplicate Message Parameters.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Performing the check is internal receiver processing. The independently observable recommendation to close the Session after finding a duplicate is recorded in clause 2."
+    },
+    {
+      "id": "D18-10-2-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.2",
+        "first_line": 3054,
+        "last_line": 3056,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION when unexpected duplicate Message Parameters are found.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-duplicate-nonrepeatable-message-parameter"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "A SUBSCRIBE with two FORWARD parameters supplies a forbidden duplicate to a publisher. Session closure is a SHOULD outcome and does not turn into MUST merely because sender duplication is prohibited."
+    },
+    {
+      "id": "D18-10-2-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2",
+        "first_line": 3061,
+        "last_line": 3064,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not alter Object payloads in response to Message Parameters in SUBSCRIBE, PUBLISH_OK or FETCH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters"
+      ],
+      "evaluators": [
+        "same-object-payload-independent-of-message-parameters"
+      ],
+      "rationale": "The named messages are subscriber inputs, but the prohibited action is the publisher changing payload content. Compare the same scoped Track, Group and Object across parameter variants; delivery choices may change while its bytes remain identical under Section 2.4.3."
+    },
+    {
+      "id": "D18-10-2-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.1",
+        "first_line": 3076,
+        "last_line": 3087,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the connection with PROTOCOL_VIOLATION when a Message Parameter appears in a message type outside its defined scope.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-message-parameter-on-disallowed-message-native-quic"
+      ],
+      "evaluators": [
+        "connection-closed-protocol-violation"
+      ],
+      "rationale": "For example, GROUP_ORDER is not allowed in REQUEST_UPDATE. The draft literally says connection here rather than session; a native-QUIC scenario can observe that outcome without inferring teardown of unrelated WebTransport sessions. Setup Options occupy a separate namespace."
+    },
+    {
+      "id": "D18-10-2-2-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3092,
+        "last_line": 3096,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Include AUTHORIZATION TOKEN in PUBLISH, SUBSCRIBE, REQUEST_UPDATE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS, PUBLISH_NAMESPACE, TRACK_STATUS or FETCH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-track-and-namespace-with-configured-authorization-token"
+      ],
+      "evaluators": [
+        "authorization-token-sent-in-permitted-request-message"
+      ],
+      "rationale": "This permission includes publisher-originated PUBLISH, PUBLISH_NAMESPACE and updates, as well as subscriber requests. Their wire tokens are observable; it does not permit tokens in arbitrary response messages or prescribe an authorization policy."
+    },
+    {
+      "id": "D18-10-2-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3117,
+        "last_line": 3119,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Retire the registered Alias and associated Token Value when processing DELETE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-delete-then-use-token-alias"
+      ],
+      "evaluators": [
+        "deleted-token-alias-rejected-as-unknown"
+      ],
+      "rationale": "A publisher receiving authorized requests also receives token-cache operations. After successful deletion, a subsequent USE_ALIAS must not resolve the retired mapping; this checks retirement without inspecting cache storage."
+    },
+    {
+      "id": "D18-10-2-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3122,
+        "last_line": 3124,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Associate a REGISTER Alias with its Token Value until the Session ends or the alias is deleted.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-valid-token-then-use-alias-in-later-request"
+      ],
+      "evaluators": [
+        "registered-alias-resolves-original-token"
+      ],
+      "rationale": "Configure a known token type and authorization policy, register within the advertised cache limit, then authorize a later request through USE_ALIAS. Persistence is observable through request results rather than direct memory inspection. Section 10.3.1.4 defines a SETUP overflow exception."
+    },
+    {
+      "id": "D18-10-2-2-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3142,
+        "last_line": 3142,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server",
+      "summary": "Close the Session with PROTOCOL_VIOLATION after receiving DELETE in a SETUP authorization token.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publishing-server-receives-setup-token-delete"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Transport server and publisher are independent roles. This applies when the contribution endpoint acts as server; Section 10.3.1.4 imports the Token structure into the SETUP option. The occurrence specifically names servers and is not broadened to clients."
+    },
+    {
+      "id": "D18-10-2-2-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3142,
+        "last_line": 3142,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "server",
+      "summary": "Close the Session with PROTOCOL_VIOLATION after receiving USE_ALIAS in a SETUP authorization token.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publishing-server-receives-setup-token-use-alias"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "A server publishing Tracks can receive client SETUP, and this alias form is prohibited there independently of DELETE. No requirement is inferred for an unmentioned client-side receive case."
+    },
+    {
+      "id": "D18-10-2-2-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3160,
+        "last_line": 3161,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with KEY_VALUE_FORMATTING_ERROR when the Token structure cannot be decoded.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-undecodable-authorization-token-structure"
+      ],
+      "evaluators": [
+        "session-closed-key-value-formatting-error"
+      ],
+      "rationale": "Inject a valid outer message and parameter length enclosing an incomplete Token structure. This publisher receive error is distinct from an invalid but structurally well-formed token and avoids masking by outer message-length validation."
+    },
+    {
+      "id": "D18-10-2-2-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3162,
+        "last_line": 3163,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with DUPLICATE_AUTH_TOKEN_ALIAS when the peer registers an already registered Alias.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-same-peer-token-alias-twice-without-delete"
+      ],
+      "evaluators": [
+        "session-closed-duplicate-auth-token-alias"
+      ],
+      "rationale": "Register twice in one sender's alias space without deletion, within cache limits. Client and server have independent alias spaces, so an alias used only by the opposite endpoint is not this error."
+    },
+    {
+      "id": "D18-10-2-2-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3164,
+        "last_line": 3165,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reject a message referencing an unregistered Alias with UNKNOWN_AUTH_TOKEN_ALIAS.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-use-alias-for-unregistered-token",
+        "receive-delete-for-unregistered-token"
+      ],
+      "evaluators": [
+        "request-error-unknown-auth-token-alias"
+      ],
+      "rationale": "A publisher handling token-bearing requests can observe either unknown reference. The draft requires rejection of the message, not termination of the Session as for duplicate registration."
+    },
+    {
+      "id": "D18-10-2-2-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3168,
+        "last_line": 3169,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reject a structurally well-formed but otherwise invalid AUTHORIZATION TOKEN parameter with MALFORMED_AUTH_TOKEN.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-well-formed-token-with-invalid-known-type-value"
+      ],
+      "evaluators": [
+        "request-error-malformed-auth-token"
+      ],
+      "rationale": "Use an agreed token type with an invalid value while keeping the outer Token encoding valid. The request-level MALFORMED_AUTH_TOKEN result is distinct from KEY_VALUE_FORMATTING_ERROR and from a valid token lacking authorization."
+    },
+    {
+      "id": "D18-10-2-2-MUST-009",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3172,
+        "last_line": 3176,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Register an AUTHORIZATION TOKEN Alias whenever REGISTER processing does not cause a Session error, even if the request fails for another reason.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-token-in-rejected-request-then-use-alias"
+      ],
+      "evaluators": [
+        "rejected-request-token-alias-still-registered"
+      ],
+      "rationale": "Send REGISTER within the advertised cache limit on an unauthorized or otherwise rejected request, then USE_ALIAS after its response. The publishing receiver must resolve that alias rather than returning UNKNOWN_AUTH_TOKEN_ALIAS. SETUP overflow has the specific exception in Section 10.3.1.4."
+    },
+    {
+      "id": "D18-10-2-2-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3176,
+        "last_line": 3183,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Store an error code instead of token data only when every future use of the registered alias will produce that error.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional receiver cache representation is private; the same wire errors result from storing the token or the permanent error. The token's original value length still counts toward cache size, and a token that might become valid must not be treated as permanently invalid."
+    },
+    {
+      "id": "D18-10-2-2-MUST-010",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3198,
+        "last_line": 3202,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Retain a registered Alias after detecting token expiration until the sender deletes it.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-token-expire-then-use-alias-before-delete"
+      ],
+      "evaluators": [
+        "expired-alias-rejected-as-expired-not-unknown"
+      ],
+      "rationale": "With a controllable token lifetime, a later USE_ALIAS must produce EXPIRED_AUTH_TOKEN instead of forgetting the alias. Expiration leaves its accounted cache size unchanged; the publisher's stored bytes need not be inspected."
+    },
+    {
+      "id": "D18-10-2-2-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3199,
+        "last_line": 3202,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Discard other no-longer-needed token state after expiration while retaining the Alias and unchanged cache accounting.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional memory reclamation cannot be distinguished externally from retaining the same state. Wire-visible expiration and Alias lifetime are specified separately and do not prove which data was discarded."
+    },
+    {
+      "id": "D18-10-2-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3211,
+        "last_line": 3213,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Register tokens only when intending to reuse them during the Session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher sends authorization tokens, but its intent to reuse one is internal. Failure to observe later reuse cannot distinguish a violated recommendation from a planned operation that never became necessary."
+    },
+    {
+      "id": "D18-10-2-2-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3212,
+        "last_line": 3213,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Retire registered tokens once their utility has passed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "DELETE is observable, but the draft gives no external signal or deadline defining when a publisher's token has no future utility. Wire silence alone cannot establish violation of this application-dependent recommendation."
+    },
+    {
+      "id": "D18-10-2-2-MUST-011",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3221,
+        "last_line": 3221,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Terminate the Session with AUTH_TOKEN_CACHE_OVERFLOW when a token registration would exceed the advertised cache limit.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "register-request-token-exceeding-advertised-cache-size"
+      ],
+      "evaluators": [
+        "session-closed-auth-token-cache-overflow"
+      ],
+      "rationale": "For a token-bearing request, exceed the publishing receiver's limit using 16 bytes plus Token Value length per active entry; zero is the default limit. Section 10.3.1.4 explicitly exempts overflow in SETUP and instead treats that REGISTER as USE_VALUE, so this evaluator excludes SETUP."
+    },
+    {
+      "id": "D18-10-2-2-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3223,
+        "last_line": 3225,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Repeat AUTHORIZATION TOKEN in one message only when each resolved Token Type and Token Value pair is unique.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-with-multiple-distinct-authorization-tokens"
+      ],
+      "evaluators": [
+        "repeated-authorization-tokens-have-unique-resolved-type-value-pairs"
+      ],
+      "rationale": "An outgoing publisher request can contain multiple tokens, including alias references. The peer can resolve its registered aliases and check uniqueness; this permission does not require publishers to send multiple tokens."
+    },
+    {
+      "id": "D18-10-2-2-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3232,
+        "last_line": 3234,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not send USE_ALIAS on a different control stream from its REGISTER until receiving the REGISTER message's response.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This sender rule applies to publisher token use, but the draft says control streams while Section 3.3 gives each sender one control stream and Table 5 places token-bearing requests on request streams. The record preserves the wording; a precise cross-stream wire oracle requires clarification rather than silently substituting request streams."
+    },
+    {
+      "id": "D18-10-2-2-MAY-005",
+      "strength": "May",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3234,
+        "last_line": 3236,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send USE_ALIAS on the same control stream as REGISTER without waiting for a response.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional publisher sender optimization mentions control streams, whereas Table 5 places the relevant requests and updates on bidirectional request streams. The draft does not resolve that terminology mismatch, so this record does not invent a control-stream permission for request messages."
+    },
+    {
+      "id": "D18-10-2-2-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2.2",
+        "first_line": 3238,
+        "last_line": 3239,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not send DELETE for an Alias while any USE_ALIAS message for it still awaits a response.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "withhold-use-alias-response-while-publisher-retires-token"
+      ],
+      "evaluators": [
+        "token-delete-not-sent-before-all-use-alias-responses"
+      ],
+      "rationale": "After acknowledged registration, hold a publisher USE_ALIAS request response and request retirement. The peer can compare DELETE ordering with outstanding responses; unlike the preceding clauses, this prohibition does not depend on the ambiguous control-stream term."
+    },
+    {
+      "id": "D18-10-2-3-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.3",
+        "first_line": 3256,
+        "last_line": 3257,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBGROUP_DELIVERY_TIMEOUT in PUBLISH_OK, SUBSCRIBE or REQUEST_UPDATE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 8 distinguishes subscriber timeout Message Parameters from publisher timeout Track Properties. This MAY permits the subscriber's input; publisher enforcement of effective timeouts is cataloged from Section 8."
+    },
+    {
+      "id": "D18-10-2-3-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "10.2.3",
+        "first_line": 3260,
+        "last_line": 3261,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not forward SUBGROUP_DELIVERY_TIMEOUT upstream when intending to serve multiple subscriptions to the same Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay should keep a subscriber-specific timeout from limiting a shared upstream subscription. The original publisher cannot determine or enforce its peer's aggregation policy."
+    },
+    {
+      "id": "D18-10-2-4-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.4",
+        "first_line": 3266,
+        "last_line": 3267,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send OBJECT_DELIVERY_TIMEOUT in PUBLISH_OK, SUBSCRIBE or REQUEST_UPDATE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The parameter is the subscriber's timeout contribution, whereas the publisher supplies a Track Property under Section 8. Receiving and applying the effective timeout does not make the subscriber's MAY a publisher sending duty."
+    },
+    {
+      "id": "D18-10-2-4-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "10.2.4",
+        "first_line": 3270,
+        "last_line": 3271,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not forward OBJECT_DELIVERY_TIMEOUT upstream when intending to serve multiple subscriptions to the same Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is relay aggregation advice intended to prevent one downstream subscriber's object timeout from affecting others; it does not constrain the original publisher's timeout advertisement."
+    },
+    {
+      "id": "D18-10-2-5-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.5",
+        "first_line": 3275,
+        "last_line": 3276,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Include FILL_TIMEOUT in FETCH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The fetching subscriber optionally supplies the budget for relay upstream retrieval. This is not a parameter the contribution publisher is permitted to place in its FETCH response."
+    },
+    {
+      "id": "D18-10-2-5-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.5",
+        "first_line": 3278,
+        "last_line": 3287,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Limit total waiting for unavailable Objects across upstream FETCHes to FILL_TIMEOUT before reporting remaining unavailable Objects as Unknown gaps.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The budget spans all upstream FETCHes generated by the downstream request, not a fresh budget for each. This forwarding relay behavior does not apply to a publisher serving its own Objects."
+    },
+    {
+      "id": "D18-10-2-5-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2.5",
+        "first_line": 3290,
+        "last_line": 3291,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not wait for upstream delivery when FILL_TIMEOUT is 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Zero selects only immediately available relay content. The explicit actor is a relay with upstream sources, not an original publisher."
+    },
+    {
+      "id": "D18-10-2-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.5",
+        "first_line": 3291,
+        "last_line": 3291,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Report unavailable Objects as Unknown gaps when FILL_TIMEOUT is 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay's missing-content representation is an independent outcome from not waiting; unavailable cached content is not asserted to be permanently nonexistent."
+    },
+    {
+      "id": "D18-10-2-5-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.5",
+        "first_line": 3296,
+        "last_line": 3297,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use a shorter FILL_TIMEOUT than requested without informing the subscriber when unwilling to wait as long.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a relay resource-policy permission; no notification or minimum wait is imposed on a contribution publisher by this occurrence."
+    },
+    {
+      "id": "D18-10-2-6-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.6",
+        "first_line": 3311,
+        "last_line": 3312,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Include RENDEZVOUS_TIMEOUT in SUBSCRIBE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber requests how long a relay should await an absent publisher. The publisher's eventual appearance does not transfer the subscriber's parameter-sending permission to it."
+    },
+    {
+      "id": "D18-10-2-6-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.6",
+        "first_line": 3318,
+        "last_line": 3322,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Hold a subscription awaiting a publisher for up to RENDEZVOUS_TIMEOUT when the parameter is present.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Rendezvous state is owned by the relay; it withholds SUBSCRIBE_OK until a publisher appears. This does not require a publisher application to buffer requests for other absent publishers."
+    },
+    {
+      "id": "D18-10-2-6-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.6",
+        "first_line": 3323,
+        "last_line": 3324,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Respond with REQUEST_ERROR and TIMEOUT when rendezvous expires without a publisher becoming available.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay sends this downstream failure after its publisher-wait budget expires; it is not the original publisher's response to a received request."
+    },
+    {
+      "id": "D18-10-2-6-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.6",
+        "first_line": 3326,
+        "last_line": 3328,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use a shorter rendezvous timeout than the subscriber requested.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay may limit waiting to protect its resources. The example maximum duration does not establish a fixed timeout for original publishers."
+    },
+    {
+      "id": "D18-10-2-6-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.6",
+        "first_line": 3331,
+        "last_line": 3335,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Immediately return REQUEST_ERROR with DOES_NOT_EXIST when no publisher is available and RENDEZVOUS_TIMEOUT is 0, including its absent-parameter default.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This immediate failure is specifically the relay's zero-wait path. It differs from TIMEOUT after a positive wait and does not classify an original publisher as a relay."
+    },
+    {
+      "id": "D18-10-2-7-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.7",
+        "first_line": 3340,
+        "last_line": 3347,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBSCRIBER_PRIORITY in SUBSCRIBE, FETCH, a subscription or FETCH REQUEST_UPDATE, or PUBLISH_OK.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission belongs to the requesting subscriber expressing relative priority. The publisher's default of 128 and Section 7 scheduling semantics describe how it consumes the value, not a publisher permission to send this parameter in responses."
+    },
+    {
+      "id": "D18-10-2-8-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.8",
+        "first_line": 3351,
+        "last_line": 3356,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send GROUP_ORDER in SUBSCRIBE, PUBLISH_OK or FETCH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber chooses this parameter in requests or its PUBLISH response. A publisher communicates its default preference through Track information; its invalid-value receive duty is separately applicable below."
+    },
+    {
+      "id": "D18-10-2-8-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.8",
+        "first_line": 3366,
+        "last_line": 3367,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION when GROUP_ORDER is neither Ascending (1) nor Descending (2).",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-group-order-zero-or-greater-than-two"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "A publisher receives GROUP_ORDER in SUBSCRIBE, PUBLISH_OK and FETCH. Testing both zero and an upper out-of-range value checks the uint8 enumeration without confusing absence, which has separate defaults, with value zero."
+    },
+    {
+      "id": "D18-10-2-9-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.9",
+        "first_line": 3375,
+        "last_line": 3380,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send SUBSCRIPTION_FILTER in SUBSCRIBE, PUBLISH_OK or a subscription REQUEST_UPDATE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber sets its desired delivery range. Publisher enforcement and update handling are separate requirements; this sender permission also does not imply omission clears an existing filter on REQUEST_UPDATE."
+    },
+    {
+      "id": "D18-10-2-10-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3384,
+        "last_line": 3390,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Include advisory EXPIRES in SUBSCRIBE_OK.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "accept-subscription-with-configured-expiry-advisory"
+      ],
+      "evaluators": [
+        "subscribe-ok-carries-expires-parameter"
+      ],
+      "rationale": "This is an optional publisher response parameter with an observable varint value. Because expiry is advisory, the evaluator does not require termination at the exact advertised instant."
+    },
+    {
+      "id": "D18-10-2-10-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3384,
+        "last_line": 3390,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Include advisory EXPIRES in PUBLISH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "initiate-publication-with-configured-expiry-advisory"
+      ],
+      "evaluators": [
+        "publish-carries-expires-parameter"
+      ],
+      "rationale": "The original publisher can advertise its intended termination interval when initiating publication. The wire parameter is testable, but the draft permits earlier or later termination."
+    },
+    {
+      "id": "D18-10-2-10-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3384,
+        "last_line": 3390,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Include advisory EXPIRES in PUBLISH_OK.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "PUBLISH_OK is sent by the subscriber accepting a publication. The contribution publisher receives this advisory, but this MAY grants the peer's sending permission."
+    },
+    {
+      "id": "D18-10-2-10-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3384,
+        "last_line": 3396,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "endpoint",
+      "summary": "Include EXPIRES in REQUEST_UPDATE_OK as named by this parameter definition.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can respond to updates, but Table 5 defines no REQUEST_UPDATE_OK and Section 10.9 instead names REQUEST_OK. The draft inconsistency prevents an exact message-type oracle; this record does not silently substitute REQUEST_OK."
+    },
+    {
+      "id": "D18-10-2-10-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3394,
+        "last_line": 3396,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Include available updated AUTHORIZATION_TOKENs in REQUEST_UPDATE when attempting to extend a subscription after receiving EXPIRES.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-receives-expires-and-renews-with-updated-tokens"
+      ],
+      "evaluators": [
+        "renewal-request-update-includes-updated-authorization-tokens"
+      ],
+      "rationale": "A publisher can receive EXPIRES in PUBLISH_OK and, as the PUBLISH initiator, send REQUEST_UPDATE under Section 10.9. Provide updated credentials and request extension, then inspect that outgoing request; no assumption about the ambiguously named response type is needed."
+    },
+    {
+      "id": "D18-10-2-10-MAY-005",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3397,
+        "last_line": 3399,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Introduce jitter when sending EXPIRES to prevent synchronized endpoint updates.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sender-side permission explicitly names relays; it is distinct from the next clause's permission for receiving applications."
+    },
+    {
+      "id": "D18-10-2-10-MAY-006",
+      "strength": "May",
+      "source": {
+        "section": "10.2.10",
+        "first_line": 3397,
+        "last_line": 3399,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "application",
+      "summary": "Introduce jitter when acting on received EXPIRES to avoid synchronized updates.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publishing application can receive EXPIRES in PUBLISH_OK. Its jitter choice has no specified distribution or bound, and observed scheduling variation cannot prove intentional jitter rather than transport or application delay."
+    },
+    {
+      "id": "D18-10-2-11-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3407,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Carry LARGEST_OBJECT in SUBSCRIBE_OK.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "subscribe-to-track-with-published-objects"
+      ],
+      "evaluators": [
+        "subscribe-ok-largest-object-matches-largest-published-location"
+      ],
+      "rationale": "The parameter is permitted in this publisher response and becomes mandatory once Objects have been published. Its Location can be compared with controlled published Objects; absence means no Objects have been published or received."
+    },
+    {
+      "id": "D18-10-2-11-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3407,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Carry LARGEST_OBJECT in PUBLISH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-track-after-objects-have-been-published"
+      ],
+      "evaluators": [
+        "publish-largest-object-matches-largest-published-location"
+      ],
+      "rationale": "The initiating publisher can describe an already active Track's largest Location. This permission is constrained by the following mandatory-presence rule and does not allow an arbitrary Location for an empty Track."
+    },
+    {
+      "id": "D18-10-2-11-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3407,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "publisher",
+      "summary": "Carry LARGEST_OBJECT in REQUEST_UPDATE_OK as named by this parameter definition.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Table 5 has no REQUEST_UPDATE_OK message type and Section 10.9 responds with REQUEST_OK. A publisher update response is in scope, but the draft gives no unambiguous encoding for this named response."
+    },
+    {
+      "id": "D18-10-2-11-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3407,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "publisher",
+      "summary": "Carry LARGEST_OBJECT in TRACK_STATUS_OK as named by this parameter definition.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 10.14 also names TRACK_STATUS_OK and describes SUBSCRIBE_OK-like parameters and Properties, but Table 5 provides no TRACK_STATUS_OK type or dedicated message format. The catalog preserves this permission without assigning an unsupported wire encoding."
+    },
+    {
+      "id": "D18-10-2-11-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3411,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Include LARGEST_OBJECT in SUBSCRIBE_OK if Objects have been published on the Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "subscribe-to-track-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "largest-object-included-after-object-publication"
+      ],
+      "rationale": "Use actual Object publication rather than queued application data as the precondition. This named response exists in Table 5, unlike the same paragraph's REQUEST_UPDATE_OK and TRACK_STATUS_OK references."
+    },
+    {
+      "id": "D18-10-2-11-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3411,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Include LARGEST_OBJECT in PUBLISH if Objects have been published on the Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-existing-track-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "largest-object-included-after-object-publication"
+      ],
+      "rationale": "Advertise a Track with known published Objects on another subscription and inspect PUBLISH. This mandatory presence is independently testable from SUBSCRIBE_OK; queued but unpublished Objects do not establish the stated precondition."
+    },
+    {
+      "id": "D18-10-2-11-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3411,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "publisher",
+      "summary": "Include LARGEST_OBJECT in REQUEST_UPDATE_OK if Objects have been published on the Track.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This follows the mandatory-presence rule for the preceding list's REQUEST_UPDATE_OK. That response is absent from Table 5 and conflicts with REQUEST_OK in Section 10.9, so a precise wire evaluator is not assigned."
+    },
+    {
+      "id": "D18-10-2-11-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3411,
+        "last_line": 3411,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "publisher",
+      "summary": "Include LARGEST_OBJECT in TRACK_STATUS_OK if Objects have been published on the Track.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The listed TRACK_STATUS_OK response has no Table 5 type. Section 10.14 confirms the name and its SUBSCRIBE_OK-like parameters, but does not define a wire type. This publisher obligation is retained without silently equating the two responses."
+    },
+    {
+      "id": "D18-10-2-11-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.11",
+        "first_line": 3424,
+        "last_line": 3430,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Set LARGEST_OBJECT to the maximum upstream-advertised LARGEST_OBJECT or Object Location received on an upstream subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay aggregates two upstream sources of Location knowledge. The list retains its REQUEST_UPDATE_OK reference despite that type being absent from Table 5; this aggregation is not an original-publisher duty."
+    },
+    {
+      "id": "D18-10-2-12-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.12",
+        "first_line": 3434,
+        "last_line": 3444,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Include FORWARD in PUBLISH to select initial Forward State; the parameter is also permitted in SUBSCRIBE, subscription REQUEST_UPDATE, PUBLISH_OK and SUBSCRIBE_TRACKS.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-with-forward-zero-then-receive-forward-one-update",
+        "publish-with-forward-one-or-omitted"
+      ],
+      "evaluators": [
+        "publish-forward-value-controls-initial-object-delivery"
+      ],
+      "rationale": "PUBLISH is a publisher-originated use of this permission. Sections 5.1 and 10.10 make Forward=0 suppress Objects until the subscriber changes it to 1; omission defaults to 1 except REQUEST_UPDATE omission preserves existing state. Subscriber-originated uses remain valid stimuli, not publisher sending duties."
+    },
+    {
+      "id": "D18-10-2-12-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.12",
+        "first_line": 3439,
+        "last_line": 3440,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the Session with PROTOCOL_VIOLATION after receiving FORWARD outside 0 or 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-forward-outside-zero-one"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "A peer can send a well-formed SUBSCRIBE, PUBLISH_OK or subscription REQUEST_UPDATE with an invalid uint8 value. The publishing endpoint's session close and error code distinguish rejection from silently treating every nonzero value as 1."
+    },
+    {
+      "id": "D18-10-2-13-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3449,
+        "last_line": 3452,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send NEW_GROUP_REQUEST in PUBLISH_OK, SUBSCRIBE or a subscription REQUEST_UPDATE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission is the subscriber's request for a new Group, subject to the following DYNAMIC_GROUPS restrictions. The original publisher's resulting group-creation recommendation is separately applicable."
+    },
+    {
+      "id": "D18-10-2-13-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3452,
+        "last_line": 3454,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Do not send NEW_GROUP_REQUEST in PUBLISH_OK unless the Track included DYNAMIC_GROUPS with value 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber accepting PUBLISH must have observed dynamic-group support before requesting a new Group in that response; this occurrence mandates no publisher rejection code for a violation."
+    },
+    {
+      "id": "D18-10-2-13-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3452,
+        "last_line": 3454,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Do not send NEW_GROUP_REQUEST in REQUEST_UPDATE unless the Track included DYNAMIC_GROUPS with value 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The update path is a separate subscriber sending restriction. Original publishers indicate support using the Track Property; they are not the senders constrained here."
+    },
+    {
+      "id": "D18-10-2-13-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3455,
+        "last_line": 3457,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Include NEW_GROUP_REQUEST in SUBSCRIBE without prior knowledge of dynamic-group support.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The explicit exception belongs to a subscriber initiating subscription. The following non-keyword sentence says an unsupported original publisher ignores it; this MAY is not a new publisher sending permission."
+    },
+    {
+      "id": "D18-10-2-13-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3461,
+        "last_line": 3466,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "End the current Group as soon as practical after receiving NEW_GROUP_REQUEST=0 or a value above the current Group when dynamic Groups are supported.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "dynamic-track-receives-zero-or-higher-new-group-request"
+      ],
+      "evaluators": [
+        "current-group-ended-after-new-group-request"
+      ],
+      "rationale": "Group termination can be observed in Object status or the stream's End-of-Group signaling. The draft allows implementation-specific delay, so the evaluator identifies the transition without inventing a fixed response deadline or requiring a particular next Group ID."
+    },
+    {
+      "id": "D18-10-2-13-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3461,
+        "last_line": 3466,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "original-publisher",
+      "summary": "Begin a new Group as soon as practical after receiving NEW_GROUP_REQUEST=0 or a value above the current Group when dynamic Groups are supported.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "dynamic-track-receives-zero-or-higher-new-group-request"
+      ],
+      "evaluators": [
+        "new-group-begun-after-new-group-request"
+      ],
+      "rationale": "A controlled dynamic Track with continued media can expose Objects in the next Group independently of ending the old Group. There is no requirement to equal the requested Group ID and no protocol-defined maximum delay; those are not asserted."
+    },
+    {
+      "id": "D18-10-2-13-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3462,
+        "last_line": 3466,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Delay acting on NEW_GROUP_REQUEST for implementation-specific concerns such as a minimum Group duration.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional delay is justified by private implementation concerns without a required duration or response signal. Observed latency alone cannot identify that policy or distinguish it from scheduling delay, so this permission has no independent external oracle."
+    },
+    {
+      "id": "D18-10-2-13-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3478,
+        "last_line": 3479,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Include a received NEW_GROUP_REQUEST when subscribing upstream for a Track without an Established subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay propagation rule makes the request visible to an original publisher, but the upstream request construction belongs to the relay. It is the new-subscription path, distinct from REQUEST_UPDATE below."
+    },
+    {
+      "id": "D18-10-2-13-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.13",
+        "first_line": 3483,
+        "last_line": 3489,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "For an Established subscription, send REQUEST_UPDATE with NEW_GROUP_REQUEST=0 or above the Largest Group unless dynamic Groups are unsupported or an equal-or-larger request is already outstanding.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Only the relay maintains this outstanding upstream request state and aggregates subscriber demand. Both enumerated exceptions remain part of the trigger; the original publisher's response recommendation is a different occurrence."
+    },
+    {
+      "id": "D18-10-2-14-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "10.2.14",
+        "first_line": 3501,
+        "last_line": 3504,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Include TRACK_NAMESPACE_PREFIX in REQUEST_UPDATE for SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS to change the subscribed prefix.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The namespace or Track-discovery subscriber chooses this updated prefix. Publisher receive-side overlap validation is separately applicable in the next occurrence."
+    },
+    {
+      "id": "D18-10-2-14-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.14",
+        "first_line": 3506,
+        "last_line": 3507,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Respond REQUEST_ERROR with PREFIX_OVERLAP if a SUBSCRIBE_NAMESPACE prefix update overlaps another active SUBSCRIBE_NAMESPACE in the same Session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "update-namespace-subscription-prefix-to-overlap-active-namespace-subscription"
+      ],
+      "evaluators": [
+        "request-error-prefix-overlap"
+      ],
+      "rationale": "Sections 10.18 and 10.9.2 identify the publisher as responder to namespace discovery and updates. Two active subscriptions of the same type establish the conflict; a SUBSCRIBE_TRACKS subscription alone is outside this overlap space."
+    },
+    {
+      "id": "D18-10-2-14-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "10.2.14",
+        "first_line": 3506,
+        "last_line": 3507,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Respond REQUEST_ERROR with PREFIX_OVERLAP if a SUBSCRIBE_TRACKS prefix update overlaps another active SUBSCRIBE_TRACKS in the same Session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "update-track-subscription-prefix-to-overlap-active-track-subscription"
+      ],
+      "evaluators": [
+        "request-error-prefix-overlap"
+      ],
+      "rationale": "Section 10.19 permits an original publisher to serve Track discovery. Its active SUBSCRIBE_TRACKS prefixes form an independent overlap space from SUBSCRIBE_NAMESPACE, so the second validation path needs its own stimulus."
+    }
+  ]
+}
