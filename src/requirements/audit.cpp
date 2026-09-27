@@ -1,5 +1,6 @@
 #include "moq/interop/requirements/catalog.h"
 
+#include <algorithm>
 #include <map>
 #include <regex>
 #include <set>
@@ -24,7 +25,8 @@ std::string collapse_whitespace(std::string_view phrase) {
     std::string result;
     bool pending_space = false;
     for (const char character : phrase) {
-        if (character == ' ' || character == '\t' || character == '\n' || character == '\r') {
+        if (character == ' ' || character == '\t' || character == '\n' || character == '\r' ||
+            character == '\v' || character == '\f') {
             pending_space = true;
         } else {
             if (pending_space && !result.empty()) result.push_back(' ');
@@ -65,7 +67,10 @@ std::vector<NormativeOccurrence> scan_normative_occurrences(const DraftSource& s
         const auto after = offset + static_cast<std::size_t>(match->length());
         const bool quoted = offset > 0 && after < source.text.size() &&
                             source.text[offset - 1] == '"' && source.text[after] == '"';
-        occurrences.push_back({phrase, normalized_strength(phrase), line, ordinal_on_line, quoted});
+        const auto last_line = line + static_cast<std::size_t>(
+                                          std::count((*match)[0].first, (*match)[0].second, '\n'));
+        occurrences.push_back(
+            {phrase, normalized_strength(phrase), line, ordinal_on_line, quoted, last_line});
     }
     return occurrences;
 }
@@ -93,6 +98,11 @@ AuditReport audit_normative_occurrences(const DraftSource& source,
                                     std::to_string(anchor.second));
         } else {
             records[anchor].push_back(&row);
+            if (row.source.last_line < known.at(anchor).last_line) {
+                report.errors.push_back("Requirement " + row.id +
+                                        " citation ends before the normative phrase ends at line " +
+                                        std::to_string(known.at(anchor).last_line));
+            }
         }
     }
     for (const auto& [anchor, occurrence] : known) {

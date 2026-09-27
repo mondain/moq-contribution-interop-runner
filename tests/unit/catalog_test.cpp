@@ -166,6 +166,26 @@ TEST_F(CatalogTest, RejectsInvalidAndReversedCitationsAndOrdinals) {
     EXPECT_THROW(load(value), std::runtime_error);
 }
 
+TEST_F(CatalogTest, RejectsCitationEndingBeforeWrappedPhrase) {
+    const DraftSource source{18, {}, "abc123", "Endpoint MUST\n NOT send.\n", {0, 14}};
+    auto value = valid_catalog();
+    value["requirements"][0]["strength"] = "MustNot";
+    const auto path = directory_ / "catalog.json";
+    {
+        std::ofstream output(path);
+        output << value.dump();
+    }
+    EXPECT_THROW(RequirementCatalog::load(source, path), std::runtime_error);
+    value["requirements"][0]["source"]["last_line"] = 2;
+    {
+        std::ofstream output(path);
+        output << value.dump();
+    }
+    const auto catalog = RequirementCatalog::load(source, path);
+    ASSERT_EQ(catalog.requirements.size(), 1u);
+    EXPECT_EQ(catalog.requirements[0].source.last_line, 2u);
+}
+
 TEST_F(CatalogTest, RejectsIncompatibleClassificationAndMissingIdentifiers) {
     auto value = valid_catalog();
     value["requirements"][0]["applicability"] = "Informative";

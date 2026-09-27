@@ -51,6 +51,7 @@ struct NormativeOccurrence {
     std::size_t first_line;
     unsigned occurrence_on_line;
     bool quoted_bcp14_vocabulary;
+    std::size_t last_line;
 };
 
 struct AuditReport {

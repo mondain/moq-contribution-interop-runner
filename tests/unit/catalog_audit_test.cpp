@@ -40,6 +40,17 @@ TEST(CatalogAuditTest, ScansWrappedNegationAndSameLineOccurrencesWithOrdinalAnch
     EXPECT_EQ(found[2].occurrence_on_line, 2u);
 }
 
+TEST(CatalogAuditTest, NormalizesEveryWhitespaceClassAcceptedBetweenPhraseWords) {
+    for (const char separator : {' ', '\t', '\n', '\r', '\v', '\f'}) {
+        const auto source = source_from_text(std::string("Endpoint MUST") + separator + "NOT send.\n");
+        const auto found = scan_normative_occurrences(source);
+        ASSERT_EQ(found.size(), 1u) << static_cast<unsigned>(separator);
+        EXPECT_EQ(found[0].phrase, "MUST NOT") << static_cast<unsigned>(separator);
+        EXPECT_EQ(found[0].normalized_strength, Strength::MustNot)
+            << static_cast<unsigned>(separator);
+    }
+}
+
 TEST(CatalogAuditTest, NormalizesAllSynonymsWithoutLosingSourcePhrase) {
     const auto source = source_from_text(
         "MUST NOT SHALL NOT SHOULD NOT NOT RECOMMENDED MUST SHALL SHOULD RECOMMENDED "
@@ -104,6 +115,18 @@ TEST(CatalogAuditTest, ReportsRecordsWithNoSourceOccurrence) {
     const auto report = audit_normative_occurrences(source, catalog);
     EXPECT_FALSE(report.ok());
     EXPECT_FALSE(report.errors.empty());
+}
+
+TEST(CatalogAuditTest, RejectsCitationEndingBeforeWrappedPhrase) {
+    const auto source = source_from_text("Endpoint MUST\n NOT send.\n");
+    RequirementCatalog catalog{18, "synthetic", true,
+                               {requirement("send", Strength::MustNot, 1, 1)}};
+    auto report = audit_normative_occurrences(source, catalog);
+    EXPECT_FALSE(report.ok());
+    EXPECT_FALSE(report.errors.empty());
+    catalog.requirements[0].source.last_line = 2;
+    report = audit_normative_occurrences(source, catalog);
+    EXPECT_TRUE(report.ok());
 }
 
 TEST(CatalogAuditTest, IncompleteCatalogCannotPassAuditEvenWithEveryAnchorPresent) {

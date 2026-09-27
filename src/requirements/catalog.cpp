@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -101,7 +102,10 @@ Testability parse_testability(const std::string& value) {
     throw std::runtime_error("Unknown testability: " + value);
 }
 
-Requirement parse_requirement(const Json& value, std::size_t line_count) {
+using Anchor = std::pair<std::size_t, unsigned>;
+
+Requirement parse_requirement(const Json& value, std::size_t line_count,
+                              const std::map<Anchor, std::size_t>& occurrence_end_lines) {
     exact_fields(value, {"id", "strength", "source", "actor", "summary", "applicability",
                          "testability", "scenarios", "evaluators", "rationale"}, "requirement");
     const auto& citation = value.at("source");
@@ -123,6 +127,14 @@ Requirement parse_requirement(const Json& value, std::size_t line_count) {
                     parse_testability(required_string(value, "testability")),
                     identifiers(value, "scenarios"), identifiers(value, "evaluators"),
                     required_string(value, "rationale")};
+
+    const auto end_line = occurrence_end_lines.find(
+        Anchor{row.source.first_line, row.source.occurrence});
+    if (end_line != occurrence_end_lines.end() && row.source.last_line < end_line->second) {
+        throw std::runtime_error("Citation for " + row.id +
+                                 " ends before the normative phrase ends at line " +
+                                 std::to_string(end_line->second));
+    }
 
     if (row.applicability == Applicability::Applicable) {
         if (row.testability == Testability::NotApplicable) {
@@ -180,10 +192,15 @@ RequirementCatalog RequirementCatalog::load(const DraftSource& source,
     }
 
     RequirementCatalog catalog{draft_number, digest, complete, {}};
+    std::map<Anchor, std::size_t> occurrence_end_lines;
+    for (const auto& occurrence : scan_normative_occurrences(source)) {
+        occurrence_end_lines.emplace(
+            Anchor{occurrence.first_line, occurrence.occurrence_on_line}, occurrence.last_line);
+    }
     std::set<std::string> ids;
     std::set<std::tuple<std::size_t, unsigned, unsigned>> anchors;
     for (const auto& value : document.at("requirements")) {
-        auto row = parse_requirement(value, source.line_offsets.size());
+        auto row = parse_requirement(value, source.line_offsets.size(), occurrence_end_lines);
         if (!ids.insert(row.id).second) {
             throw std::runtime_error("Duplicate requirement ID: " + row.id);
         }
