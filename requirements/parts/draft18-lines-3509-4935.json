@@ -1330,10 +1330,14 @@
       "actor": "responder",
       "summary": "Use Retry Interval to indicate when an EXCESSIVE_LOAD request can be retried.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "A publisher can emit this error, but the time at which its overload clears is an internal prediction. The draft specifies no fixed interval and the runner cannot infer the correct one from the response."
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-rejects-retryable-request-with-excessive-load"
+      ],
+      "evaluators": [
+        "retryable-excessive-load-has-positive-retry-interval"
+      ],
+      "rationale": "Condition on the publisher rejecting a request with EXCESSIVE_LOAD that is retryable with the same parameters. Lines 3877-3882 require a nonzero Retry Interval for retryable requests; inspect that the response carries a positive value, including 1 for immediate retry. This does not predict actual overload recovery, require recovery by the advertised time, or prescribe a fixed interval."
     },
     {
       "id": "D18-10-6-2-SHOULD-004",

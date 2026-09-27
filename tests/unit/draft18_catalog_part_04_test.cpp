@@ -302,5 +302,19 @@ TEST_F(Draft18CatalogPart04Test, ApplicationCodeAdviceHasNoInventedWireOracle) {
     }
 }
 
+TEST_F(Draft18CatalogPart04Test, RetryableExcessiveLoadAdvertisesAPositiveRetryInterval) {
+    const auto rows = at(3907);
+    ASSERT_EQ(rows.size(), 1u);
+    const auto* row = rows.front();
+    EXPECT_EQ(row->id, "D18-10-6-2-SHOULD-003");
+    EXPECT_EQ(row->strength, Strength::Should);
+    EXPECT_EQ(row->applicability, Applicability::Applicable);
+    EXPECT_EQ(row->testability, Testability::Testable);
+    EXPECT_EQ(row->scenarios,
+              std::vector<std::string>{"publisher-rejects-retryable-request-with-excessive-load"});
+    EXPECT_EQ(row->evaluators,
+              std::vector<std::string>{"retryable-excessive-load-has-positive-retry-interval"});
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements
