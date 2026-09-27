@@ -1464,14 +1464,10 @@
       "actor": "server",
       "summary": "Close the Session with PROTOCOL_VIOLATION after receiving DELETE in a SETUP authorization token.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "publishing-server-receives-setup-token-delete"
-      ],
-      "evaluators": [
-        "session-closed-protocol-violation"
-      ],
-      "rationale": "Transport server and publisher are independent roles. This applies when the contribution endpoint acts as server; Section 10.3.1.4 imports the Token structure into the SETUP option. The occurrence specifically names servers and is not broadened to clients."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This remains applicable to a publisher acting as transport server, and Section 10.3.1.4 imports the Token structure into SETUP. The approved harness is listener-only and the publisher connects as transport client, so the harness cannot exercise a publisher server receiving DELETE in client SETUP. The server-only duty is not broadened to a client receiving server SETUP."
     },
     {
       "id": "D18-10-2-2-MUST-004",
@@ -1486,14 +1482,10 @@
       "actor": "server",
       "summary": "Close the Session with PROTOCOL_VIOLATION after receiving USE_ALIAS in a SETUP authorization token.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "publishing-server-receives-setup-token-use-alias"
-      ],
-      "evaluators": [
-        "session-closed-protocol-violation"
-      ],
-      "rationale": "A server publishing Tracks can receive client SETUP, and this alias form is prohibited there independently of DELETE. No requirement is inferred for an unmentioned client-side receive case."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The USE_ALIAS prohibition applies independently to a publisher acting as transport server. The approved harness is listener-only and the publisher connects as transport client, so it cannot deliver client SETUP to a publisher server to exercise this duty. Applicability is retained without inventing a client-side rule or an unsupported harness scenario."
     },
     {
       "id": "D18-10-2-2-MUST-005",

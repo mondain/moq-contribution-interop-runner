@@ -135,8 +135,9 @@ TEST_F(Draft18CatalogPart03Test, UnknownMessageAndParameterErrorsRemainDistinctF
     for (const auto* row : setup_alias) {
         EXPECT_EQ(row->actor, "server");
         EXPECT_EQ(row->applicability, Applicability::Applicable);
-        EXPECT_EQ(row->evaluators,
-                  std::vector<std::string>{"session-closed-protocol-violation"});
+        EXPECT_EQ(row->testability, Testability::NotTestable);
+        EXPECT_TRUE(row->scenarios.empty());
+        EXPECT_TRUE(row->evaluators.empty());
     }
 }
 
