@@ -1,0 +1,872 @@
+{
+  "draft": 18,
+  "source_sha256": "9e6b32cb7797c151e9e127374c1291af3ed546b2d453cd5bbb15946977eeeeb6",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D18-13-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 6131,
+        "last_line": 6131,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Ensure each downstream subscriber is independently authorized when aggregating subscriptions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subject at lines 6129-6131 is Relays that aggregate subscriptions from multiple downstream subscribers. Although the preceding paragraph describes authorization for publishers generally, this MUST addresses aggregation by a relay, outside the contribution publisher role. Section 13.3 describes tokens without defining an additional publisher wire response here."
+    },
+    {
+      "id": "D18-13-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "13.1",
+        "first_line": 6137,
+        "last_line": 6139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Implement rate limiting on subscription requests to mitigate subscription amplification.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The recommendation explicitly names relays. The publisher-specific monitoring and limit-enforcement recommendation follows separately on lines 6139-6141; rate limiting by a downstream relay is not a contribution publisher obligation."
+    },
+    {
+      "id": "D18-13-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "13.1",
+        "first_line": 6138,
+        "last_line": 6139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reject excessive subscriptions with REQUEST_ERROR and EXCESSIVE_LOAD.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Relays remains the subject of the MAY joined to their rate-limiting recommendation. This permission is relay-only in this paragraph; it does not assign this particular rejection policy to every original publisher."
+    },
+    {
+      "id": "D18-13-1-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "13.1",
+        "first_line": 6139,
+        "last_line": 6141,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Monitor the number of active subscriptions to prevent resource exhaustion by a single subscriber or session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The recommendation expressly names publishers, including contribution publishers. Maintaining or consulting the active subscription count is internal; a successful bounded request sequence does not prove monitoring, and the draft defines no external monitoring interface."
+    },
+    {
+      "id": "D18-13-1-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "13.1",
+        "first_line": 6139,
+        "last_line": 6141,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Enforce subscription limits to prevent resource exhaustion by a single subscriber or session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is independent of monitoring the count. The draft supplies neither a limit nor a mandatory rejection or eviction policy for publishers here; observing finite accepts or a rejection cannot establish the private resource-exhaustion threshold or sufficiency of its protection."
+    },
+    {
+      "id": "D18-13-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "13.2",
+        "first_line": 6151,
+        "last_line": 6151,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation",
+      "summary": "Follow TLS 1.3 and QUIC best practices when using the secure transport for MOQT.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Contribution publishers are implementations using the transports described in this paragraph. Best practices is open-ended deployment guidance with no determinate set of MOQT wire checks in this draft; the catalog does not import an external TLS or QUIC policy as a new conformance oracle."
+    },
+    {
+      "id": "D18-13-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "13.2",
+        "first_line": 6151,
+        "last_line": 6152,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Use authentication to prevent relay impersonation.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The second normative occurrence on line 6151 explicitly names Relays. A contribution publisher's use of secure transport does not make it a relay or impose the relay authentication deployment duty."
+    },
+    {
+      "id": "D18-13-5-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "13.5",
+        "first_line": 6250,
+        "last_line": 6251,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Set flow control limits based on the anticipated bitrate.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher is an endpoint, but its anticipated bitrate, buffering budget and policy relating them to transport credit are not prescribed or externally knowable. Observed flow-control limits alone do not prove that they were chosen based on bitrate."
+    },
+    {
+      "id": "D18-13-5-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "13.5",
+        "first_line": 6253,
+        "last_line": 6255,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Impose a MAX STREAM count limit restricting concurrent application streams.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This endpoint permission also applies to publishers. The text does not define a MOQT MAX STREAM field or a required policy translating cumulative transport stream credit into a concurrent application-stream limit. Transport credit can be observed, but it cannot by itself prove the internal concurrent-stream resource policy; optional support is not mandatory."
+    },
+    {
+      "id": "D18-13-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "13.5",
+        "first_line": 6259,
+        "last_line": 6260,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Cancel a stream after reaching a resource limit, preferably the lowest-priority stream.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Publisher and subscriber are independent actors in the same MUST sentence. A publisher's resource threshold and the moment it is reached are private and unspecified, so starvation or a harness timeout does not prove the precondition. The lowest priority choice is qualified by preferably, not a mandatory selection rule."
+    },
+    {
+      "id": "D18-13-5-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "13.5",
+        "first_line": 6259,
+        "last_line": 6260,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Cancel a stream after reaching a subscriber resource limit, preferably the lowest-priority stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This clause covers the subscriber named alongside the publisher. It concerns the receiving consumer's resources, not the contribution publisher's resources, and is outside this runner's publisher scope."
+    },
+    {
+      "id": "D18-13-7-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "13.7.1",
+        "first_line": 6304,
+        "last_line": 6309,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Prevent malicious endpoints from flooding relay state with PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE, or SUBSCRIBE_TRACKS requests.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The actor is explicitly a Relay, and the paragraph gives transport limits or application-specific rejection policies as examples of state protection. The runner does not assess a production relay's namespace tree or aggregated request-state defenses."
+    },
+    {
+      "id": "D18-13-8-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "13.8",
+        "first_line": 6349,
+        "last_line": 6351,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation",
+      "summary": "Send only the minimum implementation information necessary for interoperability debugging.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The MOQT_IMPLEMENTATION option in Section 10.3.1.5 is publisher-visible on the wire, but minimum necessary depends on the deployment's debugging needs. A short name and major version are described as typically sufficient, not as a mandatory grammar or length bound."
+    },
+    {
+      "id": "D18-13-8-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "13.8",
+        "first_line": 6353,
+        "last_line": 6355,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation",
+      "summary": "Avoid detailed system information in MOQT_IMPLEMENTATION to mitigate fingerprinting.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "System information is an independent category in the recommendation. The option is free-form text under Section 10.3.1.5; no syntax identifies which substrings are detailed system information, and the runner lacks authoritative publisher platform metadata for an implementation-neutral verdict."
+    },
+    {
+      "id": "D18-13-8-SHOULD-NOT-002",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "13.8",
+        "first_line": 6353,
+        "last_line": 6355,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "implementation",
+      "summary": "Avoid build numbers in MOQT_IMPLEMENTATION to mitigate fingerprinting.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Build numbers are a separately listed category. The draft defines no build-number field or encoding, and a numeric substring can also be an allowed version. Without authoritative implementation build metadata, wire text does not determine whether a value is a build number."
+    },
+    {
+      "id": "D18-13-8-SHOULD-NOT-003",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "13.8",
+        "first_line": 6353,
+        "last_line": 6355,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "implementation",
+      "summary": "Avoid other implementation attributes that could uniquely identify an instance or user.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The uniqueness risk of an arbitrary attribute depends on the endpoint population, user identity and information combined across sessions. Those facts are outside the relay-side protocol boundary; the draft supplies no decidable uniqueness predicate."
+    },
+    {
+      "id": "D18-13-8-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "13.8",
+        "first_line": 6357,
+        "last_line": 6358,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "deployment",
+      "summary": "Omit MOQT_IMPLEMENTATION entirely in a privacy-conscious deployment.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-privacy-configuration-omits-implementation"
+      ],
+      "evaluators": [
+        "setup-omits-moqt-implementation-option"
+      ],
+      "rationale": "This permission applies to contribution-publisher deployments. In a supported privacy configuration, capture the publisher's complete SETUP and verify that option 0x07 is absent. Section 10.3.1.5 already qualifies its sending recommendation when configured not to send; this optional capability does not mandate a privacy control."
+    },
+    {
+      "id": "D18-13-8-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "13.8",
+        "first_line": 6357,
+        "last_line": 6358,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "deployment",
+      "summary": "Send a generic MOQT_IMPLEMENTATION value in a privacy-conscious deployment.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an alternative permission to omission. The draft does not define generic or a set of generic values, and a string alone does not reveal how distinctive it is across deployments. Matching a configured string would prove configuration plumbing, not the generic-value property."
+    },
+    {
+      "id": "D18-13-8-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "13.8",
+        "first_line": 6360,
+        "last_line": 6361,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation",
+      "summary": "Provide users with the ability to configure MOQT_IMPLEMENTATION.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional user-facing configuration capability applies to publisher implementations, but the draft defines no protocol operation or standard configuration API for it. An observed SETUP value cannot prove that users can change it."
+    },
+    {
+      "id": "D18-13-8-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "13.8",
+        "first_line": 6360,
+        "last_line": 6361,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "implementation",
+      "summary": "Provide users with the ability to disable MOQT_IMPLEMENTATION.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Disabling is an independent user control from choosing a value. The absence of the option is observable and classified separately at line 6357, but absence does not prove that a user-accessible disabling control exists."
+    },
+    {
+      "id": "D18-14-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Handle unknown Setup Option values gracefully.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "setup-unknown-grease-options-and-duplicates"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "Setup Options are one of the registries listed for GREASE. Supply otherwise valid SETUP options containing well-formed reserved identifiers 0x9D and 0x11C, including unknown duplicates, and then a valid publisher interaction. Sections 10.3 and 14 require ignoring them; completion of setup and the subsequent interaction provides the wire oracle."
+    },
+    {
+      "id": "D18-14-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Handle unknown Property values gracefully according to the Property processing rules.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-unknown-optional-properties",
+        "publisher-recovery-track-status-unknown-before-invalid-property"
+      ],
+      "evaluators": [
+        "track-status-unknown-optional-properties-skipped"
+      ],
+      "rationale": "Use a publisher's supported recovery TRACK_STATUS operation from Section 2.4.3 and return TRACK_STATUS_OK under Section 10.5. Keep Property Types ascending under Section 1.4.3: unknown optional 0x00 and 0x01, recognized DEFAULT_PUBLISHER_GROUP_ORDER 0x22 with valid value 1, then unknown GREASE 0x9D and 0x11C; recovery/publication must continue. In a separate run set Property 0x22 to invalid value 0 after the unknown optional types; Section 12.5 requires PROTOCOL_VIOLATION, proving the parser skipped to the known field without requiring adoption of the peer's group-order preference. Mandatory Track Properties under Section 2.5.1 have special handling and are not silently accepted by these scenarios."
+    },
+    {
+      "id": "D18-14-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "endpoint",
+      "summary": "Handle an unknown Session Termination error gracefully as the context's INTERNAL_ERROR.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Session Termination is an independently listed GREASE registry. Section 3.5 terminates the session via the transport close operation, and Section 14 maps an unknown code to INTERNAL_ERROR. After the peer has already closed, no specified MOQT response distinguishes that internal interpretation from another terminal interpretation."
+    },
+    {
+      "id": "D18-14-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "publisher",
+      "summary": "Handle unknown REQUEST_ERROR codes gracefully.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-request-rejected-with-unknown-error"
+      ],
+      "evaluators": [
+        "session-survives-unknown-request-error"
+      ],
+      "rationale": "A contribution publisher can receive REQUEST_ERROR for PUBLISH or PUBLISH_NAMESPACE. Reject one such request with reserved code 0x9D, Retry Interval zero and a legal FIN while retaining an independent accepted publication. The independent publication must remain usable; the unknown code alone cannot cause a session close. Exact internal error mapping is inventoried separately at line 6413."
+    },
+    {
+      "id": "D18-14-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 5
+      },
+      "actor": "subscriber",
+      "summary": "Handle unknown PUBLISH_DONE codes gracefully.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "PUBLISH_DONE is sent by the publisher to its subscriber under Section 10.11. Its receiving-side unknown-code handling is a subscriber obligation; delivering it to a contribution publisher without a corresponding receiving subscription would not isolate this rule."
+    },
+    {
+      "id": "D18-14-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 6
+      },
+      "actor": "endpoint",
+      "summary": "Handle unknown Stream Reset Error Codes gracefully.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-request-stream-reset-with-unknown-code"
+      ],
+      "evaluators": [
+        "session-survives-unknown-request-stream-reset-code"
+      ],
+      "rationale": "The general GREASE registry list names Stream Reset Error Codes, and Section 3.3.3 applies them to any stream. Reset the response direction of a publisher-originated bidirectional request with 0x9D while retaining an independent accepted publication; cancellation of that request must not close the session solely for the unknown code. The later mapping rule names Data Stream Reset specifically, so this general no-failure test does not claim an INTERNAL_ERROR conversion for request resets or substitute them for the subscriber-only data-reset mapping."
+    },
+    {
+      "id": "D18-14-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6402,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 7
+      },
+      "actor": "publisher",
+      "summary": "Handle an unknown MOQT Auth Token Type gracefully.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "subscribe-unknown-auth-token-type"
+      ],
+      "evaluators": [
+        "unknown-auth-token-type-does-not-close-session"
+      ],
+      "rationale": "The Auth Token Type registry is also reserved for GREASE. Send an otherwise valid SUBSCRIBE with an AUTHORIZATION_TOKEN using USE_VALUE, unknown Token Type 0x9D and structurally valid opaque bytes, alongside an independent accepted publication. A request-level authorization rejection is permitted; session failure solely due to the unknown type is not. Section 10.2.2's malformed-structure rules remain separate."
+    },
+    {
+      "id": "D18-14-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "14",
+        "first_line": 6403,
+        "last_line": 6404,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not close the session solely because of an unknown value in a listed extensible registry.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "setup-unknown-grease-options-and-duplicates",
+        "publisher-recovery-track-status-unknown-optional-properties",
+        "publisher-request-rejected-with-unknown-error",
+        "subscribe-unknown-auth-token-type",
+        "publisher-request-stream-reset-with-unknown-code"
+      ],
+      "evaluators": [
+        "unknown-extensible-value-alone-does-not-close-session"
+      ],
+      "rationale": "Exercise otherwise valid unknown Setup Options, optional Track Properties in a supported TRACK_STATUS_OK recovery, REQUEST_ERROR codes, request Auth Token Types and request-stream reset codes, retaining an independent usable interaction. Section 14 scopes this rule to its listed registries, not unknown stream types (Section 3.4) or unnegotiated Message Parameters (Section 3.3). An incoming Session Termination has already closed the session; subscriber-only PUBLISH_DONE and Data Stream Reset reception are outside contribution scope. Malformed framing, authorization failure and mandatory-property request rejection are not forbidden merely because an unknown value is also present."
+    },
+    {
+      "id": "D18-14-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6407,
+        "last_line": 6408,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Ignore unknown Setup Options, including reserved identifiers with arbitrary values.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "setup-unknown-grease-options-and-duplicates"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "Section 10.3 specifies ignoring unrecognized options and allowing unknown duplicates. Supply well-formed odd length-prefixed and even integer-valued GREASE options, preserve all recognized required setup values, and verify setup plus a subsequent valid publisher interaction. Arbitrary values remain subject to the Key-Value-Pair framing in Section 1.4.3."
+    },
+    {
+      "id": "D18-14-MUST-009",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6410,
+        "last_line": 6410,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Handle unknown optional Properties according to Section 2.5 when receiving Track metadata.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-unknown-optional-properties",
+        "publisher-recovery-track-status-unknown-before-invalid-property"
+      ],
+      "evaluators": [
+        "track-status-unknown-optional-properties-skipped"
+      ],
+      "rationale": "A publisher can receive Track metadata through recovery TRACK_STATUS_OK (Sections 2.4.3 and 10.5). Use ascending Property Types 0x00 and 0x01 (unknown optional), 0x22 (recognized DEFAULT_PUBLISHER_GROUP_ORDER with value 1), then GREASE 0x9D and 0x11C; verify continued recovery/publication. In a separate run use invalid value 0 for Property 0x22 after the unknown types and require PROTOCOL_VIOLATION under Section 12.5, proving parsing resumes at the known field. This preserves unsigned deltas under Section 1.4.3 without requiring adoption of the returned preference. Section 15.8 supplies endpoint-ignore behavior; Section 2.5.1's Mandatory Track Property exception is preserved."
+    },
+    {
+      "id": "D18-14-MUST-010",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6410,
+        "last_line": 6410,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Apply Section 2.5's preservation, forwarding and caching rules to unknown Properties at relays.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The cross-reference incorporates relay handling as well as endpoint handling. Section 2.5 expressly governs retaining unmodified unknown Properties, forwarding, caching, replacement and avoiding set merges, with a Mandatory Track Property exception. Those relay responsibilities do not apply to an original contribution publisher, and the cross-reference does not turn it into a cache."
+    },
+    {
+      "id": "D18-14-MUST-011",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6410,
+        "last_line": 6410,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Apply the Mandatory Track Property receiver rules in Section 2.5.1 to unknown mandatory extensions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 2.5.1 makes receiving PUBLISH, SUBSCRIBE_OK and FETCH_OK with unsupported Mandatory Track Properties trigger subscriber-side rejection or cancellation rather than ordinary ignoring. The unknown-property cross-reference preserves that exception; it does not require a contribution publisher to accept incoming media subscriptions as a subscriber."
+    },
+    {
+      "id": "D18-14-MUST-012",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6413,
+        "last_line": 6414,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Treat an unknown Session Termination error code as INTERNAL_ERROR for Session Termination.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The same lexical MUST covers four independently named contexts. For Session Termination, INTERNAL_ERROR is 0x1 under Section 3.5, while the other listed contexts use 0x0. The incoming transport close already ends the session and the draft prescribes no subsequent MOQT response exposing the local semantic mapping."
+    },
+    {
+      "id": "D18-14-MUST-013",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6413,
+        "last_line": 6414,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Treat an unknown REQUEST_ERROR code as INTERNAL_ERROR for that request.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher receives errors for its publication requests, but Section 10.6 defines INTERNAL_ERROR only as an implementation-specific or generic failure; it specifies no unique reply that proves the internal mapping to 0x0. Session survival is independently observable and classified at line 6415. The mapping must not be reduced to that weaker no-close check."
+    },
+    {
+      "id": "D18-14-MUST-014",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6413,
+        "last_line": 6414,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Treat an unknown PUBLISH_DONE code as INTERNAL_ERROR for the subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 10.11 identifies the receiver of PUBLISH_DONE as a subscriber and defines INTERNAL_ERROR as 0x0. This is receiving-side subscription termination handling, outside the contribution publisher role."
+    },
+    {
+      "id": "D18-14-MUST-015",
+      "strength": "Must",
+      "source": {
+        "section": "14",
+        "first_line": 6413,
+        "last_line": 6414,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "subscriber",
+      "summary": "Treat an unknown Data Stream Reset code as INTERNAL_ERROR for that data stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Object data streams run from publisher to subscriber (Section 3.3), so the receiver of a Data Stream Reset is the subscriber. Section 3.3.3 defines stream INTERNAL_ERROR as 0x0. Section 14 lists the broader Stream Reset registry but its detailed mapping names Data Stream Reset; no obligation for STOP_SENDING or request-stream reset semantics is invented from that mismatch."
+    },
+    {
+      "id": "D18-14-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "14",
+        "first_line": 6415,
+        "last_line": 6416,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not close the session because a REQUEST_ERROR contains an unknown error code.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-request-rejected-with-unknown-error"
+      ],
+      "evaluators": [
+        "session-survives-unknown-request-error"
+      ],
+      "rationale": "Reject a publisher's PUBLISH or PUBLISH_NAMESPACE with well-formed REQUEST_ERROR code 0x9D and FIN, while a separate accepted track continues. Verify no publisher-initiated session close attributable to the unknown code and continued delivery on the independent publication. This checks session survival, not an unobservable internal conversion to INTERNAL_ERROR."
+    },
+    {
+      "id": "D18-14-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "14",
+        "first_line": 6415,
+        "last_line": 6416,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Do not close the session because PUBLISH_DONE contains an unknown error code.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This alternative in the same prohibition concerns a subscriber receiving a publisher's PUBLISH_DONE under Section 10.11. A contribution publisher does not receive it for the subscription it is publishing; a wrong-role message would not be a valid test of unknown-code handling."
+    },
+    {
+      "id": "D18-15-4-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "15.4",
+        "first_line": 6541,
+        "last_line": 6542,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Ignore unknown Setup Options as specified in Section 10.3.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "setup-unknown-grease-options-and-duplicates"
+      ],
+      "evaluators": [
+        "setup-continues-with-unknown-options-ignored"
+      ],
+      "rationale": "Despite its location after an IANA table, this sentence explicitly imposes an endpoint wire-processing requirement. Send well-formed unknown odd/even options and unknown duplicates in otherwise valid SETUP, then exercise a valid publisher interaction; setup must continue with those options ignored."
+    },
+    {
+      "id": "D18-15-4-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "15.4",
+        "first_line": 6562,
+        "last_line": 6562,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "extension-registrant",
+      "summary": "Request a provisional registration when custom Setup Options are needed.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Lines 6557-6562 define registration policy and avoid codepoint collisions; the subject is an implementation developer registering a custom extension. This is a real recommendation for registrants, not merely editorial text, but it is not a contribution publisher's runtime wire duty. The draft gives no private Setup Option range."
+    },
+    {
+      "id": "D18-15-8-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "15.8",
+        "first_line": 6696,
+        "last_line": 6697,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Ignore unknown Property types and skip their encoded values.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-unknown-optional-properties",
+        "publisher-recovery-track-status-unknown-before-invalid-property"
+      ],
+      "evaluators": [
+        "track-status-unknown-optional-properties-skipped"
+      ],
+      "rationale": "Exercise a publisher's supported recovery TRACK_STATUS_OK reply (Sections 2.4.3 and 10.5) with ascending Property Types: unknown optional 0x00 and 0x01, recognized DEFAULT_PUBLISHER_GROUP_ORDER 0x22 with value 1, then GREASE 0x9D and 0x11C. Verify continued recovery/publication; separately set Property 0x22 to invalid value 0 after the unknown types and require PROTOCOL_VIOLATION under Section 12.5 to prove parser alignment. No adoption of the returned preference is required. The instruction to skip using the length field is imprecise: Section 1.4.3 gives odd types a length and even types an integer value. Both forms are tested without descending Type deltas. The blanket ignore wording conflicts with specific Mandatory Track Property handling in Section 2.5.1; these scenarios use optional types and do not settle that exception."
+    },
+    {
+      "id": "D18-15-8-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "15.8",
+        "first_line": 6714,
+        "last_line": 6716,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "extension-registrant",
+      "summary": "Give Properties registered in the range 0x4000-0x7FFF Track scope.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This clause governs the scope of registered entries in the Mandatory Track Property range. It is a normative registry/extension-author requirement, not an endpoint's instruction to receive or send an Object. The separate wire handling in Section 2.5.1 remains authoritative for endpoint behavior."
+    },
+    {
+      "id": "D18-15-8-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "15.8",
+        "first_line": 6715,
+        "last_line": 6716,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "extension-registrant",
+      "summary": "Do not register Object-scope Properties in the range 0x4000-0x7FFF.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The prohibition addresses registration in the IANA Property type space. It is not an instruction to a contribution publisher to implement registry administration, nor merely an informative mention. Section 2.5.1 separately defines the malformed-object consequence of placing Mandatory Track Properties on Objects."
+    },
+    {
+      "id": "D18-A-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "A.5",
+        "first_line": 7658,
+        "last_line": 7658,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "specification-reader",
+      "summary": "Record the historical addition of MUST language for multi-publisher relay handling since draft 13.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Appendix A is a historical change log marked for removal before publication at lines 7195-7198. This bullet reports issue #1115 and mentions the normative keyword; it does not create a second live relay or publisher requirement. The lexical MUST remains inventoried with its actual A.5 section."
+    },
+    {
+      "id": "D18-A-7-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "A.7",
+        "first_line": 7714,
+        "last_line": 7715,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "specification-reader",
+      "summary": "Record the historical relay upstream-subscription requirement change since draft 11.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Appendix A.7 records historical change #1017 concerning SUBSCRIBE_OK and upstream subscriptions. Its MUST is part of the change log, not a new normative requirement; current protocol sections supply any operative relay rule. The informative classification prevents double-counting it as either a relay or publisher duty."
+    }
+  ]
+}

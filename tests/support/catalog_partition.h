@@ -59,7 +59,7 @@ protected:
         }
         std::map<Anchor, std::set<unsigned>> clauses;
         const std::regex id_pattern("D" + std::to_string(source_.number) +
-            R"(-[0-9]+(-[0-9]+)*-(MUST|MUST-NOT|SHOULD|SHOULD-NOT|MAY)-[0-9]{3})");
+            R"(-([0-9]+|[A-Z])(-[0-9]+)*-(MUST|MUST-NOT|SHOULD|SHOULD-NOT|MAY)-[0-9]{3})");
         for (const auto& row : catalog_.requirements) {
             SCOPED_TRACE(row.id);
             const Anchor anchor{row.source.first_line, row.source.occurrence};
