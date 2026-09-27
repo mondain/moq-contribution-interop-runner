@@ -1,0 +1,1939 @@
+{
+  "draft": 18,
+  "source_sha256": "9e6b32cb7797c151e9e127374c1291af3ed546b2d453cd5bbb15946977eeeeb6",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D18-11-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11",
+        "first_line": 4948,
+        "last_line": 4949,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session when receiving an unknown datagram type.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-unknown-datagram-type"
+      ],
+      "evaluators": [
+        "session-closed"
+      ],
+      "rationale": "Datagram type dispatch applies to every endpoint, including a contribution publisher. Send a type other than the Object Datagram and Padding types; Section 11 does not mandate a specific error code."
+    },
+    {
+      "id": "D18-11-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11",
+        "first_line": 4952,
+        "last_line": 4953,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Use both Subgroups and Datagrams for different Objects within one Group.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-one-group-with-subgroup-and-datagram-objects"
+      ],
+      "evaluators": [
+        "one-group-observed-with-both-forwarding-preferences"
+      ],
+      "rationale": "The permission is the Original Publisher's choice under Sections 2.1-2.3. Observe distinct Objects in one Group on a Subgroup stream and in Object Datagrams; optional mixed delivery is not mandatory feature support."
+    },
+    {
+      "id": "D18-11-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11",
+        "first_line": 4952,
+        "last_line": 4953,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "original-publisher",
+      "summary": "Use both Subgroups and Datagrams for Objects within one Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-track-with-subgroup-and-datagram-groups"
+      ],
+      "evaluators": [
+        "one-track-observed-with-both-forwarding-preferences"
+      ],
+      "rationale": "The Track-level permission is independently observable even when individual Groups use a single preference. Correlate received Track Alias with the established Track and preserve each Object's individual preference."
+    },
+    {
+      "id": "D18-11-1-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "11.1",
+        "first_line": 4962,
+        "last_line": 4963,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not use the same Track Alias for two different Tracks simultaneously in the same session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-two-simultaneous-tracks"
+      ],
+      "evaluators": [
+        "no-simultaneous-track-alias-reuse-for-distinct-tracks"
+      ],
+      "rationale": "Inspect PUBLISH and SUBSCRIBE_OK assignments while both subscriptions are Established. The rule is simultaneous and session-scoped, not a ban on reuse after retirement; Section 11.1 notes that old Objects can remain in flight after cancellation."
+    },
+    {
+      "id": "D18-11-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.1",
+        "first_line": 4965,
+        "last_line": 4966,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with DUPLICATE_TRACK_ALIAS when PUBLISH or SUBSCRIBE_OK reuses an alias of a different Track with an Established subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The collision detector is explicitly the subscriber. A contribution publisher assigns its aliases; its sending-side prohibition is the separate anchor at line 4962. Receiving this error is not itself a publisher duty."
+    },
+    {
+      "id": "D18-11-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.1",
+        "first_line": 4969,
+        "last_line": 4971,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Retain enough cancelled-subscription state to quickly discard late unwanted Objects instead of treating their aliases as unknown.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This state-retention recommendation is explicitly for subscribers receiving late Objects. The listener exercises that role; the contribution publisher does not acquire the subscriber obligation."
+    },
+    {
+      "id": "D18-11-2-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 5007,
+        "last_line": 5008,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send an Object in a subscription according to that Object's assigned Forwarding Preference.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "redeliver-previously-observed-object-in-later-subscription"
+      ],
+      "evaluators": [
+        "subscription-delivery-preserves-observed-object-forwarding-preference"
+      ],
+      "rationale": "Sections 11.3 and 11.4.2 explicitly establish the preference of an Object observed in an Object Datagram or Subgroup stream. For a publisher supporting repeated delivery, use that first observation as independent evidence when evaluating the same Object on a later subscription. Section 2.4.2 rejects changed preference for the same Object; Section 10.12.3 exempts FETCH transport, so the evaluator never requires a FETCH response to use datagrams."
+    },
+    {
+      "id": "D18-11-2-1-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 5022,
+        "last_line": 5023,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not process the opaque Object payload intended for an End Subscriber.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is explicitly a relay processing restriction. The Original Publisher is responsible for payload content under Section 2.1 and is not prohibited from processing its own payload."
+    },
+    {
+      "id": "D18-11-2-1-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.2.1.1",
+        "first_line": 5053,
+        "last_line": 5053,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber-or-cache",
+      "summary": "Cache Normal, End of Group and End of Track Object status information.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The paragraph enumerates statuses learned from subscription Objects; caching these received signals is a subscriber/cache function. It does not require the Original Publisher to cache its own outgoing status signals."
+    },
+    {
+      "id": "D18-11-2-1-1-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "11.2.1.1",
+        "first_line": 5055,
+        "last_line": 5056,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Treat an Object Status other than Normal 0x0, End of Group 0x3 or End of Track 0x4 as a protocol error.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This concerns validation of received subscription Objects, which Section 11.2 says publishers send. The contribution publisher has no receiving subscription in this scope; session closure is separately recommended at line 5056."
+    },
+    {
+      "id": "D18-11-2-1-1-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "11.2.1.1",
+        "first_line": 5056,
+        "last_line": 5056,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION for an Object Status outside 0x0, 0x3 and 0x4.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The receiver of an Object performs this response. The SHOULD is retained rather than strengthened to MUST; the publisher's outgoing payload restriction at line 5057 is a separate requirement."
+    },
+    {
+      "id": "D18-11-2-1-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1.1",
+        "first_line": 5057,
+        "last_line": 5057,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Give every Object whose status is nonzero an empty payload.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-end-of-group-and-end-of-track-status-objects"
+      ],
+      "evaluators": [
+        "non-normal-object-status-has-empty-payload"
+      ],
+      "rationale": "Inspect publisher-sent status Objects using the Subgroup and Datagram encodings in Sections 11.3.1 and 11.4.2. Nonzero status cannot carry payload; zero-length Normal Objects remain legal."
+    },
+    {
+      "id": "D18-11-2-1-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1.2",
+        "first_line": 5063,
+        "last_line": 5063,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION on receiving Properties on an Object whose status is not Normal.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Although phrased as an endpoint rule, its trigger is receiving an Object on a subscription, a subscriber role under Sections 11 and 11.2. Sending malformed Objects to an original contribution publisher with no receiving subscription cannot establish this role-specific trigger."
+    },
+    {
+      "id": "D18-11-2-1-2-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.2.1.2",
+        "first_line": 5067,
+        "last_line": 5069,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Serialize Object metadata never intended for transport or relay access in the Object payload instead of an Object Property.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher chooses metadata placement, but whether particular metadata was ever intended for transport or relay access is application intent. This harness treats payloads as opaque and cannot infer that intent from wire bytes."
+    },
+    {
+      "id": "D18-11-3-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.3",
+        "first_line": 5086,
+        "last_line": 5088,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Drop a received Object Datagram whose Track Alias is unknown.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a receiving-subscription behavior. It permits dropping before alias establishment and does not require a contribution publisher to act as an Object consumer."
+    },
+    {
+      "id": "D18-11-3-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.3",
+        "first_line": 5086,
+        "last_line": 5088,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Buffer a received Object Datagram with an unknown Track Alias briefly to allow reordering with the establishing control message.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the alternative subscriber behavior to dropping the unknown-alias datagram. The draft gives no numeric definition of brief; no timeout is invented."
+    },
+    {
+      "id": "D18-11-3-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 5142,
+        "last_line": 5143,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION when an Object Datagram has PROPERTIES set but Properties Length is zero.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The field validation is performed while receiving Object Datagrams as a subscriber. It is distinct from type dispatch, which every endpoint performs. Section 11.3 permits unknown-alias Objects to be dropped, so such input cannot prove this publisher receiver path."
+    },
+    {
+      "id": "D18-11-3-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 5176,
+        "last_line": 5181,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION for an Object Datagram type having both STATUS 0x20 and END_OF_GROUP 0x02 set.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-datagram-types-0x22-0x23-0x26-0x27-0x2a-0x2b-0x2e-0x2f"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The type is invalid before any Track Alias or Object field is parsed, so the endpoint-as-publisher can receive this stimulus without a receiving subscription. The eight expressly listed types exercise the reserved combination."
+    },
+    {
+      "id": "D18-11-3-1-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 5176,
+        "last_line": 5184,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION for an invalid Object Datagram type outside 0x00..0x0F and 0x20..0x2F.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-invalid-object-datagram-type-0x10"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The type check is observable before Track Alias processing. The literal outside-range wording overlaps the separately defined Padding Datagram type in Section 11.5.2; preserve that discrepancy and use 0x10, not valid padding, as the unambiguous invalid stimulus. No rejection of the defined padding production is inferred."
+    },
+    {
+      "id": "D18-11-3-1-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 5187,
+        "last_line": 5189,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION for an Object Datagram with STATUS and PROPERTIES set and a non-Normal Object Status.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is subscription Object validation by its receiving endpoint, restating Section 11.2.1.2 for the Datagram form. A contribution publisher's outgoing traffic does not transfer the subscriber error-handling obligation to it."
+    },
+    {
+      "id": "D18-11-4-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.4",
+        "first_line": 5197,
+        "last_line": 5197,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a data stream FIN terminates in the middle of a serialized Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The recommendation is for the Object receiver. It covers graceful truncation, not reset streams, and does not mandate the same response from a publisher lacking an incoming subscription or FETCH."
+    },
+    {
+      "id": "D18-11-4-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.4",
+        "first_line": 5199,
+        "last_line": 5200,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not have more than one stream open at a time with the same Subgroup Header field values.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Actual simultaneous openness is sender transport state. The listener can receive a new header before a delayed FIN or reset on another stream even when the sender closed that stream first; receiver arrival order cannot prove sender overlap."
+    },
+    {
+      "id": "D18-11-4-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.4.1",
+        "first_line": 5215,
+        "last_line": 5219,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Cancel a non-control unidirectional data stream for congestion or another reason without terminating its subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-cancels-subgroup-while-another-subgroup-continues"
+      ],
+      "evaluators": [
+        "data-stream-cancelled-with-subscription-still-established"
+      ],
+      "rationale": "Observe a publisher reset on one data stream and continued delivery for the same subscription on another Subgroup. The paragraph states that early unidirectional termination does not alter MOQT subscription state."
+    },
+    {
+      "id": "D18-11-4-1-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.4.1",
+        "first_line": 5215,
+        "last_line": 5221,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Cancel a non-control bidirectional request stream for congestion or another reason, terminating its associated request.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-cancels-one-of-two-active-request-streams"
+      ],
+      "evaluators": [
+        "request-stream-cancellation-terminates-only-that-request"
+      ],
+      "rationale": "The paragraph distinguishes bidirectional cancellation, which terminates its Subscription, Fetch, Track Status or namespace request, from unidirectional cancellation. Exercise a publisher-supported request while an independent request remains active."
+    },
+    {
+      "id": "D18-11-4-1-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "11.4.1",
+        "first_line": 5215,
+        "last_line": 5219,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber",
+      "summary": "Cancel a non-control unidirectional data stream without terminating the outstanding subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The same permission also names the subscriber. That sender-of-STOP_SENDING role belongs to the listener, not the contribution publisher; publisher response duties are separately anchored in Section 11.4.3."
+    },
+    {
+      "id": "D18-11-4-1-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "11.4.1",
+        "first_line": 5215,
+        "last_line": 5221,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "subscriber",
+      "summary": "Cancel a non-control bidirectional request stream and terminate the associated request.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This independent permission applies to the subscriber endpoint cancelling its request. It is retained separately from publisher-initiated cancellation to avoid transferring the actor."
+    },
+    {
+      "id": "D18-11-4-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.1",
+        "first_line": 5221,
+        "last_line": 5223,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "When possible, send PUBLISH_DONE to terminate a subscription instead of abruptly terminating its associated request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-voluntarily-terminates-subscription-with-writable-request-stream"
+      ],
+      "evaluators": [
+        "voluntary-subscription-termination-sends-publish-done"
+      ],
+      "rationale": "Use a voluntary termination while the subscription request stream remains writable. The paragraph calls it the associated control stream, but Sections 3.3 and 10.11 distinguish the session control stream from the subscription bidirectional stream; the rule does not authorize closing the session control stream."
+    },
+    {
+      "id": "D18-11-4-2-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5232,
+        "last_line": 5234,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Abandon a received Subgroup stream with an unknown Track Alias.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The endpoint in this paragraph is receiving a subscription's Objects. This subscriber-side permission does not require contribution publishers to receive Objects."
+    },
+    {
+      "id": "D18-11-4-2-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5232,
+        "last_line": 5234,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Briefly buffer a Subgroup with an unknown Track Alias pending the control message establishing that alias.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the subscriber's alternative to abandoning the unknown-alias stream. The draft specifies neither a buffering duration nor a mandatory buffering capability."
+    },
+    {
+      "id": "D18-11-4-2-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5234,
+        "last_line": 5235,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Withhold stream flow control beyond the SUBGROUP_HEADER until the Track Alias is established.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This concerns receive flow-control credit for an incoming Subgroup stream and belongs to the subscriber. It is distinct from the all-endpoint connection allocation requirement at line 5236."
+    },
+    {
+      "id": "D18-11-4-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5236,
+        "last_line": 5240,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Allocate connection flow control to control streams before allocating it to data streams to prevent alias-establishment deadlock.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The contribution publisher is an endpoint that sends control and data streams, but the allocation decision and pending stream queues are internal transport state. Network arrival and absence of an observed deadlock do not prove allocation order."
+    },
+    {
+      "id": "D18-11-4-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5308,
+        "last_line": 5313,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION for a Subgroup Header type with reserved SUBGROUP_ID_MODE 0b11.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-subgroup-types-with-subgroup-id-mode-three"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Use the sixteen explicitly listed reserved types from 0x16 through 0x7F. The invalid mode is visible in the leading type before Track Alias lookup, so no incoming subscription is needed to exercise this endpoint error."
+    },
+    {
+      "id": "D18-11-4-2-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5308,
+        "last_line": 5327,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION for an invalid Subgroup Header type outside the form 0b0XX1XXXX.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "receive-invalid-subgroup-header-type-0x80"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "The literal outside-form wording also encompasses separately defined stream types in Section 3.4. Preserve that tension and test unassigned type 0x80; do not reinterpret valid FETCH_HEADER, SETUP or PADDING as malformed Subgroup Headers."
+    },
+    {
+      "id": "D18-11-4-2-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.2",
+        "first_line": 5340,
+        "last_line": 5346,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a decoded Subgroup Object ID exceeds 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Object receiver adds Object ID Delta plus one to the previous Object ID, or uses Delta as the first ID. This overflow response is subscriber-side; gaps without Prior Object ID Gap do not establish nonexistence."
+    },
+    {
+      "id": "D18-11-4-3-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5368,
+        "last_line": 5368,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Close a Subgroup stream with FIN after delivering all its Objects to QUIC, except Objects before the subscription Start Location.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-complete-finite-subgroup-with-start-location-filter"
+      ],
+      "evaluators": [
+        "complete-subgroup-ends-with-fin"
+      ],
+      "rationale": "A driven finite Object fixture and Start Location define the expected eligible Objects. Receiving all of them proves delivery to QUIC occurred; observe FIN after the last eligible Object. No deadline is invented for the internal completion instant."
+    },
+    {
+      "id": "D18-11-4-3-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5371,
+        "last_line": 5390,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reset a Subgroup stream if closing it before delivering all eligible Objects to QUIC.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "cancel-subscription-before-next-subgroup-object-is-produced",
+        "advance-start-location-while-subgroup-remains-incomplete",
+        "pause-forwarding-with-an-unsent-subgroup-object"
+      ],
+      "evaluators": [
+        "incomplete-subgroup-closure-uses-reset"
+      ],
+      "rationale": "Keep a known later Object unproduced while triggering early closure, so receiver absence is not mistaken for unsent data. The examples also include delivery timeouts, publisher termination and End Group changes; Section 8 governs timeout decisions separately. The required observable closure form is reset, not FIN."
+    },
+    {
+      "id": "D18-11-4-3-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5392,
+        "last_line": 5398,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "When using RESET_STREAM_AT, choose reliable_size that includes the stream header.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-resets-data-stream-using-reset-stream-at"
+      ],
+      "evaluators": [
+        "reset-stream-at-reliable-size-covers-subgroup-header"
+      ],
+      "rationale": "When this optional transport capability is used, inspect reliable_size and the serialized header length. Including the header permits the receiver to associate the stream with a subscription and account for PUBLISH_DONE Stream Count. Unsupported RESET_STREAM_AT is not itself a violation."
+    },
+    {
+      "id": "D18-11-4-3-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5406,
+        "last_line": 5410,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Signal an entirely unsent Subgroup with a new stream containing only SUBGROUP_HEADER followed by RESET_STREAM_AT whose reliable_size equals the header length.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-signals-subgroup-with-no-delivered-objects"
+      ],
+      "evaluators": [
+        "empty-subgroup-reset-reliable-size-equals-header-length"
+      ],
+      "rationale": "The header-only stream and reset reliably identify an unsent Subgroup. Observe the absence of Object fields and exact reliable_size when the publisher exercises this optional capability; this permission is not a demand to implement RESET_STREAM_AT."
+    },
+    {
+      "id": "D18-11-4-3-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5412,
+        "last_line": 5426,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not forward an Object on an existing Subgroup stream unless it is known to be the next Object in that Subgroup.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is explicitly relay forwarding. The relay can establish nextness by consecutive IDs, upstream stream adjacency, or knowledge that intervening IDs are elsewhere or nonexistent. The Original Publisher is not assigned the relay knowledge algorithm."
+    },
+    {
+      "id": "D18-11-4-3-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5437,
+        "last_line": 5438,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reset the existing Subgroup stream when unsure whether the Object to forward is the next Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The explicit relay actor and its upstream knowledge make this a relay-only duty. It is distinct from the publisher's generic early-closure reset rule."
+    },
+    {
+      "id": "D18-11-4-3-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5437,
+        "last_line": 5438,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Open a new Subgroup stream to forward an Object when its adjacency to the previous forwarded Object is unknown.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the second independent relay action in the same sentence. Resetting the old stream does not by itself fulfill the instruction to open a replacement for forwarding."
+    },
+    {
+      "id": "D18-11-4-3-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5443,
+        "last_line": 5443,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reset a Subgroup stream terminated early for a reason other than clean completion at the subscription Group boundary.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-terminates-subgroup-before-final-object-production"
+      ],
+      "evaluators": [
+        "incomplete-subgroup-closure-uses-reset"
+      ],
+      "rationale": "Use a known still-incomplete Subgroup when a publisher terminates it, such as application handoff before a later Object is produced. Unlike delayed receiver arrival, that controlled input establishes the early-termination predicate; the outgoing reset is observable."
+    },
+    {
+      "id": "D18-11-4-3-SHOULD-002",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5443,
+        "last_line": 5444,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Terminate a Subgroup stream at Group boundaries to avoid resetting an incomplete Subgroup.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-voluntarily-ends-subscription-near-known-group-boundary"
+      ],
+      "evaluators": [
+        "voluntary-stream-termination-at-complete-group-boundary"
+      ],
+      "rationale": "With a finite driven Group fixture and voluntary application termination, inspect whether the stream ends at the completed Group boundary. The recommendation does not override mandatory reset for any actual early closure."
+    },
+    {
+      "id": "D18-11-4-3-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5449,
+        "last_line": 5452,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Treat EndOfGroup or EndOfTrack receipt as a signal to close corresponding streams before an upstream FIN arrives.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional shortcut is explicitly for relay forwarding after receipt of a terminal Object. A contribution publisher originates the Objects and is not an upstream-consuming relay."
+    },
+    {
+      "id": "D18-11-4-3-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5468,
+        "last_line": 5469,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send STOP_SENDING for a Subgroup stream whose Group or Subgroup is no longer of interest.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The actor is expressly the subscriber. The runner may use that stimulus to test the distinct publisher response at line 5470."
+    },
+    {
+      "id": "D18-11-4-3-SHOULD-003",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5470,
+        "last_line": 5473,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Respond to subscriber STOP_SENDING on a Subgroup stream with a reset.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-stop-sending-on-active-subgroup-stream"
+      ],
+      "evaluators": [
+        "stopped-subgroup-stream-reset"
+      ],
+      "rationale": "The runner can stop an active publisher-sent Subgroup and observe the reset. The following reliable_size advice is nonnormative and does not require a particular reset code or exact reliable_size here."
+    },
+    {
+      "id": "D18-11-4-3-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5479,
+        "last_line": 5481,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "After STOP_SENDING for a Subgroup, do not reopen a stream to deliver additional Objects in that Subgroup unless a later Forward State 0-to-1 update renews interest.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "send-stop-sending-with-more-subgroup-objects-available"
+      ],
+      "evaluators": [
+        "no-reopened-stopped-subgroup-before-forward-renewal"
+      ],
+      "rationale": "Observe subsequent headers for the stopped Group/Subgroup during a bounded continued-publication scenario. The explicit exception at lines 5481-5484 is preserved and tested in its own permission record."
+    },
+    {
+      "id": "D18-11-4-3-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5482,
+        "last_line": 5484,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reopen a stopped Subgroup to deliver Objects after a subsequent REQUEST_UPDATE changes Forward State from 0 to 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "stop-subgroup-then-update-forward-zero-to-one"
+      ],
+      "evaluators": [
+        "stopped-subgroup-reopened-after-forward-zero-to-one"
+      ],
+      "rationale": "Establish Forward State 0 and then send an update to 1 after STOP_SENDING. A new stream with the same Group/Subgroup is an allowed optional response to renewed subscriber interest, not prohibited reopening."
+    },
+    {
+      "id": "D18-11-4-3-SHOULD-004",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.3",
+        "first_line": 5493,
+        "last_line": 5494,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "application",
+      "summary": "Use a relevant Section 3.3.3 error code when resetting a stream.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The application-specific reason and relevance of a chosen reset code cannot generally be established from a receiver trace. More specific mandated responses remain separately testable; this advice does not impose an invented universal code for all resets."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5628,
+        "last_line": 5629,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Include Group ID Delta on the first FETCH Object, with the value equal to its absolute Group ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-known-first-object-with-nonzero-group-and-object-ids"
+      ],
+      "evaluators": [
+        "first-fetch-object-has-absolute-group-id-delta"
+      ],
+      "rationale": "Inspect the first actual Object's Serialization Flags and decoded field against a known requested Object. The first Group ID Delta is absolute rather than relative to an invented previous Group."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5628,
+        "last_line": 5629,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Include Object ID Delta on the first FETCH Object, with the value equal to its absolute Object ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-known-first-object-with-nonzero-group-and-object-ids"
+      ],
+      "evaluators": [
+        "first-fetch-object-has-absolute-object-id-delta"
+      ],
+      "rationale": "This field is independently mandatory alongside Group ID Delta. A first Object with a nonzero ID distinguishes the absolute value from a default zero or a relative increment."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5631,
+        "last_line": 5632,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first FETCH Object uses a flag referencing a prior Object field.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The draft explicitly assigns this error to the Subscriber receiving a FETCH response. Table 9 includes prior priority as well as prior identifiers; the publisher must serialize a valid first Object, but is not the error receiver."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5640,
+        "last_line": 5641,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a descending FETCH Group ID delta produces a Group ID below zero.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the Subscriber's range check after subtracting Group ID Delta plus one from the prior Group ID. The contribution publisher sends the FETCH response and does not perform its receiving subscriber validation."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5640,
+        "last_line": 5641,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if an ascending FETCH Group ID delta produces a Group ID above 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the independent overflow branch of the Subscriber's computed Group ID check. It uses prior Group ID plus Group ID Delta plus one, as specified immediately before the anchor."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-006",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5649,
+        "last_line": 5650,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a computed FETCH Object ID exceeds 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Subscriber decodes Object ID relative to the prior Object or absolutely when Group ID Delta is present. The preceding prose adds an explicit Object ID Delta without plus one within a Group, whereas absent Delta increments by one; that wording is preserved rather than copied from the Subgroup encoding."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-007",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5663,
+        "last_line": 5663,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Set Serialization Flags bit 0x40 to 1 when a fetched Object has Datagram Forwarding Preference.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-object-previously-observed-as-datagram"
+      ],
+      "evaluators": [
+        "fetch-datagram-object-sets-bit-0x40"
+      ],
+      "rationale": "Use the same immutable Object previously observed in an Object Datagram to establish its preference independently of the FETCH flags. FETCH still travels on a stream under Section 10.12.3; bit 0x40 represents the Object's absent Subgroup membership, not a datagram transport for FETCH."
+    },
+    {
+      "id": "D18-11-4-4-1-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5663,
+        "last_line": 5665,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "When FETCH Serialization Flags bit 0x40 is set, set the two least significant bits to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-object-previously-observed-as-datagram"
+      ],
+      "evaluators": [
+        "fetch-datagram-object-clears-two-low-bits"
+      ],
+      "rationale": "This is a publisher encoding recommendation independently observable in the flags. The following subscriber MUST ignore those bits is a separate role and does not strengthen the sender's SHOULD."
+    },
+    {
+      "id": "D18-11-4-4-1-MUST-008",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.4.1",
+        "first_line": 5664,
+        "last_line": 5665,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Ignore the two least significant Serialization Flags bits when bit 0x40 is set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The explicit subscriber is decoding a Datagram-preference Object from a FETCH stream. This tolerant receiver rule is not a contribution-publisher obligation."
+    },
+    {
+      "id": "D18-11-4-4-2-SHOULD-NOT-001",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.4.4.2",
+        "first_line": 5674,
+        "last_line": 5677,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Use End of Non-Existent Range in FETCH only to separate unserialized Objects known not to exist from Objects with unknown status.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Flags 0x8C and 0x10C are observable, but the publisher's knowledge of every omitted Object's existence or unknown status is not. The boundary between actual Objects and End of Range indicators is defined here; receiver gaps alone cannot establish the permitted knowledge-based exception."
+    },
+    {
+      "id": "D18-11-5-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.5",
+        "first_line": 5697,
+        "last_line": 5700,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send padding on unidirectional streams without carrying Objects or other application data.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-stream"
+      ],
+      "evaluators": [
+        "padding-stream-type-0x132b3e28-without-application-data"
+      ],
+      "rationale": "A contribution publisher can send padding independently of its publisher role. Section 11.5.1 supplies the explicit type and all-zero payload encoding; this optional capability need not be implemented."
+    },
+    {
+      "id": "D18-11-5-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.5",
+        "first_line": 5697,
+        "last_line": 5700,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Send padding datagrams without carrying Objects or other application data.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-datagram"
+      ],
+      "evaluators": [
+        "padding-datagram-type-0x132b3e29-without-application-data"
+      ],
+      "rationale": "The Datagram permission is independent of stream padding. Section 11.5.2 supplies the recognized type and zero data bytes, which distinguish padding from Object Datagrams."
+    },
+    {
+      "id": "D18-11-5-SHOULD-001",
+      "strength": "Should",
+      "source": {
+        "section": "11.5",
+        "first_line": 5702,
+        "last_line": 5704,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send padding streams at lower priority than every control stream and Object data.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Priority assignment and pending transmission queues belong to the sender's scheduler. A receiver's observed arrival order, even under induced congestion, cannot prove the scheduling relationship required here; Section 7.2 also leaves scheduling interfaces implementation-dependent."
+    },
+    {
+      "id": "D18-11-5-1-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 5719,
+        "last_line": 5721,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Open a unidirectional stream of type 0x132B3E28 to send padding.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-stream"
+      ],
+      "evaluators": [
+        "padding-stream-type-0x132b3e28-without-application-data"
+      ],
+      "rationale": "This explicitly defines a permitted endpoint stream type, including a zero-length padding body. Observe the publisher's leading type and data; lack of optional padding is not a conformance failure."
+    },
+    {
+      "id": "D18-11-5-1-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 5721,
+        "last_line": 5721,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Set every padding data byte after a Padding Stream type to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-stream"
+      ],
+      "evaluators": [
+        "padding-data-bytes-all-zero"
+      ],
+      "rationale": "Inspect every byte following type 0x132B3E28. Zero padding bytes are allowed. The sentence imposes sender byte values but specifies no receiver error for nonzero padding, so no such error is invented."
+    },
+    {
+      "id": "D18-11-5-1-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 5730,
+        "last_line": 5731,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Discard all received Padding Stream data to avoid exhausting flow control.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher can receive padding, but internal discard cannot be established from the protocol boundary. Continued credit and application traffic can reveal gross failures but cannot distinguish retained copies from discarded bytes or prove all data was discarded."
+    },
+    {
+      "id": "D18-11-5-1-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 5733,
+        "last_line": 5734,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "As the sender, cancel a Padding Stream at any time without changing MOQT application state.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-cancels-own-padding-during-active-subscription"
+      ],
+      "evaluators": [
+        "padding-cancellation-preserves-active-request-behavior"
+      ],
+      "rationale": "Observe the publisher cancel its padding stream while an established subscription continues responding to valid updates and delivering Objects. This checks the externally visible application-state preservation associated with the optional cancellation."
+    },
+    {
+      "id": "D18-11-5-1-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 5733,
+        "last_line": 5734,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "As the receiver, cancel a Padding Stream at any time without changing MOQT application state.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-stops-peer-padding-during-active-subscription"
+      ],
+      "evaluators": [
+        "padding-cancellation-preserves-active-request-behavior"
+      ],
+      "rationale": "Send the publisher a legal Padding Stream and observe any optional STOP_SENDING while exercising an existing subscription. Publisher endpoint roles include receiving padding even though they do not include receiving subscription Objects."
+    },
+    {
+      "id": "D18-11-5-2-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 5738,
+        "last_line": 5740,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send a Padding Datagram of type 0x132B3E29.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-datagram"
+      ],
+      "evaluators": [
+        "padding-datagram-type-0x132b3e29-without-application-data"
+      ],
+      "rationale": "The dedicated type is explicitly permitted here despite Section 11.3.1's broad outside-Object-Datagram-range wording. The optional datagram can contain no padding data bytes."
+    },
+    {
+      "id": "D18-11-5-2-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 5740,
+        "last_line": 5740,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Set every padding data byte after a Padding Datagram type to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "observe-publisher-padding-datagram"
+      ],
+      "evaluators": [
+        "padding-data-bytes-all-zero"
+      ],
+      "rationale": "Inspect bytes after type 0x132B3E29. This sender restriction neither mandates a nonempty padding body nor defines an error response for a receiver of nonzero bytes."
+    },
+    {
+      "id": "D18-11-5-2-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 5749,
+        "last_line": 5749,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Discard all data received in a Padding Datagram.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher is an endpoint that can receive padding, but the datagram has no response or other protocol signal that proves internal data discard. Unchanged application behavior cannot prove that no copy was retained."
+    },
+    {
+      "id": "D18-12-3-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.3",
+        "first_line": 5890,
+        "last_line": 5897,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not begin forwarding a cached Object after MAX_CACHE_DURATION milliseconds have elapsed since receiving its first byte.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This restriction explicitly governs relay caches, including Objects acquired through subscriptions and FETCH. Per-Object expiry begins at receipt, not at completion of a multi-Object stream; the contribution publisher is not the caching relay."
+    },
+    {
+      "id": "D18-12-5-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "12.5",
+        "first_line": 5921,
+        "last_line": 5922,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION upon receiving DEFAULT_PUBLISHER_GROUP_ORDER outside Ascending 0x1 or Descending 0x2.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-reply-with-invalid-default-group-order"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Section 2.4.3 permits publisher recovery via TRACK_STATUS; Section 10.5 defines TRACK_STATUS_OK as REQUEST_OK carrying Track Properties. In a publisher supporting that operation, return otherwise valid Track Properties containing 0 or 3. The absent-property default is Ascending; the separate GROUP_ORDER Message Parameter is not this property."
+    },
+    {
+      "id": "D18-12-6-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "12.6",
+        "first_line": 5948,
+        "last_line": 5948,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION upon receiving a DYNAMIC_GROUPS Track Property larger than 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-reply-with-dynamic-groups-two"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Use a publisher-supported recovery TRACK_STATUS and return DYNAMIC_GROUPS=2 in TRACK_STATUS_OK Properties, as allowed by Sections 2.4.3 and 10.5. Values 0 and 1 are valid and omission means 0. DYNAMIC_GROUPS is a publisher Track Property; subscriber NEW_GROUP_REQUEST in Section 10.2.13 is a distinct parameter."
+    },
+    {
+      "id": "D18-12-7-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.7",
+        "first_line": 5964,
+        "last_line": 5965,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not add an Immutable Properties property as a relay.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The full sentence permits the Original Publisher to add the property but forbids Relays from adding it. The lexical MUST NOT attaches only to relay insertion; it is not a prohibition on original-publisher use."
+    },
+    {
+      "id": "D18-12-7-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.7",
+        "first_line": 5965,
+        "last_line": 5967,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Do not modify an already published Immutable Properties property's contents.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-and-retrieve-same-object-and-track-immutable-properties"
+      ],
+      "evaluators": [
+        "immutable-property-values-unchanged-across-deliveries"
+      ],
+      "rationale": "The prohibition says the Property must not be modified without limiting the actor to relays. It therefore constrains the originating publisher as well as intermediaries. Compare previously observed immutable Track or Object properties across deliveries of the same identity; Section 2.4.2 also treats changed immutable Object properties as malformed."
+    },
+    {
+      "id": "D18-12-7-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.7",
+        "first_line": 5965,
+        "last_line": 5967,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "original-publisher",
+      "summary": "Do not remove an already published Immutable Properties property.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-and-retrieve-same-object-and-track-immutable-properties"
+      ],
+      "evaluators": [
+        "previously-published-immutable-property-remains-present"
+      ],
+      "rationale": "Removal is independent of modifying a property's value. Compare repeated delivery of the same Track or Object after first observing the wrapper. The sentence is unqualified by actor, unlike adjacent explicit relay-only addition, caching and forwarding rules."
+    },
+    {
+      "id": "D18-12-7-MUST-NOT-004",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.7",
+        "first_line": 5967,
+        "last_line": 5967,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Do not change the serialization of the Key-Value-Pairs inside an already published Immutable Properties property.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "repeat-immutable-property-with-alternative-varint-encodings-available"
+      ],
+      "evaluators": [
+        "immutable-property-key-value-serialization-unchanged"
+      ],
+      "rationale": "Preserve exact bytes of immutable Key-Value-Pairs across repeat delivery of the same identity. Equal decoded values are insufficient because the draft expressly includes variable-length integer encodings; the preservation rule has no relay-only qualifier."
+    },
+    {
+      "id": "D18-12-7-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "12.7",
+        "first_line": 5967,
+        "last_line": 5968,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Cache Immutable Properties when caching their Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The explicitly named Relay must retain the immutable wrapper with its cached Object. This does not impose a cache on an Original Publisher."
+    },
+    {
+      "id": "D18-12-7-MUST-002",
+      "strength": "Must",
+      "source": {
+        "section": "12.7",
+        "first_line": 5967,
+        "last_line": 5968,
+        "occurrence": 2,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Cache Immutable Properties when caching their Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Track caching is independently covered by the same Relay sentence and is distinct from caching an individual Object. Original-publisher contribution does not implement this relay role."
+    },
+    {
+      "id": "D18-12-7-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "12.7",
+        "first_line": 5968,
+        "last_line": 5969,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Forward Immutable Properties.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sentence explicitly names Relays as forwarders. The original contribution publisher's creation and immutability obligations are separate from forwarding received Properties."
+    },
+    {
+      "id": "D18-12-7-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "12.7",
+        "first_line": 5969,
+        "last_line": 5970,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Decode and view the Key-Value-Pairs carried in Immutable Properties.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional inspection is expressly for Relays and does not authorize changes to immutable bytes. It does not restrict the Original Publisher from understanding the properties it originates."
+    },
+    {
+      "id": "D18-12-7-MAY-002",
+      "strength": "May",
+      "source": {
+        "section": "12.7",
+        "first_line": 5973,
+        "last_line": 5976,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Place a Property in the mutable property list unless its specification requires different placement.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-permitted-property-in-mutable-list"
+      ],
+      "evaluators": [
+        "permitted-property-present-in-mutable-list"
+      ],
+      "rationale": "Use a defined Track Property such as DEFAULT_PUBLISHER_GROUP_ORDER whose definition does not require immutable placement. Observe its mutable-list encoding; the permission remains subject to each property's own specification."
+    },
+    {
+      "id": "D18-12-7-MAY-003",
+      "strength": "May",
+      "source": {
+        "section": "12.7",
+        "first_line": 5973,
+        "last_line": 5976,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "original-publisher",
+      "summary": "Place a Property inside Immutable Properties unless its specification requires different placement.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-permitted-property-in-immutable-wrapper"
+      ],
+      "evaluators": [
+        "permitted-property-present-inside-immutable-properties"
+      ],
+      "rationale": "For a defined Track Property permitting either placement, inspect the publisher's Immutable Properties wrapper. Scope is retained: an inner Track Property belongs in a Track wrapper and an inner Object Property in an Object wrapper."
+    },
+    {
+      "id": "D18-12-7-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "12.7",
+        "first_line": 5975,
+        "last_line": 5976,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "property-processor",
+      "summary": "Search mutable Properties when looking for a property's value.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-reply-with-invalid-default-group-order"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "A publisher supporting recovery TRACK_STATUS can receive Track Properties in TRACK_STATUS_OK under Sections 2.4.3 and 10.5. An invalid recognized DEFAULT_PUBLISHER_GROUP_ORDER in the mutable list exercises the lookup through its mandatory range-error response, without claiming visibility of the internal search algorithm."
+    },
+    {
+      "id": "D18-12-7-MUST-005",
+      "strength": "Must",
+      "source": {
+        "section": "12.7",
+        "first_line": 5975,
+        "last_line": 5976,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "property-processor",
+      "summary": "Search the contents of Immutable Properties when looking for a property's value.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publisher-recovery-track-status-reply-with-invalid-default-group-order-in-immutable-wrapper"
+      ],
+      "evaluators": [
+        "session-closed-protocol-violation"
+      ],
+      "rationale": "Return a valid Immutable Properties wrapper containing an invalid recognized DEFAULT_PUBLISHER_GROUP_ORDER in TRACK_STATUS_OK to a publisher performing recovery. Section 12.5's error makes failure to look inside the wrapper observable; this conditional scenario does not require every publisher to implement recovery TRACK_STATUS."
+    },
+    {
+      "id": "D18-12-7-MAY-004",
+      "strength": "May",
+      "source": {
+        "section": "12.7",
+        "first_line": 5978,
+        "last_line": 5980,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Place a multi-valued Property Type in both mutable and immutable lists unless that property's specification forbids it.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission is conditional on a Property definition allowing multiple values. The checked-in draft does not supply such a property definition with a complete multiple-value oracle; using an invented external property would exceed the sole-authority boundary. Original-publisher placement is allowed when that prerequisite is supplied."
+    },
+    {
+      "id": "D18-12-7-MUST-NOT-005",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.7",
+        "first_line": 6013,
+        "last_line": 6013,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Do not include more than one Immutable Properties property in an Object.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-object-with-immutable-properties"
+      ],
+      "evaluators": [
+        "object-has-at-most-one-immutable-properties-wrapper"
+      ],
+      "rationale": "Inspect Object property lists, accounting for the Section 12.7 nesting prohibition when parsing them. This lexical rule is expressly per Object; it does not invent a matching Track-wrapper cardinality rule. Nested wrappers and unparseable pairs are separately described as malformed in the surrounding prose."
+    },
+    {
+      "id": "D18-12-8-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.8",
+        "first_line": 6053,
+        "last_line": 6054,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not add Prior Group ID Gap as a relay.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sentence permits addition by the Original Publisher and prohibits only relay insertion. This Property describes never-existing preceding Groups, not a number of missing received Groups; no sender prohibition is transferred to the original publisher."
+    },
+    {
+      "id": "D18-12-8-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "12.8",
+        "first_line": 6054,
+        "last_line": 6057,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Remove Prior Group ID Gap when serving an Object via FETCH if the FETCH response already communicates the same gap implicitly.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional removal is explicitly limited to relay FETCH delivery with redundant gap signaling. Original Publisher ability to originate the property is described in the preceding sentence, not by this relay permission."
+    },
+    {
+      "id": "D18-12-8-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.8",
+        "first_line": 6057,
+        "last_line": 6057,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not modify Prior Group ID Gap.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay-processing sentence permits only removal of a redundant FETCH gap and then forbids other modification or removal. It does not authorize changing a gap value under the removal exception."
+    },
+    {
+      "id": "D18-12-8-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.8",
+        "first_line": 6057,
+        "last_line": 6057,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not remove Prior Group ID Gap outside the redundant-gap FETCH exception.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The immediately preceding subject is a relay, with an explicit conditional removal permission. Preserve that role and condition rather than turning this into a generic original-publisher obligation."
+    },
+    {
+      "id": "D18-12-8-MUST-NOT-004",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.8",
+        "first_line": 6059,
+        "last_line": 6059,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Do not include more than one Prior Group ID Gap property in an Object.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-object-with-prior-group-id-gap"
+      ],
+      "evaluators": [
+        "object-has-at-most-one-prior-group-id-gap"
+      ],
+      "rationale": "The original publisher is permitted to originate type 0x3C, but the per-Object prohibition is directly observable across mutable and immutable property locations. Sections 12.8 and 2.4.2 also describe conflicting gaps, gap larger than Group ID and gap/existence contradictions as malformed; absence permits no gap inference. Sections 2.5 and 12 also reserve 0x38..0x3F for application-specific use, conflicting with this section's assignment of 0x3C; retain the explicit gap definition without inventing precedence over application meanings."
+    },
+    {
+      "id": "D18-12-9-MUST-NOT-001",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.9",
+        "first_line": 6088,
+        "last_line": 6089,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not add Prior Object ID Gap as a relay.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Original Publisher may originate this property under the sentence's non-keyword permission; only relay insertion is prohibited by this lexical MUST NOT. The property describes never-existing preceding Objects within the current Group."
+    },
+    {
+      "id": "D18-12-9-MAY-001",
+      "strength": "May",
+      "source": {
+        "section": "12.9",
+        "first_line": 6089,
+        "last_line": 6092,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Remove Prior Object ID Gap when serving an Object via FETCH if the same gap is already implicit in the response.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional exception expressly names the relay and redundant FETCH gap signaling. It is not an original-publisher or subscriber permission."
+    },
+    {
+      "id": "D18-12-9-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.9",
+        "first_line": 6092,
+        "last_line": 6092,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not modify Prior Object ID Gap.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This prohibition continues the relay-processing sentence. The FETCH exception only permits removal of a redundant property, not changing its gap value."
+    },
+    {
+      "id": "D18-12-9-MUST-NOT-003",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.9",
+        "first_line": 6092,
+        "last_line": 6092,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not remove Prior Object ID Gap outside the redundant-gap FETCH exception.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The scope follows the immediately preceding relay removal permission. Do not transfer a relay's preservation obligation to the contribution publisher merely because it originated the Object."
+    },
+    {
+      "id": "D18-12-9-MUST-NOT-004",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.9",
+        "first_line": 6094,
+        "last_line": 6094,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original-publisher",
+      "summary": "Do not include more than one Prior Object ID Gap property in an Object.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "publish-object-with-prior-object-id-gap"
+      ],
+      "evaluators": [
+        "object-has-at-most-one-prior-object-id-gap"
+      ],
+      "rationale": "Count type 0x3E across the Object's mutable and immutable property locations. The Original Publisher can originate the optional gap; surrounding malformed-track conditions additionally address an excessive gap or contradictions with existing Objects. Omission provides no nonexistence inference. The assignment of 0x3E overlaps the application-specific range in Sections 2.5 and 12; preserve the explicit gap definition without choosing a conflicting application's meaning."
+    }
+  ]
+}
