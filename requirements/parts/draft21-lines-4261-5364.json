@@ -1,0 +1,728 @@
+{
+  "draft": 21,
+  "source_sha256": "8c1d80849f46026b634fa19f8607ce983be2b1db9ae4ee1990878969c7b7e142",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D21-9-11-MAY-373", "strength": "May",
+      "source": {"section": "9.11", "first_line": 4331, "last_line": 4332, "occurrence": 1, "clause": 1},
+      "actor": "relay serving cached FETCH objects", "summary": "Begin delivering cached objects from the start of a FETCH range immediately.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The permission explicitly concerns a relay's cache and upstream retrieval. The original contribution publisher has no upstream cache-reconciliation duty; its separate permission to send Objects before FETCH_OK appears in Section 9.12."
+    },
+    {
+      "id": "D21-9-11-MUST-374", "strength": "Must",
+      "source": {"section": "9.11", "first_line": 4334, "last_line": 4335, "occurrence": 1, "clause": 1},
+      "actor": "relay encountering an uncached FETCH object of unknown status", "summary": "Pause subsequent FETCH delivery until the unknown object's status is confirmed upstream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is the relay-specific continuation of the cached-delivery paragraph. It does not require an original publisher to fetch or confirm its own objects through another publisher."
+    },
+    {
+      "id": "D21-9-11-MUST-375", "strength": "Must",
+      "source": {"section": "9.11", "first_line": 4353, "last_line": 4354, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving FETCH for a track with no published Objects", "summary": "Return REQUEST_ERROR INVALID_RANGE when no Objects have been published for the requested Track.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-fetch-track-with-no-published-objects"], "evaluators": ["d21-empty-track-fetch-invalid-range"],
+      "rationale": "Use a known existing Track whose controlled source has not published any Object, isolating INVALID_RANGE from DOES_NOT_EXIST. Section 3.1.3 advances Largest Object at first-byte publication; merely queued content does not satisfy this precondition."
+    },
+    {
+      "id": "D21-9-11-MUST-376", "strength": "Must",
+      "source": {"section": "9.11", "first_line": 4353, "last_line": 4354, "occurrence": 1, "clause": 2},
+      "actor": "publisher receiving FETCH starting beyond Largest Object", "summary": "Return REQUEST_ERROR INVALID_RANGE when the requested Start Location is greater than Largest Object.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-fetch-start-beyond-largest-object"], "evaluators": ["d21-fetch-start-invalid-range"],
+      "rationale": "Freeze a controlled Track after a known publication and request a later Location. Equality remains valid. Although this paragraph cites Section 9.6, Sections 3.1.3 and 9.20.18 define Largest Object in this draft; an End Location beyond it alone is not this error."
+    },
+    {
+      "id": "D21-9-11-MUST-377", "strength": "Must",
+      "source": {"section": "9.11", "first_line": 4356, "last_line": 4358, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending fetched groups", "summary": "Send fetched groups in the requested ascending or descending group order.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-fetch-ascending-groups", "d21-fetch-descending-groups", "d21-fetch-default-group-order"], "evaluators": ["d21-fetch-group-order"],
+      "rationale": "Parse the ordered Objects on the single FETCH stream, so cross-stream arrival cannot reorder them. Within each group the following sentence uses Object ID order, not subgroup ID. Section 9.20.9 defaults FETCH to Ascending; publisher subscription preference does not replace that default."
+    },
+    {
+      "id": "D21-9-12-MAY-378", "strength": "May",
+      "source": {"section": "9.12", "first_line": 4383, "last_line": 4384, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending a FETCH response", "summary": "Send fetched Objects before sending FETCH_OK.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Objects and FETCH_OK use different streams. Their arrival order at the listener cannot establish sender order, and the driver exposes no publisher transport-send instrumentation. Either ordering is permitted; receiving Objects first must not itself be treated as a failure."
+    },
+    {
+      "id": "D21-9-12-MUST-NOT-379", "strength": "MustNot",
+      "source": {"section": "9.12", "first_line": 4385, "last_line": 4385, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending FETCH_OK", "summary": "Do not send FETCH_OK until its End Location is known.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener sees the End Location value but cannot inspect when the publisher learned it. A plausible or later-consistent value does not prove prior knowledge, and cross-stream delivery timing cannot establish that private state. Section 9.12 separately defines externally visible End Location bounds."
+    },
+    {
+      "id": "D21-9-12-MUST-380", "strength": "Must",
+      "source": {"section": "9.12", "first_line": 4407, "last_line": 4408, "occurrence": 1, "clause": 1},
+      "actor": "subscriber receiving FETCH_OK", "summary": "Close the session with PROTOCOL_VIOLATION if FETCH_OK End Location precedes the corresponding FETCH Start Location.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The receiver here is the FETCH requester, not the original publisher responding to FETCH. The listener performs this check; it does not require the contribution publisher to originate subscriber requests."
+    },
+    {
+      "id": "D21-9-13-MAY-381", "strength": "May",
+      "source": {"section": "9.13", "first_line": 4443, "last_line": 4444, "occurrence": 1, "clause": 1},
+      "actor": "relay without an Established subscription", "summary": "Forward TRACK_STATUS to one or more publishers to determine the response.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This permission describes upstream discovery by a relay. The original publisher answers the listener's TRACK_STATUS directly and does not relay it to another publisher."
+    },
+    {
+      "id": "D21-9-13-MAY-382", "strength": "May",
+      "source": {"section": "9.13", "first_line": 4444, "last_line": 4445, "occurrence": 1, "clause": 1},
+      "actor": "relay without an Established subscription", "summary": "Initiate an authorized subscription to determine the TRACK_STATUS response.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The alternative to forwarding TRACK_STATUS is also explicitly a relay operation, subject to authorization and Section 7.5. It does not impose upstream subscription behavior on an original publisher."
+    },
+    {
+      "id": "D21-9-15-MUST-383", "strength": "Must",
+      "source": {"section": "9.15", "first_line": 4512, "last_line": 4513, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving a SUBSCRIBE_NAMESPACE prefix", "summary": "Close the session with PROTOCOL_VIOLATION when a SUBSCRIBE_NAMESPACE prefix contains more than 32 namespace fields.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-namespace-prefix-too-many-fields"], "evaluators": ["d21-namespace-discovery-prefix-bound"],
+      "rationale": "The listener can send 33 nonempty fields within the aggregate length bound to isolate this receiver check. Zero through 32 fields are permitted; zero fields select all namespaces under Section 4.1."
+    },
+    {
+      "id": "D21-9-15-MUST-384", "strength": "Must",
+      "source": {"section": "9.15", "first_line": 4520, "last_line": 4521, "occurrence": 1, "clause": 1},
+      "actor": "subscriber receiving the first SUBSCRIBE_NAMESPACE response", "summary": "Close the session with PROTOCOL_VIOLATION unless the first SUBSCRIBE_NAMESPACE response message is REQUEST_OK or REQUEST_ERROR.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This lexical occurrence prescribes subscriber response validation. The publisher's first-response obligation is independently stated in Section 4.1; do not turn a subscriber close rule into another publisher response rule."
+    },
+    {
+      "id": "D21-9-15-MUST-385", "strength": "Must",
+      "source": {"section": "9.15", "first_line": 4530, "last_line": 4532, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving an overlapping SUBSCRIBE_NAMESPACE", "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP when a SUBSCRIBE_NAMESPACE shares a common prefix with an established SUBSCRIBE_NAMESPACE in the same session.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-namespace-overlap", "d21-discovery-independent-overlap-spaces"], "evaluators": ["d21-namespace-overlap-request-error"],
+      "rationale": "Establish one request before sending the conflicting request. SUBSCRIBE_TRACKS occupies an independent overlap space. The draft says shares a common prefix; retain that wording and include identical and ancestor-prefix stimuli without redefining it using another draft."
+    },
+    {
+      "id": "D21-9-15-MUST-386", "strength": "Must",
+      "source": {"section": "9.15", "first_line": 4541, "last_line": 4542, "occurrence": 1, "clause": 1},
+      "actor": "publisher accepting SUBSCRIBE_NAMESPACE", "summary": "Ensure the subscriber is authorized to perform the namespace subscription.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-namespace-discovery-authorization"], "evaluators": ["d21-namespace-discovery-authorized-only"],
+      "rationale": "A driven fixture supplies a known authorization policy and valid versus unauthorized credentials. Observe whether namespace discovery is granted under that policy; this sentence does not prescribe a particular rejection code. Without a controllable policy the scenario remains NOT_RUN rather than presuming unrestricted access is wrong."
+    },
+    {
+      "id": "D21-9-15-MUST-NOT-387", "strength": "MustNot",
+      "source": {"section": "9.15", "first_line": 4544, "last_line": 4545, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending namespace discovery updates", "summary": "Do not send NAMESPACE_DONE for a namespace suffix before the corresponding NAMESPACE.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-namespace-discovery-withdrawal-order"], "evaluators": ["d21-namespace-done-follows-namespace"],
+      "rationale": "Announcements and withdrawals share the SUBSCRIBE_NAMESPACE response stream, so its byte order establishes sender order. Track suffixes relative to that request's prefix; unrelated PUBLISH_NAMESPACE on a separate stream is not the required corresponding NAMESPACE."
+    },
+    {
+      "id": "D21-9-15-MUST-388", "strength": "Must",
+      "source": {"section": "9.15", "first_line": 4546, "last_line": 4547, "occurrence": 1, "clause": 1},
+      "actor": "subscriber receiving namespace discovery updates", "summary": "Close the session with PROTOCOL_VIOLATION if NAMESPACE_DONE arrives before the corresponding NAMESPACE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener is the subscriber consuming namespace updates. The original publisher's emission prohibition is separately captured at line 4544."
+    },
+    {
+      "id": "D21-9-15-MAY-389", "strength": "May",
+      "source": {"section": "9.15", "first_line": 4551, "last_line": 4552, "occurrence": 1, "clause": 1},
+      "actor": "publisher whose namespace response stream is flow-control blocked", "summary": "Reset the SUBSCRIBE_NAMESPACE response stream when flow control prevents timely NAMESPACE or NAMESPACE_DONE delivery.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-namespace-discovery-flow-control-reset"], "evaluators": ["d21-blocked-namespace-stream-reset-capability"],
+      "rationale": "Withhold stream flow control credit while driving namespace changes and observe an optional reset. Timely has no fixed bound, so no deadline mandates a reset or penalizes waiting. Separate PUBLISH subscriptions remain unaffected by discovery-stream closure as the paragraph specifies."
+    },
+    {
+      "id": "D21-9-15-SHOULD-390", "strength": "Should",
+      "source": {"section": "9.15", "first_line": 4554, "last_line": 4557, "occurrence": 1, "clause": 1},
+      "actor": "subscriber receiving namespace response stream closure", "summary": "Treat a reset or FIN of SUBSCRIBE_NAMESPACE as NAMESPACE_DONE for each active namespace.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber updates its discovery state. The rule does not terminate subscriptions established by PUBLISH on separate streams and does not require this receiving behavior from an original publisher."
+    },
+    {
+      "id": "D21-9-18-MUST-391", "strength": "Must",
+      "source": {"section": "9.18", "first_line": 4633, "last_line": 4634, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving a SUBSCRIBE_TRACKS prefix", "summary": "Close the session with PROTOCOL_VIOLATION when a SUBSCRIBE_TRACKS prefix contains more than 32 namespace fields.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-tracks-prefix-too-many-fields"], "evaluators": ["d21-track-discovery-prefix-bound"],
+      "rationale": "Inject 33 nonempty fields while preserving message framing and total name length. The generic receiving endpoint here includes an original publisher serving track discovery; 0 through 32 fields remain legal."
+    },
+    {
+      "id": "D21-9-18-MUST-392", "strength": "Must",
+      "source": {"section": "9.18", "first_line": 4643, "last_line": 4644, "occurrence": 1, "clause": 1},
+      "actor": "subscriber receiving the first SUBSCRIBE_TRACKS response", "summary": "Close the session with PROTOCOL_VIOLATION unless the first SUBSCRIBE_TRACKS response is REQUEST_OK or REQUEST_ERROR.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This receiver is the listener requesting tracks. The separate publisher first-response duty is in Section 4.1; resulting PUBLISH messages use their own bidirectional streams."
+    },
+    {
+      "id": "D21-9-18-MUST-393", "strength": "Must",
+      "source": {"section": "9.18", "first_line": 4659, "last_line": 4661, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving an overlapping SUBSCRIBE_TRACKS", "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP when a SUBSCRIBE_TRACKS shares a common prefix with an established SUBSCRIBE_TRACKS in the same session.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-tracks-overlap", "d21-discovery-independent-overlap-spaces"], "evaluators": ["d21-track-discovery-overlap-request-error"],
+      "rationale": "The two discovery types have independent overlap spaces. Exercise a confirmed established SUBSCRIBE_TRACKS followed by a conflicting prefix, with the same prefix on SUBSCRIBE_NAMESPACE as a distinct-type control. Preserve shares a common prefix without importing a narrower definition."
+    },
+    {
+      "id": "D21-9-18-MUST-394", "strength": "Must",
+      "source": {"section": "9.18", "first_line": 4663, "last_line": 4664, "occurrence": 1, "clause": 1},
+      "actor": "publisher accepting SUBSCRIBE_TRACKS", "summary": "Ensure the subscriber is authorized to perform the track-discovery namespace subscription.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-track-discovery-authorization"], "evaluators": ["d21-track-discovery-authorized-only"],
+      "rationale": "Use a controlled authorization policy with authorized and unauthorized track-discovery requests. The paragraph calls this a namespace subscription but is in SUBSCRIBE_TRACKS; retain its actor and request context. No arbitrary credential format or error code is imposed."
+    },
+    {
+      "id": "D21-9-20-MUST-395", "strength": "Must",
+      "source": {"section": "9.20", "first_line": 4732, "last_line": 4733, "occurrence": 1, "clause": 1},
+      "actor": "publisher serializing Message Parameters", "summary": "Serialize Message Parameters in ascending Type order using deltas from the preceding Type, or from zero for the first parameter.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-parameter-serialization"], "evaluators": ["d21-parameter-type-order"],
+      "rationale": "Decode publisher-originated messages using draft-21 vi64 Type Deltas and definition-specific values. Ascending order accommodates explicitly permitted repeated Types with zero delta; Section 9.20's duplicate rule remains independent. These are not Setup Options or generic Key-Value-Pair values."
+    },
+    {
+      "id": "D21-9-20-MUST-396", "strength": "Must",
+      "source": {"section": "9.20", "first_line": 4734, "last_line": 4734, "occurrence": 1, "clause": 1},
+      "actor": "endpoint decoding Message Parameter Type Deltas", "summary": "Close the session with PROTOCOL_VIOLATION if adding a Type Delta makes the Parameter Type greater than 2^64 - 1.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-parameter-type-delta-overflow"], "evaluators": ["d21-parameter-type-overflow-protocol-violation"],
+      "rationale": "Start with a known valid parameter, then add a vi64 delta whose mathematical sum exceeds the bound, avoiding an earlier unknown Type. Observe the publisher's session error; integer wraparound must not reinterpret the next Type as a small known parameter."
+    },
+    {
+      "id": "D21-9-20-MUST-397", "strength": "Must",
+      "source": {"section": "9.20", "first_line": 4765, "last_line": 4766, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending Message Parameters", "summary": "Send only Message Parameters defined in the negotiated MOQT version or negotiated via Setup Options.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-parameter-negotiation"], "evaluators": ["d21-sent-parameters-defined-or-negotiated"],
+      "rationale": "Capture exact draft-21 setup negotiation and subsequent publisher messages. A known draft-21 type or an explicitly negotiated extension type is allowed; an unnegotiated type from any other draft is not silently treated as compatible."
+    },
+    {
+      "id": "D21-9-20-MUST-398", "strength": "Must",
+      "source": {"section": "9.20", "first_line": 4767, "last_line": 4768, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving an unknown Message Parameter", "summary": "Close the session with PROTOCOL_VIOLATION upon receiving an unknown Message Parameter.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-unknown-message-parameter"], "evaluators": ["d21-unknown-parameter-protocol-violation"],
+      "rationale": "Send an unnegotiated unknown Type on an otherwise legal request or response received by the publisher. Parameters are count-bounded and cannot be skipped by length; unlike unknown Setup Options, unknown Message Parameters are fatal."
+    },
+    {
+      "id": "D21-9-20-MUST-NOT-399", "strength": "MustNot",
+      "source": {"section": "9.20", "first_line": 4776, "last_line": 4778, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending Message Parameters", "summary": "Do not repeat a Parameter Type within one message unless its definition explicitly permits multiple instances.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-parameter-multiplicity"], "evaluators": ["d21-sent-parameter-duplicates-permitted-only"],
+      "rationale": "Inspect each publisher message against its parameter definitions. Section 3.3.2 permits certain repeated filter types and Section 9.20.16 gives nested fill an independent scope. Do not infer general duplicate AUTHORIZATION_TOKEN permission from the separate Setup Option definition."
+    },
+    {
+      "id": "D21-9-20-SHOULD-400", "strength": "Should",
+      "source": {"section": "9.20", "first_line": 4778, "last_line": 4780, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving Message Parameters", "summary": "Check received messages for unexpected duplicate Parameter Types.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The check itself is private implementation behavior. An open session cannot distinguish failure to check from detecting and disregarding the duplicate; the independently observable recommendation to close is classified separately."
+    },
+    {
+      "id": "D21-9-20-SHOULD-401", "strength": "Should",
+      "source": {"section": "9.20", "first_line": 4778, "last_line": 4780, "occurrence": 1, "clause": 2},
+      "actor": "endpoint receiving unexpected duplicate Message Parameters", "summary": "Close the session with PROTOCOL_VIOLATION when unexpected duplicate Parameter Types are found.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-unexpected-duplicate-message-parameter"], "evaluators": ["d21-unexpected-duplicate-parameter-close-advisory"],
+      "rationale": "Inject a duplicate singleton such as FORWARD on a legal SUBSCRIBE and observe the recommended response as an advisory, not a MUST failure. Legal repeated filters and independent outer/inner fill parameters are separate cases; this row does not prescribe rejection of them."
+    },
+    {
+      "id": "D21-9-20-MUST-NOT-402", "strength": "MustNot",
+      "source": {"section": "9.20", "first_line": 4785, "last_line": 4787, "occurrence": 1, "clause": 1},
+      "actor": "publisher handling SUBSCRIBE parameters", "summary": "Do not alter Object payloads because of Message Parameters in SUBSCRIBE.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-parameters-preserve-payload"], "evaluators": ["d21-subscribe-object-payload-identity"],
+      "rationale": "Compare opaque bytes for the same Track and Object under different valid subscription parameters against a fixed driven fixture. Parameters can select or prioritize objects, but Section 2.5 forbids changing their contents. Do not compare unrelated Locations or require media decoding."
+    },
+    {
+      "id": "D21-9-20-MUST-NOT-403", "strength": "MustNot",
+      "source": {"section": "9.20", "first_line": 4785, "last_line": 4787, "occurrence": 1, "clause": 2},
+      "actor": "publisher handling FETCH parameters", "summary": "Do not alter Object payloads because of Message Parameters in FETCH.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-fetch-parameters-preserve-payload"], "evaluators": ["d21-fetch-object-payload-identity"],
+      "rationale": "Fetch the same retained opaque Objects with different valid parameters and compare payload identity. Changes to delivery order, object selection, and transport representation do not authorize payload changes under Section 2.5."
+    },
+    {
+      "id": "D21-9-20-1-MUST-404", "strength": "Must",
+      "source": {"section": "9.20.1", "first_line": 4799, "last_line": 4800, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving a parameter in a disallowed message", "summary": "Close the connection with PROTOCOL_VIOLATION when a Message Parameter appears in a message type not allowed by its definition.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-parameter-invalid-message-scope", "d21-group-order-in-subscription-update", "d21-fill-timeout-outside-fill-or-fetch"], "evaluators": ["d21-out-of-scope-parameter-protocol-violation"],
+      "rationale": "Use a known parameter with a legal encoding in a forbidden message, accounting for SUBSCRIBE_TRACKS inheritance under Section 9.18.1 and nested fill's explicit exceptions. Section 9.20.2 is empty in this draft, so the individual definitions supply scope. SETUP uses a separate namespace."
+    },
+    {
+      "id": "D21-9-20-3-MAY-405", "strength": "May",
+      "source": {"section": "9.20.3", "first_line": 4824, "last_line": 4827, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending publication authorization", "summary": "Include AUTHORIZATION_TOKEN in PUBLISH, PUBLISH_NAMESPACE or legal publisher-originated REQUEST_UPDATE messages.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publication-authorization-parameter"], "evaluators": ["d21-publisher-authorization-parameter-capability"],
+      "rationale": "Observe optional credentials from the driven publisher and decode the length-prefixed Token using Section 8.9. The token authorizes the sender's operation; its scope does not permit copying a subscriber's credential into a new publication."
+    },
+    {
+      "id": "D21-9-20-3-MAY-406", "strength": "May",
+      "source": {"section": "9.20.3", "first_line": 4824, "last_line": 4827, "occurrence": 1, "clause": 2},
+      "actor": "subscriber sending request authorization", "summary": "Include AUTHORIZATION_TOKEN in SUBSCRIBE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS, TRACK_STATUS, FETCH or legal subscriber REQUEST_UPDATE messages.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "These are optional subscriber-originated parameters supplied by the listener. Publisher authorization validation is covered by its own receiver duties, rather than treating this sender permission as a mandatory publisher capability."
+    },
+    {
+      "id": "D21-9-20-3-MUST-NOT-407", "strength": "MustNot",
+      "source": {"section": "9.20.3", "first_line": 4828, "last_line": 4829, "occurrence": 1, "clause": 1},
+      "actor": "publisher creating PUBLISH from SUBSCRIBE_TRACKS", "summary": "Do not copy AUTHORIZATION_TOKEN from SUBSCRIBE_TRACKS into the resulting PUBLISH parameters.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-track-discovery-does-not-copy-authorization"], "evaluators": ["d21-discovery-authorization-not-copied"],
+      "rationale": "Supply a distinctive subscriber credential and a separate publisher credential, then inspect resulting PUBLISH Token values and aliases. Section 8.9 has independent directional alias spaces; compare resolved credentials, not coincidentally equal alias integers. Publisher-owned authorization may still be present."
+    },
+    {
+      "id": "D21-9-20-4-MAY-408", "strength": "May",
+      "source": {"section": "9.20.4", "first_line": 4837, "last_line": 4838, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending timeout parameters", "summary": "Include the varint SUBGROUP_DELIVERY_TIMEOUT parameter in PUBLISH or an otherwise legal publisher-originated REQUEST_UPDATE.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-subgroup-timeout-parameter"], "evaluators": ["d21-publisher-subgroup-timeout-parameter-capability"],
+      "rationale": "Observe optional parameter carriage; this definition does not restrict REQUEST_UPDATE by request kind. Section 5.2 separately describes publisher Track/Object Properties, subscriber timeout parameters and their minimum rule. Carriage neither changes that rule nor proves private timeout enforcement."
+    },
+    {
+      "id": "D21-9-20-4-MAY-409", "strength": "May",
+      "source": {"section": "9.20.4", "first_line": 4837, "last_line": 4838, "occurrence": 1, "clause": 2},
+      "actor": "subscriber sending timeout parameters", "summary": "Include SUBGROUP_DELIVERY_TIMEOUT in SUBSCRIBE or an otherwise legal subscriber-originated REQUEST_UPDATE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener supplies subscriber timeout preferences. Section 9.18.1 also permits subscription parameters in SUBSCRIBE_TRACKS unless otherwise specified, while Section 9.20.16 does not list this parameter inside fill. None of these sender permissions are publisher enforcement obligations."
+    },
+    {
+      "id": "D21-9-20-4-SHOULD-NOT-410", "strength": "ShouldNot",
+      "source": {"section": "9.20.4", "first_line": 4841, "last_line": 4842, "occurrence": 1, "clause": 1},
+      "actor": "relay intending to serve multiple subscriptions for one track", "summary": "Do not forward the subscription-specific SUBGROUP_DELIVERY_TIMEOUT parameter upstream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This recommendation constrains relay aggregation of multiple downstream subscriptions. The original contribution publisher does not forward subscription parameters upstream."
+    },
+    {
+      "id": "D21-9-20-5-MAY-411", "strength": "May",
+      "source": {"section": "9.20.5", "first_line": 4847, "last_line": 4848, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending timeout parameters", "summary": "Include the varint OBJECT_DELIVERY_TIMEOUT parameter in PUBLISH or an otherwise legal publisher-originated REQUEST_UPDATE.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-object-timeout-parameter"], "evaluators": ["d21-publisher-object-timeout-parameter-capability"],
+      "rationale": "The PUBLISH placement allows an observable publisher sender capability, and this definition does not restrict REQUEST_UPDATE by request kind. Its value is a varint. Section 5.2 supplies timeout semantics and separately describes publisher Properties; on-wire presence alone does not prove expiry scheduling."
+    },
+    {
+      "id": "D21-9-20-5-MAY-412", "strength": "May",
+      "source": {"section": "9.20.5", "first_line": 4847, "last_line": 4848, "occurrence": 1, "clause": 2},
+      "actor": "subscriber sending timeout parameters", "summary": "Include OBJECT_DELIVERY_TIMEOUT in SUBSCRIBE or an otherwise legal subscriber-originated REQUEST_UPDATE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Subscriber parameter emission belongs to the listener, including inherited SUBSCRIBE_TRACKS permission under Section 9.18.1. Publisher timeout behavior comes from Section 5.2; the fill whitelist does not permit this parameter inside FILL_PARAMETERS."
+    },
+    {
+      "id": "D21-9-20-5-SHOULD-NOT-413", "strength": "ShouldNot",
+      "source": {"section": "9.20.5", "first_line": 4851, "last_line": 4852, "occurrence": 1, "clause": 1},
+      "actor": "relay intending to serve multiple subscriptions for one track", "summary": "Do not forward the subscription-specific OBJECT_DELIVERY_TIMEOUT parameter upstream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This recommendation addresses upstream relay requests serving multiple downstream consumers, outside original contribution publishing."
+    },
+    {
+      "id": "D21-9-20-6-MAY-414", "strength": "May",
+      "source": {"section": "9.20.6", "first_line": 4856, "last_line": 4859, "occurrence": 1, "clause": 1},
+      "actor": "subscriber sending FETCH", "summary": "Include FILL_TIMEOUT in a FETCH message.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is the subscriber's permission to select the relay's upstream wait budget. The listener sends FETCH; an original publisher has no upstream retrieval duty under the following relay-specific paragraphs."
+    },
+    {
+      "id": "D21-9-20-6-MAY-415", "strength": "May",
+      "source": {"section": "9.20.6", "first_line": 4856, "last_line": 4859, "occurrence": 1, "clause": 2},
+      "actor": "subscriber requesting a fill fetch stream", "summary": "Include FILL_TIMEOUT inside FILL_PARAMETERS in SUBSCRIBE or subscription REQUEST_UPDATE to apply it to the fill fetch stream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The nested placement is distinct from a top-level subscription parameter. Sections 3.4 and 9.20.16 define independent fill state; Section 9.18.1 permits joining via SUBSCRIBE_TRACKS. This permission does not require the publisher to send subscriber fill requests."
+    },
+    {
+      "id": "D21-9-20-6-SHOULD-416", "strength": "Should",
+      "source": {"section": "9.20.6", "first_line": 4861, "last_line": 4879, "occurrence": 1, "clause": 1},
+      "actor": "relay waiting for upstream FETCH objects", "summary": "Use FILL_TIMEOUT as the maximum total upstream waiting budget in milliseconds before reporting unavailable objects as Timed-Out gaps.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The budget spans all upstream FETCHes for the request, rather than restarting per object. Its relay actor and upstream sources exclude the original publisher; do not reinterpret it as that publisher's local scheduling deadline."
+    },
+    {
+      "id": "D21-9-20-6-MUST-NOT-417", "strength": "MustNot",
+      "source": {"section": "9.20.6", "first_line": 4882, "last_line": 4883, "occurrence": 1, "clause": 1},
+      "actor": "relay receiving FILL_TIMEOUT zero", "summary": "Do not wait for upstream delivery when FILL_TIMEOUT is zero.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber asks the relay for immediately available content only. This prohibition is explicitly about upstream delivery, not a generic zero-timeout rule for an original publisher."
+    },
+    {
+      "id": "D21-9-20-6-MUST-418", "strength": "Must",
+      "source": {"section": "9.20.6", "first_line": 4883, "last_line": 4883, "occurrence": 1, "clause": 1},
+      "actor": "relay receiving FILL_TIMEOUT zero", "summary": "Report unavailable Objects as Timed-Out gaps when FILL_TIMEOUT is zero.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The explicit relay subject carries over from the preceding line. The Timed-Out gap status represents exhausted upstream waiting; original publisher availability and FETCH validation are separate rules."
+    },
+    {
+      "id": "D21-9-20-6-MAY-419", "strength": "May",
+      "source": {"section": "9.20.6", "first_line": 4888, "last_line": 4889, "occurrence": 1, "clause": 1},
+      "actor": "relay unwilling to wait for the requested fill timeout", "summary": "Use a shorter FILL_TIMEOUT than requested without informing the subscriber.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is a relay resource-policy permission. It does not allow an original publisher to silently alter other subscription timeout parameters or invent a mandatory fill wait duration."
+    },
+    {
+      "id": "D21-9-20-7-MAY-420", "strength": "May",
+      "source": {"section": "9.20.7", "first_line": 4893, "last_line": 4894, "occurrence": 1, "clause": 1},
+      "actor": "subscriber waiting for a publisher", "summary": "Include RENDEZVOUS_TIMEOUT in SUBSCRIBE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber supplies how long a relay should wait for a publisher to appear. This optional request parameter and the following relay behavior do not make the original publisher a rendezvous relay."
+    },
+    {
+      "id": "D21-9-20-7-SHOULD-421", "strength": "Should",
+      "source": {"section": "9.20.7", "first_line": 4900, "last_line": 4904, "occurrence": 1, "clause": 1},
+      "actor": "relay receiving RENDEZVOUS_TIMEOUT without a current publisher", "summary": "Hold the subscription and wait up to the requested rendezvous duration for a publisher to appear.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The relay waits before sending SUBSCRIBE_OK and proceeds normally if a publisher appears. This is upstream availability management, outside the original publisher's contribution role."
+    },
+    {
+      "id": "D21-9-20-7-SHOULD-422", "strength": "Should",
+      "source": {"section": "9.20.7", "first_line": 4905, "last_line": 4906, "occurrence": 1, "clause": 1},
+      "actor": "relay whose rendezvous timeout expires", "summary": "Respond with REQUEST_ERROR TIMEOUT if the rendezvous wait expires without a publisher.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The original publisher is the entity the relay is waiting for, not the relay enforcing that wait. This recommended TIMEOUT response differs from the zero-duration DOES_NOT_EXIST rule."
+    },
+    {
+      "id": "D21-9-20-7-MAY-423", "strength": "May",
+      "source": {"section": "9.20.7", "first_line": 4908, "last_line": 4910, "occurrence": 1, "clause": 1},
+      "actor": "relay limiting rendezvous wait", "summary": "Use a shorter rendezvous timeout than the subscriber requested.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This permission protects relay resources while awaiting another publisher. It does not establish a contribution publisher deadline or a general right to shorten every timeout."
+    },
+    {
+      "id": "D21-9-20-7-MUST-424", "strength": "Must",
+      "source": {"section": "9.20.7", "first_line": 4913, "last_line": 4915, "occurrence": 1, "clause": 1},
+      "actor": "relay receiving zero rendezvous timeout without a publisher", "summary": "Immediately return REQUEST_ERROR DOES_NOT_EXIST when RENDEZVOUS_TIMEOUT is zero and no publisher is available.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "An absent parameter defaults to zero in the following paragraph. The explicit relay subject remains outside original contribution publishing; this is not the FETCH INVALID_RANGE rule for an existing but empty Track."
+    },
+    {
+      "id": "D21-9-20-8-MAY-425", "strength": "May",
+      "source": {"section": "9.20.8", "first_line": 4936, "last_line": 4940, "occurrence": 1, "clause": 1},
+      "actor": "publisher communicating subscription priority", "summary": "Include uint8 SUBSCRIBER_PRIORITY in PUBLISH or an otherwise legal subscription REQUEST_UPDATE.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-subscriber-priority-parameter"], "evaluators": ["d21-publisher-subscriber-priority-capability"],
+      "rationale": "Observe optional priority advertisement, including explicit initial parameters in PUBLISH resulting from SUBSCRIBE_TRACKS under Section 9.18.1. Lower values mean higher priority and omitted SUBSCRIBE or FETCH defaults to 128. Parameter carriage does not prove the private scheduling choices of Section 5.1."
+    },
+    {
+      "id": "D21-9-20-8-MAY-426", "strength": "May",
+      "source": {"section": "9.20.8", "first_line": 4936, "last_line": 4940, "occurrence": 1, "clause": 2},
+      "actor": "subscriber expressing request priority", "summary": "Include SUBSCRIBER_PRIORITY in SUBSCRIBE, FETCH or REQUEST_UPDATE for a subscription or FETCH.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "These sender permissions belong to the listener. Section 9.18.1 extends subscription parameters to SUBSCRIBE_TRACKS, and the explicit fill whitelist in Section 9.20.16 also permits SUBSCRIBER_PRIORITY in the independent fill scope."
+    },
+    {
+      "id": "D21-9-20-9-MAY-427", "strength": "May",
+      "source": {"section": "9.20.9", "first_line": 4946, "last_line": 4948, "occurrence": 1, "clause": 1},
+      "actor": "publisher communicating subscription Group Order", "summary": "Include the uint8 GROUP_ORDER parameter in PUBLISH.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-group-order-parameter"], "evaluators": ["d21-publish-group-order-capability"],
+      "rationale": "Inspect initial PUBLISH parameters, including those derived from SUBSCRIBE_TRACKS. Section 5.1 says existing subscription Group Order cannot change; this permission does not allow top-level GROUP_ORDER in REQUEST_UPDATE. Nested fill Group Order has its separate scope."
+    },
+    {
+      "id": "D21-9-20-9-MAY-428", "strength": "May",
+      "source": {"section": "9.20.9", "first_line": 4946, "last_line": 4948, "occurrence": 1, "clause": 2},
+      "actor": "subscriber selecting subscription or fetch Group Order", "summary": "Include GROUP_ORDER in SUBSCRIBE, SUBSCRIBE_TRACKS, FETCH or inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener sends these preferences. A nested value controls the fill stream, not the existing subscription, and Section 5.1 specifies ordering between fill and subscription Objects. Publisher validation of the parameter's numeric value is a separate endpoint rule."
+    },
+    {
+      "id": "D21-9-20-9-MUST-429", "strength": "Must",
+      "source": {"section": "9.20.9", "first_line": 4956, "last_line": 4957, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving GROUP_ORDER", "summary": "Close the session with PROTOCOL_VIOLATION if GROUP_ORDER is neither Ascending 0x1 nor Descending 0x2.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-group-order-zero", "d21-group-order-above-two", "d21-fill-invalid-group-order"], "evaluators": ["d21-group-order-bounds-protocol-violation"],
+      "rationale": "Use legal message or nested-fill placement with uint8 values 0 and 3 to isolate value validation. Zero is not an alias for publisher preference: omission supplies the default, and FETCH omission specifically means Ascending."
+    },
+    {
+      "id": "D21-9-20-10-MAY-430", "strength": "May",
+      "source": {"section": "9.20.10", "first_line": 4965, "last_line": 4968, "occurrence": 1, "clause": 1},
+      "actor": "publisher communicating the subscription Location Filter", "summary": "Include LOCATION_FILTER in PUBLISH, a legal subscription REQUEST_UPDATE or PUBLISH_STATE_NOTIFY.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-location-filter-parameter"], "evaluators": ["d21-publisher-location-filter-capability"],
+      "rationale": "Decode the length-prefixed field count and advertised filter in publisher messages. PUBLISH_STATE_NOTIFY reports the current filter; Section 9.10 forbids changing subscriber-controlled values without subscriber request. Zero length means no filter, while omission in updates or notifications leaves the value unchanged."
+    },
+    {
+      "id": "D21-9-20-10-MAY-431", "strength": "May",
+      "source": {"section": "9.20.10", "first_line": 4965, "last_line": 4968, "occurrence": 1, "clause": 2},
+      "actor": "subscriber selecting a Location Filter", "summary": "Include LOCATION_FILTER in FETCH, SUBSCRIBE or subscription REQUEST_UPDATE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Subscriber emission is a listener action. Section 9.18.1 permits subscription filters in SUBSCRIBE_TRACKS and Section 9.20.16 separately allows them inside fill. The publisher's range-selection and overflow duties are classified independently; the optional sender permission is not a receiver MUST."
+    },
+    {
+      "id": "D21-9-20-10-MUST-432", "strength": "Must",
+      "source": {"section": "9.20.10", "first_line": 5015, "last_line": 5016, "occurrence": 1, "clause": 1},
+      "actor": "endpoint decoding an absolute Location Filter", "summary": "Close the session with PROTOCOL_VIOLATION if StartGroup plus EndGroupDelta exceeds 2^64 - 1.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-location-filter-end-group-overflow", "d21-fill-location-filter-end-group-overflow"], "evaluators": ["d21-location-filter-overflow-protocol-violation"],
+      "rationale": "Use an absolute filter with EndGroupDelta present, distinguishing this error from the clamping specified for a relative one-field start. Section 9.20.10 gives four optional fields, zero-length removal, and the special two-zero-field Next Object form; neither range-filter INVALID_FILTER nor relative clamping applies to this sum."
+    },
+    {
+      "id": "D21-9-20-13-MUST-433", "strength": "Must",
+      "source": {"section": "9.20.13", "first_line": 5068, "last_line": 5070, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving a PRIORITY_FILTER value above 255", "summary": "Reject PRIORITY_FILTER with REQUEST_ERROR INVALID_FILTER if a decoded priority value exceeds 255.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-priority-filter-start-above-255", "d21-priority-filter-end-above-255"], "evaluators": ["d21-priority-filter-invalid-filter"],
+      "rationale": "Negotiate sufficient MAX_FILTER_RANGES and use valid range encoding, then test reconstructed Start or explicit End beyond the uint8 Publisher Priority bound. Do not confuse an omitted open-ended End with an explicit out-of-range value. This is a request error, not a session close."
+    },
+    {
+      "id": "D21-9-20-14-MUST-434", "strength": "Must",
+      "source": {"section": "9.20.14", "first_line": 5083, "last_line": 5085, "occurrence": 1, "clause": 1},
+      "actor": "subscriber selecting an OBJECT_PROPERTY_FILTER property", "summary": "Use an even Property Type for OBJECT_PROPERTY_FILTER so the property has a single integer value.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Range filters in Section 3.3.2 are subscriber requests. The parity rule concerns the selected Property Type, not parameter Type 0x28 or SetID; publisher receiver validation is independently prescribed at the next lexical anchor."
+    },
+    {
+      "id": "D21-9-20-14-MUST-435", "strength": "Must",
+      "source": {"section": "9.20.14", "first_line": 5084, "last_line": 5085, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving OBJECT_PROPERTY_FILTER with an odd Property Type", "summary": "Reject OBJECT_PROPERTY_FILTER with REQUEST_ERROR INVALID_FILTER if the selected Property Type is not even.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-object-property-filter-odd-property-type"], "evaluators": ["d21-object-property-filter-invalid-filter"],
+      "rationale": "Send a nonempty filter with odd Property Type after negotiating sufficient range capacity. Zero-length removal has no Property Type and does not trigger this condition. Section 8.3 Figure 2 establishes that odd properties carry bytes, whereas this filter requires integer values."
+    },
+    {
+      "id": "D21-9-20-15-MUST-436", "strength": "Must",
+      "source": {"section": "9.20.15", "first_line": 5113, "last_line": 5115, "occurrence": 1, "clause": 1},
+      "actor": "subscriber selecting a TRACK_PROPERTY_FILTER property", "summary": "Use an even Property Type for TRACK_PROPERTY_FILTER so the property has a single integer value.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Section 3.3.2 places this selector in SUBSCRIBE_TRACKS and its updates. The listener authors those filters; the original publisher validates them. Parameter Type 0x29 being odd does not violate the selected Property Type requirement."
+    },
+    {
+      "id": "D21-9-20-15-MUST-437", "strength": "Must",
+      "source": {"section": "9.20.15", "first_line": 5114, "last_line": 5115, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving TRACK_PROPERTY_FILTER with an odd Property Type", "summary": "Reject TRACK_PROPERTY_FILTER with REQUEST_ERROR INVALID_FILTER if the selected Property Type is not even.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-track-property-filter-odd-property-type"], "evaluators": ["d21-track-property-filter-invalid-filter"],
+      "rationale": "Negotiate range support and send an otherwise valid SUBSCRIBE_TRACKS filter selecting an odd Property Type. Validate the request error, not a session error or the parity of the parameter Type. Empty removal values have no Property Type to validate."
+    },
+    {
+      "id": "D21-9-20-16-MAY-438", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5128, "last_line": 5133, "occurrence": 1, "clause": 1},
+      "actor": "subscriber requesting fill delivery", "summary": "Include FILL_PARAMETERS in SUBSCRIBE or subscription REQUEST_UPDATE to request a fill fetch stream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener sends the optional length-prefixed nested parameter sequence. Its presence requests fill subject to Section 3.4, including Forward State and empty-range exceptions. Section 9.18.1 also permits joining via SUBSCRIBE_TRACKS; this sender permission does not override those conditions."
+    },
+    {
+      "id": "D21-9-20-16-MAY-439", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 1},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include FILL_TIMEOUT inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Table 6 explicitly allows this nested parameter to control the fill fetch upstream wait budget. This subscriber permission is independent from top-level FETCH placement and from relay-specific enforcement in Section 9.20.6."
+    },
+    {
+      "id": "D21-9-20-16-MAY-440", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 2},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include SUBSCRIBER_PRIORITY inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Table 6 allows a separate fill priority even though Section 9.20.8's general message list does not mention nesting. An omitted value inherits from the subscription; the listener supplies the override rather than the original publisher."
+    },
+    {
+      "id": "D21-9-20-16-MAY-441", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 3},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include LOCATION_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Table 6 and the following paragraph select an independent fill range using FETCH rules. Section 3.4 limits it to Largest Object; zero length requests an unfiltered fill, not the subscription's nonempty filter. This remains a subscriber sender permission."
+    },
+    {
+      "id": "D21-9-20-16-MAY-442", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 4},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include GROUP_ORDER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber may choose a fill Group Order independent of the subscription. Section 9.20.9 and Section 5.1 define its effect without allowing a change to the existing subscription's Group Order."
+    },
+    {
+      "id": "D21-9-20-16-MAY-443", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 5},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include SUBGROUP_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Table 6 permits the subscriber to restrict subgroup IDs for fill delivery using the range encoding and negotiated limits of Sections 3.3.2 and 8.6. It does not require original publishers to send filter requests."
+    },
+    {
+      "id": "D21-9-20-16-MAY-444", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 6},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include OBJECTID_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This independent Table 6 permission lets the subscriber restrict Object IDs for fill. The inherited subscription filter and explicit override behavior remain governed by Section 3.4; receiving validation is covered separately."
+    },
+    {
+      "id": "D21-9-20-16-MAY-445", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 7},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include PRIORITY_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Table 6 permits filtering fill by Publisher Priority. The subscriber sends the selector; the publisher's explicit INVALID_FILTER duty for values above 255 remains at Section 9.20.13 and is not lost by this sender-role classification."
+    },
+    {
+      "id": "D21-9-20-16-MAY-446", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5135, "last_line": 5177, "occurrence": 1, "clause": 8},
+      "actor": "subscriber supplying nested fill parameters", "summary": "Include OBJECT_PROPERTY_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The fill whitelist permits Object Property filtering but does not include TRACK_PROPERTY_FILTER. Selected Object Property Types must still be even under Section 9.20.14; publisher rejection of forbidden nesting is independently captured below."
+    },
+    {
+      "id": "D21-9-20-16-MUST-447", "strength": "Must",
+      "source": {"section": "9.20.16", "first_line": 5186, "last_line": 5187, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving a disallowed nested fill parameter", "summary": "Close the session with PROTOCOL_VIOLATION if FILL_PARAMETERS contains a parameter not listed in Table 6.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-fill-forbidden-nested-authorization", "d21-fill-forbidden-track-property-filter", "d21-fill-recursive-parameter"], "evaluators": ["d21-fill-parameter-whitelist-protocol-violation"],
+      "rationale": "Inject well-formed known but unlisted parameters inside a legal FILL_PARAMETERS field. AUTHORIZATION_TOKEN, TRACK_PROPERTY_FILTER and nested FILL_PARAMETERS are not in Table 6. Inherited authorization in Section 3.4 does not license a token inside the nested scope."
+    },
+    {
+      "id": "D21-9-20-16-MAY-448", "strength": "May",
+      "source": {"section": "9.20.16", "first_line": 5191, "last_line": 5196, "occurrence": 1, "clause": 1},
+      "actor": "subscriber setting parameters in independent scopes", "summary": "Use the same Parameter Type in both the enclosing message and FILL_PARAMETERS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber may send separate outer and fill values without violating the same-message duplicate rule. The nested sequence has its own Type Delta origin, overrides inherited values only for fill, and is not retained as subscription state. This explicit exception informs publisher duplicate-validation stimuli."
+    },
+    {
+      "id": "D21-9-20-17-MAY-449", "strength": "May",
+      "source": {"section": "9.20.17", "first_line": 5215, "last_line": 5222, "occurrence": 1, "clause": 1},
+      "actor": "publisher communicating expiry", "summary": "Include EXPIRES in PUBLISH, SUBSCRIBE_OK, SUBSCRIBE_NAMESPACE_OK, SUBSCRIBE_TRACKS_OK or publisher-sent REQUEST_UPDATE_OK.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-expires-parameter"], "evaluators": ["d21-publisher-expires-capability"],
+      "rationale": "Inspect optional varint expiry advertisement. The milliseconds value is advisory: termination may precede or follow it, so arrival timing does not create a strict deadline. Section 9.3 supplies REQUEST_OK aliases for discovery and update acknowledgements; SUBSCRIBE_OK has its own format in Section 9.7. Zero or absence means no expiry or unknown expiry."
+    },
+    {
+      "id": "D21-9-20-17-MAY-450", "strength": "May",
+      "source": {"section": "9.20.17", "first_line": 5215, "last_line": 5222, "occurrence": 1, "clause": 2},
+      "actor": "subscriber communicating publication expiry", "summary": "Include EXPIRES in PUBLISH_OK, PUBLISH_NAMESPACE_OK or subscriber-sent REQUEST_UPDATE_OK.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener accepts publisher-originated PUBLISH or PUBLISH_NAMESPACE and can advertise expiry in its response. These subscriber sender permissions are distinct from a publisher receiving such an expiry and renewing its own request."
+    },
+    {
+      "id": "D21-9-20-17-SHOULD-451", "strength": "Should",
+      "source": {"section": "9.20.17", "first_line": 5226, "last_line": 5227, "occurrence": 1, "clause": 1},
+      "actor": "publisher renewing an expiring publication request", "summary": "Include available updated AUTHORIZATION_TOKEN credentials in REQUEST_UPDATE when attempting to extend a received EXPIRES deadline.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publication-expiry-renewal-updated-authorization"], "evaluators": ["d21-publication-renewal-includes-updated-token"],
+      "rationale": "The listener supplies EXPIRES in PUBLISH_OK or PUBLISH_NAMESPACE_OK; the driven publisher receives a known refreshed credential and attempts renewal. Inspect its REQUEST_UPDATE. Renewal is optional, and the available-credential precondition must be established by the fixture, not inferred from missing wire tokens. Multiple-token wording does not override Section 9.20's duplicate rule."
+    },
+    {
+      "id": "D21-9-20-17-SHOULD-452", "strength": "Should",
+      "source": {"section": "9.20.17", "first_line": 5226, "last_line": 5227, "occurrence": 1, "clause": 2},
+      "actor": "subscriber renewing an expiring subscription", "summary": "Include available updated AUTHORIZATION_TOKEN credentials in a subscription-renewal REQUEST_UPDATE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "When the publisher advertises EXPIRES, the listener acts as receiver and potential renewal sender. That subscriber duty is outside the contribution publisher role, unlike the sibling publisher-originated publication renewal case."
+    },
+    {
+      "id": "D21-9-20-17-MAY-453", "strength": "May",
+      "source": {"section": "9.20.17", "first_line": 5229, "last_line": 5231, "occurrence": 1, "clause": 1},
+      "actor": "relay sending EXPIRES", "summary": "Introduce expiry jitter to prevent simultaneous endpoint updates.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This half of the permission explicitly names relays sending expiry values. Do not substitute every publisher sender for that actor; a publisher application receiving EXPIRES is separately covered by the other half."
+    },
+    {
+      "id": "D21-9-20-17-MAY-454", "strength": "May",
+      "source": {"section": "9.20.17", "first_line": 5229, "last_line": 5231, "occurrence": 1, "clause": 2},
+      "actor": "publisher application receiving EXPIRES", "summary": "Introduce renewal jitter to avoid many endpoints updating simultaneously.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A publisher application can receive EXPIRES in responses to its own publication requests. Wire arrival variance cannot distinguish deliberately introduced application jitter from scheduling or transport delay, and the draft specifies neither a jitter distribution nor a magnitude."
+    },
+    {
+      "id": "D21-9-20-18-MAY-455", "strength": "May",
+      "source": {"section": "9.20.18", "first_line": 5239, "last_line": 5242, "occurrence": 1, "clause": 1},
+      "actor": "publisher advertising its Largest Object", "summary": "Carry LARGEST_OBJECT in SUBSCRIBE_OK, PUBLISH, REQUEST_UPDATE_OK, TRACK_STATUS_OK or PUBLISH_STATE_NOTIFY.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-largest-object-parameter-scope"], "evaluators": ["d21-largest-object-allowed-message-capability"],
+      "rationale": "All named messages can be emitted by the publisher in this role. The value is a Location, not a length-prefixed field inferred from odd Type 0x09. This placement permission is qualified by the following MUST when Objects have been published, rather than allowing unconditional omission."
+    },
+    {
+      "id": "D21-9-20-18-MUST-456", "strength": "Must",
+      "source": {"section": "9.20.18", "first_line": 5243, "last_line": 5246, "occurrence": 1, "clause": 1},
+      "actor": "publisher sending a permitted LARGEST_OBJECT-bearing message after publication", "summary": "Include LARGEST_OBJECT in the permitted messages if Objects have been published on the Track.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-largest-object-required-after-publication", "d21-largest-object-before-publication"], "evaluators": ["d21-published-track-largest-object-present"],
+      "rationale": "Use a known Track after an observed Object's first byte establishes publication under Section 3.1.3, then stimulate SUBSCRIBE_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, PUBLISH or PUBLISH_STATE_NOTIFY. Merely queued Objects do not establish the precondition. Absence of wire Objects alone cannot prove the publisher has never published elsewhere."
+    },
+    {
+      "id": "D21-9-20-18-MUST-457", "strength": "Must",
+      "source": {"section": "9.20.18", "first_line": 5248, "last_line": 5254, "occurrence": 1, "clause": 1},
+      "actor": "relay advertising Largest Object", "summary": "Set LARGEST_OBJECT to the maximum of upstream SUBSCRIBE_OK, PUBLISH and REQUEST_UPDATE_OK values and Locations received on upstream subscriptions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The relay combines its upstream publisher's advertised knowledge with actually received subscription Objects. The original publisher has no upstream subscription or relay maximum to compute; its required presence and own publication boundary are separate requirements. FETCH reception is not an input named here."
+    },
+    {
+      "id": "D21-9-20-19-MAY-458", "strength": "May",
+      "source": {"section": "9.20.19", "first_line": 5271, "last_line": 5275, "occurrence": 1, "clause": 1},
+      "actor": "publisher communicating Forwarding State", "summary": "Include FORWARD in PUBLISH, a legal subscription REQUEST_UPDATE or PUBLISH_STATE_NOTIFY.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-forward-parameter"], "evaluators": ["d21-publisher-forward-parameter-capability"],
+      "rationale": "Observe the optional uint8 parameter in publisher output. Omission in REQUEST_UPDATE or PUBLISH_STATE_NOTIFY preserves state; other allowed messages default to 1. A notification reports current state and remains subject to Section 9.10's prohibition on unsolicited changes to subscriber-controlled parameters."
+    },
+    {
+      "id": "D21-9-20-19-MAY-459", "strength": "May",
+      "source": {"section": "9.20.19", "first_line": 5271, "last_line": 5275, "occurrence": 1, "clause": 2},
+      "actor": "subscriber setting Forwarding State", "summary": "Include FORWARD in SUBSCRIBE, SUBSCRIBE_TRACKS or REQUEST_UPDATE for a subscription or SUBSCRIBE_TRACKS request.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener sends these subscriber controls. For SUBSCRIBE_TRACKS updates, only future matching subscriptions receive the new Forwarding State; existing subscriptions are unaffected. The parameter is absent from Table 6, so FORWARD cannot be placed inside FILL_PARAMETERS."
+    },
+    {
+      "id": "D21-9-20-19-MUST-460", "strength": "Must",
+      "source": {"section": "9.20.19", "first_line": 5277, "last_line": 5277, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving FORWARD", "summary": "Close the session with PROTOCOL_VIOLATION if FORWARD is not 0 or 1.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-forward-value-two", "d21-forward-value-255", "d21-discovery-update-invalid-forward"], "evaluators": ["d21-forward-bounds-protocol-violation"],
+      "rationale": "Inject an out-of-range uint8 in an otherwise allowed message, including SUBSCRIBE_TRACKS REQUEST_UPDATE. Do not treat nonzero values as truthy or confuse an invalid nested scope with this valid-scope numeric error."
+    },
+    {
+      "id": "D21-9-20-20-MAY-461", "strength": "May",
+      "source": {"section": "9.20.20", "first_line": 5292, "last_line": 5295, "occurrence": 1, "clause": 1},
+      "actor": "subscriber requesting a new Group", "summary": "Include NEW_GROUP_REQUEST in SUBSCRIBE or subscription REQUEST_UPDATE.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The subscriber sends its largest known Group ID plus one, or zero when no Group information is known. This sender permission is not a requirement that the publisher send NEW_GROUP_REQUEST; original publisher reaction is separately stated below."
+    },
+    {
+      "id": "D21-9-20-20-MUST-NOT-462", "strength": "MustNot",
+      "source": {"section": "9.20.20", "first_line": 5295, "last_line": 5297, "occurrence": 1, "clause": 1},
+      "actor": "subscriber updating a subscription with NEW_GROUP_REQUEST", "summary": "Do not send NEW_GROUP_REQUEST in REQUEST_UPDATE unless the Track included DYNAMIC_GROUPS with value 1.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The restriction is explicitly on the subscriber sender. It does not prescribe a publisher error for an unsupported update, and it differs from the following permission to probe support in initial SUBSCRIBE."
+    },
+    {
+      "id": "D21-9-20-20-MAY-463", "strength": "May",
+      "source": {"section": "9.20.20", "first_line": 5297, "last_line": 5300, "occurrence": 1, "clause": 1},
+      "actor": "subscriber without advance dynamic-Group support knowledge", "summary": "Include NEW_GROUP_REQUEST in SUBSCRIBE without foreknowledge of dynamic-Group support.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener may probe support this way. The following non-keyword sentence says an original publisher without support ignores the parameter in this case; it does not extend the permission to unsupported REQUEST_UPDATE."
+    },
+    {
+      "id": "D21-9-20-20-SHOULD-464", "strength": "Should",
+      "source": {"section": "9.20.20", "first_line": 5304, "last_line": 5305, "occurrence": 1, "clause": 1},
+      "actor": "original publisher supporting dynamic Groups", "summary": "When supporting dynamic Groups, end the current Group as soon as practical upon NEW_GROUP_REQUEST zero or a value larger than the current Group.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-dynamic-group-request-zero", "d21-dynamic-group-request-above-current"], "evaluators": ["d21-new-group-request-ends-current-group-advisory"],
+      "rationale": "Drive a Track that advertises dynamic Groups and observe an explicit terminal Group indication in response to a qualifying request. No fixed deadline is defined; delayed or unobserved completion is NOT_RUN, not an invented latency failure. Ending the current Group is distinct from starting the next one."
+    },
+    {
+      "id": "D21-9-20-20-SHOULD-465", "strength": "Should",
+      "source": {"section": "9.20.20", "first_line": 5304, "last_line": 5305, "occurrence": 1, "clause": 2},
+      "actor": "original publisher supporting dynamic Groups", "summary": "When supporting dynamic Groups, begin a new Group as soon as practical upon NEW_GROUP_REQUEST zero or a value larger than the current Group.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-dynamic-group-request-zero", "d21-dynamic-group-request-above-current"], "evaluators": ["d21-new-group-request-begins-new-group-advisory"],
+      "rationale": "Use a controlled source that creates Groups on request and inspect subsequent Group IDs. The publisher chooses the next ID; it need not equal the requested value. Implementation-specific delay is permitted and supplies no fixed deadline, so missing progress alone cannot establish a timing failure."
+    },
+    {
+      "id": "D21-9-20-20-MAY-466", "strength": "May",
+      "source": {"section": "9.20.20", "first_line": 5305, "last_line": 5309, "occurrence": 1, "clause": 1},
+      "actor": "original publisher handling NEW_GROUP_REQUEST", "summary": "Delay NEW_GROUP_REQUEST for implementation-specific concerns such as minimum Group duration.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A listener cannot determine whether observed delay came from an implementation-specific concern, ordinary scheduling or transport. No minimum or maximum duration is specified. Keep the explicit permission visible without claiming that measured latency proves its cause."
+    },
+    {
+      "id": "D21-9-20-20-MUST-467", "strength": "Must",
+      "source": {"section": "9.20.20", "first_line": 5314, "last_line": 5315, "occurrence": 1, "clause": 1},
+      "actor": "relay without an Established subscription receiving NEW_GROUP_REQUEST", "summary": "Include NEW_GROUP_REQUEST when subscribing upstream.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This requirement is under Relay Handling and requires creating an upstream subscription. The original contribution publisher receives the request and does not forward it through another upstream peer."
+    },
+    {
+      "id": "D21-9-20-20-MUST-468", "strength": "Must",
+      "source": {"section": "9.20.20", "first_line": 5327, "last_line": 5333, "occurrence": 1, "clause": 1},
+      "actor": "relay with an Established subscription receiving a qualifying NEW_GROUP_REQUEST", "summary": "Send upstream REQUEST_UPDATE with NEW_GROUP_REQUEST zero or greater than Largest Group unless dynamic Groups are unsupported or an equal-or-greater request is already outstanding.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Both exceptions qualify one upstream relay action. The following paragraphs suppress nonzero requests at or below Largest Group and define outstanding until Largest Group increases. None requires an original publisher to relay the subscriber request."
+    },
+    {
+      "id": "D21-9-20-21-MAY-469", "strength": "May",
+      "source": {"section": "9.20.21", "first_line": 5345, "last_line": 5347, "occurrence": 1, "clause": 1},
+      "actor": "subscriber updating namespace discovery", "summary": "Include TRACK_NAMESPACE_PREFIX in REQUEST_UPDATE for SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This optional subscriber update uses the Track Namespace encoding of Section 8.7. The listener sends it; the publisher's same-type overlap error below remains Applicable independently of this sender permission."
+    },
+    {
+      "id": "D21-9-20-21-MUST-470", "strength": "Must",
+      "source": {"section": "9.20.21", "first_line": 5349, "last_line": 5350, "occurrence": 1, "clause": 1},
+      "actor": "publisher receiving a SUBSCRIBE_NAMESPACE prefix update", "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP if the updated prefix shares a common prefix with another active SUBSCRIBE_NAMESPACE in the same session.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-namespace-prefix-update-overlap", "d21-discovery-update-independent-overlap-spaces"], "evaluators": ["d21-namespace-prefix-update-overlap-error"],
+      "rationale": "Establish two distinct namespace subscriptions, then update one to overlap the other. Exclude the request being updated and keep the SUBSCRIBE_TRACKS overlap space independent. Section 9.5.1 separately requires closing the failed namespace request stream; this anchor supplies PREFIX_OVERLAP."
+    },
+    {
+      "id": "D21-9-20-21-MUST-471", "strength": "Must",
+      "source": {"section": "9.20.21", "first_line": 5349, "last_line": 5350, "occurrence": 1, "clause": 2},
+      "actor": "publisher receiving a SUBSCRIBE_TRACKS prefix update", "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP if the updated prefix shares a common prefix with another active SUBSCRIBE_TRACKS in the same session.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-track-prefix-update-overlap", "d21-discovery-update-independent-overlap-spaces"], "evaluators": ["d21-track-prefix-update-overlap-error"],
+      "rationale": "A track-discovery update conflicts only with another active request of its own type. The listener controls the session and all prefixes. Preserve the draft's common-prefix wording, rather than importing another draft's overlap algorithm; failed-update cleanup is separately stated in Section 9.5.1."
+    },
+    {
+      "id": "D21-9-20-22-MAY-472", "strength": "May",
+      "source": {"section": "9.20.22", "first_line": 5355, "last_line": 5358, "occurrence": 1, "clause": 1},
+      "actor": "subscriber choosing whether to receive Track Properties", "summary": "Include INCLUDE_PROPERTIES in SUBSCRIBE, TRACK_STATUS, FETCH or SUBSCRIBE_TRACKS.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The listener sends this uint8 selector. SUBSCRIBE_TRACKS controls properties in resulting PUBLISH messages, while the other listed requests control the OK response. The explicit list does not permit REQUEST_UPDATE or nesting inside FILL_PARAMETERS."
+    },
+    {
+      "id": "D21-9-20-22-SHOULD-473", "strength": "Should",
+      "source": {"section": "9.20.22", "first_line": 5360, "last_line": 5361, "occurrence": 1, "clause": 1},
+      "actor": "publisher replying to INCLUDE_PROPERTIES zero", "summary": "Keep the Track Properties field present but empty in the OK response to SUBSCRIBE, TRACK_STATUS or FETCH when INCLUDE_PROPERTIES is 0.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscribe-omit-track-properties", "d21-track-status-omit-track-properties", "d21-fetch-omit-track-properties"], "evaluators": ["d21-ok-track-properties-empty-advisory"],
+      "rationale": "Use a Track with known nonempty properties and compare responses with selector 0 and the default 1. Section 8.4 encodes Track Properties as the remaining message bytes, so an empty final sequence has no invented count or length field. Empty properties are recommended, not mandatory."
+    },
+    {
+      "id": "D21-9-20-22-SHOULD-474", "strength": "Should",
+      "source": {"section": "9.20.22", "first_line": 5360, "last_line": 5361, "occurrence": 1, "clause": 2},
+      "actor": "publisher generating PUBLISH from SUBSCRIBE_TRACKS with INCLUDE_PROPERTIES zero", "summary": "Keep the Track Properties field present but empty in resulting PUBLISH messages when SUBSCRIBE_TRACKS includes INCLUDE_PROPERTIES 0.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-track-discovery-omit-track-properties"], "evaluators": ["d21-discovered-publish-track-properties-empty-advisory"],
+      "rationale": "The property selection applies to resulting PUBLISH messages, not merely SUBSCRIBE_TRACKS_OK. Parse the final property sequence after PUBLISH parameters. Nonempty output is an advisory deviation from this SHOULD, not a required-rule failure; default selector 1 remains distinct."
+    },
+    {
+      "id": "D21-9-20-22-MUST-475", "strength": "Must",
+      "source": {"section": "9.20.22", "first_line": 5362, "last_line": 5363, "occurrence": 1, "clause": 1},
+      "actor": "endpoint receiving INCLUDE_PROPERTIES", "summary": "Close the session with PROTOCOL_VIOLATION if INCLUDE_PROPERTIES is not 0 or 1.",
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-include-properties-value-two", "d21-include-properties-value-255"], "evaluators": ["d21-include-properties-bounds-protocol-violation"],
+      "rationale": "Inject out-of-range uint8 values in allowed requests while preserving all other framing. The default is 1 when omitted; do not accept arbitrary nonzero values as true or substitute REQUEST_ERROR for the required session close."
+    }
+  ]
+}
