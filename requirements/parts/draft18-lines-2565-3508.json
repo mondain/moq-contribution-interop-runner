@@ -837,7 +837,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay duty is retained as written. Section 10.14 names TRACK_STATUS_OK with SUBSCRIBE_OK-like parameters and Properties, but Table 5 gives TRACK_STATUS_OK no message type. The catalog does not silently assign it SUBSCRIBE_OK's encoding."
+      "rationale": "Section 10.5 defines TRACK_STATUS_OK as shorthand for REQUEST_OK, type 0x7, in response to TRACK_STATUS, and explicitly permits Track Properties in that response. Preserving all Track Properties remains this relay's duty, subject to each property's omission rules; the defined encoding does not make a relay-only obligation applicable to the original publisher."
     },
     {
       "id": "D18-9-6-MUST-004",
@@ -2195,12 +2195,16 @@
         "clause": 4
       },
       "actor": "endpoint",
-      "summary": "Include EXPIRES in REQUEST_UPDATE_OK as named by this parameter definition.",
+      "summary": "Include advisory EXPIRES in REQUEST_UPDATE_OK, the REQUEST_OK response to REQUEST_UPDATE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "A publisher can respond to updates, but Table 5 defines no REQUEST_UPDATE_OK and Section 10.9 instead names REQUEST_OK. The draft inconsistency prevents an exact message-type oracle; this record does not silently substitute REQUEST_OK."
+      "testability": "Testable",
+      "scenarios": [
+        "supported-expiry-renewal-accepted-with-configured-advisory"
+      ],
+      "evaluators": [
+        "request-ok-to-request-update-carries-expires"
+      ],
+      "rationale": "Section 10.5 defines REQUEST_UPDATE_OK as shorthand for a REQUEST_OK response with type 0x7. When the publisher supports expiry renewal and is configured to grant it with an advisory, send an authorized REQUEST_UPDATE on the established subscription stream and inspect its REQUEST_OK for the EXPIRES varint parameter. This optional-capability scenario does not require every publisher to support renewal or terminate at the advertised instant."
     },
     {
       "id": "D18-10-2-10-SHOULD-001",
@@ -2222,7 +2226,7 @@
       "evaluators": [
         "renewal-request-update-includes-updated-authorization-tokens"
       ],
-      "rationale": "A publisher can receive EXPIRES in PUBLISH_OK and, as the PUBLISH initiator, send REQUEST_UPDATE under Section 10.9. Provide updated credentials and request extension, then inspect that outgoing request; no assumption about the ambiguously named response type is needed."
+      "rationale": "A publisher can receive EXPIRES in PUBLISH_OK and, as the PUBLISH initiator, send REQUEST_UPDATE under Section 10.9. Provide updated credentials and request extension, then inspect that outgoing request. Section 10.5 defines PUBLISH_OK and REQUEST_UPDATE_OK as shorthand for REQUEST_OK, type 0x7, identified by their corresponding requests; neither response name has an undefined encoding."
     },
     {
       "id": "D18-10-2-10-MAY-005",
@@ -2315,12 +2319,16 @@
         "clause": 3
       },
       "actor": "publisher",
-      "summary": "Carry LARGEST_OBJECT in REQUEST_UPDATE_OK as named by this parameter definition.",
+      "summary": "Carry LARGEST_OBJECT in REQUEST_UPDATE_OK, the REQUEST_OK response to REQUEST_UPDATE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Table 5 has no REQUEST_UPDATE_OK message type and Section 10.9 responds with REQUEST_OK. A publisher update response is in scope, but the draft gives no unambiguous encoding for this named response."
+      "testability": "Testable",
+      "scenarios": [
+        "supported-subscription-update-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "request-ok-to-request-update-largest-object-matches-published-location"
+      ],
+      "rationale": "Section 10.5 defines REQUEST_UPDATE_OK as shorthand for REQUEST_OK, type 0x7, answering REQUEST_UPDATE. For a publisher supporting and accepting subscription updates, publish Objects to a controlled largest Location, pause new publication, send the update on that subscription stream, and compare LARGEST_OBJECT in its REQUEST_OK with the published Location. The MAY grants parameter carriage, not mandatory feature support; the following MUST separately requires presence after publication."
     },
     {
       "id": "D18-10-2-11-MAY-004",
@@ -2333,12 +2341,16 @@
         "clause": 4
       },
       "actor": "publisher",
-      "summary": "Carry LARGEST_OBJECT in TRACK_STATUS_OK as named by this parameter definition.",
+      "summary": "Carry LARGEST_OBJECT in TRACK_STATUS_OK, the REQUEST_OK response to TRACK_STATUS.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Section 10.14 also names TRACK_STATUS_OK and describes SUBSCRIBE_OK-like parameters and Properties, but Table 5 provides no TRACK_STATUS_OK type or dedicated message format. The catalog preserves this permission without assigning an unsupported wire encoding."
+      "testability": "Testable",
+      "scenarios": [
+        "supported-track-status-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "request-ok-to-track-status-largest-object-matches-published-location"
+      ],
+      "rationale": "Section 10.5 defines TRACK_STATUS_OK as shorthand for REQUEST_OK, type 0x7, answering TRACK_STATUS. With a publisher supporting and accepting Track status queries, publish Objects to a controlled largest Location, pause new publication, send TRACK_STATUS on a new request stream, and compare the response's LARGEST_OBJECT with that Location. This MAY does not require feature support; successful responses after publication also fall under the separate mandatory-presence clause."
     },
     {
       "id": "D18-10-2-11-MUST-001",
@@ -2360,7 +2372,7 @@
       "evaluators": [
         "largest-object-included-after-object-publication"
       ],
-      "rationale": "Use actual Object publication rather than queued application data as the precondition. This named response exists in Table 5, unlike the same paragraph's REQUEST_UPDATE_OK and TRACK_STATUS_OK references."
+      "rationale": "Use actual Object publication rather than queued application data as the precondition and inspect the SUBSCRIBE_OK response for LARGEST_OBJECT. SUBSCRIBE_OK has its own message type; Section 10.5 defines the other listed names REQUEST_UPDATE_OK and TRACK_STATUS_OK as shorthand for REQUEST_OK, type 0x7. All of these response forms have defined encodings."
     },
     {
       "id": "D18-10-2-11-MUST-002",
@@ -2397,10 +2409,14 @@
       "actor": "publisher",
       "summary": "Include LARGEST_OBJECT in REQUEST_UPDATE_OK if Objects have been published on the Track.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "This follows the mandatory-presence rule for the preceding list's REQUEST_UPDATE_OK. That response is absent from Table 5 and conflicts with REQUEST_OK in Section 10.9, so a precise wire evaluator is not assigned."
+      "testability": "Testable",
+      "scenarios": [
+        "accepted-subscription-update-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "request-ok-to-request-update-includes-largest-object"
+      ],
+      "rationale": "Section 10.5 defines REQUEST_UPDATE_OK as shorthand for the REQUEST_OK response, type 0x7, to REQUEST_UPDATE. After observing actual Object publication on an established subscription, send a valid update that the publisher accepts and require LARGEST_OBJECT in the resulting REQUEST_OK on that stream. The obligation is conditional on published Objects and this successful response; it does not require accepting every update."
     },
     {
       "id": "D18-10-2-11-MUST-004",
@@ -2415,10 +2431,14 @@
       "actor": "publisher",
       "summary": "Include LARGEST_OBJECT in TRACK_STATUS_OK if Objects have been published on the Track.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "The listed TRACK_STATUS_OK response has no Table 5 type. Section 10.14 confirms the name and its SUBSCRIBE_OK-like parameters, but does not define a wire type. This publisher obligation is retained without silently equating the two responses."
+      "testability": "Testable",
+      "scenarios": [
+        "accepted-track-status-after-observed-object-publication"
+      ],
+      "evaluators": [
+        "request-ok-to-track-status-includes-largest-object"
+      ],
+      "rationale": "Section 10.5 defines TRACK_STATUS_OK as shorthand for the REQUEST_OK response, type 0x7, to TRACK_STATUS. After observing actual Object publication, query that Track on a new request stream and require LARGEST_OBJECT in an accepted query's REQUEST_OK. This checks mandatory parameter presence in the successful response without requiring acceptance of every Track status query."
     },
     {
       "id": "D18-10-2-11-MUST-005",
@@ -2436,7 +2456,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay aggregates two upstream sources of Location knowledge. The list retains its REQUEST_UPDATE_OK reference despite that type being absent from Table 5; this aggregation is not an original-publisher duty."
+      "rationale": "The relay aggregates upstream-advertised Locations and received Object Locations. Section 10.5 defines the listed REQUEST_UPDATE_OK as shorthand for REQUEST_OK, type 0x7, responding to REQUEST_UPDATE, so its LARGEST_OBJECT is a defined input to that aggregation. Computing the maximum across upstream inputs remains a relay duty, not an original-publisher duty."
     },
     {
       "id": "D18-10-2-12-MAY-001",

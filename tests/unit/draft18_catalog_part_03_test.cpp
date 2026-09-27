@@ -180,17 +180,89 @@ TEST_F(Draft18CatalogPart03Test, PayloadInvarianceAndPublishedLocationArePublish
               std::vector<std::string>{"same-object-payload-independent-of-message-parameters"});
     const auto location = at(3411);
     ASSERT_EQ(location.size(), 4u);
+    const std::vector<std::string> evaluators = {
+        "largest-object-included-after-object-publication",
+        "largest-object-included-after-object-publication",
+        "request-ok-to-request-update-includes-largest-object",
+        "request-ok-to-track-status-includes-largest-object"};
     for (std::size_t index = 0; index < location.size(); ++index) {
         EXPECT_EQ(location[index]->actor, "publisher");
         EXPECT_EQ(location[index]->applicability, Applicability::Applicable);
-        if (index < 2) {
-            EXPECT_EQ(location[index]->evaluators,
-                      std::vector<std::string>{"largest-object-included-after-object-publication"});
-        } else {
-            EXPECT_EQ(location[index]->testability, Testability::NotTestable);
-        }
+        EXPECT_EQ(location[index]->testability, Testability::Testable);
+        EXPECT_EQ(location[index]->evaluators, std::vector<std::string>{evaluators[index]});
     }
     EXPECT_NE(location.front()->rationale.find("REQUEST_UPDATE_OK"), std::string::npos);
+}
+
+TEST_F(Draft18CatalogPart03Test, RequestOkShorthandHasObservableResponseSpecificParameterMappings) {
+    struct Expected {
+        std::size_t line;
+        unsigned clause;
+        const char* id;
+        Strength strength;
+        const char* scenario;
+        const char* evaluator;
+    };
+    const std::vector<Expected> expected = {
+        {3384, 4, "D18-10-2-10-MAY-004", Strength::May,
+         "supported-expiry-renewal-accepted-with-configured-advisory",
+         "request-ok-to-request-update-carries-expires"},
+        {3407, 3, "D18-10-2-11-MAY-003", Strength::May,
+         "supported-subscription-update-after-observed-object-publication",
+         "request-ok-to-request-update-largest-object-matches-published-location"},
+        {3407, 4, "D18-10-2-11-MAY-004", Strength::May,
+         "supported-track-status-after-observed-object-publication",
+         "request-ok-to-track-status-largest-object-matches-published-location"},
+        {3411, 3, "D18-10-2-11-MUST-003", Strength::Must,
+         "accepted-subscription-update-after-observed-object-publication",
+         "request-ok-to-request-update-includes-largest-object"},
+        {3411, 4, "D18-10-2-11-MUST-004", Strength::Must,
+         "accepted-track-status-after-observed-object-publication",
+         "request-ok-to-track-status-includes-largest-object"}};
+    for (const auto& item : expected) {
+        SCOPED_TRACE(item.id);
+        const auto rows = at(item.line);
+        ASSERT_GE(rows.size(), item.clause);
+        const auto& row = *rows[item.clause - 1];
+        EXPECT_EQ(row.id, item.id);
+        EXPECT_EQ(row.strength, item.strength);
+        EXPECT_EQ(row.applicability, Applicability::Applicable);
+        EXPECT_EQ(row.testability, Testability::Testable);
+        EXPECT_EQ(row.scenarios, std::vector<std::string>{item.scenario});
+        EXPECT_EQ(row.evaluators, std::vector<std::string>{item.evaluator});
+        EXPECT_NE(row.rationale.find("Section 10.5"), std::string::npos);
+        EXPECT_NE(row.rationale.find("shorthand"), std::string::npos);
+        EXPECT_NE(row.rationale.find("REQUEST_OK"), std::string::npos);
+        EXPECT_NE(row.rationale.find("0x7"), std::string::npos);
+    }
+}
+
+TEST_F(Draft18CatalogPart03Test, DefinedRequestOkShorthandPreservesOtherRecordsRoleBoundaries) {
+    struct Expected {
+        std::size_t line;
+        unsigned clause;
+        const char* actor;
+        Applicability applicability;
+        Testability testability;
+    };
+    const std::vector<Expected> expected = {
+        {2869, 3, "relay", Applicability::NotApplicable, Testability::NotApplicable},
+        {3394, 1, "endpoint", Applicability::Applicable, Testability::Testable},
+        {3411, 1, "publisher", Applicability::Applicable, Testability::Testable},
+        {3424, 1, "relay", Applicability::NotApplicable, Testability::NotApplicable}};
+    for (const auto& item : expected) {
+        const auto rows = at(item.line);
+        ASSERT_GE(rows.size(), item.clause);
+        const auto& row = *rows[item.clause - 1];
+        SCOPED_TRACE(row.id);
+        EXPECT_EQ(row.actor, item.actor);
+        EXPECT_EQ(row.applicability, item.applicability);
+        EXPECT_EQ(row.testability, item.testability);
+        EXPECT_NE(row.rationale.find("Section 10.5"), std::string::npos);
+        EXPECT_NE(row.rationale.find("shorthand"), std::string::npos);
+        EXPECT_NE(row.rationale.find("REQUEST_OK"), std::string::npos);
+        EXPECT_NE(row.rationale.find("0x7"), std::string::npos);
+    }
 }
 
 TEST_F(Draft18CatalogPart03Test, NamespacePrefixUpdateValidationAppliesToPublishingResponder) {
