@@ -37,10 +37,15 @@ TEST_F(DraftSourceTest, LoadsDraft18WithVerifiedDigestAndOneBasedLines) {
     EXPECT_EQ(draft.text.size(), 314260u);
     ASSERT_FALSE(draft.line_offsets.empty());
     EXPECT_EQ(draft.line_offsets.front(), 0u);
+    const auto last_line = draft.line_offsets.size();
+    EXPECT_EQ(draft.lines(1, 1), "\n");
     EXPECT_EQ(draft.lines(16, 16), "                      draft-ietf-moq-transport-18\n");
     EXPECT_EQ(draft.lines(17, 18), "\nAbstract\n");
+    EXPECT_EQ(draft.lines(last_line, last_line),
+              "Nandakumar, et al.      Expires 13 November 2026              [Page 140]\n");
     EXPECT_THROW(draft.lines(0, 1), std::out_of_range);
     EXPECT_THROW(draft.lines(18, 17), std::out_of_range);
+    EXPECT_THROW(draft.lines(last_line + 1, last_line + 1), std::out_of_range);
 }
 
 TEST_F(DraftSourceTest, LoadsDraft21WithVerifiedDigestAndOneBasedLines) {
@@ -51,8 +56,14 @@ TEST_F(DraftSourceTest, LoadsDraft21WithVerifiedDigestAndOneBasedLines) {
     EXPECT_EQ(draft.path, kProjectRoot / "docs/draft-ietf-moq-transport-21.txt");
     EXPECT_EQ(draft.sha256, "8c1d80849f46026b634fa19f8607ce983be2b1db9ae4ee1990878969c7b7e142");
     EXPECT_EQ(draft.text.size(), 358078u);
+    ASSERT_FALSE(draft.line_offsets.empty());
+    const auto last_line = draft.line_offsets.size();
+    EXPECT_EQ(draft.lines(1, 1), "\n");
     EXPECT_EQ(draft.lines(16, 16), "                      draft-ietf-moq-transport-21\n");
     EXPECT_EQ(draft.lines(17, 18), "\nAbstract\n");
+    EXPECT_EQ(draft.lines(last_line, last_line),
+              "Nandakumar, et al.        Expires 12 March 2027               [Page 159]\n");
+    EXPECT_THROW(draft.lines(last_line + 1, last_line + 1), std::out_of_range);
 }
 
 TEST_F(DraftSourceTest, ReportsExpectedAndActualDigestForOneByteChange) {
