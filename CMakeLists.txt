@@ -159,4 +159,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft21-catalog-part-02-tests PRIVATE
                           moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft21-catalog-part-02 COMMAND moq-interop-draft21-catalog-part-02-tests)
+
+    add_executable(moq-interop-draft21-catalog-part-03-tests
+                   tests/unit/draft21_catalog_part_03_test.cpp)
+    target_compile_definitions(moq-interop-draft21-catalog-part-03-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    target_link_libraries(moq-interop-draft21-catalog-part-03-tests PRIVATE
+                          moq-interop-requirements GTest::gtest_main)
+    add_test(NAME draft21-catalog-part-03 COMMAND moq-interop-draft21-catalog-part-03-tests)
 endif()
