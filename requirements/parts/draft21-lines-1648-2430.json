@@ -1,0 +1,600 @@
+{
+  "draft": 21,
+  "source_sha256": "8c1d80849f46026b634fa19f8607ce983be2b1db9ae4ee1990878969c7b7e142",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D21-5-1-1-SHOULD-104", "strength": "Should",
+      "source": {"section": "5.1.1", "first_line": 1694, "last_line": 1697, "occurrence": 1, "clause": 1},
+      "actor": "publisher", "summary": "Make a best effort to apply a changed Subscriber Priority to all Objects that have not yet been scheduled; handling already scheduled Objects is implementation-dependent.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The publisher owns scheduling, but the relay-side boundary cannot establish which Objects were already scheduled or how best effort was applied. Section 5.1.2 explicitly leaves the scheduling point implementation-dependent; arrival order cannot prove this internal update."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-105", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1723, "occurrence": 1, "clause": 1},
+      "actor": "publisher", "summary": "Among multiple schedulable Objects with different Subscriber Priorities, schedule the Object with the highest Subscriber Priority first; lower numeric values have higher priority.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Rule 1 governs a publisher's internal selection among simultaneously schedulable Objects, excluding Objects blocked by flow control. Lines 1760-1765 allow scheduling to mean either serialization or packet transmission, so peer arrival order is not a conformance oracle."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-106", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1727, "occurrence": 1, "clause": 2},
+      "actor": "publisher", "summary": "For schedulable Objects with equal Subscriber Priority and different Publisher Priorities, schedule the Object with the highest Publisher Priority first.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Rule 2 is independently conditional on tied Subscriber Priority. Publisher Priority can override the Track default per Subgroup or Datagram, but the implementation-dependent scheduling point and transport reordering prevent an external wire-order assertion."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-107", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1743, "occurrence": 1, "clause": 3},
+      "actor": "publisher", "summary": "For schedulable Objects in the same subscription and Track, with equal Subscriber and Publisher Priorities but different Groups, use the subscription's Group Order to select which is scheduled first, subject to the differing-fill-order exception.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Rule 3 applies only within one subscription and Track; it is not a general ordering guarantee across subscriptions or FETCH responses. Section 5.1.2 defines the scheduling point as implementation-dependent. The fill exception is classified separately."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-108", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1743, "occurrence": 1, "clause": 4},
+      "actor": "publisher", "summary": "In rule 3's equal-priority, different-Group comparison, when the subscription fill's Group Order differs from the subscription's Group Order, schedule the subscription-delivered Object first.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This draft-21 fill exception is a separate scheduling branch. Section 9.20.9 confirms that FILL_PARAMETERS Group Order governs ordering relative to subscription-delivered Objects, but the scheduling stage remains internal and does not promise peer arrival order."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-109", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1753, "occurrence": 1, "clause": 5},
+      "actor": "publisher", "summary": "For equal-priority schedulable Objects in the same Group, Track and subscription, schedule a fill-delivered Object before a subscription-delivered Object.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Rule 4 prefers fill within one Group, whereas rule 3's different-Group, differing-order exception prefers subscription delivery. This distinction is normative scheduler advice, but neither local eligibility nor the implementation-dependent scheduling point can be determined from peer delivery order."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-110", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1753, "occurrence": 1, "clause": 6},
+      "actor": "publisher", "summary": "When rule 4's fill-versus-subscription tie-break does not decide the comparison, schedule the lower Subgroup ID first for equal-priority Subgroup Objects in the same subscription, Track and Group.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This branch compares Subgroup forwarding preferences after the earlier priority and fill rules. A receiver sees transmitted data rather than the publisher's set of schedulable Objects or scheduling decisions."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-111", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1753, "occurrence": 1, "clause": 7},
+      "actor": "publisher", "summary": "When rule 4's fill-versus-subscription tie-break does not decide the comparison, schedule the lower Object ID first for equal-priority Datagram Objects in the same subscription, Track and Group.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The Datagram branch compares Object IDs rather than Subgroup IDs. Its scheduler recommendation cannot be evaluated from potentially reordered or lost datagrams at the receiving peer."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-112", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1719, "last_line": 1753, "occurrence": 1, "clause": 8},
+      "actor": "publisher", "summary": "In rule 4's remaining equal-priority, same-subscription, same-Track and same-Group tie, if the two Objects have different Forwarding Preferences, select the datagram first.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This final rule-4 branch distinguishes datagrams from Subgroup streams; it does not override earlier priority or fill tie-breaks. Local scheduling and transport delivery remain different observations under lines 1760-1765."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-113", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1780, "last_line": 1783, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Prioritize the control streams highest, ahead of bidirectional request streams and all Objects.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "An endpoint acting as publisher shares this scheduling recommendation. Relative internal scheduling priority is not a guaranteed arrival order and has no specified external completion deadline."
+    },
+    {
+      "id": "D21-5-1-2-SHOULD-114", "strength": "Should",
+      "source": {"section": "5.1.2", "first_line": 1780, "last_line": 1783, "occurrence": 1, "clause": 2},
+      "actor": "endpoint", "summary": "Prioritize bidirectional request streams ahead of all Objects, after the control streams.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The request-versus-Object relation is independently meaningful from highest control priority. The recommendation constrains a local scheduler whose underlying transport interface and timing are not exposed to this harness."
+    },
+    {
+      "id": "D21-5-1-2-MAY-115", "strength": "May",
+      "source": {"section": "5.1.2", "first_line": 1782, "last_line": 1783, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Optionally prioritize bidirectional request streams relative to each other using Subscriber Priority when specified.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This permits a publisher endpoint's internal request-stream policy. Wire arrival order cannot establish which scheduler selected the order; absence of this optional policy is not a conformance failure."
+    },
+    {
+      "id": "D21-5-1-3-SHOULD-116", "strength": "Should",
+      "source": {"section": "5.1.3", "first_line": 1799, "last_line": 1800, "occurrence": 1, "clause": 1},
+      "actor": "relay", "summary": "Respect subscribers' priorities for downstream subscriptions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The sentence explicitly assigns this downstream forwarding policy to relays. The contribution publisher is not being evaluated as a forwarding relay."
+    },
+    {
+      "id": "D21-5-1-3-SHOULD-117", "strength": "Should",
+      "source": {"section": "5.1.3", "first_line": 1799, "last_line": 1800, "occurrence": 1, "clause": 2},
+      "actor": "relay", "summary": "Respect original publishers' priorities for downstream subscriptions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is the relay's independent duty to respect the original publisher's priority. Mention of the original publisher does not make it the actor of the requirement."
+    },
+    {
+      "id": "D21-5-1-3-SHOULD-NOT-118", "strength": "ShouldNot",
+      "source": {"section": "5.1.3", "first_line": 1802, "last_line": 1807, "occurrence": 1, "clause": 1},
+      "actor": "relay", "summary": "Avoid directly copying Subscriber Priority from incoming subscriptions into upstream subscriptions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The relay can derive upstream policy from popularity, local policy or a common value. The contribution publisher does not perform upstream subscription aggregation for downstream subscribers."
+    },
+    {
+      "id": "D21-5-1-3-SHOULD-NOT-119", "strength": "ShouldNot",
+      "source": {"section": "5.1.3", "first_line": 1802, "last_line": 1807, "occurrence": 1, "clause": 2},
+      "actor": "relay", "summary": "Avoid directly copying Group Order from incoming subscriptions into upstream subscriptions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This separately names the upstream Group Order choice as relay policy. It is outside contribution-publisher behavior even though relays also act as publishers on downstream sessions."
+    },
+    {
+      "id": "D21-5-1-3-SHOULD-120", "strength": "Should",
+      "source": {"section": "5.1.3", "first_line": 1820, "last_line": 1822, "occurrence": 1, "clause": 1},
+      "actor": "implementation", "summary": "If a default priority exists, set it near the middle of the range, for example 128, so non-default priorities can be higher or lower.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A publisher implementation is included, but this advice neither fixes a unique midpoint nor identifies a wire field that proves the implementation's default policy. Sections 9.20.8 and 10.4 separately specify defaults for particular fields; those definitions do not turn this general recommendation into an exact-value test."
+    },
+    {
+      "id": "D21-5-2-MUST-121", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1854, "last_line": 1857, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "When OBJECT_DELIVERY_TIMEOUT is nonzero, retain when the last header byte of each Object was received upstream or provided by the original publisher application.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Original-publisher timestamp retention is an internal state requirement. Observable expiration actions are classified separately; no wire event proves that a particular timestamp was retained rather than an equivalent internal mechanism used."
+    },
+    {
+      "id": "D21-5-2-MUST-122", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1859, "last_line": 1863, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "For a Subgroup Object subject to a nonzero OBJECT_DELIVERY_TIMEOUT, check elapsed time before attempting to pass the Object to the underlying transport for transmission.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The exact pre-transport check point is local to the publisher. Packet arrival does not identify when bytes entered the transport; the next clause supplies the externally observable reset outcome."
+    },
+    {
+      "id": "D21-5-2-MUST-123", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1862, "last_line": 1865, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "If a Subgroup Object's elapsed time exceeds its effective nonzero OBJECT_DELIVERY_TIMEOUT before handoff to the transport, reset the underlying stream using DELIVERY_TIMEOUT.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-subgroup-object-expiry-before-transport"],
+      "evaluators": ["d21-expired-object-subgroup-delivery-timeout-reset"],
+      "rationale": "A driven fixture needs recorded header-provision time and independently established pre-transport admission control before releasing an expired Object and observing DELIVERY_TIMEOUT. Peer flow control alone cannot establish this precondition because the transport may buffer bytes without sending them. Without that independent evidence the scenario is not scored; ordinary late arrival is insufficient. Effective timeouts use the first Object's override or Track value and the smaller nonzero subscriber value. Section 11.3.2 supplies closure context; Section 12.5 defines DELIVERY_TIMEOUT as 0x2."
+    },
+    {
+      "id": "D21-5-2-SHOULD-NOT-124", "strength": "ShouldNot",
+      "source": {"section": "5.2", "first_line": 1863, "last_line": 1865, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "After an Object delivery timeout resets a Subgroup stream, avoid opening a new stream to deliver additional Objects in that same Subgroup.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-subgroup-object-expiry-then-more-objects"],
+      "evaluators": ["d21-no-reopen-after-object-delivery-timeout"],
+      "rationale": "After observing the timeout reset, supply more Objects with the same Group and Subgroup IDs and inspect subsequent streams during the bounded fixture. This checks a concrete attempted reopening, not inferred scheduler state or a prohibition on other Subgroups."
+    },
+    {
+      "id": "D21-5-2-SHOULD-125", "strength": "Should",
+      "source": {"section": "5.2", "first_line": 1865, "last_line": 1867, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "Check Object delivery timeouts before retransmitting Object data when the underlying transport implementation permits it.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Both availability of the transport hook and the pre-retransmission check are internal. A peer cannot distinguish permitted transport limitations from a missing check; the source gives no unconditional wire outcome for this recommendation."
+    },
+    {
+      "id": "D21-5-2-SHOULD-126", "strength": "Should",
+      "source": {"section": "5.2", "first_line": 1867, "last_line": 1870, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "Minimize data buffered at the underlying transport layer because such buffered data can no longer be timed out and can be transmitted after expiry.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Transport queue occupancy and the meaning of minimize have no external numeric bound. The explicit warning about already-buffered expired data prevents treating every late received Object as a delivery-timeout violation."
+    },
+    {
+      "id": "D21-5-2-MUST-127", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1872, "last_line": 1877, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "Drop Object datagrams when their elapsed time exceeds the effective nonzero OBJECT_DELIVERY_TIMEOUT.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-datagram-expiry-before-transport"],
+      "evaluators": ["d21-expired-object-datagram-dropped"],
+      "rationale": "A driven fixture needs known header-provision times and independent admission evidence establishing that expired Object bytes have not entered the transport queue. With that precondition, release expired and fresh identified Objects and inspect delivery; absent that evidence the scenario is not scored. Packet loss or ordinary late arrival alone is insufficient, and a fresh control only establishes continued delivery. For Datagram forwarding, SUBGROUP_DELIVERY_TIMEOUT also acts as an Object timeout and the smaller nonzero value applies; data already queued in transport is excluded by this section's buffering caveat."
+    },
+    {
+      "id": "D21-5-2-SHOULD-128", "strength": "Should",
+      "source": {"section": "5.2", "first_line": 1874, "last_line": 1877, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "Either minimize datagram queueing or use a datagram queue mechanism with time bounds, such as WebTransport outgoingMaxAge.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "These are alternatives for meeting one queueing recommendation, not two mandatory policies. Internal queue size or choice of a time-bounded API cannot be established from delivered datagrams, and minimize has no numeric threshold."
+    },
+    {
+      "id": "D21-5-2-MUST-129", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1880, "last_line": 1885, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "For Subgroup forwarding with nonzero SUBGROUP_DELIVERY_TIMEOUT, start a timer of that duration when all Subgroup Objects are known published, through upstream FIN or notification by the original publisher application.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The original publisher's notification and timer creation are local state. The timer does not begin merely because a subscriber saw the last Object. The next clause separately defines the reset observable under a controlled completion trigger."
+    },
+    {
+      "id": "D21-5-2-MUST-130", "strength": "Must",
+      "source": {"section": "5.2", "first_line": 1887, "last_line": 1890, "occurrence": 1, "clause": 1},
+      "actor": "MOQT implementation", "summary": "If the nonzero Subgroup delivery timer expires before the underlying stream reaches all data committed, reset that stream.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-subgroup-completion-withheld-acknowledgments"],
+      "evaluators": ["d21-uncommitted-subgroup-timeout-reset"],
+      "rationale": "A driven application can announce Subgroup completion at a known time while the controlled receiver withholds acknowledgments, ensuring the stream cannot be fully committed; a reset then provides the bounded wire outcome. This clause does not specify a reset code, unlike the OBJECT_DELIVERY_TIMEOUT reset at line 1862. Section 11.3.2 permits a reset after a sent FIN and explains the closure context."
+    },
+    {
+      "id": "D21-5-2-MAY-131", "strength": "May",
+      "source": {"section": "5.2", "first_line": 1933, "last_line": 1934, "occurrence": 1, "clause": 1},
+      "actor": "publisher", "summary": "If a subscriber consumes Objects too slowly and causes the publisher to exceed its resource limits, optionally terminate that subscription using PUBLISH_DONE with TOO_FAR_BEHIND.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-slow-subscriber-configured-resource-limit"],
+      "evaluators": ["d21-too-far-behind-publish-done"],
+      "rationale": "Use a declared resource limit and a deliberately stalled subscriber to observe this optional termination capability. The draft supplies the message and error, not a universal resource threshold; continuing the subscription is not a required-conformance failure."
+    },
+    {
+      "id": "D21-6-1-MUST-NOT-132", "strength": "MustNot",
+      "source": {"section": "6.1", "first_line": 1946, "last_line": 1948, "occurrence": 1, "clause": 1},
+      "actor": "endpoint using a MOQT URI", "summary": "Do not use a moqt URI whose authority has an empty host portion.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A contribution client uses a URI, but parsing a locally supplied malformed URI has no prescribed peer-visible error in this clause; failure to connect does not establish the reason. Native-QUIC AUTHORITY validation and its errors are specified separately in Section 9.1.1, not invented here."
+    },
+    {
+      "id": "D21-6-1-1-MAY-133", "strength": "May",
+      "source": {"section": "6.1.1", "first_line": 1970, "last_line": 1972, "occurrence": 1, "clause": 1},
+      "actor": "client endpoint", "summary": "Optionally use fragment identifiers with moqt URIs; process the fragment locally after establishing the session and do not transmit it to the server.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This permission covers a client publisher, but its capability is local fragment processing. A fragment's absence from the wire does not prove that processing occurred. The required registered syntax is a separate anchor and Section 16.3's registry is initially empty."
+    },
+    {
+      "id": "D21-6-1-1-MUST-134", "strength": "Must",
+      "source": {"section": "6.1.1", "first_line": 1974, "last_line": 1978, "occurrence": 1, "clause": 1},
+      "actor": "endpoint using a MOQT URI fragment", "summary": "Begin a moqt URI fragment with a registered fragment type identifier, followed by a colon and a type-specific value.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Fragments are processed locally and are not transmitted to the relay-side peer. Section 16.3 makes the fragment registry initially empty, so this draft supplies no registered type for a positive fixture. No local failure API or wire error is specified for malformed fragments."
+    },
+    {
+      "id": "D21-6-1-1-MUST-135", "strength": "Must",
+      "source": {"section": "6.1.1", "first_line": 1980, "last_line": 1983, "occurrence": 1, "clause": 1},
+      "actor": "endpoint using a MOQT URI fragment", "summary": "Use only ASCII lowercase letters, digits and hyphens (a-z, 0-9, -) in fragment type identifiers.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "This syntax constraint applies to URI-using contribution clients but the identifier is never transmitted. The grammar can be unit-tested in a client parser, not inferred from a connection at the runner's protocol boundary."
+    },
+    {
+      "id": "D21-6-1-2-MAY-136", "strength": "May",
+      "source": {"section": "6.1.2", "first_line": 2022, "last_line": 2026, "occurrence": 1, "clause": 1},
+      "actor": "client endpoint", "summary": "When SVCB-compatible records are published for the authority, optionally use them to learn server endpoints and supported ALPN protocols before connecting.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A publisher client can use this discovery mechanism, but the chosen endpoint and ALPN do not reveal whether DNS records, cache or configuration supplied them. DNS resolver instrumentation is outside this relay-side protocol boundary. The text separately describes HTTPS records for WebTransport and retains a TODO for the moqt SVCB draft."
+    },
+    {
+      "id": "D21-6-1-2-MAY-137", "strength": "May",
+      "source": {"section": "6.1.2", "first_line": 2030, "last_line": 2038, "occurrence": 1, "clause": 1},
+      "actor": "client endpoint", "summary": "Optionally establish a native QUIC MOQT session when the server selects a supported MOQT ALPN from the client's TLS ClientHello offer.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-native-quic-session-establishment"],
+      "evaluators": ["d21-native-quic-session-capability"],
+      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 21. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
+    },
+    {
+      "id": "D21-6-1-2-MAY-138", "strength": "May",
+      "source": {"section": "6.1.2", "first_line": 2030, "last_line": 2038, "occurrence": 1, "clause": 2},
+      "actor": "client endpoint", "summary": "Optionally establish MOQT over WebTransport, using the h3 selection on QUIC or the h2 offer on TCP+TLS described here and the WebTransport establishment procedure in Section 6.2.1.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-webtransport-h3-session-establishment"],
+      "evaluators": ["d21-webtransport-session-capability"],
+      "rationale": "An HTTP/3 extended CONNECT and WT-Available-Protocols negotiation followed by MOQT setup provide observable optional capability. Section 6.1.2 also describes TCP+TLS/h2, while Section 6.2 says the protocol is not defined over other transports such as TCP; preserve this wording tension and do not infer a native TCP MOQT protocol or require an HTTP/2 runner. The draft does not impose a separate WebTransport reliability-mode prohibition in this range."
+    },
+    {
+      "id": "D21-6-2-MUST-139", "strength": "Must",
+      "source": {"section": "6.2", "first_line": 2048, "last_line": 2049, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Support the QUIC DATAGRAM extension on the QUIC connection used for MOQT.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-native-quic-datagram-support", "d21-webtransport-h3-datagram-support"],
+      "evaluators": ["d21-quic-datagram-extension-supported"],
+      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
+    },
+    {
+      "id": "D21-6-2-MUST-140", "strength": "Must",
+      "source": {"section": "6.2", "first_line": 2048, "last_line": 2049, "occurrence": 1, "clause": 2},
+      "actor": "endpoint", "summary": "Negotiate the QUIC DATAGRAM extension in the QUIC connection used for MOQT.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-native-quic-without-datagram-negotiation", "d21-webtransport-h3-without-datagram-negotiation"],
+      "evaluators": ["d21-no-moqt-session-without-quic-datagram-negotiation"],
+      "rationale": "Transport negotiation is visible independently of compiled-in support: a connection on which the extension was not negotiated must not proceed as a valid MOQT session. The clause covers native QUIC and WebTransport over HTTP/3; it names neither a MOQT error code for negotiation failure nor a reliability-mode value."
+    },
+    {
+      "id": "D21-6-3-MUST-NOT-141", "strength": "MustNot",
+      "source": {"section": "6.3", "first_line": 2111, "last_line": 2114, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Do not begin a bidirectional request stream with a message other than TRACK_STATUS, SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS unless that other message type was negotiated.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-request-stream-openers"],
+      "evaluators": ["d21-request-stream-first-message-allowed"],
+      "rationale": "Inspect each publisher-opened bidirectional stream's first message with the negotiated extension set. SETUP belongs on each peer's unidirectional control stream and Objects on unidirectional data streams; neither is silently added to the seven default request openers."
+    },
+    {
+      "id": "D21-6-3-MUST-142", "strength": "Must",
+      "source": {"section": "6.3", "first_line": 2112, "last_line": 2114, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Close the session with PROTOCOL_VIOLATION if a bidirectional stream begins with a message other than the seven permitted request types or a negotiated alternative.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-invalid-bidirectional-request-stream-opener"],
+      "evaluators": ["d21-invalid-request-stream-opener-protocol-violation"],
+      "rationale": "The runner opens a bidirectional stream with an unnegotiated invalid initial message and observes the publisher endpoint's session close and specified error. This receiver duty is distinct from the sender's placement prohibition."
+    },
+    {
+      "id": "D21-6-3-SHOULD-143", "strength": "Should",
+      "source": {"section": "6.3", "first_line": 2123, "last_line": 2124, "occurrence": 1, "clause": 1},
+      "actor": "subscriber", "summary": "Buffer Object data arriving on unidirectional streams before the control streams until both control streams arrive and setup is complete.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Receiving Objects is the subscriber side of this combined sentence. The contribution publisher sends Objects and is not evaluated as an Object-consuming subscriber."
+    },
+    {
+      "id": "D21-6-3-SHOULD-144", "strength": "Should",
+      "source": {"section": "6.3", "first_line": 2123, "last_line": 2124, "occurrence": 1, "clause": 2},
+      "actor": "receiving endpoint", "summary": "Buffer data arriving on bidirectional streams beginning with request messages before the control streams until both control streams arrive and setup is complete.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "A publisher can receive early requests, but internal buffering is not established by a later successful response. The next paragraph explicitly permits resets when buffering is unwanted or the message type is unsupported, so there is no unconditional bounded response proving this storage policy."
+    },
+    {
+      "id": "D21-6-3-MAY-145", "strength": "May",
+      "source": {"section": "6.3", "first_line": 2133, "last_line": 2135, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream if buffering is unwanted or its message type is unsupported.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-request-stream-before-peer-setup"],
+      "evaluators": ["d21-pre-setup-request-stream-reset"],
+      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. The permission applies to bidirectional request streams, not an invented reset rule for every early unidirectional Object stream; buffering instead is also permitted."
+    },
+    {
+      "id": "D21-6-3-MUST-NOT-146", "strength": "MustNot",
+      "source": {"section": "6.3", "first_line": 2137, "last_line": 2139, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Do not close a control stream at the underlying transport layer during the session's lifetime; such closure results in session closure as PROTOCOL_VIOLATION.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-control-stream-lifetime"],
+      "evaluators": ["d21-control-stream-open-during-session"],
+      "rationale": "Track the publisher's unidirectional control stream for a FIN or reset while the MOQT session is active. The prohibition does not prevent session termination itself; the next sentence states the consequence of premature control closure."
+    },
+    {
+      "id": "D21-6-3-SHOULD-NOT-147", "strength": "ShouldNot",
+      "source": {"section": "6.3", "first_line": 2143, "last_line": 2147, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Avoid using Message Parameters requiring negotiation before receiving the peer SETUP, unless the application requires the extension or the endpoint knows the peer supports it.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-fresh-peer-parameters-before-setup"],
+      "evaluators": ["d21-no-unrequired-unknown-peer-extension-before-setup"],
+      "rationale": "A driven fresh-client fixture with no preconfigured peer support and no required application extension can inspect parameters sent before delivery of peer SETUP. Without those declared preconditions, early use cannot be scored as a violation. Section 9.20 distinguishes base-version parameters from negotiated extensions and explains the unknown-parameter termination consequence."
+    },
+    {
+      "id": "D21-6-3-1-MAY-148", "strength": "May",
+      "source": {"section": "6.3.1", "first_line": 2205, "last_line": 2207, "occurrence": 1, "clause": 1},
+      "actor": "relay", "summary": "Optionally defer upstream subscription initiation until handshake completion to mitigate resource exhaustion from replayed packets.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The permission concerns a relay opening upstream subscriptions on behalf of replayed requests, not the original contribution publisher's own publication."
+    },
+    {
+      "id": "D21-6-3-1-MAY-149", "strength": "May",
+      "source": {"section": "6.3.1", "first_line": 2205, "last_line": 2207, "occurrence": 1, "clause": 2},
+      "actor": "relay", "summary": "Optionally reject 0-RTT entirely to mitigate resource exhaustion from replayed packets.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Rejecting 0-RTT is the second independent relay mitigation. Section 6.3.1 does not require a contribution client to implement or accept 0-RTT."
+    },
+    {
+      "id": "D21-6-3-2-MUST-150", "strength": "Must",
+      "source": {"section": "6.3.2", "first_line": 2216, "last_line": 2217, "occurrence": 1, "clause": 1},
+      "actor": "client and server endpoints", "summary": "Include in SETUP all Setup Options required by Section 9.1 for the negotiated MOQT version.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-native-quic-required-setup-options", "d21-webtransport-required-setup-options"],
+      "evaluators": ["d21-required-version-setup-options"],
+      "rationale": "Decode the publisher's SETUP against the negotiated draft and transport. Sections 9.1.1 and 9.1.2 require AUTHORITY and PATH for a native client using a moqt URI but prohibit them for servers and WebTransport; optional/defaulted options are not promoted to universally required fields. SETUP exchange determines extensions after both messages have been sent and received."
+    },
+    {
+      "id": "D21-6-3-2-MUST-151", "strength": "Must",
+      "source": {"section": "6.3.2", "first_line": 2224, "last_line": 2225, "occurrence": 1, "clause": 1},
+      "actor": "MOQT version specification author", "summary": "In a new MOQT version, specify which existing extensions can be used with that version.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is a normative specification-author obligation, not an endpoint implementation action or quoted informative vocabulary."
+    },
+    {
+      "id": "D21-6-3-2-MUST-152", "strength": "Must",
+      "source": {"section": "6.3.2", "first_line": 2225, "last_line": 2226, "occurrence": 1, "clause": 1},
+      "actor": "MOQT extension specification author", "summary": "In a new extension, specify the existing MOQT versions with which the extension can be used.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Compatibility declarations belong to authors of extension specifications. A contribution publisher cannot satisfy or violate this document-authoring requirement through a wire interaction."
+    },
+    {
+      "id": "D21-6-4-1-MUST-153", "strength": "Must",
+      "source": {"section": "6.4.1", "first_line": 2259, "last_line": 2260, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Close the session upon receiving an unknown unidirectional stream type.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-unknown-unidirectional-stream-type"],
+      "evaluators": ["d21-unknown-stream-type-session-close"],
+      "rationale": "Inject a stream type outside Table 2 and all negotiated extensions, then observe session termination. This clause does not name an error code; do not borrow PROTOCOL_VIOLATION from the distinct bidirectional first-message rule or from another draft."
+    },
+    {
+      "id": "D21-6-4-2-1-MUST-154", "strength": "Must",
+      "source": {"section": "6.4.2.1", "first_line": 2285, "last_line": 2286, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Close the session with INVALID_REQUEST_ID when a received Request ID has the wrong least significant bit for its sender: clients use even IDs and servers use odd IDs.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-request-id-wrong-sender-parity"],
+      "evaluators": ["d21-wrong-parity-invalid-request-id"],
+      "rationale": "The runner sends an otherwise valid request with parity inconsistent with its client/server role and observes the specific session error. Sender role, not publisher/subscriber role, determines parity."
+    },
+    {
+      "id": "D21-6-4-2-1-MUST-155", "strength": "Must",
+      "source": {"section": "6.4.2.1", "first_line": 2285, "last_line": 2286, "occurrence": 1, "clause": 2},
+      "actor": "receiving endpoint", "summary": "Close the session with INVALID_REQUEST_ID when a duplicate Request ID is received.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-duplicate-request-id-across-streams", "d21-duplicate-request-update-id"],
+      "evaluators": ["d21-duplicate-invalid-request-id"],
+      "rationale": "Request IDs are session-wide across SUBSCRIBE, PUBLISH, FETCH, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS, PUBLISH_NAMESPACE, REQUEST_UPDATE and TRACK_STATUS. Reuse a prior ID with valid parity to isolate duplicate rejection; response messages carry no Request ID in this draft."
+    },
+    {
+      "id": "D21-6-4-2-2-MUST-NOT-156", "strength": "MustNot",
+      "source": {"section": "6.4.2.2", "first_line": 2303, "last_line": 2304, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Do not send FIN on a request-stream direction until all messages required for that request type on that direction have been sent.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-request-stream-terminal-message-order"],
+      "evaluators": ["d21-all-required-request-messages-before-fin"],
+      "rationale": "A bidirectional stream is ordered separately in each direction, so the peer can decode every message before FIN and compare with that request type's requirements. FIN means no further messages, not request cancellation; an abrupt reset is a different operation."
+    },
+    {
+      "id": "D21-6-4-2-2-MUST-157", "strength": "Must",
+      "source": {"section": "6.4.2.2", "first_line": 2305, "last_line": 2308, "occurrence": 1, "clause": 1},
+      "actor": "responding endpoint", "summary": "Send the corresponding response message before sending FIN on the response direction of a request stream.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-request-response-before-fin"],
+      "evaluators": ["d21-request-response-before-fin"],
+      "rationale": "The publisher responds to relay requests. Stream ordering provides direct evidence of a response preceding FIN, independently of the more general all-required-messages rule and the Established-subscription PUBLISH_DONE rule."
+    },
+    {
+      "id": "D21-6-4-2-2-MUST-158", "strength": "Must",
+      "source": {"section": "6.4.2.2", "first_line": 2307, "last_line": 2308, "occurrence": 1, "clause": 1},
+      "actor": "publisher", "summary": "For an Established subscription, send PUBLISH_DONE before sending FIN on the request-stream direction.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-established-subscription-publisher-fin"],
+      "evaluators": ["d21-publish-done-before-request-fin"],
+      "rationale": "The publisher obligation holds for Established subscriptions initiated through either PUBLISH or SUBSCRIBE. Inspect the same request-stream direction for PUBLISH_DONE before graceful FIN; the clause does not require PUBLISH_DONE for a never-established rejected request or turn a reset into a FIN."
+    },
+    {
+      "id": "D21-6-4-2-2-SHOULD-159", "strength": "Should",
+      "source": {"section": "6.4.2.2", "first_line": 2310, "last_line": 2313, "occurrence": 1, "clause": 1},
+      "actor": "requesting endpoint", "summary": "After the responder sends its response, any subsequent required messages and FIN to signal completion, send FIN on the requester's direction if it has not already done so.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-originated-request-responder-fin"],
+      "evaluators": ["d21-requester-fin-after-responder-completion"],
+      "rationale": "For a completed publisher-originated request, the runner supplies the valid terminal responder messages and FIN, then observes reciprocal graceful closure in a bounded run. The draft gives no numeric latency bound; an observation deadline records inconclusive non-completion rather than inventing an exact timing requirement."
+    },
+    {
+      "id": "D21-6-4-2-2-SHOULD-160", "strength": "Should",
+      "source": {"section": "6.4.2.2", "first_line": 2315, "last_line": 2317, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Send FIN promptly after a message when nothing further will be sent on that direction and no response to a future REQUEST_UPDATE will be needed.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The peer cannot establish the endpoint's future-message intentions, and promptly has no specified deadline. The concrete response-before-FIN and PUBLISH_DONE-before-FIN wire rules remain independently testable."
+    },
+    {
+      "id": "D21-6-4-2-2-MAY-161", "strength": "May",
+      "source": {"section": "6.4.2.2", "first_line": 2318, "last_line": 2319, "occurrence": 1, "clause": 1},
+      "actor": "requesting endpoint", "summary": "A requester, except a sender of PUBLISH, may send FIN immediately after a message if it will not send REQUEST_UPDATE.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publish-namespace-requester-immediate-fin"],
+      "evaluators": ["d21-non-publish-requester-immediate-fin-capability"],
+      "rationale": "A contribution publisher can originate PUBLISH_NAMESPACE, so the permission is applicable even though PUBLISH itself is excluded. With an update-free driven request, observe FIN immediately after the request on that direction; the stream remains open in the responder's direction and the FIN does not cancel the request."
+    },
+    {
+      "id": "D21-6-4-2-3-MAY-162", "strength": "May",
+      "source": {"section": "6.4.2.3", "first_line": 2323, "last_line": 2331, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Optionally cancel an opened request, as either requester or responder, using RESET_STREAM for its sending direction when that direction is still open.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-cancels-open-request"],
+      "evaluators": ["d21-cancel-request-reset-open-send-direction"],
+      "rationale": "Cancellation is optional, but its transport mechanism is explicit. A driven publisher withdrawal or rejection can expose RESET_STREAM on the still-open send direction; the separate receive direction requires its own action and FIN is not a cancellation substitute."
+    },
+    {
+      "id": "D21-6-4-2-3-MAY-163", "strength": "May",
+      "source": {"section": "6.4.2.3", "first_line": 2323, "last_line": 2331, "occurrence": 1, "clause": 2},
+      "actor": "endpoint", "summary": "Optionally cancel an opened request using STOP_SENDING for its receiving direction when that direction is still open, including when the endpoint has already sent FIN on its sending direction.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-cancels-open-request", "d21-publisher-cancels-after-own-fin"],
+      "evaluators": ["d21-cancel-request-stop-open-receive-direction"],
+      "rationale": "A requester or responder can cancel; STOP_SENDING independently terminates the receive direction. A prior local FIN cannot cancel the still-open remote direction, so include a cancellation-after-FIN scenario rather than treating half-closure as full cancellation."
+    },
+    {
+      "id": "D21-6-4-2-3-SHOULD-164", "strength": "Should",
+      "source": {"section": "6.4.2.3", "first_line": 2334, "last_line": 2334, "occurrence": 1, "clause": 1},
+      "actor": "rejecting endpoint", "summary": "When rejecting a request without any application processing, send REQUEST_ERROR.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-unprocessed-request-rejection"],
+      "evaluators": ["d21-unprocessed-rejection-request-error"],
+      "rationale": "Under a declared pre-application rejection condition, such as a configured unsupported request, observe the publisher's error response. The scenario must establish that condition independently; the wire response alone cannot prove whether application processing occurred. The clause does not prescribe one universal error code."
+    },
+    {
+      "id": "D21-6-4-2-3-SHOULD-165", "strength": "Should",
+      "source": {"section": "6.4.2.3", "first_line": 2334, "last_line": 2334, "occurrence": 1, "clause": 2},
+      "actor": "rejecting endpoint", "summary": "When rejecting a request without any application processing, gracefully close its sending direction with FIN after REQUEST_ERROR.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-unprocessed-request-rejection"],
+      "evaluators": ["d21-unprocessed-rejection-fin"],
+      "rationale": "The error response and FIN are independently observable requirements under the same declared rejection precondition. Section 6.4.2.2 requires the response before FIN; bidirectional directions close independently, so this does not require an endpoint to send FIN for its peer."
+    },
+    {
+      "id": "D21-6-5-MUST-NOT-166", "strength": "MustNot",
+      "source": {"section": "6.5", "first_line": 2346, "last_line": 2347, "occurrence": 1, "clause": 1},
+      "actor": "publisher application", "summary": "Do not publish application Tracks whose Track Namespace first field is .session.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-application-track-publication-under-session"],
+      "evaluators": ["d21-no-application-track-publication-under-session"],
+      "rationale": "A driven application fixture identifies its attempted Track publication so the runner can detect forbidden PUBLISH or resulting Track delivery. Session-level Tracks managed by the MOQT implementation for an extension are distinct and must not be rejected merely because their first field is .session."
+    },
+    {
+      "id": "D21-6-5-MUST-NOT-167", "strength": "MustNot",
+      "source": {"section": "6.5", "first_line": 2346, "last_line": 2347, "occurrence": 1, "clause": 2},
+      "actor": "publisher application", "summary": "Do not publish application namespaces whose first field is .session.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-application-namespace-publication-under-session"],
+      "evaluators": ["d21-no-application-namespace-publication-under-session"],
+      "rationale": "Namespace publication is independently observable from Track publication when the driven application tries to advertise a known namespace. The restriction targets the first namespace field and the application actor, preserving MOQT-managed extension namespaces."
+    },
+    {
+      "id": "D21-6-5-MUST-NOT-168", "strength": "MustNot",
+      "source": {"section": "6.5", "first_line": 2347, "last_line": 2348, "occurrence": 1, "clause": 1},
+      "actor": "relay", "summary": "Do not forward requests for session-level Tracks to other sessions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "This is a cross-session forwarding prohibition on relays. The contribution-publisher harness does not serve downstream subscribers or test relay forwarding."
+    },
+    {
+      "id": "D21-6-5-MUST-NOT-169", "strength": "MustNot",
+      "source": {"section": "6.5", "first_line": 2347, "last_line": 2348, "occurrence": 1, "clause": 2},
+      "actor": "relay", "summary": "Do not forward requests for session-level namespaces to other sessions.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "Namespace request forwarding is independently prohibited but remains relay-only. It is not a ban on a publisher processing session-level requests locally."
+    },
+    {
+      "id": "D21-6-5-MUST-170", "strength": "Must",
+      "source": {"section": "6.5", "first_line": 2359, "last_line": 2360, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Reject with DOES_NOT_EXIST a request whose Track Namespace first field is .session and whose Track Name is empty.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-session-namespace-empty-track-request"],
+      "evaluators": ["d21-session-empty-track-does-not-exist"],
+      "rationale": "Send a Track request with the reserved first field and an empty Track Name, including a multi-field namespace case, and observe the defined rejection. The normative sentence tests the first field, rather than only an exact one-field .session tuple."
+    },
+    {
+      "id": "D21-6-5-MUST-171", "strength": "Must",
+      "source": {"section": "6.5", "first_line": 2363, "last_line": 2364, "occurrence": 1, "clause": 1},
+      "actor": "receiving endpoint", "summary": "Reject a request for an unrecognized session-level Track with REQUEST_ERROR using DOES_NOT_EXIST.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-session-namespace-unknown-track-request"],
+      "evaluators": ["d21-session-unknown-track-does-not-exist"],
+      "rationale": "Use a nonempty Track Name under .session that is unrecognized by the declared extension set and inspect the publisher endpoint's error. Section 16.10 defines registration of session-level names; no arbitrary extension Track is assumed supported. Application dispatch is classified separately."
+    },
+    {
+      "id": "D21-6-5-MUST-172", "strength": "Must",
+      "source": {"section": "6.5", "first_line": 2363, "last_line": 2364, "occurrence": 1, "clause": 2},
+      "actor": "receiving endpoint", "summary": "Reject a request for an unrecognized session-level namespace with REQUEST_ERROR using DOES_NOT_EXIST.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-session-namespace-unknown-namespace-request"],
+      "evaluators": ["d21-session-unknown-namespace-does-not-exist"],
+      "rationale": "A namespace request has a different target from a Track request; submit an unrecognized namespace beneath the reserved first field and observe the specified request error. The condition is unrecognized session-level names, not every unknown application namespace."
+    },
+    {
+      "id": "D21-6-5-MUST-173", "strength": "Must",
+      "source": {"section": "6.5", "first_line": 2363, "last_line": 2364, "occurrence": 1, "clause": 3},
+      "actor": "receiving endpoint", "summary": "Handle an unrecognized session-level Track request by rejecting it within MOQT rather than passing it to the Application.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The same normative clause also constrains internal dispatch: a wire REQUEST_ERROR cannot prove that no Application callback ran. Keep the local handling duty separate from the externally testable rejection instead of claiming the error establishes both."
+    },
+    {
+      "id": "D21-6-5-MUST-174", "strength": "Must",
+      "source": {"section": "6.5", "first_line": 2363, "last_line": 2364, "occurrence": 1, "clause": 4},
+      "actor": "receiving endpoint", "summary": "Handle an unrecognized session-level namespace request by rejecting it within MOQT rather than passing it to the Application.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "Namespace dispatch can differ from Track dispatch. This application-boundary prohibition is applicable to a publisher endpoint, but the runner cannot observe callbacks and does not equate a correct error response with proof of internal routing."
+    },
+    {
+      "id": "D21-6-6-MAY-175", "strength": "May",
+      "source": {"section": "6.6", "first_line": 2381, "last_line": 2385, "occurrence": 1, "clause": 1},
+      "actor": "endpoint", "summary": "Optionally treat a subscription- or request-specific error as a session error and close the entire session in selected circumstances, considering the impact on other outstanding subscriptions.",
+      "applicability": "Applicable", "testability": "NotTestable", "scenarios": [], "evaluators": [],
+      "rationale": "The publisher endpoint can choose this policy, but the circumstances and consideration of other subscriptions are unspecified internal decisions. A generic close does not establish why it happened and no deterministic error stimulus must select escalation under this permission."
+    },
+    {
+      "id": "D21-6-6-1-SHOULD-176", "strength": "Should",
+      "source": {"section": "6.6.1", "first_line": 2413, "last_line": 2415, "occurrence": 1, "clause": 1},
+      "actor": "GOAWAY sender", "summary": "After the timeout indicated by a session-level GOAWAY, close the session with GOAWAY_TIMEOUT if subscriptions or fetches remain open.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-publisher-goaway-timeout-with-open-subscription"],
+      "evaluators": ["d21-goaway-timeout-session-close"],
+      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2428 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
+    },
+    {
+      "id": "D21-6-6-1-SHOULD-177", "strength": "Should",
+      "source": {"section": "6.6.1", "first_line": 2417, "last_line": 2419, "occurrence": 1, "clause": 1},
+      "actor": "server acting as subscriber and relay", "summary": "When the server is a subscriber, send GOAWAY to downstream subscribers before unsubscribing from upstream publishers.",
+      "applicability": "NotApplicable", "testability": "NotApplicable", "scenarios": [], "evaluators": [],
+      "rationale": "The stated topology has downstream subscribers and upstream publishers, so this is a relay/server-subscriber migration ordering rule. It does not require an original contribution publisher to invent downstream subscriber sessions."
+    },
+    {
+      "id": "D21-6-6-1-SHOULD-178", "strength": "Should",
+      "source": {"section": "6.6.1", "first_line": 2421, "last_line": 2429, "occurrence": 1, "clause": 1},
+      "actor": "client endpoint", "summary": "After receiving GOAWAY, wait until no Established subscriptions remain before closing the session with NO_ERROR.",
+      "applicability": "Applicable", "testability": "Testable",
+      "scenarios": ["d21-client-publisher-goaway-subscription-drain"],
+      "evaluators": ["d21-goaway-client-drain-before-no-error-close"],
+      "rationale": "RECOMMENDED normalizes to Should. A client contribution publisher owns Established subscriptions as their publisher; send a control-stream GOAWAY and track subscription completion relative to its NO_ERROR close. The surrounding text allows delayed closure for more Objects and describes migration of subscriptions and published namespaces as ideal, not separate mandatory actions under this keyword. A sender's GOAWAY_TIMEOUT closure is a distinct outcome."
+    }
+  ]
+}
