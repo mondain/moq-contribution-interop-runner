@@ -203,9 +203,20 @@ TEST_F(Draft18CatalogPart05Test, FetchFirstObjectAndDatagramFlagsBelongToPublish
         }
     }
     EXPECT_EQ(at(5640).size(), 2u);
-    const auto knowledge = at(5674);
-    ASSERT_EQ(knowledge.size(), 1u);
-    EXPECT_EQ(knowledge.front()->testability, Testability::NotTestable);
+}
+
+TEST_F(Draft18CatalogPart05Test, FinCompleteFetchWithoutUnknownPortionsAvoidsRedundantNonexistentRangeMarkers) {
+    const auto range = at(5674);
+    ASSERT_EQ(range.size(), 1u);
+    EXPECT_EQ(range.front()->id, "D18-11-4-4-2-SHOULD-NOT-001");
+    EXPECT_EQ(range.front()->strength, Strength::ShouldNot);
+    EXPECT_EQ(range.front()->actor, "publisher");
+    EXPECT_EQ(range.front()->applicability, Applicability::Applicable);
+    EXPECT_EQ(range.front()->testability, Testability::Testable);
+    EXPECT_EQ(range.front()->scenarios,
+              std::vector<std::string>{"fetch-fin-complete-known-gap-without-unknown-portion"});
+    EXPECT_EQ(range.front()->evaluators,
+              std::vector<std::string>{"no-redundant-0x8c-in-fin-complete-fetch-without-unknown-portion"});
 }
 
 TEST_F(Draft18CatalogPart05Test, PaddingBytesAreObservableButMemoryDiscardAndSchedulingAreNot) {

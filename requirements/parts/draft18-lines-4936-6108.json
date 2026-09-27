@@ -1166,10 +1166,14 @@
       "actor": "publisher",
       "summary": "Use End of Non-Existent Range in FETCH only to separate unserialized Objects known not to exist from Objects with unknown status.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Flags 0x8C and 0x10C are observable, but the publisher's knowledge of every omitted Object's existence or unknown status is not. The boundary between actual Objects and End of Range indicators is defined here; receiver gaps alone cannot establish the permitted knowledge-based exception."
+      "testability": "Testable",
+      "scenarios": [
+        "fetch-fin-complete-known-gap-without-unknown-portion"
+      ],
+      "evaluators": [
+        "no-redundant-0x8c-in-fin-complete-fetch-without-unknown-portion"
+      ],
+      "rationale": "Use a controlled ascending FETCH with a known gap, a FIN-complete response and no 0x10C or unknown portion. Section 10.12.3 says ordinary gaps in a FIN-complete FETCH already indicate nonexistence, so an observed 0x8C in this case is redundant and does not split nonexistent from unknown portions as Section 11.4.4.2 recommends. The evaluator detects only that wire-observable counterexample; it does not establish the truth of private publisher knowledge, require adjacent range markers, or judge incomplete/reset responses by this rule."
     },
     {
       "id": "D18-11-5-MAY-001",
