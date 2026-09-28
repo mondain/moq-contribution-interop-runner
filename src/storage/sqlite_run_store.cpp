@@ -37,6 +37,12 @@ public:
             handle_ = nullptr;
             throw std::runtime_error("open SQLite run store: " + message);
         }
+        if (sqlite3_busy_timeout(handle_, 5'000) != SQLITE_OK) {
+            const std::string message = sqlite3_errmsg(handle_);
+            sqlite3_close(handle_);
+            handle_ = nullptr;
+            throw std::runtime_error("configure SQLite busy timeout: " + message);
+        }
     }
 
     ~Database() {
@@ -157,7 +163,8 @@ private:
 std::string text(sqlite3_stmt* statement, int column) {
     const auto* value = sqlite3_column_text(statement, column);
     if (value == nullptr) return {};
-    return reinterpret_cast<const char*>(value);
+    const auto size = sqlite3_column_bytes(statement, column);
+    return {reinterpret_cast<const char*>(value), static_cast<std::size_t>(size)};
 }
 
 std::optional<std::string> optional_text(sqlite3_stmt* statement, int column) {
@@ -311,6 +318,34 @@ public:
         return last_timestamp;
     }
 
+    std::int64_t creation_timestamp() {
+        Statement latest(database.get(), "SELECT MAX(created_at_unix_ns) FROM runs");
+        if (!latest.row()) {
+            throw std::runtime_error("allocate run timestamp: query returned no row");
+        }
+
+        const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+        auto candidate = std::max(now, last_timestamp);
+        if (sqlite3_column_type(latest.get(), 0) != SQLITE_NULL) {
+            const auto stored =
+                static_cast<std::int64_t>(sqlite3_column_int64(latest.get(), 0));
+            if (stored == std::numeric_limits<std::int64_t>::max()) {
+                throw std::runtime_error("allocate run timestamp: timestamp space exhausted");
+            }
+            candidate = std::max(candidate, stored + 1);
+        }
+        if (candidate <= last_timestamp) {
+            if (last_timestamp == std::numeric_limits<std::int64_t>::max()) {
+                throw std::runtime_error("allocate run timestamp: timestamp space exhausted");
+            }
+            candidate = last_timestamp + 1;
+        }
+        last_timestamp = candidate;
+        return candidate;
+    }
+
     static std::string run_id(std::int64_t created_at) {
         std::ostringstream stream;
         stream << "run-" << std::hex << std::setw(16) << std::setfill('0')
@@ -338,9 +373,9 @@ SqliteRunStore::~SqliteRunStore() = default;
 
 app::RunId SqliteRunStore::create_run(const app::RunConfig& config) {
     std::lock_guard lock(impl_->mutex);
-    const auto created_at = impl_->timestamp();
-    const auto id = Impl::run_id(created_at);
     Transaction transaction(impl_->database.get(), "create run");
+    const auto created_at = impl_->creation_timestamp();
+    const auto id = Impl::run_id(created_at);
 
     Statement insert_run(
         impl_->database.get(),

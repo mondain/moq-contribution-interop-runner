@@ -4,7 +4,9 @@
 #include <sqlite3.h>
 
 #include <chrono>
+#include <barrier>
 #include <filesystem>
+#include <future>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -36,9 +38,10 @@ private:
 
 app::BuildInfo sample_build() {
     return {
-        "0.1.0' ; DROP TABLE runs; --",
+        std::string{"0.1.0\0' ; DROP TABLE runs; --", 30},
         "abc,def|123",
-        {{"sqlite3", "3.46.0'"}, {"quiche", "rev,with|delimiters"}},
+        {{"sqlite3", "3.46.0'"},
+         {std::string{"quiche\0binary", 13}, std::string{"rev\0with|delimiters", 19}}},
     };
 }
 
@@ -47,7 +50,7 @@ app::RunConfig sample_config() {
         app::DraftVersion::Draft21,
         app::TransportKind::WebTransport,
         app::RunMode::Driven,
-        {"session/setup", "publisher's-object", "x,y|z"},
+        {"session/setup", std::string{"publisher\0object", 16}, "x,y|z"},
         12'345ms,
     };
 }
@@ -59,6 +62,10 @@ EvidenceEvent event(std::int64_t ordinal) {
     value.kind = "frame'received," + std::to_string(ordinal);
     value.detail = R"({"sql":"DELETE FROM evidence_events; --","ordinal":)" +
                    std::to_string(ordinal) + "}";
+    if (ordinal == 0) {
+        value.kind = std::string{"frame\0received", 14};
+        value.detail = std::string{"{\"binary\":\"a\0b\"}", 16};
+    }
     value.connection_id = "connection|" + std::to_string(ordinal);
     value.stream_id = "stream," + std::to_string(ordinal);
     value.request_id = "request'" + std::to_string(ordinal);
@@ -133,6 +140,50 @@ TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
     EXPECT_EQ(loaded.build.version, build.version);
     EXPECT_EQ(loaded.build.source_revision, build.source_revision);
     EXPECT_EQ(loaded.build.dependencies, build.dependencies);
+}
+
+TEST(RunStoreTest, AllocatesUniqueRunIdsAcrossStoresOpenedAtTheSameDatabaseState) {
+    TemporaryDatabase database;
+    app::RunId seed_id;
+    {
+        SqliteRunStore bootstrap(database.path(), sample_build());
+        seed_id = bootstrap.create_run(sample_config());
+    }
+
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    sqlite3_stmt* update = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(raw, "UPDATE runs SET created_at_unix_ns=? WHERE id=?", -1,
+                                 &update, nullptr),
+              SQLITE_OK);
+    const auto future =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            (std::chrono::system_clock::now() + std::chrono::hours(24)).time_since_epoch())
+            .count();
+    ASSERT_EQ(sqlite3_bind_int64(update, 1, future), SQLITE_OK);
+    ASSERT_EQ(sqlite3_bind_text(update, 2, seed_id.data(), static_cast<int>(seed_id.size()),
+                                SQLITE_TRANSIENT),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(update), SQLITE_DONE);
+    sqlite3_finalize(update);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+
+    SqliteRunStore first(database.path(), sample_build());
+    SqliteRunStore second(database.path(), sample_build());
+    std::barrier start(3);
+    auto create = [&start](SqliteRunStore& store) {
+        start.arrive_and_wait();
+        return store.create_run(sample_config());
+    };
+    auto first_result = std::async(std::launch::async, create, std::ref(first));
+    auto second_result = std::async(std::launch::async, create, std::ref(second));
+    start.arrive_and_wait();
+    const auto first_id = first_result.get();
+    const auto second_id = second_result.get();
+
+    EXPECT_NE(first_id, second_id);
+    EXPECT_EQ(first.load(first_id).id, first_id);
+    EXPECT_EQ(first.load(second_id).id, second_id);
 }
 
 TEST(RunStoreTest, AppendsEventsInCallerOrderAndPaginatesWithoutGaps) {
