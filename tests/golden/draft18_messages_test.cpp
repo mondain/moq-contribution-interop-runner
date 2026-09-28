@@ -34,6 +34,14 @@ const SetupMessage& require_setup(const MessageDecodeResult& result) {
     return std::get<SetupMessage>(message);
 }
 
+template <class T>
+const T& require_message(const MessageDecodeResult& result) {
+    EXPECT_TRUE(std::holds_alternative<Message>(result));
+    const auto& message = std::get<Message>(result);
+    EXPECT_TRUE(std::holds_alternative<T>(message));
+    return std::get<T>(message);
+}
+
 const ByteValue& require_bytes(const KeyValuePair& entry) {
     EXPECT_TRUE(std::holds_alternative<ByteValue>(entry.value));
     return std::get<ByteValue>(entry.value);
@@ -353,6 +361,395 @@ TEST(Draft18MessagesTest, EncodingFromDecodedSourceDoesNotAliasDestinationStorag
     ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
     expect_bytes(output.bytes(), bytes({0xaf, 0x00, 0x00, 0x03, 0x01, 0x01, 0xaa,
                                        0xaf, 0x00, 0x00, 0x03, 0x01, 0x01, 0xaa}));
+}
+
+TEST(Draft18RequestMessagesTest, DecodesAndEncodesEveryOpeningMessage) {
+    const std::vector<std::byte> subscribe =
+        bytes({0x03, 0x00, 0x09, 0x02, 0x01, 0x01, 'n', 0x01, 't',
+               0x01, 0x20, 0x07});
+    Cursor subscribe_input(subscribe);
+    const auto subscribe_result =
+        decode_message(StreamRole::Request, subscribe_input, {});
+    const auto& subscribe_message =
+        require_message<SubscribeMessage>(subscribe_result);
+    EXPECT_EQ(subscribe_message.request_id, 2u);
+    ASSERT_EQ(subscribe_message.track_namespace.fields.size(), 1u);
+    expect_bytes(subscribe_message.track_namespace.fields[0], bytes({'n'}));
+    expect_bytes(subscribe_message.track_name.bytes, bytes({'t'}));
+    ASSERT_EQ(subscribe_message.parameters.size(), 1u);
+    EXPECT_EQ(subscribe_message.parameters[0].type, 0x20u);
+
+    const std::vector<std::byte> publish =
+        bytes({0x1d, 0x00, 0x11, 0x03, 0x01, 0x01, 'n', 0x01, 't',
+               0x05, 0x00, 0x02, 0x09, 0x01, 0x02, 0xaa, 0xbb,
+               0xbf, 0xfd, 0x07});
+    Cursor publish_input(publish);
+    const auto publish_result = decode_message(StreamRole::Request, publish_input, {});
+    const auto& publish_message = require_message<PublishMessage>(publish_result);
+    EXPECT_EQ(publish_message.request_id, 3u);
+    EXPECT_EQ(publish_message.track_alias, 5u);
+    ASSERT_EQ(publish_message.track_properties.entries.size(), 3u);
+    EXPECT_EQ(publish_message.track_properties.entries[0].type, 2u);
+    EXPECT_EQ(publish_message.track_properties.entries[1].type, 3u);
+    EXPECT_EQ(publish_message.track_properties.entries[2].type, 0x4000u);
+    EXPECT_TRUE(is_mandatory_track_property(
+        publish_message.track_properties.entries[2]));
+
+    const std::vector<std::byte> track_status =
+        bytes({0x0d, 0x00, 0x07, 0x04, 0x01, 0x01, 'n', 0x01, 't', 0x00});
+    Cursor status_input(track_status);
+    EXPECT_EQ(require_message<TrackStatusMessage>(
+                  decode_message(StreamRole::Request, status_input, {}))
+                  .request_id,
+              4u);
+
+    const std::vector<std::byte> publish_namespace =
+        bytes({0x06, 0x00, 0x05, 0x05, 0x01, 0x01, 'n', 0x00});
+    Cursor publish_namespace_input(publish_namespace);
+    EXPECT_EQ(require_message<PublishNamespaceMessage>(decode_message(
+                  StreamRole::Request, publish_namespace_input, {}))
+                  .request_id,
+              5u);
+
+    const std::vector<std::byte> subscribe_namespace =
+        bytes({0x50, 0x00, 0x03, 0x06, 0x00, 0x00});
+    Cursor subscribe_namespace_input(subscribe_namespace);
+    EXPECT_TRUE(require_message<SubscribeNamespaceMessage>(decode_message(
+                    StreamRole::Request, subscribe_namespace_input, {}))
+                    .track_namespace_prefix.fields.empty());
+
+    const std::vector<std::byte> subscribe_tracks =
+        bytes({0x51, 0x00, 0x03, 0x07, 0x00, 0x00});
+    Cursor subscribe_tracks_input(subscribe_tracks);
+    EXPECT_TRUE(require_message<SubscribeTracksMessage>(decode_message(
+                    StreamRole::Request, subscribe_tracks_input, {}))
+                    .track_namespace_prefix.fields.empty());
+
+    for (const auto* result : {&subscribe_result, &publish_result}) {
+        ByteWriter output(64);
+        ASSERT_TRUE(encode_message(std::get<Message>(*result), output).has_value());
+        const auto& expected = result == &subscribe_result ? subscribe : publish;
+        expect_bytes(output.bytes(), expected);
+    }
+    for (const auto& encoded : {track_status, publish_namespace,
+                                subscribe_namespace, subscribe_tracks}) {
+        Cursor input(encoded);
+        const auto decoded = decode_message(StreamRole::Request, input, {});
+        ASSERT_TRUE(std::holds_alternative<Message>(decoded));
+        ByteWriter output(encoded.size());
+        ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+        expect_bytes(output.bytes(), encoded);
+    }
+}
+
+TEST(Draft18RequestMessagesTest, DecodesAndEncodesEveryFetchForm) {
+    const std::vector<std::vector<std::byte>> vectors{
+        bytes({0x16, 0x00, 0x0c, 0x08, 0x01, 0x01, 0x01, 'n',
+               0x01, 't', 0x01, 0x02, 0x03, 0x00, 0x00}),
+        bytes({0x16, 0x00, 0x05, 0x0a, 0x02, 0x02, 0x05, 0x00}),
+        bytes({0x16, 0x00, 0x05, 0x0c, 0x03, 0x02, 0x05, 0x00}),
+    };
+    for (std::size_t index = 0; index < vectors.size(); ++index) {
+        Cursor input(vectors[index]);
+        const auto decoded = decode_message(StreamRole::Request, input, {});
+        const auto& fetch = require_message<FetchMessage>(decoded);
+        EXPECT_EQ(fetch.request_id, 8u + index * 2u);
+        if (index == 0) {
+            const auto& standalone = std::get<StandaloneFetch>(fetch.fetch);
+            EXPECT_EQ(standalone.start, (Location{1, 2}));
+            EXPECT_EQ(standalone.end, (Location{3, 0}));
+        } else if (index == 1) {
+            const auto& joining = std::get<RelativeJoiningFetch>(fetch.fetch);
+            EXPECT_EQ(joining.joining_request_id, 2u);
+            EXPECT_EQ(joining.joining_start, 5u);
+        } else {
+            const auto& joining = std::get<AbsoluteJoiningFetch>(fetch.fetch);
+            EXPECT_EQ(joining.joining_request_id, 2u);
+            EXPECT_EQ(joining.joining_start, 5u);
+        }
+        ByteWriter output(vectors[index].size());
+        ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+        expect_bytes(output.bytes(), vectors[index]);
+    }
+}
+
+TEST(Draft18RequestMessagesTest, AcceptsNonMinimalFieldsAndEncodesCanonically) {
+    const auto encoded = bytes({0x03, 0x00, 0x08, 0x80, 0x02, 0x01, 0x01,
+                                'n', 0x01, 't', 0x00});
+    Cursor input(encoded);
+    const auto decoded = decode_message(StreamRole::Request, input, {});
+    EXPECT_EQ(require_message<SubscribeMessage>(decoded).request_id, 2u);
+    ByteWriter output(16);
+    ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+    expect_bytes(output.bytes(),
+                 bytes({0x03, 0x00, 0x07, 0x02, 0x01, 0x01, 'n',
+                        0x01, 't', 0x00}));
+}
+
+TEST(Draft18RequestMessagesTest, UsesExactParameterContextAndPropagatesAmbiguity) {
+    const std::vector<std::vector<std::byte>> illegal{
+        bytes({0x03, 0x00, 0x09, 0x02, 0x01, 0x01, 'n', 0x01, 't',
+               0x01, 0x08, 0x01}),
+        bytes({0x1d, 0x00, 0x0a, 0x03, 0x01, 0x01, 'n', 0x01, 't',
+               0x05, 0x01, 0x20, 0x01}),
+        bytes({0x16, 0x00, 0x0e, 0x04, 0x01, 0x01, 0x01, 'n', 0x01, 't',
+               0x01, 0x02, 0x03, 0x00, 0x01, 0x08, 0x01}),
+        bytes({0x0d, 0x00, 0x09, 0x04, 0x01, 0x01, 'n', 0x01, 't',
+               0x01, 0x20, 0x01}),
+        bytes({0x06, 0x00, 0x07, 0x05, 0x01, 0x01, 'n', 0x01, 0x10, 0x01}),
+        bytes({0x50, 0x00, 0x05, 0x06, 0x00, 0x01, 0x10, 0x01}),
+        bytes({0x51, 0x00, 0x05, 0x07, 0x00, 0x01, 0x20, 0x01}),
+    };
+    for (const auto& frame : illegal) {
+        Cursor input(frame, 200);
+        expect_error_code(decode_message(StreamRole::Request, input, {}),
+                          DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.offset(), 200u);
+    }
+
+    const auto ambiguous = bytes({0x03, 0x00, 0x08, 0x02, 0x01, 0x01, 'n',
+                                  0x01, 't', 0x01, 0x04});
+    Cursor ambiguity_input(ambiguous, 210);
+    const auto ambiguity =
+        decode_message(StreamRole::Request, ambiguity_input, {});
+    EXPECT_TRUE(std::holds_alternative<DraftAmbiguity>(ambiguity));
+    EXPECT_FALSE(std::holds_alternative<DecodeError>(ambiguity));
+    EXPECT_EQ(ambiguity_input.offset(), 210u);
+}
+
+TEST(Draft18RequestMessagesTest, RejectsInvalidFetchAndTrailingPayload) {
+    const std::vector<std::vector<std::byte>> invalid{
+        bytes({0x16, 0x00, 0x03, 0x02, 0x04, 0x00}),
+        bytes({0x16, 0x00, 0x0c, 0x02, 0x01, 0x01, 0x01, 'n',
+               0x01, 't', 0x03, 0x00, 0x02, 0x00, 0x00}),
+        bytes({0x03, 0x00, 0x08, 0x02, 0x01, 0x01, 'n', 0x01, 't',
+               0x00, 0xff}),
+    };
+    for (const auto& frame : invalid) {
+        Cursor input(frame, 220);
+        expect_error_code(decode_message(StreamRole::Request, input, {}),
+                          DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.offset(), 220u);
+    }
+}
+
+TEST(Draft18RequestMessagesTest, StandaloneFetchUsesLexicographicLocationOrder) {
+    struct Vector {
+        Location start;
+        Location end;
+        bool accepted;
+    };
+    const std::vector<Vector> vectors{
+        {{3, 4}, {3, 4}, true},
+        {{3, 4}, {3, 3}, false},
+        {{3, 4}, {2, 99}, false},
+        {{3, 4}, {4, 0}, true},
+        {{3, 1}, {3, 0}, false},
+        {{3, 0}, {3, 0}, true},
+    };
+    for (const auto& vector : vectors) {
+        const auto frame = bytes({0x16, 0x00, 0x0c, 0x02, 0x01, 0x01, 0x01,
+                                  'n', 0x01, 't',
+                                  static_cast<unsigned>(vector.start.group),
+                                  static_cast<unsigned>(vector.start.object),
+                                  static_cast<unsigned>(vector.end.group),
+                                  static_cast<unsigned>(vector.end.object), 0x00});
+        Cursor input(frame, 225);
+        const auto result = decode_message(StreamRole::Request, input, {});
+        EXPECT_EQ(std::holds_alternative<Message>(result), vector.accepted);
+        if (!vector.accepted) {
+            expect_error_code(result, DecodeErrorCode::ProtocolViolation);
+            EXPECT_EQ(input.offset(), 225u);
+        }
+    }
+}
+
+TEST(Draft18RequestMessagesTest, PublishPropertyDeltaResetsAfterParameters) {
+    const auto encoded = bytes({0x1d, 0x00, 0x0c, 0x03, 0x01, 0x01, 'n',
+                                0x01, 't', 0x05, 0x01, 0x08, 0x07,
+                                0x02, 0x09});
+    Cursor input(encoded);
+    const auto decoded = decode_message(StreamRole::Request, input, {});
+    const auto& publish = require_message<PublishMessage>(decoded);
+    ASSERT_EQ(publish.parameters.size(), 1u);
+    EXPECT_EQ(publish.parameters[0].type, 8u);
+    ASSERT_EQ(publish.track_properties.entries.size(), 1u);
+    EXPECT_EQ(publish.track_properties.entries[0].type, 2u);
+    ByteWriter output(encoded.size());
+    ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+    expect_bytes(output.bytes(), encoded);
+}
+
+TEST(Draft18RequestMessagesTest, BoundedInnerFailuresHaveExactPeerErrors) {
+    const auto truncated_namespace =
+        bytes({0x03, 0x00, 0x04, 0x02, 0x01, 0x02, 'n'});
+    Cursor namespace_input(truncated_namespace, 227);
+    expect_error_code(decode_message(StreamRole::Request, namespace_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(namespace_input.offset(), 227u);
+
+    const auto malformed_property =
+        bytes({0x1d, 0x00, 0x0b, 0x03, 0x01, 0x01, 'n', 0x01, 't',
+               0x05, 0x00, 0x01, 0x02, 0xaa});
+    Cursor property_input(malformed_property, 228);
+    expect_error_code(decode_message(StreamRole::Request, property_input, {}),
+                      DecodeErrorCode::KeyValueFormattingError);
+    EXPECT_EQ(property_input.offset(), 228u);
+}
+
+TEST(Draft18RequestMessagesTest, TrackPropertyKvpErrorsKeepDraftExactCodes) {
+    const auto delta_overflow = bytes({
+        0x1d, 0x00, 0x13, 0x03, 0x01, 0x01, 'n', 0x01, 't', 0x05, 0x00,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x01,
+    });
+    Cursor overflow_input(delta_overflow, 229);
+    expect_error_code(decode_message(StreamRole::Request, overflow_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(overflow_input.offset(), 229u);
+
+    const auto draft_oversize =
+        bytes({0x1d, 0x00, 0x0c, 0x03, 0x01, 0x01, 'n', 0x01, 't',
+               0x05, 0x00, 0x01, 0xc1, 0x00, 0x00});
+    Cursor draft_limit_input(draft_oversize, 230);
+    expect_error_code(decode_message(StreamRole::Request, draft_limit_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(draft_limit_input.offset(), 230u);
+
+    const auto configured_oversize =
+        bytes({0x1d, 0x00, 0x0d, 0x03, 0x01, 0x01, 'n', 0x01, 't',
+               0x05, 0x00, 0x01, 0x03, 0xaa, 0xbb, 0xcc});
+    Limits limits;
+    limits.maximum_odd_value_length = 2;
+    Cursor configured_limit_input(configured_oversize, 231);
+    expect_error_code(
+        decode_message(StreamRole::Request, configured_limit_input, limits),
+        DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(configured_limit_input.offset(), 231u);
+}
+
+TEST(Draft18RequestMessagesTest, RejectsEveryWrongPhysicalRoleBeforePayload) {
+    const std::vector<std::vector<std::byte>> headers{
+        bytes({0x03, 0xff, 0xff}), bytes({0x1d, 0xff, 0xff}),
+        bytes({0x16, 0xff, 0xff}), bytes({0x0d, 0xff, 0xff}),
+        bytes({0x06, 0xff, 0xff}), bytes({0x50, 0xff, 0xff}),
+        bytes({0x51, 0xff, 0xff}),
+    };
+    for (const auto& header : headers) {
+        Cursor input(header, 230);
+        expect_error_code(decode_message(StreamRole::Control, input, {}),
+                          DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.offset(), 230u);
+    }
+}
+
+TEST(Draft18RequestMessagesTest, DistinguishesUnsupportedFromPeerTypesEarly) {
+    const std::vector<std::uint64_t> pending{0x02, 0x04, 0x05, 0x07, 0x08,
+                                             0x0b, 0x0e, 0x0f, 0x18};
+    for (const auto type : pending) {
+        const auto header = bytes({static_cast<unsigned>(type), 0xff, 0xff});
+        Cursor input(header, 240);
+        const auto result = decode_message(StreamRole::Request, input, {});
+        ASSERT_TRUE(std::holds_alternative<UnsupportedMessage>(result));
+        EXPECT_EQ(std::get<UnsupportedMessage>(result).type, type);
+        EXPECT_EQ(input.offset(), 240u);
+
+        Cursor wrong_role(header, 245);
+        expect_error_code(decode_message(StreamRole::Control, wrong_role, {}),
+                          DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(wrong_role.offset(), 245u);
+    }
+
+    const auto goaway = bytes({0x10, 0xff, 0xff});
+    for (const auto role : {StreamRole::Control, StreamRole::Request}) {
+        Cursor input(goaway, 247);
+        const auto result = decode_message(role, input, {});
+        ASSERT_TRUE(std::holds_alternative<UnsupportedMessage>(result));
+        EXPECT_EQ(std::get<UnsupportedMessage>(result).type, 0x10u);
+        EXPECT_EQ(input.offset(), 247u);
+    }
+    const std::vector<std::vector<std::byte>> peer_errors{
+        bytes({0x01, 0xff, 0xff}), bytes({0x1e, 0xff, 0xff}),
+        bytes({0x7f, 0xff, 0xff}),
+    };
+    for (const auto& header : peer_errors) {
+        for (const auto role : {StreamRole::Control, StreamRole::Request}) {
+            Cursor input(header, 250);
+            expect_error_code(decode_message(role, input, {}),
+                              DecodeErrorCode::ProtocolViolation);
+            EXPECT_EQ(input.offset(), 250u);
+        }
+    }
+}
+
+TEST(Draft18RequestMessagesTest, EveryOpeningFrameTruncationIsAtomic) {
+    const std::vector<std::vector<std::byte>> frames{
+        bytes({0x03, 0x00, 0x07, 0x02, 0x01, 0x01, 'n', 0x01, 't', 0x00}),
+        bytes({0x1d, 0x00, 0x08, 0x03, 0x01, 0x01, 'n', 0x01, 't', 0x05, 0x00}),
+        bytes({0x16, 0x00, 0x05, 0x04, 0x02, 0x02, 0x05, 0x00}),
+        bytes({0x0d, 0x00, 0x07, 0x04, 0x01, 0x01, 'n', 0x01, 't', 0x00}),
+        bytes({0x06, 0x00, 0x05, 0x05, 0x01, 0x01, 'n', 0x00}),
+        bytes({0x50, 0x00, 0x03, 0x06, 0x00, 0x00}),
+        bytes({0x51, 0x00, 0x03, 0x07, 0x00, 0x00}),
+    };
+    for (const auto& frame : frames) {
+        for (std::size_t available = 0; available < frame.size(); ++available) {
+            Cursor input(std::span<const std::byte>(frame).first(available), 260);
+            EXPECT_TRUE(std::holds_alternative<NeedMore>(
+                decode_message(StreamRole::Request, input, {})))
+                << frame.size() << ' ' << available;
+            EXPECT_EQ(input.offset(), 260u);
+        }
+    }
+}
+
+TEST(Draft18RequestMessagesTest, FramingAndEncodingFailuresAreAtomic) {
+    const auto frame =
+        bytes({0x03, 0x00, 0x07, 0x02, 0x01, 0x01, 'n', 0x01, 't', 0x00});
+    auto concatenated = frame;
+    concatenated.insert(concatenated.end(), frame.begin(), frame.end());
+    Cursor input(concatenated);
+    const auto first = decode_message(StreamRole::Request, input, {});
+    ASSERT_TRUE(std::holds_alternative<Message>(first));
+    EXPECT_EQ(input.remaining(), frame.size());
+
+    ByteWriter output(frame.size());
+    ASSERT_TRUE(output.append_byte(std::byte{0xcc}));
+    const auto before = std::vector<std::byte>(output.bytes().begin(),
+                                               output.bytes().end());
+    EXPECT_FALSE(encode_message(std::get<Message>(first), output).has_value());
+    expect_bytes(output.bytes(), before);
+
+    auto too_long = frame;
+    too_long[2] = std::byte{0x08};
+    Cursor too_long_input(too_long, 270);
+    EXPECT_TRUE(std::holds_alternative<NeedMore>(
+        decode_message(StreamRole::Request, too_long_input, {})));
+    EXPECT_EQ(too_long_input.offset(), 270u);
+
+    auto too_short = frame;
+    too_short[2] = std::byte{0x06};
+    Cursor too_short_input(too_short, 280);
+    expect_error_code(decode_message(StreamRole::Request, too_short_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(too_short_input.offset(), 280u);
+
+    const SubscribeMessage invalid{
+        2, TrackNamespace{{bytes({'n'})}}, TrackName{bytes({'t'})},
+        Parameters{Parameter{0x08, VarIntParameterValue{1}}}};
+    const FetchMessage reversed{
+        4,
+        StandaloneFetch{TrackNamespace{{bytes({'n'})}}, TrackName{bytes({'t'})},
+                        Location{2, 0}, Location{1, 99}},
+        {}};
+    for (const auto& message : {Message{invalid}, Message{reversed}}) {
+        ByteWriter invalid_output(64);
+        ASSERT_TRUE(invalid_output.append_byte(std::byte{0xcc}));
+        const auto invalid_before = std::vector<std::byte>(
+            invalid_output.bytes().begin(), invalid_output.bytes().end());
+        const auto result = encode_message(message, invalid_output);
+        EXPECT_FALSE(result.has_value());
+        expect_bytes(invalid_output.bytes(), invalid_before);
+    }
 }
 
 template <class T>

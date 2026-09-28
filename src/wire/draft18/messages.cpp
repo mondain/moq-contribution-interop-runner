@@ -10,6 +10,13 @@ namespace moq::interop::wire::draft18 {
 namespace {
 
 constexpr std::uint64_t kSetupMessageType = 0x2f00;
+constexpr std::uint64_t kSubscribeMessageType = 0x03;
+constexpr std::uint64_t kPublishMessageType = 0x1d;
+constexpr std::uint64_t kFetchMessageType = 0x16;
+constexpr std::uint64_t kTrackStatusMessageType = 0x0d;
+constexpr std::uint64_t kPublishNamespaceMessageType = 0x06;
+constexpr std::uint64_t kSubscribeNamespaceMessageType = 0x50;
+constexpr std::uint64_t kSubscribeTracksMessageType = 0x51;
 constexpr std::size_t kMaximumMessagePayload = 65'535;
 constexpr std::size_t kMaximumFrameSize = kMaximumMessagePayload + 11;
 constexpr std::size_t kMaximumFullTrackName = 4'096;
@@ -151,6 +158,222 @@ bool context_is(ParameterContext context,
     return std::find(allowed.begin(), allowed.end(), context) != allowed.end();
 }
 
+bool is_opening_request_type(std::uint64_t type) {
+    return type == kSubscribeMessageType || type == kPublishMessageType ||
+           type == kFetchMessageType || type == kTrackStatusMessageType ||
+           type == kPublishNamespaceMessageType ||
+           type == kSubscribeNamespaceMessageType ||
+           type == kSubscribeTracksMessageType;
+}
+
+bool is_pending_request_only_type(std::uint64_t type) {
+    switch (type) {
+        case 0x02:
+        case 0x04:
+        case 0x05:
+        case 0x07:
+        case 0x08:
+        case 0x0b:
+        case 0x0e:
+        case 0x0f:
+        case 0x18:
+            return true;
+        default:
+            return false;
+    }
+}
+
+struct TrackOpeningFields {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    TrackName track_name;
+    Parameters parameters;
+};
+
+DraftDecodeResult<TrackOpeningFields> decode_track_opening_fields(
+    Cursor& input, ParameterContext context, const Limits& limits,
+    bool includes_alias, std::optional<std::uint64_t>& alias) {
+    Cursor working = input;
+    const auto request_id = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&request_id)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&request_id)) return *value;
+    const auto name_space = decode_track_namespace(working, limits);
+    if (const auto* value = std::get_if<NeedMore>(&name_space)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&name_space)) return *value;
+    const auto decoded_namespace = std::get<TrackNamespace>(name_space);
+    const auto name = decode_track_name(working, decoded_namespace, limits);
+    if (const auto* value = std::get_if<NeedMore>(&name)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&name)) return *value;
+    if (includes_alias) {
+        const auto decoded_alias = read_vi64(working);
+        if (const auto* value = std::get_if<NeedMore>(&decoded_alias)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&decoded_alias)) return *value;
+        alias = std::get<std::uint64_t>(decoded_alias);
+    }
+    const auto count = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&count)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&count)) return *value;
+    const auto parameters = decode_parameters(
+        working, std::get<std::uint64_t>(count), context, limits);
+    if (const auto* value = std::get_if<NeedMore>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DraftAmbiguity>(&parameters)) return *value;
+    input = working;
+    return TrackOpeningFields{std::get<std::uint64_t>(request_id),
+                              decoded_namespace, std::get<TrackName>(name),
+                              std::get<Parameters>(parameters)};
+}
+
+struct NamespaceOpeningFields {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    Parameters parameters;
+};
+
+DraftDecodeResult<NamespaceOpeningFields> decode_namespace_opening_fields(
+    Cursor& input, ParameterContext context, const Limits& limits) {
+    Cursor working = input;
+    const auto request_id = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&request_id)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&request_id)) return *value;
+    const auto name_space = decode_track_namespace(working, limits);
+    if (const auto* value = std::get_if<NeedMore>(&name_space)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&name_space)) return *value;
+    const auto count = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&count)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&count)) return *value;
+    const auto parameters = decode_parameters(
+        working, std::get<std::uint64_t>(count), context, limits);
+    if (const auto* value = std::get_if<NeedMore>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DraftAmbiguity>(&parameters)) return *value;
+    input = working;
+    return NamespaceOpeningFields{std::get<std::uint64_t>(request_id),
+                                  std::get<TrackNamespace>(name_space),
+                                  std::get<Parameters>(parameters)};
+}
+
+DraftDecodeResult<FetchMessage> decode_fetch_payload(Cursor& input,
+                                                     const Limits& limits) {
+    Cursor working = input;
+    const auto request_id = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&request_id)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&request_id)) return *value;
+    const auto fetch_type = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&fetch_type)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&fetch_type)) return *value;
+    const auto type = std::get<std::uint64_t>(fetch_type);
+    Fetch fetch;
+    if (type == 1) {
+        const auto name_space = decode_track_namespace(working, limits);
+        if (const auto* value = std::get_if<NeedMore>(&name_space)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&name_space)) return *value;
+        const auto decoded_namespace = std::get<TrackNamespace>(name_space);
+        const auto name = decode_track_name(working, decoded_namespace, limits);
+        if (const auto* value = std::get_if<NeedMore>(&name)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&name)) return *value;
+        const auto start = decode_location(working);
+        if (const auto* value = std::get_if<NeedMore>(&start)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&start)) return *value;
+        const auto end = decode_location(working);
+        if (const auto* value = std::get_if<NeedMore>(&end)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&end)) return *value;
+        const auto start_value = std::get<Location>(start);
+        const auto end_value = std::get<Location>(end);
+        if (end_value.group < start_value.group ||
+            (end_value.group == start_value.group &&
+             end_value.object < start_value.object)) {
+            return protocol_violation(input.offset(),
+                                      "standalone FETCH range is reversed");
+        }
+        fetch = StandaloneFetch{decoded_namespace, std::get<TrackName>(name),
+                                start_value, end_value};
+    } else if (type == 2 || type == 3) {
+        const auto joining_request_id = read_vi64(working);
+        if (const auto* value = std::get_if<NeedMore>(&joining_request_id)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&joining_request_id)) return *value;
+        const auto joining_start = read_vi64(working);
+        if (const auto* value = std::get_if<NeedMore>(&joining_start)) return *value;
+        if (const auto* value = std::get_if<DecodeError>(&joining_start)) return *value;
+        if (type == 2) {
+            fetch = RelativeJoiningFetch{
+                std::get<std::uint64_t>(joining_request_id),
+                std::get<std::uint64_t>(joining_start)};
+        } else {
+            fetch = AbsoluteJoiningFetch{
+                std::get<std::uint64_t>(joining_request_id),
+                std::get<std::uint64_t>(joining_start)};
+        }
+    } else {
+        return protocol_violation(input.offset(), "unknown FETCH type");
+    }
+    const auto count = read_vi64(working);
+    if (const auto* value = std::get_if<NeedMore>(&count)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&count)) return *value;
+    const auto parameters = decode_parameters(
+        working, std::get<std::uint64_t>(count), ParameterContext::Fetch, limits);
+    if (const auto* value = std::get_if<NeedMore>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DecodeError>(&parameters)) return *value;
+    if (const auto* value = std::get_if<DraftAmbiguity>(&parameters)) return *value;
+    input = working;
+    return FetchMessage{std::get<std::uint64_t>(request_id), std::move(fetch),
+                        std::get<Parameters>(parameters)};
+}
+
+EncodeResult encode_track_opening_fields(std::uint64_t request_id,
+                                         const TrackNamespace& name_space,
+                                         const TrackName& name,
+                                         std::optional<std::uint64_t> alias,
+                                         const Parameters& parameters,
+                                         ParameterContext context,
+                                         ByteWriter& output) {
+    if (!write_vi64(request_id, output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "request ID exceeds payload capacity");
+    }
+    auto result = encode_track_namespace(name_space, output);
+    if (!result.has_value()) return result;
+    result = encode_track_name(name, name_space, output);
+    if (!result.has_value()) return result;
+    if (alias && !write_vi64(*alias, output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "track alias exceeds payload capacity");
+    }
+    if (!write_vi64(parameters.size(), output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "parameter count exceeds payload capacity");
+    }
+    return encode_parameters(parameters, context, output);
+}
+
+EncodeResult encode_namespace_opening_fields(
+    std::uint64_t request_id, const TrackNamespace& name_space,
+    const Parameters& parameters, ParameterContext context, ByteWriter& output) {
+    if (!write_vi64(request_id, output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "request ID exceeds payload capacity");
+    }
+    auto result = encode_track_namespace(name_space, output);
+    if (!result.has_value()) return result;
+    if (!write_vi64(parameters.size(), output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "parameter count exceeds payload capacity");
+    }
+    return encode_parameters(parameters, context, output);
+}
+
+template <class T>
+std::optional<MessageDecodeResult> bounded_message_failure(
+    const DraftDecodeResult<T>& result) {
+    if (const auto* value = std::get_if<NeedMore>(&result)) {
+        return protocol_violation(value->offset,
+                                  "message field exceeds framed payload");
+    }
+    if (const auto* value = std::get_if<DecodeError>(&result)) return *value;
+    if (const auto* value = std::get_if<DraftAmbiguity>(&result)) return *value;
+    return std::nullopt;
+}
+
 }  // namespace
 
 EncodeResult::EncodeResult(State state, EncodeError error,
@@ -204,7 +427,8 @@ KeyValueDecodeResult decode_key_value_pairs(Cursor& input,
         if (const auto* error = std::get_if<DecodeError>(&delta_result)) return *error;
         const auto delta = std::get<std::uint64_t>(delta_result);
         if (delta > std::numeric_limits<std::uint64_t>::max() - previous_type) {
-            return invalid(entry_offset, "KVP resolved type overflows uint64");
+            return protocol_violation(entry_offset,
+                                      "KVP resolved type overflows uint64");
         }
         const auto type = previous_type + delta;
 
@@ -230,9 +454,11 @@ KeyValueDecodeResult decode_key_value_pairs(Cursor& input,
             }
             if (const auto* error = std::get_if<DecodeError>(&length_result)) return *error;
             const auto declared = std::get<std::uint64_t>(length_result);
-            const auto configured_limit =
-                std::min(limits.maximum_odd_value_length, kMaximumMessagePayload);
-            if (declared > configured_limit) {
+            if (declared > kMaximumMessagePayload) {
+                return protocol_violation(
+                    entry_offset, "KVP byte value exceeds draft limit");
+            }
+            if (declared > limits.maximum_odd_value_length) {
                 return DecodeError{DecodeErrorCode::LengthExceedsLimit, entry_offset,
                                    "KVP byte value exceeds configured limit"};
             }
@@ -276,7 +502,13 @@ TrackPropertiesDecodeResult decode_track_properties(Cursor& input,
         return TrackProperties{std::move(*value)};
     }
     if (const auto* need = std::get_if<NeedMore>(&result)) return *need;
-    if (const auto* error = std::get_if<DecodeError>(&result)) return *error;
+    if (const auto* error = std::get_if<DecodeError>(&result)) {
+        if (error->code == DecodeErrorCode::InvalidValue) {
+            return key_value_formatting_error(
+                error->offset, "track property KVP is malformed");
+        }
+        return *error;
+    }
     return std::get<DraftAmbiguity>(result);
 }
 
@@ -887,11 +1119,25 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
     if (const auto* error = std::get_if<DecodeError>(&type_result)) return *error;
 
     const auto type = std::get<std::uint64_t>(type_result);
-    if (type != kSetupMessageType) {
-        return invalid(input.offset(), "unknown, reserved, or removed message type");
+    if (type == kSetupMessageType && role != StreamRole::Control) {
+        return protocol_violation(input.offset(),
+                                  "SETUP is not valid on a request stream");
     }
-    if (role != StreamRole::Control) {
-        return invalid(input.offset(), "SETUP is not valid on a request stream");
+    if (is_opening_request_type(type) && role != StreamRole::Request) {
+        return protocol_violation(input.offset(),
+                                  "request message is not valid on control stream");
+    }
+    if (is_pending_request_only_type(type)) {
+        if (role != StreamRole::Request) {
+            return protocol_violation(
+                input.offset(), "request message is not valid on control stream");
+        }
+        return UnsupportedMessage{type, role};
+    }
+    if (type == 0x10) return UnsupportedMessage{type, role};
+    if (type != kSetupMessageType && !is_opening_request_type(type)) {
+        return protocol_violation(
+            input.offset(), "unknown, reserved, or removed message type");
     }
 
     const auto length_result = read_bytes(working, 2);
@@ -909,33 +1155,209 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
 
     const auto payload = std::get<std::span<const std::byte>>(payload_result);
     Cursor payload_cursor(payload, payload_offset);
-    const auto options_result =
-        decode_key_value_pairs(payload_cursor, payload.size(), limits);
-    if (const auto* need = std::get_if<NeedMore>(&options_result)) {
-        return invalid(need->offset, "SETUP option exceeds framed payload");
+    Message message;
+    if (type == kSetupMessageType) {
+        const auto options_result =
+            decode_key_value_pairs(payload_cursor, payload.size(), limits);
+        if (const auto* need = std::get_if<NeedMore>(&options_result)) {
+            return invalid(need->offset, "SETUP option exceeds framed payload");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&options_result)) {
+            return *error;
+        }
+        if (const auto* ambiguity = std::get_if<DraftAmbiguity>(&options_result)) {
+            return *ambiguity;
+        }
+        auto options = std::get<KeyValuePairs>(options_result);
+        if (const auto duplicate = validate_setup_options(options, payload_offset)) {
+            return *duplicate;
+        }
+        message = SetupMessage{std::move(options)};
+    } else if (type == kSubscribeMessageType ||
+               type == kTrackStatusMessageType ||
+               type == kPublishMessageType) {
+        std::optional<std::uint64_t> alias;
+        const auto context = type == kSubscribeMessageType
+                                 ? ParameterContext::Subscribe
+                             : type == kTrackStatusMessageType
+                                 ? ParameterContext::TrackStatus
+                                 : ParameterContext::Publish;
+        const auto fields = decode_track_opening_fields(
+            payload_cursor, context, limits, type == kPublishMessageType, alias);
+        if (const auto failure = bounded_message_failure(fields)) return *failure;
+        auto decoded = std::get<TrackOpeningFields>(fields);
+        if (type == kSubscribeMessageType) {
+            message = SubscribeMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.track_name), std::move(decoded.parameters)};
+        } else if (type == kTrackStatusMessageType) {
+            message = TrackStatusMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.track_name), std::move(decoded.parameters)};
+        } else {
+            const auto properties = decode_track_properties(
+                payload_cursor, payload_cursor.remaining(), limits);
+            if (const auto failure = bounded_message_failure(properties)) {
+                return *failure;
+            }
+            message = PublishMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.track_name), *alias,
+                std::move(decoded.parameters),
+                std::get<TrackProperties>(properties)};
+        }
+    } else if (type == kFetchMessageType) {
+        const auto fetch = decode_fetch_payload(payload_cursor, limits);
+        if (const auto failure = bounded_message_failure(fetch)) return *failure;
+        message = std::get<FetchMessage>(fetch);
+    } else {
+        ParameterContext context = ParameterContext::PublishNamespace;
+        if (type == kSubscribeNamespaceMessageType) {
+            context = ParameterContext::SubscribeNamespace;
+        } else if (type == kSubscribeTracksMessageType) {
+            context = ParameterContext::SubscribeTracks;
+        }
+        const auto fields =
+            decode_namespace_opening_fields(payload_cursor, context, limits);
+        if (const auto failure = bounded_message_failure(fields)) return *failure;
+        auto decoded = std::get<NamespaceOpeningFields>(fields);
+        if (type == kPublishNamespaceMessageType) {
+            message = PublishNamespaceMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.parameters)};
+        } else if (type == kSubscribeNamespaceMessageType) {
+            message = SubscribeNamespaceMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.parameters)};
+        } else {
+            message = SubscribeTracksMessage{
+                decoded.request_id, std::move(decoded.track_namespace),
+                std::move(decoded.parameters)};
+        }
     }
-    if (const auto* error = std::get_if<DecodeError>(&options_result)) return *error;
-    if (const auto* ambiguity = std::get_if<DraftAmbiguity>(&options_result)) {
-        return *ambiguity;
-    }
-
-    auto options = std::get<KeyValuePairs>(options_result);
-    if (const auto duplicate = validate_setup_options(options, payload_offset)) {
-        return *duplicate;
+    if (payload_cursor.remaining() != 0) {
+        return protocol_violation(payload_cursor.offset(),
+                                  "message has trailing payload bytes");
     }
     input = working;
-    return Message{SetupMessage{std::move(options)}};
+    return message;
 }
 
 EncodeResult encode_message(const Message& message, ByteWriter& output) {
-    const auto& setup = std::get<SetupMessage>(message);
-    if (const auto duplicate = validate_setup_options(setup.options, 0)) {
-        return EncodeResult::failure(EncodeErrorCode::InvalidValue,
-                                     duplicate->detail);
-    }
-
     ByteWriter payload(kMaximumMessagePayload);
-    const auto payload_result = encode_key_value_pairs_to(setup.options, payload);
+    std::uint64_t type = 0;
+    EncodeResult payload_result = EncodeResult::success();
+    if (const auto* setup = std::get_if<SetupMessage>(&message)) {
+        type = kSetupMessageType;
+        if (const auto duplicate = validate_setup_options(setup->options, 0)) {
+            return EncodeResult::failure(EncodeErrorCode::InvalidValue,
+                                         duplicate->detail);
+        }
+        payload_result = encode_key_value_pairs_to(setup->options, payload);
+    } else if (const auto* subscribe = std::get_if<SubscribeMessage>(&message)) {
+        type = kSubscribeMessageType;
+        payload_result = encode_track_opening_fields(
+            subscribe->request_id, subscribe->track_namespace,
+            subscribe->track_name, std::nullopt, subscribe->parameters,
+            ParameterContext::Subscribe, payload);
+    } else if (const auto* publish = std::get_if<PublishMessage>(&message)) {
+        type = kPublishMessageType;
+        payload_result = encode_track_opening_fields(
+            publish->request_id, publish->track_namespace, publish->track_name,
+            publish->track_alias, publish->parameters, ParameterContext::Publish,
+            payload);
+        if (payload_result.has_value()) {
+            payload_result =
+                encode_key_value_pairs(publish->track_properties.entries, payload);
+        }
+    } else if (const auto* fetch = std::get_if<FetchMessage>(&message)) {
+        type = kFetchMessageType;
+        if (!write_vi64(fetch->request_id, payload)) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "FETCH request ID exceeds capacity");
+        }
+        if (const auto* standalone = std::get_if<StandaloneFetch>(&fetch->fetch)) {
+            if (standalone->end.group < standalone->start.group ||
+                (standalone->end.group == standalone->start.group &&
+                 standalone->end.object < standalone->start.object)) {
+                return EncodeResult::failure(EncodeErrorCode::InvalidValue,
+                                             "standalone FETCH range is reversed");
+            }
+            if (!write_vi64(1, payload)) {
+                return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                             "FETCH type exceeds capacity");
+            }
+            payload_result = encode_track_namespace(standalone->track_namespace,
+                                                    payload);
+            if (payload_result.has_value()) {
+                payload_result = encode_track_name(
+                    standalone->track_name, standalone->track_namespace, payload);
+            }
+            if (payload_result.has_value()) {
+                payload_result = encode_location(standalone->start, payload);
+            }
+            if (payload_result.has_value()) {
+                payload_result = encode_location(standalone->end, payload);
+            }
+        } else {
+            const bool relative =
+                std::holds_alternative<RelativeJoiningFetch>(fetch->fetch);
+            if (!write_vi64(relative ? 2u : 3u, payload)) {
+                return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                             "FETCH type exceeds capacity");
+            }
+            const auto joining_request_id = relative
+                ? std::get<RelativeJoiningFetch>(fetch->fetch).joining_request_id
+                : std::get<AbsoluteJoiningFetch>(fetch->fetch).joining_request_id;
+            const auto joining_start = relative
+                ? std::get<RelativeJoiningFetch>(fetch->fetch).joining_start
+                : std::get<AbsoluteJoiningFetch>(fetch->fetch).joining_start;
+            if (!write_vi64(joining_request_id, payload) ||
+                !write_vi64(joining_start, payload)) {
+                return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                             "joining FETCH exceeds capacity");
+            }
+        }
+        if (payload_result.has_value() &&
+            !write_vi64(fetch->parameters.size(), payload)) {
+            payload_result = EncodeResult::failure(
+                EncodeErrorCode::OutputCapacity,
+                "FETCH parameter count exceeds capacity");
+        }
+        if (payload_result.has_value()) {
+            payload_result = encode_parameters(fetch->parameters,
+                                               ParameterContext::Fetch, payload);
+        }
+    } else if (const auto* status = std::get_if<TrackStatusMessage>(&message)) {
+        type = kTrackStatusMessageType;
+        payload_result = encode_track_opening_fields(
+            status->request_id, status->track_namespace, status->track_name,
+            std::nullopt, status->parameters, ParameterContext::TrackStatus,
+            payload);
+    } else if (const auto* publish_namespace =
+                   std::get_if<PublishNamespaceMessage>(&message)) {
+        type = kPublishNamespaceMessageType;
+        payload_result = encode_namespace_opening_fields(
+            publish_namespace->request_id, publish_namespace->track_namespace,
+            publish_namespace->parameters, ParameterContext::PublishNamespace,
+            payload);
+    } else if (const auto* subscribe_namespace =
+                   std::get_if<SubscribeNamespaceMessage>(&message)) {
+        type = kSubscribeNamespaceMessageType;
+        payload_result = encode_namespace_opening_fields(
+            subscribe_namespace->request_id,
+            subscribe_namespace->track_namespace_prefix,
+            subscribe_namespace->parameters,
+            ParameterContext::SubscribeNamespace, payload);
+    } else {
+        const auto& subscribe_tracks = std::get<SubscribeTracksMessage>(message);
+        type = kSubscribeTracksMessageType;
+        payload_result = encode_namespace_opening_fields(
+            subscribe_tracks.request_id,
+            subscribe_tracks.track_namespace_prefix,
+            subscribe_tracks.parameters, ParameterContext::SubscribeTracks,
+            payload);
+    }
     if (!payload_result.has_value()) return payload_result;
     if (payload.size() > kMaximumMessagePayload) {
         return EncodeResult::failure(EncodeErrorCode::PayloadTooLarge,
@@ -943,7 +1365,7 @@ EncodeResult encode_message(const Message& message, ByteWriter& output) {
     }
 
     ByteWriter frame(kMaximumFrameSize);
-    if (!write_vi64(kSetupMessageType, frame)) {
+    if (!write_vi64(type, frame)) {
         return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
                                      "message type exceeds frame capacity");
     }

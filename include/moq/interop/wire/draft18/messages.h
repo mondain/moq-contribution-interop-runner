@@ -52,6 +52,8 @@ struct TrackProperties {
 struct Location {
     std::uint64_t group;
     std::uint64_t object;
+
+    bool operator==(const Location&) const = default;
 };
 
 struct TrackNamespace {
@@ -142,12 +144,90 @@ struct SetupMessage {
     KeyValuePairs options;
 };
 
-using Message = std::variant<SetupMessage>;
+struct SubscribeMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    TrackName track_name;
+    Parameters parameters;
+};
+
+struct PublishMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    TrackName track_name;
+    std::uint64_t track_alias;
+    Parameters parameters;
+    TrackProperties track_properties;
+};
+
+struct StandaloneFetch {
+    TrackNamespace track_namespace;
+    TrackName track_name;
+    Location start;
+    Location end;
+};
+
+struct RelativeJoiningFetch {
+    std::uint64_t joining_request_id;
+    std::uint64_t joining_start;
+};
+
+struct AbsoluteJoiningFetch {
+    std::uint64_t joining_request_id;
+    std::uint64_t joining_start;
+};
+
+using Fetch = std::variant<StandaloneFetch, RelativeJoiningFetch,
+                           AbsoluteJoiningFetch>;
+
+struct FetchMessage {
+    std::uint64_t request_id;
+    Fetch fetch;
+    Parameters parameters;
+};
+
+struct TrackStatusMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    TrackName track_name;
+    Parameters parameters;
+};
+
+struct PublishNamespaceMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace;
+    Parameters parameters;
+};
+
+struct SubscribeNamespaceMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace_prefix;
+    Parameters parameters;
+};
+
+struct SubscribeTracksMessage {
+    std::uint64_t request_id;
+    TrackNamespace track_namespace_prefix;
+    Parameters parameters;
+};
+
+using Message = std::variant<SetupMessage, SubscribeMessage, PublishMessage,
+                             FetchMessage, TrackStatusMessage,
+                             PublishNamespaceMessage,
+                             SubscribeNamespaceMessage,
+                             SubscribeTracksMessage>;
+
+struct UnsupportedMessage {
+    std::uint64_t type;
+    StreamRole role;
+};
 
 template <class T>
 using DraftDecodeResult = std::variant<T, NeedMore, DecodeError, DraftAmbiguity>;
 
-using MessageDecodeResult = DraftDecodeResult<Message>;
+using MessageDecodeResult =
+    std::variant<Message, NeedMore, DecodeError, DraftAmbiguity,
+                 UnsupportedMessage>;
 using KeyValueDecodeResult = DraftDecodeResult<KeyValuePairs>;
 using TrackPropertiesDecodeResult = DraftDecodeResult<TrackProperties>;
 using LocationDecodeResult = DraftDecodeResult<Location>;
