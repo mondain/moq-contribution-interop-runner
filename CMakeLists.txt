@@ -126,6 +126,15 @@ target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requir
                       moq-interop-storage)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 
+add_library(moq-interop-transport
+    src/transport/quiche_connection.cpp
+)
+target_link_libraries(moq-interop-transport PUBLIC moq-interop-app)
+target_link_libraries(moq-interop-transport PRIVATE moq-interop-quiche)
+target_compile_options(moq-interop-transport PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -166,6 +175,28 @@ if(MOQ_INTEROP_BUILD_TESTS)
             "-DFIXTURE_ROOT=${PROJECT_BINARY_DIR}/quiche-contract-fixtures"
             -P "${PROJECT_SOURCE_DIR}/tests/integration/quiche_dependency_contract.cmake"
     )
+
+    add_executable(moq-interop-session-transport-header-tests
+                   tests/transport/session_transport_header_test.cpp)
+    target_link_libraries(moq-interop-session-transport-header-tests PRIVATE
+                          moq-interop-app GTest::gtest_main)
+    target_compile_options(moq-interop-session-transport-header-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME session-transport-header
+             COMMAND moq-interop-session-transport-header-tests)
+
+    add_executable(moq-interop-quiche-connection-tests
+                   tests/transport/quiche_connection_test.cpp)
+    target_include_directories(moq-interop-quiche-connection-tests PRIVATE
+                               "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(moq-interop-quiche-connection-tests PRIVATE
+                          moq-interop-transport moq-interop-quiche
+                          GTest::gtest_main)
+    target_compile_options(moq-interop-quiche-connection-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME quiche-connection COMMAND moq-interop-quiche-connection-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
