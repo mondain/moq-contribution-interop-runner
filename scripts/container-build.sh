@@ -26,6 +26,11 @@ if [[ $# -eq 0 || ( "$1" != "build" && "$1" != "config" ) ]]; then
     printf 'Usage: %s {build|config} [docker compose arguments...]\n' "$0" >&2
     exit 2
 fi
+if [[ -n "$(git -C "${ROOT}" status --porcelain=v1 --untracked-files=all)" ]]; then
+    printf '%s\n' \
+        'repository worktree is dirty; commit or remove relevant changes before building' >&2
+    exit 2
+fi
 
 export MOQ_INTEROP_SOURCE_REVISION="${HEAD_REVISION}"
 export SOURCE_DATE_EPOCH="${EXPECTED_SOURCE_DATE_EPOCH}"

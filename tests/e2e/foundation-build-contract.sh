@@ -4,9 +4,11 @@ set -euo pipefail
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly HEAD_REVISION="$(git -C "${ROOT}" rev-parse HEAD)"
 readonly ERROR_FILE="$(mktemp /tmp/moq-interop-build-contract.XXXXXX)"
+readonly DIRTY_PROBE="${ROOT}/.moq-interop-dirty-probe-$$-${RANDOM}.tmp"
+readonly BASELINE_STATUS="$(git -C "${ROOT}" status --porcelain=v1 --untracked-files=all)"
 
 cleanup() {
-    rm -f "${ERROR_FILE}"
+    rm -f "${ERROR_FILE}" "${DIRTY_PROBE}"
 }
 trap cleanup EXIT
 
@@ -31,5 +33,23 @@ if MOQ_INTEROP_SOURCE_REVISION=0000000000000000000000000000000000000000 \
 fi
 grep -F "conflicts with repository HEAD ${HEAD_REVISION}" "${ERROR_FILE}" >/dev/null
 
-"${ROOT}/scripts/container-build.sh" config --quiet
+touch "${DIRTY_PROBE}"
+if "${ROOT}/scripts/container-build.sh" config --quiet 2>"${ERROR_FILE}"; then
+    printf 'build wrapper unexpectedly accepted a dirty repository\n' >&2
+    exit 1
+fi
+grep -F 'repository worktree is dirty; commit or remove relevant changes before building' \
+    "${ERROR_FILE}" >/dev/null
+rm -f "${DIRTY_PROBE}"
+
+if [[ -z "${BASELINE_STATUS}" ]]; then
+    "${ROOT}/scripts/container-build.sh" config --quiet
+else
+    if "${ROOT}/scripts/container-build.sh" config --quiet 2>"${ERROR_FILE}"; then
+        printf 'build wrapper unexpectedly accepted the dirty development tree\n' >&2
+        exit 1
+    fi
+    grep -F 'repository worktree is dirty; commit or remove relevant changes before building' \
+        "${ERROR_FILE}" >/dev/null
+fi
 printf '[foundation-build-contract] PASS: source identity inputs are checked\n'
