@@ -1,0 +1,12 @@
+.git
+.gitignore
+.worktrees
+.superpowers
+build
+build-*
+tests
+docs/*.md
+docs/plans
+requirements/parts
+*.sqlite3
+*.swp

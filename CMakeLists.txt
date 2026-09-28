@@ -118,6 +118,10 @@ target_compile_definitions(moq-interop-runner PRIVATE
 )
 target_link_libraries(moq-interop-runner PRIVATE moq-interop-http)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
+install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
+        FILES_MATCHING PATTERN "*.txt")
+install(DIRECTORY requirements/ DESTINATION share/moq-interop/requirements
+        FILES_MATCHING PATTERN "*.json" PATTERN "parts" EXCLUDE)
 
 if(MOQ_INTEROP_BUILD_TESTS)
     enable_testing()
