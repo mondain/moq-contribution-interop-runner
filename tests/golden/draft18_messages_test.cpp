@@ -904,6 +904,16 @@ TEST(Draft18ContinuationMessagesTest, RejectsRedirectShapeAndBoundedTruncation) 
     }
 }
 
+TEST(Draft18ContinuationMessagesTest,
+     RedirectUriBeyondFrameCapacityIsProtocolViolation) {
+    const auto frame =
+        bytes({0x05, 0x00, 0x06, 0x34, 0x00, 0x00, 0xc1, 0x00, 0x00});
+    Cursor input(frame, 335);
+    expect_error_code(decode_message(StreamRole::Request, input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(input.offset(), 335u);
+}
+
 TEST(Draft18ContinuationMessagesTest, PropagatesUnresolvedParameterAmbiguity) {
     const std::vector<std::vector<std::byte>> ambiguous{
         bytes({0x07, 0x00, 0x02, 0x01, 0x04}),

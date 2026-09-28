@@ -414,7 +414,13 @@ DraftDecodeResult<Redirect> decode_redirect(Cursor& input,
     const auto uri_result =
         read_length_prefixed_bytes(working, kMaximumMessagePayload);
     if (const auto* need = std::get_if<NeedMore>(&uri_result)) return *need;
-    if (const auto* error = std::get_if<DecodeError>(&uri_result)) return *error;
+    if (const auto* error = std::get_if<DecodeError>(&uri_result)) {
+        if (error->code == DecodeErrorCode::LengthExceedsLimit) {
+            return protocol_violation(error->offset,
+                                      "redirect URI exceeds framed payload limit");
+        }
+        return *error;
+    }
     const auto name_space = decode_track_namespace(working, limits);
     if (const auto* need = std::get_if<NeedMore>(&name_space)) return *need;
     if (const auto* error = std::get_if<DecodeError>(&name_space)) return *error;
