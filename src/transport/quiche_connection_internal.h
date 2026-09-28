@@ -113,6 +113,7 @@ public:
     bool notify_idle_timeout();
     bool notify_transport_error(TransportError error);
     std::optional<TransportDiagnostic> last_transport_diagnostic() const;
+    bool event_queue_overflowed() const noexcept;
     quiche_conn* native_handle() noexcept;
 
 private:

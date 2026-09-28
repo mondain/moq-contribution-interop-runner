@@ -19,6 +19,7 @@
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 #include <utility>
@@ -304,6 +305,24 @@ struct NativeQuicListener::Impl {
                 std::span<const std::byte>(receive_buffer)
                     .first(static_cast<std::size_t>(read)));
         }
+        close_on_event_overflow();
+    }
+
+    void close_on_event_overflow() {
+        if (!connection || !connection->event_queue_overflowed() ||
+            state == State::Closing || state == State::Closed) {
+            return;
+        }
+        static constexpr std::string_view reason = "event queue overflow";
+        const auto result = quiche_conn_close(
+            connection->native_handle(), false, 1,
+            reinterpret_cast<const std::uint8_t*>(reason.data()),
+            reason.size());
+        if (result == 0 || result == QUICHE_ERR_DONE) {
+            state = State::Closing;
+        } else {
+            terminal_transport_error();
+        }
     }
 
     void check_established() {
@@ -349,11 +368,15 @@ struct NativeQuicListener::Impl {
                               &local_size);
         quiche_conn_destination_id(connection->native_handle(), &peer_cid,
                                    &peer_size);
-        connection->notify_established(
+        const auto notified = connection->notify_established(
             {reinterpret_cast<const std::byte*>(alpn), alpn_size},
             {reinterpret_cast<const std::byte*>(local_cid), local_size},
             {reinterpret_cast<const std::byte*>(peer_cid), peer_size},
             static_cast<std::size_t>(maximum));
+        close_on_event_overflow();
+        if (!notified || state == State::Closing || state == State::Closed) {
+            return;
+        }
         state = State::Established;
     }
 

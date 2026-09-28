@@ -118,6 +118,14 @@ std::vector<std::byte> expected_alpn() {
     return bytes({'m', 'o', 'q', 't', '-', '1', '8'});
 }
 
+bool terminal_event(const TransportEvent& event) {
+    return std::holds_alternative<PeerCloseEvent>(event) ||
+           std::holds_alternative<LocalCloseEvent>(event) ||
+           std::holds_alternative<IdleTimeoutEvent>(event) ||
+           std::holds_alternative<TransportErrorEvent>(event) ||
+           std::holds_alternative<EventQueueOverflowEvent>(event);
+}
+
 NativeQuicListenerConfig base_config() {
     NativeQuicListenerConfig config;
     config.expected_alpn = expected_alpn();
@@ -931,8 +939,10 @@ TEST(NativeQuicLive, ReportsPeerAndLocalApplicationCloseEvidence) {
     }));
     ASSERT_TRUE(peer_client->close(41, bytes({1, 0, 2})));
     bool peer_close = false;
+    std::size_t peer_terminal_count = 0;
     ASSERT_TRUE(pump_until(*peer_client, [&] {
         for (const auto& event : peer_created.listener->poll(8)) {
+            peer_terminal_count += terminal_event(event) ? 1u : 0u;
             if (const auto* close = std::get_if<PeerCloseEvent>(&event)) {
                 peer_close = close->error_space == CloseErrorSpace::Application &&
                              close->error_code == 41 &&
@@ -941,6 +951,12 @@ TEST(NativeQuicLive, ReportsPeerAndLocalApplicationCloseEvidence) {
         }
         return peer_close;
     }));
+    EXPECT_EQ(peer_terminal_count, 1u);
+    EXPECT_EQ(peer_created.listener->close(43, {}).status,
+              TransportStatus::ConnectionClosed);
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        EXPECT_TRUE(peer_created.listener->poll(8).empty());
+    }
 
     auto local_created = NativeQuicListener::create(live_config(pem));
     ASSERT_NE(local_created.listener, nullptr);
@@ -959,6 +975,7 @@ TEST(NativeQuicLive, ReportsPeerAndLocalApplicationCloseEvidence) {
     EXPECT_EQ(local_created.listener->close(42, bytes({3, 0, 4})).status,
               TransportStatus::Success);
     const auto local_events = local_created.listener->poll(8);
+    EXPECT_EQ(std::ranges::count_if(local_events, terminal_event), 1);
     const auto local = std::ranges::find_if(local_events, [](const auto& event) {
         return std::holds_alternative<LocalCloseEvent>(event);
     });
@@ -967,6 +984,11 @@ TEST(NativeQuicLive, ReportsPeerAndLocalApplicationCloseEvidence) {
     EXPECT_EQ(close.error_space, CloseErrorSpace::Application);
     EXPECT_EQ(close.error_code, 42u);
     EXPECT_EQ(close.reason, bytes({3, 0, 4}));
+    EXPECT_EQ(local_created.listener->close(43, {}).status,
+              TransportStatus::ConnectionClosed);
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        EXPECT_TRUE(local_created.listener->poll(8).empty());
+    }
 }
 
 TEST(NativeQuicLive, ReportsIdleTimeout) {
@@ -989,15 +1011,23 @@ TEST(NativeQuicLive, ReportsIdleTimeout) {
     }));
 
     bool timed_out = false;
+    std::size_t terminal_count = 0;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds{500};
     while (!timed_out && std::chrono::steady_clock::now() < deadline) {
         for (const auto& event : created.listener->poll(8)) {
+            terminal_count += terminal_event(event) ? 1u : 0u;
             timed_out |= std::holds_alternative<IdleTimeoutEvent>(event);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     EXPECT_TRUE(timed_out);
+    EXPECT_EQ(terminal_count, 1u);
+    EXPECT_EQ(created.listener->close(44, {}).status,
+              TransportStatus::ConnectionClosed);
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        EXPECT_TRUE(created.listener->poll(8).empty());
+    }
 }
 
 TEST(NativeQuicLive, ReportsPeerResetAndStopSending) {
@@ -1219,6 +1249,519 @@ TEST(NativeQuicLive, MigratesToAdditionalCidAndRetiresInitialSequence) {
         }
         return received;
     }));
+}
+
+TEST(NativeQuicLive, ClientStreamsPreserveBytesAndFinAcrossSends) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+
+    ASSERT_TRUE(client->send_stream(0, bytes({1, 0}), false));
+    ASSERT_TRUE(client->send_stream(0, bytes({2, 3}), false));
+    ASSERT_TRUE(client->send_stream(0, {}, true));
+    ASSERT_TRUE(client->send_stream(2, bytes({4}), false));
+    ASSERT_TRUE(client->send_stream(2, bytes({0, 5}), true));
+    std::vector<std::byte> bidi;
+    std::vector<std::byte> uni;
+    std::size_t bidi_fin = 0;
+    std::size_t uni_fin = 0;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(32)) {
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) {
+                auto& target = stream->stream_id == 0 ? bidi : uni;
+                target.insert(target.end(), stream->data.begin(),
+                              stream->data.end());
+                if (stream->stream_id == 0 && stream->fin) ++bidi_fin;
+                if (stream->stream_id == 2 && stream->fin) ++uni_fin;
+            }
+        }
+        return bidi_fin == 1 && uni_fin == 1;
+    }));
+    EXPECT_EQ(bidi, bytes({1, 0, 2, 3}));
+    EXPECT_EQ(uni, bytes({4, 0, 5}));
+    EXPECT_EQ(bidi_fin, 1u);
+    EXPECT_EQ(uni_fin, 1u);
+}
+
+TEST(NativeQuicLive, ServerStreamsPreserveBytesAndFinAcrossSends) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+
+    const auto bidi = created.listener->open_bidi();
+    const auto uni = created.listener->open_uni();
+    ASSERT_EQ(bidi.status, TransportStatus::Success);
+    ASSERT_EQ(uni.status, TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(bidi.stream_id, bytes({1, 0}), false).status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(bidi.stream_id, bytes({2}), false).status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(bidi.stream_id, {}, true).status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(uni.stream_id, bytes({3}), false).status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(uni.stream_id, bytes({0, 4}), true).status,
+              TransportStatus::Success);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        const auto bidi_observation = client->stream(bidi.stream_id);
+        const auto uni_observation = client->stream(uni.stream_id);
+        return bidi_observation && bidi_observation->fin && uni_observation &&
+               uni_observation->fin;
+    }));
+    const auto bidi_observation = client->stream(bidi.stream_id);
+    const auto uni_observation = client->stream(uni.stream_id);
+    ASSERT_TRUE(bidi_observation.has_value());
+    ASSERT_TRUE(uni_observation.has_value());
+    EXPECT_EQ(bidi_observation->data, bytes({1, 0, 2}));
+    EXPECT_EQ(uni_observation->data, bytes({3, 0, 4}));
+    EXPECT_EQ(bidi_observation->fin_count, 1u);
+    EXPECT_EQ(uni_observation->fin_count, 1u);
+}
+
+TEST(NativeQuicLive, ServerResetAndStopSendingReachClientWithExactCodes) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+
+    const auto server_stream = created.listener->open_bidi();
+    ASSERT_EQ(server_stream.status, TransportStatus::Success);
+    ASSERT_EQ(created.listener->write(server_stream.stream_id, bytes({1}), false)
+                  .status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->reset(server_stream.stream_id, 71).status,
+              TransportStatus::Success);
+    ASSERT_TRUE(client->send_stream(0, bytes({2}), false));
+    bool received_client_stream = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) {
+                received_client_stream = stream->stream_id == 0 &&
+                                         stream->data == bytes({2});
+            }
+        }
+        return received_client_stream;
+    }));
+    ASSERT_EQ(created.listener->stop_sending(0, 72).status,
+              TransportStatus::Success);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        const auto reset = client->stream(server_stream.stream_id);
+        const auto stopped = client->try_send_stream(0, bytes({3}), false);
+        return reset && reset->reset_error == 71 &&
+               stopped.status == test::ClientStreamSendStatus::PeerStopped &&
+               stopped.application_error == 72;
+    }));
+}
+
+TEST(NativeQuicLive, DatagramsAreBidirectionalEmptySafeAndBounded) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+    ASSERT_TRUE(client->send_datagram({}));
+    ASSERT_TRUE(client->send_datagram(bytes({1, 0, 2})));
+    std::vector<std::vector<std::byte>> server_datagrams;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            if (const auto* datagram = std::get_if<DatagramEvent>(&event)) {
+                server_datagrams.push_back(datagram->data);
+            }
+        }
+        return server_datagrams.size() == 2;
+    }));
+    ASSERT_EQ(server_datagrams[0], std::vector<std::byte>{});
+    ASSERT_EQ(server_datagrams[1], bytes({1, 0, 2}));
+
+    ASSERT_EQ(created.listener->send_datagram({}).status,
+              TransportStatus::Success);
+    ASSERT_EQ(created.listener->send_datagram(bytes({3, 0, 4})).status,
+              TransportStatus::Success);
+    std::vector<std::vector<std::byte>> client_datagrams;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        auto next = client->take_datagrams();
+        client_datagrams.insert(client_datagrams.end(),
+                                std::make_move_iterator(next.begin()),
+                                std::make_move_iterator(next.end()));
+        return client_datagrams.size() == 2;
+    }));
+    EXPECT_EQ(client_datagrams[0], std::vector<std::byte>{});
+    EXPECT_EQ(client_datagrams[1], bytes({3, 0, 4}));
+    EXPECT_EQ(created.listener->send_datagram(
+                  std::vector<std::byte>(65'536, std::byte{1})).status,
+              TransportStatus::DatagramTooLarge);
+}
+
+TEST(NativeQuicLive, EventOverflowPreservesEvidenceAndClosesTransport) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.max_events = 2;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+
+    ASSERT_TRUE(client->send_datagram(bytes({1})));
+    ASSERT_TRUE(client->send_datagram(bytes({2})));
+    ASSERT_TRUE(client->send_datagram(bytes({3})));
+    const auto events = created.listener->poll(16);
+    ASSERT_EQ(events.size(), 3u);
+    ASSERT_TRUE(std::holds_alternative<DatagramEvent>(events[0]));
+    ASSERT_TRUE(std::holds_alternative<DatagramEvent>(events[1]));
+    EXPECT_EQ(std::get<DatagramEvent>(events[0]).data, bytes({1}));
+    EXPECT_EQ(std::get<DatagramEvent>(events[1]).data, bytes({2}));
+    EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[2]));
+    EXPECT_TRUE(created.listener->poll(16).empty());
+    EXPECT_EQ(created.listener->open_bidi().status,
+              TransportStatus::ConnectionClosed);
+    EXPECT_EQ(created.listener->send_datagram(bytes({4})).status,
+              TransportStatus::ConnectionClosed);
+    EXPECT_EQ(created.listener->close(1, {}).status,
+              TransportStatus::ConnectionClosed);
+
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        return client->peer_close().has_value();
+    }));
+    const auto close = client->peer_close();
+    ASSERT_TRUE(close.has_value());
+    EXPECT_FALSE(close->application);
+    EXPECT_EQ(close->error_code, 1u);
+    EXPECT_EQ(close->reason,
+              bytes({'e', 'v', 'e', 'n', 't', ' ', 'q', 'u', 'e', 'u', 'e',
+                     ' ', 'o', 'v', 'e', 'r', 'f', 'l', 'o', 'w'}));
+}
+
+TEST(NativeQuicLive, EventPayloadOverflowPreservesEvidenceAndClosesTransport) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.max_events = 8;
+    config.max_event_payload_bytes = 64;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+
+    const std::vector<std::byte> preserved(64, std::byte{1});
+    ASSERT_TRUE(client->send_datagram(preserved));
+    ASSERT_TRUE(client->send_datagram(bytes({2})));
+    const auto events = created.listener->poll(16);
+    ASSERT_EQ(events.size(), 2u);
+    ASSERT_TRUE(std::holds_alternative<DatagramEvent>(events[0]));
+    EXPECT_EQ(std::get<DatagramEvent>(events[0]).data, preserved);
+    EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[1]));
+    EXPECT_TRUE(created.listener->poll(16).empty());
+    EXPECT_EQ(created.listener->open_uni().status,
+              TransportStatus::ConnectionClosed);
+    EXPECT_EQ(created.listener->close(1, {}).status,
+              TransportStatus::ConnectionClosed);
+
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        return client->peer_close().has_value();
+    }));
+    const auto close = client->peer_close();
+    ASSERT_TRUE(close.has_value());
+    EXPECT_FALSE(close->application);
+    EXPECT_EQ(close->error_code, 1u);
+    EXPECT_EQ(close->reason,
+              bytes({'e', 'v', 'e', 'n', 't', ' ', 'q', 'u', 'e', 'u', 'e',
+                     ' ', 'o', 'v', 'e', 'r', 'f', 'l', 'o', 'w'}));
+}
+
+TEST(NativeQuicLive, EstablishmentPayloadOverflowClosesWithoutEstablishing) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.max_event_payload_bytes = 1;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+
+    std::vector<TransportEvent> events;
+    bool overflow = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        auto next = created.listener->poll(16);
+        overflow |= std::ranges::any_of(next, [](const auto& event) {
+            return std::holds_alternative<EventQueueOverflowEvent>(event);
+        });
+        events.insert(events.end(), std::make_move_iterator(next.begin()),
+                      std::make_move_iterator(next.end()));
+        return overflow;
+    }));
+    ASSERT_TRUE(client->pump());
+    EXPECT_EQ(std::ranges::count_if(events, [](const auto& event) {
+                  return std::holds_alternative<ConnectionEstablishedEvent>(
+                      event);
+              }),
+              0);
+    EXPECT_EQ(std::ranges::count_if(events, [](const auto& event) {
+                  return std::holds_alternative<EventQueueOverflowEvent>(event);
+              }),
+              1);
+    EXPECT_EQ(created.listener->open_bidi().status,
+              TransportStatus::ConnectionClosed);
+    EXPECT_TRUE(created.listener->poll(16).empty());
+    const auto close = client->peer_close();
+    ASSERT_TRUE(close.has_value());
+    EXPECT_FALSE(close->application);
+    EXPECT_EQ(close->error_code, 1u);
+    EXPECT_EQ(close->reason,
+              bytes({'e', 'v', 'e', 'n', 't', ' ', 'q', 'u', 'e', 'u', 'e',
+                     ' ', 'o', 'v', 'e', 'r', 'f', 'l', 'o', 'w'}));
+}
+
+TEST(NativeQuicLive, SimultaneousCloseClassifiesExactlyOnce) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+    ASSERT_TRUE(client->close(81, bytes({1, 0, 2})));
+    ASSERT_EQ(created.listener->close(82, bytes({3, 0, 4})).status,
+              TransportStatus::Success);
+    std::vector<TransportEvent> events;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        auto next = created.listener->poll(16);
+        events.insert(events.end(), std::make_move_iterator(next.begin()),
+                      std::make_move_iterator(next.end()));
+        return std::ranges::any_of(events, terminal_event);
+    }));
+    const auto terminal_count = static_cast<std::size_t>(std::ranges::count_if(
+        events, terminal_event));
+    ASSERT_EQ(terminal_count, 1u);
+    const auto server_close = std::ranges::find_if(events, terminal_event);
+    ASSERT_TRUE(std::holds_alternative<LocalCloseEvent>(*server_close));
+    const auto& local = std::get<LocalCloseEvent>(*server_close);
+    EXPECT_EQ(local.error_space, CloseErrorSpace::Application);
+    EXPECT_EQ(local.error_code, 82u);
+    EXPECT_EQ(local.reason, bytes({3, 0, 4}));
+    EXPECT_EQ(created.listener->close(83, {}).status,
+              TransportStatus::ConnectionClosed);
+    EXPECT_TRUE(created.listener->poll(16).empty());
+}
+
+TEST(NativeQuicLive, CloseAfterFinAndResetPreservesEvidenceBeforeTerminal) {
+    TestPemFiles pem;
+    for (const bool reset_case : {false, true}) {
+        auto created = NativeQuicListener::create(live_config(pem));
+        ASSERT_NE(created.listener, nullptr);
+        auto client = test::QuicheTestClient::create(
+            {.port = created.listener->bound_endpoint().port,
+             .alpn = expected_alpn()});
+        ASSERT_NE(client, nullptr);
+        bool established = false;
+        ASSERT_TRUE(pump_until(*client, [&] {
+            for (const auto& event : created.listener->poll(16)) {
+                established |=
+                    std::holds_alternative<ConnectionEstablishedEvent>(event);
+            }
+            return established;
+        }));
+        ASSERT_TRUE(client->send_stream(0, bytes({5, 0, 6}), !reset_case));
+        if (reset_case) {
+            ASSERT_TRUE(client->reset_stream(0, 91));
+        }
+        ASSERT_TRUE(client->close(reset_case ? 93 : 92,
+                                  reset_case ? bytes({9, 3}) : bytes({9, 2})));
+
+        std::vector<TransportEvent> events;
+        ASSERT_TRUE(pump_until(*client, [&] {
+            auto next = created.listener->poll(16);
+            events.insert(events.end(), std::make_move_iterator(next.begin()),
+                          std::make_move_iterator(next.end()));
+            return std::ranges::any_of(events, terminal_event);
+        }));
+        EXPECT_EQ(std::ranges::count_if(events, terminal_event), 1);
+        const auto close = std::ranges::find_if(events, terminal_event);
+        ASSERT_TRUE(std::holds_alternative<PeerCloseEvent>(*close));
+        const auto& peer_close = std::get<PeerCloseEvent>(*close);
+        EXPECT_EQ(peer_close.error_space, CloseErrorSpace::Application);
+        EXPECT_EQ(peer_close.error_code, reset_case ? 93u : 92u);
+        EXPECT_EQ(peer_close.reason,
+                  reset_case ? bytes({9, 3}) : bytes({9, 2}));
+        if (reset_case) {
+            const auto reset = std::ranges::find_if(events, [](const auto& event) {
+                return std::holds_alternative<PeerResetEvent>(event);
+            });
+            ASSERT_NE(reset, events.end());
+            EXPECT_EQ(std::get<PeerResetEvent>(*reset).stream_id, 0u);
+            EXPECT_EQ(std::get<PeerResetEvent>(*reset).application_error, 91u);
+        } else {
+            const auto stream = std::ranges::find_if(events, [](const auto& event) {
+                const auto* data = std::get_if<StreamDataEvent>(&event);
+                return data != nullptr && data->stream_id == 0 && data->fin;
+            });
+            ASSERT_NE(stream, events.end());
+            EXPECT_EQ(std::get<StreamDataEvent>(*stream).data,
+                      bytes({5, 0, 6}));
+        }
+        EXPECT_TRUE(created.listener->poll(16).empty());
+    }
+}
+
+TEST(NativeQuicLive, ServerWriteBackpressurePreservesEveryByteAndSingleFin) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(16)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+    const auto opened = created.listener->open_bidi();
+    ASSERT_EQ(opened.status, TransportStatus::Success);
+    std::vector<std::byte> payload(400'000);
+    for (std::size_t index = 0; index < payload.size(); ++index) {
+        payload[index] = static_cast<std::byte>(index % 251u);
+    }
+    std::size_t offset = 0;
+    bool saw_backpressure = false;
+    for (std::size_t iteration = 0; iteration < 2000 && offset < payload.size();
+         ++iteration) {
+        const auto result = created.listener->write(
+            opened.stream_id,
+            std::span<const std::byte>(payload).subspan(offset), false);
+        ASSERT_TRUE(result.status == TransportStatus::Success ||
+                    result.status == TransportStatus::Partial ||
+                    result.status == TransportStatus::WouldBlock);
+        ASSERT_LE(result.accepted, payload.size() - offset);
+        offset += result.accepted;
+        saw_backpressure |= result.status == TransportStatus::Partial ||
+                            result.status == TransportStatus::WouldBlock;
+        ASSERT_TRUE(client->pump());
+        created.listener->poll(16);
+    }
+    ASSERT_EQ(offset, payload.size());
+    ASSERT_TRUE(saw_backpressure);
+    ASSERT_EQ(created.listener->write(opened.stream_id, {}, true).status,
+              TransportStatus::Success);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        created.listener->poll(16);
+        const auto stream = client->stream(opened.stream_id);
+        return stream && stream->fin;
+    }));
+    const auto stream = client->stream(opened.stream_id);
+    ASSERT_TRUE(stream.has_value());
+    EXPECT_EQ(stream->data, payload);
+    EXPECT_EQ(stream->fin_count, 1u);
+}
+
+TEST(NativeQuicLifecycle, EstablishedAndClosingDestructionReleasePort) {
+    TestPemFiles pem;
+    for (const bool close_first : {false, true}) {
+        auto config = live_config(pem);
+        auto created = NativeQuicListener::create(config);
+        ASSERT_NE(created.listener, nullptr);
+        auto client = test::QuicheTestClient::create(
+            {.port = created.listener->bound_endpoint().port,
+             .alpn = expected_alpn()});
+        ASSERT_NE(client, nullptr);
+        bool established = false;
+        ASSERT_TRUE(pump_until(*client, [&] {
+            for (const auto& event : created.listener->poll(16)) {
+                established |=
+                    std::holds_alternative<ConnectionEstablishedEvent>(event);
+            }
+            return established;
+        }));
+        const auto port = created.listener->bound_endpoint().port;
+        if (close_first) {
+            ASSERT_EQ(created.listener->close(101, {}).status,
+                      TransportStatus::Success);
+        }
+        created.listener.reset();
+        config.bind_port = port;
+        auto replacement = NativeQuicListener::create(config);
+        EXPECT_NE(replacement.listener, nullptr);
+    }
 }
 
 }  // namespace

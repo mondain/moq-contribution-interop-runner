@@ -11,6 +11,8 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <unordered_map>
+#include <utility>
 
 namespace moq::interop::transport::test {
 namespace {
@@ -36,6 +38,9 @@ struct QuicheTestClient::Impl {
         std::vector<std::uint8_t>(kPacketSize);
     std::vector<std::uint8_t> send_buffer =
         std::vector<std::uint8_t>(kPacketSize);
+    std::unordered_map<std::uint64_t, ClientStreamObservation> streams;
+    std::vector<std::vector<std::byte>> datagrams;
+    std::optional<ClientCloseObservation> peer_close;
 
     ~Impl() {
         if (connection != nullptr) quiche_conn_free(connection);
@@ -62,6 +67,83 @@ struct QuicheTestClient::Impl {
             }
             if (sent != written) return false;
         }
+    }
+
+    bool drain_application() {
+        auto* readable = quiche_conn_readable(connection);
+        if (readable != nullptr) {
+            std::uint64_t stream_id = 0;
+            while (quiche_stream_iter_next(readable, &stream_id)) {
+                auto& observation = streams[stream_id];
+                while (true) {
+                    bool fin = false;
+                    std::uint64_t error = 0;
+                    const auto read = quiche_conn_stream_recv(
+                        connection, stream_id, receive_buffer.data(),
+                        receive_buffer.size(), &fin, &error);
+                    if (read == QUICHE_ERR_DONE) break;
+                    if (read == QUICHE_ERR_STREAM_RESET) {
+                        observation.reset_error = error;
+                        break;
+                    }
+                    if (read < 0) {
+                        quiche_stream_iter_free(readable);
+                        return false;
+                    }
+                    const auto size = static_cast<std::size_t>(read);
+                    if (size > 0) {
+                        observation.data.insert(
+                            observation.data.end(),
+                            reinterpret_cast<const std::byte*>(
+                                receive_buffer.data()),
+                            reinterpret_cast<const std::byte*>(
+                                receive_buffer.data()) + size);
+                        observation.chunk_sizes.push_back(size);
+                    }
+                    if (fin) {
+                        observation.fin = true;
+                        ++observation.fin_count;
+                        break;
+                    }
+                    if (read == 0) break;
+                }
+            }
+            quiche_stream_iter_free(readable);
+        }
+        while (true) {
+            const auto front = quiche_conn_dgram_recv_front_len(connection);
+            if (front == QUICHE_ERR_DONE) break;
+            if (front < 0 || static_cast<std::size_t>(front) >
+                                 receive_buffer.size()) {
+                return false;
+            }
+            const auto read = quiche_conn_dgram_recv(
+                connection, receive_buffer.data(), receive_buffer.size());
+            if (read < 0) return false;
+            datagrams.emplace_back(
+                reinterpret_cast<const std::byte*>(receive_buffer.data()),
+                reinterpret_cast<const std::byte*>(receive_buffer.data()) +
+                    static_cast<std::size_t>(read));
+        }
+        if (!peer_close) {
+            bool application = false;
+            std::uint64_t code = 0;
+            const std::uint8_t* reason = nullptr;
+            std::size_t reason_size = 0;
+            if (quiche_conn_peer_error(connection, &application, &code,
+                                       &reason, &reason_size)) {
+                std::vector<std::byte> owned_reason;
+                if (reason_size > 0) {
+                    owned_reason.assign(
+                        reinterpret_cast<const std::byte*>(reason),
+                        reinterpret_cast<const std::byte*>(reason) +
+                            reason_size);
+                }
+                peer_close = ClientCloseObservation{
+                    application, code, std::move(owned_reason)};
+            }
+        }
+        return true;
     }
 };
 
@@ -164,7 +246,7 @@ bool QuicheTestClient::pump() {
     if (quiche_conn_timeout_as_nanos(impl_->connection) == 0) {
         quiche_conn_on_timeout(impl_->connection);
     }
-    return impl_->flush();
+    return impl_->drain_application() && impl_->flush();
 }
 
 bool QuicheTestClient::established() const {
@@ -173,6 +255,12 @@ bool QuicheTestClient::established() const {
 
 bool QuicheTestClient::send_stream(std::uint64_t stream_id,
                                    std::span<const std::byte> data, bool fin) {
+    const auto result = try_send_stream(stream_id, data, fin);
+    return result.status == ClientStreamSendStatus::Success;
+}
+
+ClientStreamSendResult QuicheTestClient::try_send_stream(
+    std::uint64_t stream_id, std::span<const std::byte> data, bool fin) {
     static constexpr std::uint8_t kEmpty = 0;
     const auto* pointer = data.empty()
                               ? &kEmpty
@@ -181,7 +269,23 @@ bool QuicheTestClient::send_stream(std::uint64_t stream_id,
     const auto sent = quiche_conn_stream_send(impl_->connection, stream_id,
                                                pointer, data.size(), fin,
                                                &error);
-    return sent >= 0 && impl_->flush();
+    if (sent >= 0) {
+        if (!impl_->flush()) return {};
+        return {static_cast<std::size_t>(sent) == data.size()
+                    ? ClientStreamSendStatus::Success
+                    : ClientStreamSendStatus::Partial,
+                static_cast<std::size_t>(sent), 0};
+    }
+    if (sent == QUICHE_ERR_DONE) {
+        return {ClientStreamSendStatus::WouldBlock, 0, 0};
+    }
+    if (sent == QUICHE_ERR_STREAM_STOPPED) {
+        return {ClientStreamSendStatus::PeerStopped, 0, error};
+    }
+    if (sent == QUICHE_ERR_STREAM_RESET) {
+        return {ClientStreamSendStatus::PeerReset, 0, error};
+    }
+    return {};
 }
 
 bool QuicheTestClient::send_datagram(std::span<const std::byte> data) {
@@ -262,6 +366,26 @@ std::optional<std::uint64_t> QuicheTestClient::migrate_source() {
 bool QuicheTestClient::retire_destination_id(std::uint64_t sequence) {
     return impl_ && quiche_conn_retire_dcid(impl_->connection, sequence) == 0 &&
            impl_->flush();
+}
+
+std::optional<ClientStreamObservation> QuicheTestClient::stream(
+    std::uint64_t stream_id) const {
+    if (!impl_) return std::nullopt;
+    const auto found = impl_->streams.find(stream_id);
+    return found == impl_->streams.end()
+               ? std::nullopt
+               : std::optional<ClientStreamObservation>{found->second};
+}
+
+std::vector<std::vector<std::byte>> QuicheTestClient::take_datagrams() {
+    if (!impl_) return {};
+    auto output = std::move(impl_->datagrams);
+    impl_->datagrams.clear();
+    return output;
+}
+
+std::optional<ClientCloseObservation> QuicheTestClient::peer_close() const {
+    return impl_ ? impl_->peer_close : std::nullopt;
 }
 
 bool QuicheTestClient::close(std::uint64_t application_error,

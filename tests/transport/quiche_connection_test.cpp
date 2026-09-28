@@ -564,6 +564,7 @@ TEST(QuicheConnectionEvents, CountOverflowIsTerminalExactOnceAndPreservesQueue) 
     EXPECT_TRUE(connection->notify_peer_stop_sending(2, 11));
     EXPECT_FALSE(connection->notify_datagram(bytes({1})));
     EXPECT_FALSE(connection->notify_datagram(bytes({2})));
+    EXPECT_TRUE(connection->event_queue_overflowed());
 
     auto events = connection->poll(10);
     ASSERT_EQ(events.size(), 3u);
@@ -585,6 +586,7 @@ TEST(QuicheConnectionEvents, CountOverflowIsTerminalExactOnceAndPreservesQueue) 
 TEST(QuicheConnectionEvents, ByteOverflowAccountsOnlyUndrainedOwnedPayload) {
     FakeApiState state;
     auto connection = make_connection(state, 10, 3);
+    EXPECT_FALSE(connection->event_queue_overflowed());
     EXPECT_TRUE(connection->notify_datagram(bytes({1, 2, 3})));
     auto drained = connection->poll(1);
     ASSERT_EQ(drained.size(), 1u);

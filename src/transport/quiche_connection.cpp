@@ -122,6 +122,7 @@ struct QuicheConnection::Impl {
     bool bidi_ids_exhausted = false;
     bool uni_ids_exhausted = false;
     bool terminal = false;
+    bool overflowed = false;
     std::unordered_map<StreamId, LocalStreamState> local_streams;
     std::unordered_set<StreamId> peer_stop_reported;
     std::deque<TransportEvent> events;
@@ -187,6 +188,7 @@ struct QuicheConnection::Impl {
             bytes > limits.max_payload_bytes - owned_payload_bytes;
         if (count_exceeded || bytes_exceeded) {
             events.emplace_back(EventQueueOverflowEvent{});
+            overflowed = true;
             terminal = true;
             return false;
         }
@@ -528,6 +530,10 @@ std::optional<TransportDiagnostic>
 QuicheConnection::last_transport_diagnostic() const {
     if (!impl_) return std::nullopt;
     return impl_->last_diagnostic;
+}
+
+bool QuicheConnection::event_queue_overflowed() const noexcept {
+    return impl_ && impl_->overflowed;
 }
 
 quiche_conn* QuicheConnection::native_handle() noexcept {
