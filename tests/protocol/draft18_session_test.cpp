@@ -15,6 +15,7 @@ namespace {
 using transport::ConnectionEstablishedEvent;
 using transport::StreamDataEvent;
 using wire::draft18::SetupMessage;
+using wire::draft18::Message;
 
 ConnectionEstablishedEvent established() {
     return {{std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
@@ -35,6 +36,1021 @@ void establish_with_local_setup(PublisherSession& session) {
 const CloseSessionAction* close_action(const SessionTransition& transition) {
     if (transition.actions.size() != 1) return nullptr;
     return std::get_if<CloseSessionAction>(&transition.actions.front());
+}
+
+void activate(PublisherSession& session) {
+    establish_with_local_setup(session);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(128);
+}
+
+void activate_with_empty_transport_evidence(PublisherSession& session) {
+    session.on_event(ConnectionEstablishedEvent{{}, {}, {}, 1200});
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(3, SetupMessage{}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(128);
+}
+
+void activate_with_small_evidence_queue(PublisherSession& session) {
+    session.on_event(established());
+    session.take_evidence(16);
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(3, SetupMessage{}, false);
+    session.take_evidence(16);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(16);
+}
+
+std::vector<std::byte> encode(const Message& message) {
+    wire::ByteWriter output(65'546);
+    EXPECT_TRUE(wire::draft18::encode_message(message, output).has_value());
+    return {output.bytes().begin(), output.bytes().end()};
+}
+
+std::vector<Message> opening_requests(std::uint64_t first_id) {
+    using namespace wire::draft18;
+    return {
+        SubscribeMessage{first_id, {}, {}, {}},
+        PublishMessage{first_id + 2, {}, {}, 7, {}, {}},
+        FetchMessage{first_id + 4,
+                     StandaloneFetch{{}, {}, {0, 0}, {0, 0}}, {}},
+        TrackStatusMessage{first_id + 6, {}, {}, {}},
+        PublishNamespaceMessage{first_id + 8, {}, {}},
+        SubscribeNamespaceMessage{first_id + 10, {}, {}},
+        SubscribeTracksMessage{first_id + 12, {}, {}},
+    };
+}
+
+TEST(Draft18SessionRequests, ObservesAllSevenPeerAndLocalOpeningRequests) {
+    PublisherSession peer_session;
+    activate(peer_session);
+    const auto peer_messages = opening_requests(0);
+    for (std::size_t index = 0; index < peer_messages.size(); ++index) {
+        const auto frame = encode(peer_messages[index]);
+        peer_session.on_event(StreamDataEvent{
+            static_cast<transport::StreamId>(index * 4), frame, false});
+    }
+    const auto peer_evidence = peer_session.take_evidence(128);
+    EXPECT_EQ(std::count_if(peer_evidence.begin(), peer_evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestObserved;
+                            }),
+              7);
+    for (std::size_t index = 0; index < peer_messages.size(); ++index) {
+        const auto& observed = std::get<RequestObservedEvidence>(
+            peer_evidence[index * 2 + 1].data);
+        EXPECT_EQ(observed.initiator, RequestInitiator::Peer);
+        EXPECT_EQ(observed.request_id, index * 2);
+        EXPECT_EQ(observed.stream_id, index * 4);
+    }
+
+    PublisherSession local_session;
+    activate(local_session);
+    const auto local_messages = opening_requests(1);
+    for (std::size_t index = 0; index < local_messages.size(); ++index) {
+        const auto stream_id = static_cast<transport::StreamId>(index * 4 + 1);
+        local_session.observe_local_stream(stream_id,
+                                           LocalStreamPurpose::Request);
+        local_session.observe_local_message(stream_id, local_messages[index],
+                                            false);
+    }
+    const auto local_evidence = local_session.take_evidence(128);
+    EXPECT_EQ(std::count_if(local_evidence.begin(), local_evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestObserved;
+                            }),
+              7);
+}
+
+TEST(Draft18SessionRequests, EnforcesGlobalRequestIdParityReuseAndTracksGaps) {
+    PublisherSession wrong_parity;
+    activate(wrong_parity);
+    const auto odd_peer = encode(opening_requests(1).front());
+    const auto parity_transition = wrong_parity.on_event(
+        StreamDataEvent{0, odd_peer, false});
+    ASSERT_NE(close_action(parity_transition), nullptr);
+    EXPECT_EQ(close_action(parity_transition)->application_error, 0x4u);
+
+    PublisherSession reuse;
+    activate(reuse);
+    const auto first = encode(opening_requests(0).front());
+    reuse.on_event(StreamDataEvent{0, first, false});
+    const auto reuse_transition = reuse.on_event(StreamDataEvent{4, first, false});
+    ASSERT_NE(close_action(reuse_transition), nullptr);
+    EXPECT_EQ(close_action(reuse_transition)->application_error, 0x4u);
+
+    PublisherSession gap;
+    activate(gap);
+    const auto gap_frame = encode(opening_requests(4).front());
+    const auto gap_transition = gap.on_event(StreamDataEvent{0, gap_frame, false});
+    EXPECT_EQ(close_action(gap_transition), nullptr);
+    const auto gap_evidence = gap.take_evidence(32);
+    const auto gap_event = std::find_if(
+        gap_evidence.begin(), gap_evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::RequestIdSequenceViolation;
+        });
+    ASSERT_NE(gap_event, gap_evidence.end());
+    EXPECT_EQ(std::get<RequestIdSequenceEvidence>(gap_event->data).expected, 0u);
+    EXPECT_EQ(std::get<RequestIdSequenceEvidence>(gap_event->data).observed, 4u);
+
+    PublisherSession maximum;
+    activate(maximum);
+    const auto maximum_id = (std::uint64_t{1} << 62) - 2;
+    auto maximum_message = opening_requests(maximum_id).front();
+    const auto maximum_transition = maximum.on_event(
+        StreamDataEvent{0, encode(maximum_message), false});
+    EXPECT_EQ(close_action(maximum_transition), nullptr);
+}
+
+TEST(Draft18SessionRequests, RejectsIllegalFirstMessageAndNeedMoreIsSemanticNoop) {
+    PublisherSession illegal;
+    activate(illegal);
+    const auto response = encode(wire::draft18::RequestOkMessage{});
+    const auto illegal_transition = illegal.on_event(
+        StreamDataEvent{0, response, false});
+    ASSERT_NE(close_action(illegal_transition), nullptr);
+    EXPECT_EQ(close_action(illegal_transition)->application_error, 0x3u);
+
+    const auto request = encode(opening_requests(0).front());
+    for (std::size_t split = 0; split < request.size(); ++split) {
+        PublisherSession session;
+        activate(session);
+        session.on_event(StreamDataEvent{
+            0, {request.begin(), request.begin() +
+                                     static_cast<std::ptrdiff_t>(split)}, false});
+        const auto before = session.take_evidence(32);
+        EXPECT_EQ(std::count_if(before.begin(), before.end(),
+                                [](const EvidenceEvent& event) {
+                                    return event.kind == EvidenceKind::RequestObserved;
+                                }),
+                  0) << split;
+        session.on_event(StreamDataEvent{
+            0, {request.begin() + static_cast<std::ptrdiff_t>(split),
+                request.end()}, false});
+        const auto after = session.take_evidence(32);
+        EXPECT_EQ(std::count_if(after.begin(), after.end(),
+                                [](const EvidenceEvent& event) {
+                                    return event.kind == EvidenceKind::RequestObserved;
+                                }),
+                  1) << split;
+    }
+}
+
+Message successful_response(RequestKind kind) {
+    using namespace wire::draft18;
+    if (kind == RequestKind::Subscribe) {
+        return SubscribeOkMessage{7, {}, {}};
+    }
+    if (kind == RequestKind::Fetch) {
+        return FetchOkMessage{0, {0, 0}, {}, {}};
+    }
+    return RequestOkMessage{};
+}
+
+TEST(Draft18SessionRequests, CorrelatesEveryInitialResponseFamily) {
+    const auto requests = opening_requests(1);
+    const std::array kinds{
+        RequestKind::Subscribe, RequestKind::Publish, RequestKind::Fetch,
+        RequestKind::TrackStatus, RequestKind::PublishNamespace,
+        RequestKind::SubscribeNamespace, RequestKind::SubscribeTracks};
+    for (std::size_t index = 0; index < requests.size(); ++index) {
+        PublisherSession session;
+        activate(session);
+        const auto stream_id = static_cast<transport::StreamId>(index * 4 + 1);
+        session.observe_local_stream(stream_id, LocalStreamPurpose::Request);
+        session.observe_local_message(stream_id, requests[index], false);
+        session.take_evidence(32);
+        const auto response = encode(successful_response(kinds[index]));
+        const auto transition = session.on_event(
+            StreamDataEvent{stream_id, response, false});
+        EXPECT_EQ(close_action(transition), nullptr) << index;
+        const auto evidence = session.take_evidence(32);
+        ASSERT_EQ(evidence.size(), 1u) << index;
+        EXPECT_EQ(evidence.front().kind, EvidenceKind::InitialResponseObserved);
+        const auto& observed =
+            std::get<InitialResponseEvidence>(evidence.front().data);
+        EXPECT_EQ(observed.original_request_id, index * 2 + 1);
+        EXPECT_EQ(observed.request_kind, kinds[index]);
+    }
+}
+
+TEST(Draft18SessionRequests, WrongOrDuplicateInitialResponseIsTypedEvidence) {
+    PublisherSession wrong;
+    activate(wrong);
+    wrong.observe_local_stream(1, LocalStreamPurpose::Request);
+    wrong.observe_local_message(1, opening_requests(1).front(), false);
+    const auto wrong_transition = wrong.on_event(
+        StreamDataEvent{1, encode(wire::draft18::RequestOkMessage{}), false});
+    EXPECT_EQ(close_action(wrong_transition), nullptr);
+
+    PublisherSession duplicate;
+    activate(duplicate);
+    duplicate.observe_local_stream(1, LocalStreamPurpose::Request);
+    duplicate.observe_local_message(1, opening_requests(1).front(), false);
+    const auto response = encode(wire::draft18::SubscribeOkMessage{7, {}, {}});
+    duplicate.on_event(StreamDataEvent{1, response, false});
+    const auto duplicate_transition = duplicate.on_event(
+        StreamDataEvent{1, response, false});
+    EXPECT_EQ(close_action(duplicate_transition), nullptr);
+    const auto evidence = duplicate.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::ResponseViolation;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, NamespaceWrongFirstResponseMandatesClose) {
+    const auto requests = opening_requests(1);
+    for (const auto index : {std::size_t{5}, std::size_t{6}}) {
+        PublisherSession session;
+        activate(session);
+        session.observe_local_stream(1, LocalStreamPurpose::Request);
+        session.observe_local_message(1, requests[index], false);
+        const auto transition = session.on_event(StreamDataEvent{
+            1,
+            encode(wire::draft18::SubscribeOkMessage{7, {}, {}}),
+            false});
+        ASSERT_NE(close_action(transition), nullptr) << index;
+        EXPECT_EQ(close_action(transition)->application_error, 0x3u)
+            << index;
+    }
+}
+
+TEST(Draft18SessionRequests, ExhaustionCannotSuppressNamespaceMandatoryClose) {
+    PublisherSessionConfig config;
+    config.maximum_evidence_count = 2;
+    PublisherSession session(config);
+    activate_with_small_evidence_queue(session);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, wire::draft18::SubscribeNamespaceMessage{1, {}, {}}, false);
+    const auto transition = session.on_event(StreamDataEvent{
+        1, encode(wire::draft18::SubscribeOkMessage{7, {}, {}}), false});
+    ASSERT_NE(close_action(transition), nullptr);
+    EXPECT_EQ(close_action(transition)->application_error, 0x3u);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::ProtocolViolation;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::HarnessLimit;
+                            }),
+              0);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, CorrelatesUpdatesInOrderAndPreservesErrorAmbiguity) {
+    PublisherSession fifo;
+    activate(fifo);
+    const auto request = encode(opening_requests(0).front());
+    fifo.on_event(StreamDataEvent{0, request, false});
+    fifo.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, false);
+    std::vector<std::byte> updates =
+        encode(wire::draft18::RequestUpdateMessage{2, {}});
+    const auto second_update =
+        encode(wire::draft18::RequestUpdateMessage{4, {}});
+    updates.insert(updates.end(), second_update.begin(), second_update.end());
+    fifo.on_event(StreamDataEvent{0, updates, false});
+    fifo.observe_local_message(0, wire::draft18::RequestOkMessage{}, false);
+    fifo.observe_local_message(0, wire::draft18::RequestOkMessage{}, false);
+    const auto fifo_evidence = fifo.take_evidence(128);
+    std::vector<std::uint64_t> resolved;
+    for (const auto& event : fifo_evidence) {
+        if (event.kind == EvidenceKind::UpdateResponseObserved) {
+            resolved.push_back(std::get<UpdateResponseEvidence>(event.data)
+                                   .update_request_id.value());
+        }
+    }
+    EXPECT_EQ(resolved, (std::vector<std::uint64_t>{2, 4}));
+
+    PublisherSession ambiguous;
+    activate(ambiguous);
+    ambiguous.on_event(StreamDataEvent{0, request, false});
+    ambiguous.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, false);
+    ambiguous.on_event(StreamDataEvent{0, updates, false});
+    ambiguous.observe_local_message(
+        0, wire::draft18::RequestErrorMessage{1, 0, {}, std::nullopt}, false);
+    const auto ambiguous_evidence = ambiguous.take_evidence(128);
+    const auto event = std::find_if(
+        ambiguous_evidence.begin(), ambiguous_evidence.end(),
+        [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::UpdateResponseObserved;
+        });
+    ASSERT_NE(event, ambiguous_evidence.end());
+    const auto& response = std::get<UpdateResponseEvidence>(event->data);
+    EXPECT_FALSE(response.update_request_id.has_value());
+    EXPECT_EQ(response.candidate_update_ids,
+              (std::vector<std::uint64_t>{2, 4}));
+}
+
+TEST(Draft18SessionRequests, UpdateErrorEntersFailedPhaseWithoutTerminalizing) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {}, {}, {}}), false});
+    session.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    session.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{2, {}}), false});
+    session.observe_local_message(
+        0, RequestErrorMessage{1, 0, {}, std::nullopt}, false);
+    session.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{4, {}}), false});
+    const auto evidence = session.take_evidence(128);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              0);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::RequestUpdateFailed;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::RequestStateViolation;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, FailedPhaseStillOwnsValidUpdateIds) {
+    using namespace wire::draft18;
+    PublisherSession consumed;
+    activate(consumed);
+    consumed.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {}, {}, {}}), false});
+    consumed.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    consumed.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{2, {}}), false});
+    consumed.observe_local_message(
+        0, RequestErrorMessage{1, 0, {}, std::nullopt}, false);
+    consumed.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{4, {}}), false});
+    const auto reuse = consumed.on_event(StreamDataEvent{
+        4, encode(SubscribeMessage{4, {}, {}, {}}), false});
+    ASSERT_NE(close_action(reuse), nullptr);
+    EXPECT_EQ(close_action(reuse)->application_error, 0x4u);
+
+    PublisherSession parity;
+    activate(parity);
+    parity.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {}, {}, {}}), false});
+    parity.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    parity.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{2, {}}), false});
+    parity.observe_local_message(
+        0, RequestErrorMessage{1, 0, {}, std::nullopt}, false);
+    const auto invalid = parity.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{3, {}}), false});
+    ASSERT_NE(close_action(invalid), nullptr);
+    EXPECT_EQ(close_action(invalid)->application_error, 0x4u);
+}
+
+TEST(Draft18SessionRequests, PrematureCrossPublishUpdateConsumesIdAsViolation) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {}, {}, 7, {}, {}}), false});
+    session.observe_local_message(0, RequestUpdateMessage{1, {}}, false);
+    session.observe_local_stream(5, LocalStreamPurpose::Request);
+    session.observe_local_message(5, SubscribeMessage{1, {}, {}, {}}, false);
+    const auto evidence = session.take_evidence(128);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::RequestStateViolation;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::UpdateObserved;
+                            }),
+              0);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::LocalObservationError;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, PublishDoneRemainsLegalAfterFailedPublishUpdate) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {}, {}, 7, {}, {}}), false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.observe_local_message(0, RequestUpdateMessage{1, {}}, false);
+    session.on_event(StreamDataEvent{
+        0, encode(RequestErrorMessage{1, 0, {}, std::nullopt}), false});
+    const auto transition = session.on_event(StreamDataEvent{
+        0, encode(PublishDoneMessage{5, 0, {}}), false});
+    EXPECT_EQ(close_action(transition), nullptr);
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+
+    PublisherSession local;
+    activate(local);
+    local.observe_local_stream(1, LocalStreamPurpose::Request);
+    local.observe_local_message(1, PublishMessage{1, {}, {}, 7, {}, {}},
+                                false);
+    local.on_event(StreamDataEvent{1, encode(RequestOkMessage{}), false});
+    local.take_evidence(64);
+    local.observe_local_message(1, PublishDoneMessage{0, 0, {}}, false);
+    const auto local_evidence = local.take_evidence(64);
+    ASSERT_EQ(local_evidence.size(), 1u);
+    EXPECT_EQ(local_evidence.front().kind,
+              EvidenceKind::RequestMessageObserved);
+}
+
+TEST(Draft18SessionRequests, ProtocolCloseCompactsEveryActiveRequest) {
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    session.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    session.take_evidence(64);
+    const auto transition = session.on_event(StreamDataEvent{
+        0, encode(wire::draft18::SetupMessage{}), false});
+    ASSERT_NE(close_action(transition), nullptr);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              2);
+    for (const auto& event : evidence) {
+        if (event.kind == EvidenceKind::RequestTerminal) {
+            EXPECT_EQ(std::get<RequestTerminalEvidence>(event.data).cause,
+                      RequestTerminalCause::SessionClosed);
+        }
+    }
+}
+
+TEST(Draft18SessionRequests, ExhaustedEvidencePreservesProtocolTerminalKinds) {
+    PublisherSessionConfig config;
+    config.maximum_evidence_count = 4;
+    PublisherSession session(config);
+    activate_with_small_evidence_queue(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    session.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    const auto transition = session.on_event(StreamDataEvent{
+        0, encode(wire::draft18::SetupMessage{}), false});
+    ASSERT_NE(close_action(transition), nullptr);
+    EXPECT_EQ(close_action(transition)->application_error, 0x3u);
+    const auto evidence = session.take_evidence(128);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              2);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::ProtocolViolation;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::HarnessLimit;
+                            }),
+              0);
+}
+
+TEST(Draft18SessionRequests, ExhaustedEvidencePreservesPeerCloseTerminalKinds) {
+    PublisherSessionConfig config;
+    config.maximum_evidence_count = 4;
+    PublisherSession session(config);
+    activate_with_small_evidence_queue(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    session.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    session.on_event(transport::PeerCloseEvent{
+        transport::CloseErrorSpace::Application, 9, {std::byte{0x61}}});
+    const auto evidence = session.take_evidence(128);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              2);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::PeerClose;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::HarnessLimit;
+                            }),
+              0);
+}
+
+TEST(Draft18SessionRequests, ExhaustedEvidenceReservesFinTerminalBeforeHarnessClose) {
+    PublisherSessionConfig config;
+    config.maximum_evidence_count = 2;
+    PublisherSession session(config);
+    activate_with_small_evidence_queue(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), true});
+    session.observe_local_fin(0);
+    const auto evidence = session.take_evidence(128);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::HarnessLimit;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, ReplaysRetainedPreSetupRequestAndRememberedFin) {
+    PublisherSession session;
+    establish_with_local_setup(session);
+    session.take_evidence(32);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), true});
+    EXPECT_EQ(session.phase(), SessionPhase::AwaitingSetup);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestObserved;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              0);
+    session.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, true);
+    evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, InvalidIdPrecedesRequestAndUpdateCapacity) {
+    PublisherSessionConfig request_config;
+    request_config.maximum_active_requests = 1;
+    PublisherSession requests(request_config);
+    activate(requests);
+    requests.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    const auto request_transition = requests.on_event(StreamDataEvent{
+        4, encode(opening_requests(1).front()), false});
+    ASSERT_NE(close_action(request_transition), nullptr);
+    EXPECT_EQ(close_action(request_transition)->application_error, 0x4u);
+
+    PublisherSessionConfig update_config;
+    update_config.maximum_outstanding_updates_per_request = 1;
+    PublisherSession updates(update_config);
+    activate(updates);
+    updates.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    updates.on_event(StreamDataEvent{
+        0, encode(wire::draft18::RequestUpdateMessage{2, {}}), false});
+    const auto update_transition = updates.on_event(StreamDataEvent{
+        0, encode(wire::draft18::RequestUpdateMessage{2, {}}), false});
+    ASSERT_NE(close_action(update_transition), nullptr);
+    EXPECT_EQ(close_action(update_transition)->application_error, 0x4u);
+}
+
+TEST(Draft18SessionRequests, ConfiguredWireLimitIsHarnessEvidence) {
+    PublisherSessionConfig config;
+    config.wire_limits.maximum_odd_value_length = 1;
+    PublisherSession session(config);
+    activate(session);
+    wire::draft18::Token token;
+    token.alias_type = wire::draft18::TokenAliasType::UseValue;
+    token.token_type = 1;
+    token.token_value.assign(32, std::byte{0x61});
+    const auto transition = session.on_event(StreamDataEvent{
+        0, encode(wire::draft18::SubscribeMessage{0, {}, {}, {{0x03, token}}}),
+        false});
+    ASSERT_NE(close_action(transition), nullptr);
+    EXPECT_EQ(close_action(transition)->application_error, 0x1u);
+    const auto evidence = session.take_evidence(64);
+    const auto limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::HarnessLimit;
+        });
+    ASSERT_NE(limit, evidence.end());
+    EXPECT_EQ(std::get<HarnessLimitEvidence>(limit->data).limit,
+              HarnessLimitKind::PartialStreamBytes);
+}
+
+TEST(Draft18SessionRequests, EnforcesControlAndRequestGoawayContextAndCardinality) {
+    using wire::draft18::GoawayMessage;
+    PublisherSession control;
+    activate(control);
+    const auto control_goaway = encode(GoawayMessage{{}, 10, 1});
+    const auto accepted = control.on_event(
+        StreamDataEvent{2, control_goaway, false});
+    EXPECT_EQ(close_action(accepted), nullptr);
+    auto evidence = control.take_evidence(32);
+    const auto observed = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::GoawayObserved;
+        });
+    ASSERT_NE(observed, evidence.end());
+    EXPECT_EQ(std::get<GoawayEvidence>(observed->data).placement,
+              GoawayPlacement::Control);
+    const auto repeated = control.on_event(
+        StreamDataEvent{2, control_goaway, false});
+    ASSERT_NE(close_action(repeated), nullptr);
+    EXPECT_EQ(close_action(repeated)->application_error, 0x3u);
+
+    PublisherSession request;
+    activate(request);
+    request.on_event(StreamDataEvent{0, encode(opening_requests(0).front()),
+                                     false});
+    const auto request_goaway = encode(GoawayMessage{{}, 5, std::nullopt});
+    EXPECT_EQ(close_action(request.on_event(
+                  StreamDataEvent{0, request_goaway, false})),
+              nullptr);
+    const auto duplicate = request.on_event(
+        StreamDataEvent{0, request_goaway, false});
+    ASSERT_NE(close_action(duplicate), nullptr);
+    EXPECT_EQ(close_action(duplicate)->application_error, 0x3u);
+
+    PublisherSession wrong_cutoff;
+    activate(wrong_cutoff);
+    const auto parity = wrong_cutoff.on_event(StreamDataEvent{
+        2, encode(GoawayMessage{{}, 0, 2}), false});
+    ASSERT_NE(close_action(parity), nullptr);
+    EXPECT_EQ(close_action(parity)->application_error, 0x4u);
+}
+
+TEST(Draft18SessionRequests, ReceivedControlGoawayCutsOffLocalRequests) {
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        2, encode(wire::draft18::GoawayMessage{{}, 0, 3}), false});
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(1, opening_requests(1).front(), false);
+    session.observe_local_stream(5, LocalStreamPurpose::Request);
+    session.observe_local_message(5, opening_requests(3).front(), false);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestObserved;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::LocalObservationError;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionRequests, FinIsHalfCloseAndTerminalEvidenceIsExactOnce) {
+    PublisherSession session;
+    activate(session);
+    const auto request = encode(opening_requests(0).front());
+    session.on_event(StreamDataEvent{0, request, true});
+    auto before = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(before.begin(), before.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              0);
+    session.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, true);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestTerminal;
+                            }),
+              1);
+    const auto terminal = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::RequestTerminal;
+        });
+    ASSERT_NE(terminal, evidence.end());
+    EXPECT_EQ(std::get<RequestTerminalEvidence>(terminal->data).cause,
+              RequestTerminalCause::LocalFin);
+}
+
+TEST(Draft18SessionRequests, EitherSecondFinOrderingReleasesRequestStreamSlot) {
+    PublisherSessionConfig config;
+    config.maximum_active_streams = 2;
+
+    PublisherSession peer_first(config);
+    activate(peer_first);
+    peer_first.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), true});
+    peer_first.observe_local_fin(0);
+    const auto peer_first_transition = peer_first.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    EXPECT_EQ(close_action(peer_first_transition), nullptr);
+
+    PublisherSession local_first(config);
+    activate(local_first);
+    local_first.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    local_first.observe_local_fin(0);
+    local_first.on_event(StreamDataEvent{0, {}, true});
+    const auto local_first_transition = local_first.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    EXPECT_EQ(close_action(local_first_transition), nullptr);
+
+    const auto peer_evidence = peer_first.take_evidence(128);
+    const auto local_evidence = local_first.take_evidence(128);
+    for (const auto* evidence : {&peer_evidence, &local_evidence}) {
+        EXPECT_EQ(std::count_if(evidence->begin(), evidence->end(),
+                                [](const EvidenceEvent& event) {
+                                    return event.kind ==
+                                           EvidenceKind::RequestTerminal;
+                                }),
+                  1);
+        EXPECT_EQ(std::count_if(evidence->begin(), evidence->end(),
+                                [](const EvidenceEvent& event) {
+                                    return event.kind ==
+                                           EvidenceKind::RequestObserved;
+                                }),
+                  2);
+    }
+}
+
+TEST(Draft18SessionRequests, DeepOwnedEvidenceRespectsOneByteBudget) {
+    using namespace wire::draft18;
+    auto expect_limit = [](PublisherSession& session) {
+        const auto evidence = session.take_evidence(128);
+        const auto limit = std::find_if(
+            evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+                return event.kind == EvidenceKind::HarnessLimit;
+            });
+        ASSERT_NE(limit, evidence.end());
+        EXPECT_EQ(std::get<HarnessLimitEvidence>(limit->data).limit,
+                  HarnessLimitKind::EvidenceBytes);
+    };
+
+    PublisherSessionConfig config;
+    config.maximum_evidence_bytes = 1;
+
+    PublisherSession request_session(config);
+    activate_with_empty_transport_evidence(request_session);
+    request_session.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {}, {{64, std::byte{0x61}}}, {}}),
+        false});
+    expect_limit(request_session);
+
+    PublisherSession response_session(config);
+    activate_with_empty_transport_evidence(response_session);
+    response_session.observe_local_stream(1, LocalStreamPurpose::Request);
+    response_session.observe_local_message(1, opening_requests(1).front(),
+                                            false);
+    response_session.take_evidence(32);
+    response_session.on_event(StreamDataEvent{
+        1, encode(SubscribeOkMessage{
+               1, {}, {{{1, ByteValue{{64, std::byte{0x62}}}}}}}),
+        false});
+    expect_limit(response_session);
+
+    PublisherSession update_session(config);
+    activate_with_empty_transport_evidence(update_session);
+    update_session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    update_session.take_evidence(32);
+    Token token;
+    token.alias_type = TokenAliasType::UseValue;
+    token.token_type = 1;
+    token.token_value.assign(64, std::byte{0x63});
+    update_session.on_event(StreamDataEvent{
+        0, encode(RequestUpdateMessage{2, {{0x03, token}}}), false});
+    expect_limit(update_session);
+
+    PublisherSession goaway_session(config);
+    activate_with_empty_transport_evidence(goaway_session);
+    goaway_session.observe_local_message(
+        3, GoawayMessage{{64, std::byte{0x64}}, 0, 0}, false);
+    expect_limit(goaway_session);
+
+    PublisherSession candidates_session(config);
+    activate_with_empty_transport_evidence(candidates_session);
+    candidates_session.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {}, {}, {}}), false});
+    candidates_session.observe_local_message(
+        0, SubscribeOkMessage{7, {}, {}}, false);
+    candidates_session.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{2, {}}), false});
+    candidates_session.on_event(
+        StreamDataEvent{0, encode(RequestUpdateMessage{4, {}}), false});
+    candidates_session.observe_local_message(
+        0, RequestErrorMessage{1, 0, {}, std::nullopt}, false);
+    expect_limit(candidates_session);
+}
+
+TEST(Draft18SessionRequests, RequestHistoryHasAnIndependentBound) {
+    PublisherSessionConfig config;
+    config.maximum_request_history = 1;
+    PublisherSession session(config);
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), true});
+    session.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, true);
+    session.on_event(StreamDataEvent{
+        4, encode(opening_requests(2).front()), false});
+    const auto evidence = session.take_evidence(128);
+    const auto limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::HarnessLimit;
+        });
+    ASSERT_NE(limit, evidence.end());
+    EXPECT_EQ(std::get<HarnessLimitEvidence>(limit->data).limit,
+              HarnessLimitKind::RequestHistory);
+}
+
+TEST(Draft18SessionRequests, LocalStreamHistoryHasAnIndependentBound) {
+    PublisherSessionConfig config;
+    config.maximum_local_stream_history = 2;
+    PublisherSession session(config);
+    activate(session);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_stream(5, LocalStreamPurpose::Request);
+    const auto evidence = session.take_evidence(64);
+    const auto limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::HarnessLimit;
+        });
+    ASSERT_NE(limit, evidence.end());
+    EXPECT_EQ(std::get<HarnessLimitEvidence>(limit->data).limit,
+              HarnessLimitKind::LocalStreamHistory);
+}
+
+TEST(Draft18SessionRequests, RequestGoawayCardinalityIsPerDirection) {
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    const wire::draft18::GoawayMessage goaway{{}, 0, std::nullopt};
+    EXPECT_EQ(close_action(session.on_event(
+                  StreamDataEvent{0, encode(goaway), false})),
+              nullptr);
+    EXPECT_TRUE(session.observe_local_message(0, goaway, false).actions.empty());
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::GoawayObserved;
+                            }),
+              2);
+    const auto repeated = session.on_event(
+        StreamDataEvent{0, encode(goaway), false});
+    ASSERT_NE(close_action(repeated), nullptr);
+}
+
+TEST(Draft18SessionRequests, PublishAllowsSubscriberInitiatedUpdate) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {}, {}, 7, {}, {}}), false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.observe_local_message(0, RequestUpdateMessage{1, {}}, false);
+    const auto response = session.on_event(
+        StreamDataEvent{0, encode(RequestOkMessage{}), false});
+    EXPECT_EQ(close_action(response), nullptr);
+    const auto evidence = session.take_evidence(128);
+    const auto update = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::UpdateObserved;
+        });
+    ASSERT_NE(update, evidence.end());
+    EXPECT_EQ(std::get<UpdateObservedEvidence>(update->data).initiator,
+              RequestInitiator::Local);
+    const auto resolved = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::UpdateResponseObserved;
+        });
+    ASSERT_NE(resolved, evidence.end());
+    EXPECT_EQ(std::get<UpdateResponseEvidence>(resolved->data).responder,
+              RequestInitiator::Peer);
+}
+
+TEST(Draft18SessionRequests, LocalStopSendingIsDistinctAndExactOnce) {
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(opening_requests(0).front()), false});
+    session.observe_local_stop_sending(0, 4);
+    session.observe_local_stop_sending(0, 4);
+    const auto evidence = session.take_evidence(64);
+    const auto terminals = std::count_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::RequestTerminal;
+        });
+    EXPECT_EQ(terminals, 1);
+    const auto terminal = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::RequestTerminal;
+        });
+    ASSERT_NE(terminal, evidence.end());
+    EXPECT_EQ(std::get<RequestTerminalEvidence>(terminal->data).cause,
+              RequestTerminalCause::LocalStopSending);
+}
+
+TEST(Draft18SessionRequests, CoalescedAndSplitUpdatesMutateOnlyOnCompleteFrames) {
+    const auto request = encode(opening_requests(0).front());
+    const auto update = encode(wire::draft18::RequestUpdateMessage{2, {}});
+    for (std::size_t split = 0; split < update.size(); ++split) {
+        PublisherSession session;
+        activate(session);
+        session.on_event(StreamDataEvent{0, request, false});
+        session.take_evidence(32);
+        session.on_event(StreamDataEvent{
+            0, {update.begin(), update.begin() +
+                                    static_cast<std::ptrdiff_t>(split)}, false});
+        EXPECT_TRUE(session.take_evidence(32).empty()) << split;
+        session.on_event(StreamDataEvent{
+            0, {update.begin() + static_cast<std::ptrdiff_t>(split),
+                update.end()}, false});
+        const auto evidence = session.take_evidence(32);
+        ASSERT_EQ(evidence.size(), 1u) << split;
+        EXPECT_EQ(evidence.front().kind, EvidenceKind::UpdateObserved);
+    }
+
+    PublisherSession coalesced;
+    activate(coalesced);
+    std::vector<std::byte> frames = request;
+    frames.insert(frames.end(), update.begin(), update.end());
+    coalesced.on_event(StreamDataEvent{0, frames, false});
+    const auto evidence = coalesced.take_evidence(32);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::RequestObserved ||
+                                       event.kind == EvidenceKind::UpdateObserved;
+                            }),
+              2);
+}
+
+TEST(Draft18SessionRequests, EnforcesIndependentRequestAndUpdateBounds) {
+    PublisherSessionConfig request_config;
+    request_config.maximum_active_requests = 1;
+    PublisherSession requests(request_config);
+    activate(requests);
+    requests.on_event(
+        StreamDataEvent{0, encode(opening_requests(0).front()), false});
+    requests.on_event(
+        StreamDataEvent{4, encode(opening_requests(2).front()), false});
+    auto evidence = requests.take_evidence(64);
+    const auto request_limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::HarnessLimit;
+        });
+    ASSERT_NE(request_limit, evidence.end());
+    EXPECT_EQ(std::get<HarnessLimitEvidence>(request_limit->data).limit,
+              HarnessLimitKind::ActiveRequests);
+
+    PublisherSessionConfig update_config;
+    update_config.maximum_outstanding_updates_per_request = 1;
+    PublisherSession updates(update_config);
+    activate(updates);
+    updates.on_event(
+        StreamDataEvent{0, encode(opening_requests(0).front()), false});
+    updates.observe_local_message(
+        0, wire::draft18::SubscribeOkMessage{7, {}, {}}, false);
+    updates.on_event(StreamDataEvent{
+        0, encode(wire::draft18::RequestUpdateMessage{2, {}}), false});
+    updates.on_event(StreamDataEvent{
+        0, encode(wire::draft18::RequestUpdateMessage{4, {}}), false});
+    evidence = updates.take_evidence(64);
+    const auto update_limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::HarnessLimit;
+        });
+    ASSERT_NE(update_limit, evidence.end());
+    EXPECT_EQ(std::get<HarnessLimitEvidence>(update_limit->data).limit,
+              HarnessLimitKind::OutstandingUpdates);
 }
 
 TEST(Draft18Session, BecomesActiveOnlyAfterBothSetupMessages) {
@@ -256,12 +1272,12 @@ TEST(Draft18Session, SetupOptionsAreOwnedAndKnownDuplicatesAreEvidence) {
               1);
 }
 
-TEST(Draft18Session, CoalescedPostSetupControlFrameIsDeferred) {
+TEST(Draft18Session, CoalescedPostSetupGoawayIsObserved) {
     PublisherSession session;
     establish_with_local_setup(session);
     std::vector<std::byte> bytes(kSetup.begin(), kSetup.end());
     const std::array goaway{std::byte{0x10}, std::byte{0x00}, std::byte{0x03},
-                            std::byte{0x00}, std::byte{0x00}, std::byte{0x02}};
+                            std::byte{0x00}, std::byte{0x00}, std::byte{0x01}};
     bytes.insert(bytes.end(), goaway.begin(), goaway.end());
     const auto transition = session.on_event(StreamDataEvent{2, bytes, false});
     EXPECT_TRUE(transition.actions.empty());
@@ -269,8 +1285,7 @@ TEST(Draft18Session, CoalescedPostSetupControlFrameIsDeferred) {
     const auto evidence = session.take_evidence(32);
     EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
                            [](const EvidenceEvent& event) {
-                               return event.kind ==
-                                      EvidenceKind::DeferredStreamBytes;
+                               return event.kind == EvidenceKind::GoawayObserved;
                            }),
               evidence.end());
 }

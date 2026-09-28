@@ -25,6 +25,37 @@ enum class LocalStreamPurpose { Control, Request, Data };
 
 enum class PeerStreamKind { Control, Request, Subgroup, Fetch, Padding };
 
+enum class RequestInitiator { Peer, Local };
+
+enum class RequestKind {
+    Subscribe,
+    Publish,
+    Fetch,
+    TrackStatus,
+    PublishNamespace,
+    SubscribeNamespace,
+    SubscribeTracks,
+};
+
+enum class GoawayPlacement { Control, Request };
+
+enum class RequestTerminalCause {
+    PeerFin,
+    LocalFin,
+    PeerReset,
+    PeerStopSending,
+    LocalStopSending,
+    ResponseError,
+    SessionClosed,
+};
+
+enum class RequestPhase {
+    AwaitingInitialResponse,
+    Active,
+    UpdateFailed,
+    Terminal,
+};
+
 enum class EvidenceKind {
     TransportEstablished,
     LocalStreamObserved,
@@ -44,6 +75,17 @@ enum class EvidenceKind {
     ProtocolViolation,
     HarnessLimit,
     LocalObservationError,
+    RequestObserved,
+    RequestIdSequenceViolation,
+    InitialResponseObserved,
+    UpdateObserved,
+    UpdateResponseObserved,
+    GoawayObserved,
+    RequestTerminal,
+    ResponseViolation,
+    RequestUpdateFailed,
+    RequestStateViolation,
+    RequestMessageObserved,
 };
 
 enum class HarnessLimitKind {
@@ -54,6 +96,10 @@ enum class HarnessLimitKind {
     PartialSessionBytes,
     EvidenceCount,
     EvidenceBytes,
+    ActiveRequests,
+    OutstandingUpdates,
+    RequestHistory,
+    LocalStreamHistory,
 };
 
 struct TransportEstablishedEvidence {
@@ -130,6 +176,88 @@ struct LocalObservationErrorEvidence {
     std::optional<transport::StreamId> stream_id;
 };
 
+struct RequestObservedEvidence {
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t request_id{0};
+    RequestKind request_kind{RequestKind::Subscribe};
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
+struct RequestIdSequenceEvidence {
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t expected{0};
+    std::uint64_t observed{0};
+};
+
+struct InitialResponseEvidence {
+    RequestInitiator responder{RequestInitiator::Peer};
+    std::uint64_t original_request_id{0};
+    RequestKind request_kind{RequestKind::Subscribe};
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
+struct UpdateObservedEvidence {
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t update_request_id{0};
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    wire::draft18::RequestUpdateMessage update;
+};
+
+struct UpdateResponseEvidence {
+    RequestInitiator responder{RequestInitiator::Peer};
+    std::uint64_t original_request_id{0};
+    std::optional<std::uint64_t> update_request_id;
+    std::vector<std::uint64_t> candidate_update_ids;
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
+struct ResponseViolationEvidence {
+    RequestInitiator responder{RequestInitiator::Peer};
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
+struct GoawayEvidence {
+    RequestInitiator sender{RequestInitiator::Peer};
+    GoawayPlacement placement{GoawayPlacement::Control};
+    transport::StreamId stream_id{0};
+    std::optional<std::uint64_t> cutoff_request_id;
+    wire::draft18::GoawayMessage message;
+};
+
+struct RequestTerminalEvidence {
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    RequestTerminalCause cause{RequestTerminalCause::SessionClosed};
+    std::optional<std::uint64_t> application_error;
+};
+
+struct RequestUpdateFailedEvidence {
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    RequestKind request_kind{RequestKind::Subscribe};
+    RequestInitiator update_initiator{RequestInitiator::Peer};
+};
+
+struct RequestStateViolationEvidence {
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
+struct RequestMessageObservedEvidence {
+    RequestInitiator sender{RequestInitiator::Peer};
+    std::uint64_t original_request_id{0};
+    transport::StreamId stream_id{0};
+    wire::draft18::Message message;
+};
+
 using EvidenceData =
     std::variant<TransportEstablishedEvidence, StreamEvidence,
                  LocalStreamEvidence, SetupEvidence,
@@ -137,7 +265,13 @@ using EvidenceData =
                  StreamErrorEvidence, CloseEvidence, TransportErrorEvidence,
                  MarkerEvidence, DraftAmbiguityEvidence,
                  ProtocolViolationEvidence, HarnessLimitEvidence,
-                 LocalObservationErrorEvidence>;
+                 LocalObservationErrorEvidence, RequestObservedEvidence,
+                 RequestIdSequenceEvidence, InitialResponseEvidence,
+                 UpdateObservedEvidence, UpdateResponseEvidence,
+                 ResponseViolationEvidence, GoawayEvidence,
+                 RequestTerminalEvidence, RequestUpdateFailedEvidence,
+                 RequestStateViolationEvidence,
+                 RequestMessageObservedEvidence>;
 
 struct EvidenceEvent {
     std::uint64_t sequence{0};
@@ -182,6 +316,10 @@ struct PublisherSessionConfig {
     std::size_t maximum_partial_bytes_per_session{1u << 20};
     std::size_t maximum_evidence_count{512};
     std::size_t maximum_evidence_bytes{1u << 20};
+    std::size_t maximum_active_requests{256};
+    std::size_t maximum_outstanding_updates_per_request{64};
+    std::size_t maximum_request_history{4'096};
+    std::size_t maximum_local_stream_history{4'096};
     wire::draft18::Limits wire_limits{};
 };
 
@@ -201,6 +339,9 @@ public:
     SessionTransition observe_local_message(
         transport::StreamId stream_id,
         const wire::draft18::Message& message, bool fin);
+    SessionTransition observe_local_stop_sending(
+        transport::StreamId stream_id, std::uint64_t application_error);
+    SessionTransition observe_local_fin(transport::StreamId stream_id);
     std::vector<EvidenceEvent> take_evidence(std::size_t maximum);
 
     [[nodiscard]] SessionPhase phase() const noexcept;
