@@ -220,6 +220,14 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
     if (const auto* need = std::get_if<NeedMore>(&type_result)) return *need;
     if (const auto* error = std::get_if<DecodeError>(&type_result)) return *error;
 
+    const auto type = std::get<std::uint64_t>(type_result);
+    if (type != kSetupMessageType) {
+        return invalid(input.offset(), "unknown, reserved, or removed message type");
+    }
+    if (role != StreamRole::Control) {
+        return invalid(input.offset(), "SETUP is not valid on a request stream");
+    }
+
     const auto length_result = read_bytes(working, 2);
     if (const auto* need = std::get_if<NeedMore>(&length_result)) return *need;
     if (const auto* error = std::get_if<DecodeError>(&length_result)) return *error;
@@ -232,14 +240,6 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
     const auto payload_result = read_bytes(working, payload_length);
     if (const auto* need = std::get_if<NeedMore>(&payload_result)) return *need;
     if (const auto* error = std::get_if<DecodeError>(&payload_result)) return *error;
-
-    const auto type = std::get<std::uint64_t>(type_result);
-    if (type != kSetupMessageType) {
-        return invalid(input.offset(), "unknown, reserved, or removed message type");
-    }
-    if (role != StreamRole::Control) {
-        return invalid(input.offset(), "SETUP is not valid on a request stream");
-    }
 
     const auto payload = std::get<std::span<const std::byte>>(payload_result);
     Cursor payload_cursor(payload, payload_offset);

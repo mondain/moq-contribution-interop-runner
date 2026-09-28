@@ -277,6 +277,26 @@ TEST(Draft18MessagesTest, RejectsWrongRoleReservedStaleAndUnknownTypes) {
     }
 }
 
+TEST(Draft18MessagesTest, RejectsInvalidTypeAfterHeaderWithoutWaitingForPayload) {
+    const std::vector<std::vector<std::byte>> rejected{
+        bytes({0x1e, 0xff, 0xff}),
+        bytes({0x01, 0xff, 0xff}),
+        bytes({0x7f, 0xff, 0xff}),
+    };
+    for (const auto& header : rejected) {
+        Cursor input(header, 70);
+        expect_decode_error(decode_message(StreamRole::Control, input, {}));
+        EXPECT_EQ(input.offset(), 70u);
+    }
+}
+
+TEST(Draft18MessagesTest, RejectsWrongPhysicalRoleWithoutWaitingForPayload) {
+    const auto setup_header = bytes({0xaf, 0x00, 0xff, 0xff});
+    Cursor input(setup_header, 80);
+    expect_decode_error(decode_message(StreamRole::Request, input, {}));
+    EXPECT_EQ(input.offset(), 80u);
+}
+
 TEST(Draft18MessagesTest, TrackPropertiesPreserveUnknownMandatoryAndRawValues) {
     const auto encoded = bytes({
         0x0a, 0x80, 0x25,
