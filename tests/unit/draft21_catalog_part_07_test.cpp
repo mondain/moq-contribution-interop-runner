@@ -80,6 +80,29 @@ TEST_F(Draft21CatalogPart07Test, GreaseRulesPreserveRegistryAndPublisherReceiver
     EXPECT_NE(no_close[1]->summary.find("PUBLISH_DONE"), std::string::npos);
 }
 
+TEST_F(Draft21CatalogPart07Test, UnknownStopSendingExercisesBothGreaseRulesWithoutScoringInternalMapping) {
+    const std::map<std::size_t, std::string> expected_evaluators = {
+        {6745, "d21-unknown-stop-sending-graceful-handling"},
+        {6746, "d21-unknown-stop-sending-preserves-session"}};
+    for (const auto& [line, evaluator] : expected_evaluators) {
+        const auto rows = at(line);
+        ASSERT_EQ(rows.size(), 1u);
+        const auto& row = *rows.front();
+        SCOPED_TRACE(row.id);
+        EXPECT_NE(std::find(row.scenarios.begin(), row.scenarios.end(), "d21-grease-stop-sending"),
+                  row.scenarios.end());
+        EXPECT_NE(std::find(row.evaluators.begin(), row.evaluators.end(), evaluator),
+                  row.evaluators.end());
+        EXPECT_NE(row.rationale.find("STOP_SENDING"), std::string::npos);
+        EXPECT_NE(row.rationale.find("subgroup"), std::string::npos);
+    }
+    const auto equivalence = at(6756);
+    ASSERT_EQ(equivalence.size(), 4u);
+    EXPECT_EQ(equivalence[3]->testability, Testability::NotTestable);
+    EXPECT_TRUE(equivalence[3]->scenarios.empty());
+    EXPECT_TRUE(equivalence[3]->evaluators.empty());
+}
+
 TEST_F(Draft21CatalogPart07Test, PublisherMonitoringDoesNotBecomeRelayRateLimitingOrErrorPolicy) {
     for (const auto line : {6859u, 6865u, 6866u, 6957u, 7079u}) {
         const auto rows = at(line);
