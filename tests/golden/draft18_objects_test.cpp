@@ -715,6 +715,17 @@ TEST(Draft18SubgroupTest, PreservesPropertiesStatusAndRecommendationEvidence) {
               DecoderObservationKind::DraftAmbiguity);
     EXPECT_EQ(result.observations[1].kind,
               DecoderObservationKind::ShouldClose);
+    EXPECT_FALSE(result.clean_fin);
+
+    AccumulatedSubgroupResult one_shot;
+    accumulate(result, one_shot);
+    SubgroupDecoder split_decoder;
+    AccumulatedSubgroupResult split;
+    accumulate(split_decoder.push(encoded, false), split);
+    const auto split_fin = split_decoder.push({}, true);
+    EXPECT_FALSE(split_fin.clean_fin);
+    accumulate(split_fin, split);
+    expect_same_result(split, one_shot, encoded.size());
 }
 
 TEST(Draft18SubgroupTest, DistinguishesStatusPropertyRules) {

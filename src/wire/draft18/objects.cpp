@@ -565,6 +565,7 @@ private:
         }
         if (current_status_ && *current_status_ != 0u &&
             *current_status_ != 3u && *current_status_ != 4u) {
+            should_close_seen_ = true;
             result.observations.push_back({
                 DecoderObservationKind::ShouldClose,
                 SubgroupDecodePhase::Status, status_offset_,
@@ -610,7 +611,7 @@ private:
             return;
         }
         if (phase_ == Phase::ObjectDelta && vi_size_ == 0u) {
-            result.clean_fin = true;
+            result.clean_fin = !should_close_seen_;
             if (subgroup_mode_ == 1u && object_count_ == 0u) {
                 result.observations.push_back({
                     DecoderObservationKind::DraftAmbiguity,
@@ -669,6 +670,7 @@ private:
     bool terminal_{false};
     bool header_complete_{false};
     bool terminal_status_{false};
+    bool should_close_seen_{false};
     std::size_t offset_{0};
     std::array<std::byte, 9> vi_bytes_{};
     std::size_t vi_size_{0};
