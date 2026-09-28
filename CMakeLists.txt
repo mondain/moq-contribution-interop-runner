@@ -12,7 +12,11 @@ include(cmake/Dependencies.cmake)
 find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
-FetchContent_MakeAvailable(nlohmann_json)
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nlohmann_json cpp_httplib)
 
 set(MOQ_INTEROP_SCHEMA_FILE "${PROJECT_SOURCE_DIR}/src/storage/schema.sql")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MOQ_INTEROP_SCHEMA_FILE}")
@@ -44,6 +48,23 @@ execute_process(
 )
 if(NOT MOQ_INTEROP_ACTUAL_NLOHMANN_JSON_REVISION STREQUAL MOQ_INTEROP_EXPECTED_NLOHMANN_JSON_COMMIT)
     message(FATAL_ERROR "nlohmann_json revision mismatch: pinned ${MOQ_INTEROP_NLOHMANN_JSON_REVISION} resolves to ${MOQ_INTEROP_EXPECTED_NLOHMANN_JSON_COMMIT}, actual ${MOQ_INTEROP_ACTUAL_NLOHMANN_JSON_REVISION}")
+endif()
+execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse "${MOQ_INTEROP_CPP_HTTPLIB_REVISION}^{commit}"
+    WORKING_DIRECTORY "${cpp_httplib_SOURCE_DIR}"
+    OUTPUT_VARIABLE MOQ_INTEROP_EXPECTED_CPP_HTTPLIB_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+)
+execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${cpp_httplib_SOURCE_DIR}"
+    OUTPUT_VARIABLE MOQ_INTEROP_ACTUAL_CPP_HTTPLIB_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+)
+if(NOT MOQ_INTEROP_ACTUAL_CPP_HTTPLIB_REVISION STREQUAL MOQ_INTEROP_EXPECTED_CPP_HTTPLIB_COMMIT)
+    message(FATAL_ERROR "cpp-httplib revision mismatch: pinned ${MOQ_INTEROP_CPP_HTTPLIB_REVISION} resolves to ${MOQ_INTEROP_EXPECTED_CPP_HTTPLIB_COMMIT}, actual ${MOQ_INTEROP_ACTUAL_CPP_HTTPLIB_REVISION}")
 endif()
 set(MOQ_INTEROP_SOURCE_REVISION "" CACHE STRING "Source commit revision")
 if(NOT MOQ_INTEROP_SOURCE_REVISION)
@@ -82,8 +103,20 @@ target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/ge
 target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
                       SQLite::SQLite3)
 
+add_library(moq-interop-http
+    src/http/server.cpp
+    src/http/json.cpp
+    src/http/report.cpp
+)
+target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements
+                      moq-interop-storage)
+target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
+
 add_executable(moq-interop-runner src/app/main.cpp)
-target_link_libraries(moq-interop-runner PRIVATE moq-interop-app)
+target_compile_definitions(moq-interop-runner PRIVATE
+    MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+target_link_libraries(moq-interop-runner PRIVATE moq-interop-http)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
 
 if(MOQ_INTEROP_BUILD_TESTS)
@@ -118,6 +151,14 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-run-store-tests PRIVATE moq-interop-storage
                           GTest::gtest_main)
     add_test(NAME run-store COMMAND moq-interop-run-store-tests)
+
+    add_executable(moq-interop-http-api-tests tests/integration/http_api_test.cpp)
+    target_compile_definitions(moq-interop-http-api-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
+                          httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME http-api COMMAND moq-interop-http-api-tests)
 
     add_executable(moq-interop-draft18-catalog-part-01-tests
                    tests/unit/draft18_catalog_part_01_test.cpp)
