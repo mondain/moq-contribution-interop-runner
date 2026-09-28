@@ -1,5 +1,6 @@
 ARG DEBIAN_BASE=debian@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 ARG DEBIAN_SNAPSHOT=20260927T000000Z
+ARG SOURCE_DATE_EPOCH=1790467200
 
 FROM ${DEBIAN_BASE} AS apt-base
 
@@ -13,10 +14,11 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 FROM apt-base AS builder
 
 ARG SOURCE_REVISION
-RUN case "${SOURCE_REVISION}" in ""|unknown) \
-        echo 'SOURCE_REVISION must be a concrete source revision' >&2; exit 2;; esac
+ARG SOURCE_DATE_EPOCH
+RUN if ! printf '%s\n' "${SOURCE_REVISION}" | grep -Eq '^[0-9a-f]{40}$'; then \
+        echo 'SOURCE_REVISION must be a full lowercase Git object ID' >&2; exit 2; fi
 
-ENV SOURCE_DATE_EPOCH=1790467200
+ENV SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -49,7 +51,11 @@ RUN cmake -S . -B /build \
 FROM apt-base AS runtime
 
 ARG DEBIAN_SNAPSHOT
-LABEL org.moq-interop.debian-snapshot="${DEBIAN_SNAPSHOT}"
+ARG SOURCE_DATE_EPOCH
+ARG SOURCE_REVISION
+LABEL org.moq-interop.debian-snapshot="${DEBIAN_SNAPSHOT}" \
+      org.moq-interop.source-date-epoch="${SOURCE_DATE_EPOCH}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -57,7 +63,8 @@ RUN apt-get update \
         curl \
         libsqlite3-0 \
         libssl3 \
-    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/apt/lists/* /var/log/apt/* \
+    && rm -f /var/log/dpkg.log /var/cache/ldconfig/aux-cache \
     && groupadd --gid 10001 moq-interop \
     && useradd --uid 10001 --gid 10001 --no-create-home \
         --home-dir /nonexistent --shell /usr/sbin/nologin moq-interop \

@@ -162,6 +162,8 @@ assert_runtime_hardening() {
     [[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "${container}")" == "true" ]]
     [[ "$(docker inspect --format '{{.HostConfig.SecurityOpt}}' "${container}")" == "[no-new-privileges:true]" ]]
     [[ "$(docker exec "${container}" id -u)" == "10001" ]]
+    [[ "$(docker exec "${container}" /usr/local/bin/moq-interop-runner --version | \
+        awk '$1 == "source:" {print $2}')" == "${source_revision}" ]]
     docker exec "${container}" sh -ec \
         'test -w /var/lib/moq-interop &&
          test ! -w /usr/share/moq-interop/docs/draft-ietf-moq-transport-18.txt &&
@@ -173,11 +175,13 @@ assert_runtime_hardening() {
 assert_names_available
 log "building ${IMAGE}"
 source_revision="$(git -C "${ROOT}" rev-parse HEAD)"
-docker build --quiet --build-arg "SOURCE_REVISION=${source_revision}" \
-    --tag "${IMAGE}" "${ROOT}" >/dev/null
+MOQ_INTEROP_IMAGE="${IMAGE}" "${ROOT}/scripts/container-build.sh" build --quiet >/dev/null
 [[ "$(docker image inspect --format \
     "{{index .Config.Labels \"org.moq-interop.debian-snapshot\"}}" "${IMAGE}")" == \
     "${DEBIAN_SNAPSHOT}" ]]
+[[ "$(docker image inspect --format \
+    "{{index .Config.Labels \"org.opencontainers.image.revision\"}}" "${IMAGE}")" == \
+    "${source_revision}" ]]
 create_results_volume
 
 start_container "${CONTAINER}"
@@ -187,7 +191,10 @@ wait_for_ready "${CONTAINER}" "${port}"
 
 base_url="http://127.0.0.1:${port}"
 health="$(curl --fail --silent --show-error "${base_url}/healthz")"
-jq -e '.schema_version == 1 and .status == "ok" and .database.ready == true' \
+jq -e --arg revision "${source_revision}" '
+    .schema_version == 1 and .status == "ok" and .database.ready == true and
+    .validator.source_revision == $revision
+' \
     <<<"${health}" >/dev/null
 
 drafts="$(curl --fail --silent --show-error "${base_url}/api/v1/drafts")"
