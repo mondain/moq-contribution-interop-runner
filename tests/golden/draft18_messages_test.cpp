@@ -28,6 +28,20 @@ void expect_bytes(std::span<const std::byte> actual,
     EXPECT_TRUE(std::ranges::equal(actual, expected));
 }
 
+template <class Encoder>
+void expect_atomic_encode_error(Encoder&& encoder, EncodeErrorCode code) {
+    ByteWriter output(65'535);
+    ASSERT_TRUE(output.append_byte(std::byte{0xcc}));
+    ASSERT_TRUE(output.append_byte(std::byte{0xdd}));
+    const auto before =
+        std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+    const auto result = encoder(output);
+    EXPECT_FALSE(result.has_value());
+    ASSERT_NE(result.error(), nullptr);
+    EXPECT_EQ(result.error()->code, code);
+    expect_bytes(output.bytes(), before);
+}
+
 const SetupMessage& require_setup(const MessageDecodeResult& result) {
     EXPECT_TRUE(std::holds_alternative<Message>(result));
     const auto& message = std::get<Message>(result);
@@ -295,6 +309,30 @@ TEST(Draft18MessagesTest, EveryKvpTruncationNeedsMoreWithoutConsumption) {
         const auto result = decode_key_value_pairs(input, encoded.size(), {});
         ASSERT_TRUE(std::holds_alternative<NeedMore>(result)) << available;
         EXPECT_EQ(input.offset(), 25u);
+    }
+}
+
+TEST(Draft18MessagesTest, InvalidTypedKvpEncodersAreAtomic) {
+    const std::vector<KeyValuePairs> invalid{
+        {KeyValuePair{2, VarIntValue{1, {}}},
+         KeyValuePair{1, ByteValue{bytes({0xaa})}}},
+        {KeyValuePair{2, ByteValue{bytes({0xaa})}}},
+        {KeyValuePair{1, VarIntValue{1, {}}}},
+        {KeyValuePair{1, ByteValue{
+                             std::vector<std::byte>(65'536u, std::byte{0xaa})}}},
+    };
+    const std::vector<EncodeErrorCode> codes{
+        EncodeErrorCode::InvalidValue,
+        EncodeErrorCode::InvalidValue,
+        EncodeErrorCode::InvalidValue,
+        EncodeErrorCode::PayloadTooLarge,
+    };
+    for (std::size_t index = 0; index < invalid.size(); ++index) {
+        expect_atomic_encode_error(
+            [&](ByteWriter& output) {
+                return encode_key_value_pairs(invalid[index], output);
+            },
+            codes[index]);
     }
 }
 
@@ -568,6 +606,35 @@ TEST(Draft18RequestMessagesTest, DecodesAndEncodesEveryFetchForm) {
         ByteWriter output(vectors[index].size());
         ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
         expect_bytes(output.bytes(), vectors[index]);
+    }
+}
+
+TEST(Draft18RequestMessagesTest,
+     EveryFetchFormAcceptsNonMinimalFieldsAndEncodesCanonically) {
+    struct Vector {
+        std::vector<std::byte> encoded;
+        std::vector<std::byte> canonical;
+    };
+    const std::vector<Vector> vectors{
+        {bytes({0x16, 0x00, 0x16, 0x80, 0x08, 0x80, 0x01, 0x80,
+                0x01, 0x80, 0x01, 'n', 0x80, 0x01, 't', 0x80, 0x01,
+                0x80, 0x02, 0x80, 0x03, 0x80, 0x00, 0x80, 0x00}),
+         bytes({0x16, 0x00, 0x0c, 0x08, 0x01, 0x01, 0x01, 'n',
+                0x01, 't', 0x01, 0x02, 0x03, 0x00, 0x00})},
+        {bytes({0x16, 0x00, 0x0a, 0x80, 0x0a, 0x80, 0x02, 0x80,
+                0x02, 0x80, 0x05, 0x80, 0x00}),
+         bytes({0x16, 0x00, 0x05, 0x0a, 0x02, 0x02, 0x05, 0x00})},
+        {bytes({0x16, 0x00, 0x0a, 0x80, 0x0c, 0x80, 0x03, 0x80,
+                0x02, 0x80, 0x05, 0x80, 0x00}),
+         bytes({0x16, 0x00, 0x05, 0x0c, 0x03, 0x02, 0x05, 0x00})},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.encoded);
+        const auto decoded = decode_message(StreamRole::Request, input, {});
+        ASSERT_TRUE(std::holds_alternative<Message>(decoded));
+        ByteWriter output(vector.canonical.size());
+        ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+        expect_bytes(output.bytes(), vector.canonical);
     }
 }
 
@@ -1329,6 +1396,32 @@ TEST(Draft18StructuresTest, NamespaceAcceptsZeroAndThirtyTwoArbitraryFields) {
     expect_bytes(output.bytes(), encoded);
 }
 
+TEST(Draft18StructuresTest,
+     NamespaceAndTrackNameAcceptNonMinimalLengthsAndEncodeCanonically) {
+    const auto encoded_namespace =
+        bytes({0x80, 0x02, 0x80, 0x01, 'a', 0x80, 0x01, 'b'});
+    Cursor namespace_input(encoded_namespace);
+    const auto decoded_namespace = decode_track_namespace(namespace_input, {});
+    ASSERT_TRUE(std::holds_alternative<TrackNamespace>(decoded_namespace));
+    ByteWriter namespace_output(5);
+    ASSERT_TRUE(encode_track_namespace(std::get<TrackNamespace>(decoded_namespace),
+                                       namespace_output)
+                    .has_value());
+    expect_bytes(namespace_output.bytes(), bytes({0x02, 0x01, 'a', 0x01, 'b'}));
+
+    const auto encoded_name = bytes({0x80, 0x01, 't'});
+    Cursor name_input(encoded_name);
+    const auto decoded_name = decode_track_name(
+        name_input, std::get<TrackNamespace>(decoded_namespace), {});
+    ASSERT_TRUE(std::holds_alternative<TrackName>(decoded_name));
+    ByteWriter name_output(2);
+    ASSERT_TRUE(encode_track_name(std::get<TrackName>(decoded_name),
+                                  std::get<TrackNamespace>(decoded_namespace),
+                                  name_output)
+                    .has_value());
+    expect_bytes(name_output.bytes(), bytes({0x01, 't'}));
+}
+
 TEST(Draft18StructuresTest, NamespaceRejectsCountEmptyFieldAndValueOverflowAtomically) {
     const std::vector<std::vector<std::byte>> invalid{
         bytes({0x21}),
@@ -1355,6 +1448,39 @@ TEST(Draft18StructuresTest, NamespaceRejectsCountEmptyFieldAndValueOverflowAtomi
     expect_error_code(decode_track_namespace(overflow_input, {}),
                       DecodeErrorCode::ProtocolViolation);
     EXPECT_EQ(overflow_input.offset(), 40u);
+}
+
+TEST(Draft18StructuresTest, InvalidTypedNamespaceAndTrackNameEncodersAreAtomic) {
+    const TrackNamespace too_many{
+        std::vector<std::vector<std::byte>>(33, bytes({'n'}))};
+    const TrackNamespace empty_field{{bytes({'n'}), {}}};
+    const TrackNamespace oversized{
+        {std::vector<std::byte>(4'097u, std::byte{'n'})}};
+    for (const auto& name_space : {too_many, empty_field}) {
+        expect_atomic_encode_error(
+            [&](ByteWriter& output) {
+                return encode_track_namespace(name_space, output);
+            },
+            EncodeErrorCode::InvalidValue);
+    }
+    expect_atomic_encode_error(
+        [&](ByteWriter& output) {
+            return encode_track_namespace(oversized, output);
+        },
+        EncodeErrorCode::PayloadTooLarge);
+
+    const TrackNamespace maximum{
+        {std::vector<std::byte>(4'096u, std::byte{'n'})}};
+    expect_atomic_encode_error(
+        [&](ByteWriter& output) {
+            return encode_track_name(TrackName{bytes({'t'})}, maximum, output);
+        },
+        EncodeErrorCode::PayloadTooLarge);
+    expect_atomic_encode_error(
+        [&](ByteWriter& output) {
+            return encode_track_name(TrackName{}, oversized, output);
+        },
+        EncodeErrorCode::PayloadTooLarge);
 }
 
 TEST(Draft18StructuresTest, TrackNameAllowsEmptyAndEnforcesFullNameBoundary) {
@@ -1416,6 +1542,33 @@ TEST(Draft18StructuresTest, DecodesAndEncodesEverySubscriptionFilterForm) {
     }
 }
 
+TEST(Draft18StructuresTest,
+     EverySubscriptionFilterVi64AcceptsNonMinimalAndEncodesCanonically) {
+    struct Vector {
+        std::vector<std::byte> encoded;
+        std::vector<std::byte> canonical;
+    };
+    const std::vector<Vector> vectors{
+        {bytes({0x80, 0x01}), bytes({0x01})},
+        {bytes({0x80, 0x02}), bytes({0x02})},
+        {bytes({0x80, 0x03, 0x80, 0x05, 0x80, 0x06}),
+         bytes({0x03, 0x05, 0x06})},
+        {bytes({0x80, 0x04, 0x80, 0x05, 0x80, 0x06, 0x80, 0x07}),
+         bytes({0x04, 0x05, 0x06, 0x07})},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.encoded);
+        const auto decoded =
+            decode_subscription_filter(input, vector.encoded.size());
+        ASSERT_TRUE(std::holds_alternative<SubscriptionFilter>(decoded));
+        ByteWriter output(vector.canonical.size());
+        ASSERT_TRUE(encode_subscription_filter(
+                        std::get<SubscriptionFilter>(decoded), output)
+                        .has_value());
+        expect_bytes(output.bytes(), vector.canonical);
+    }
+}
+
 TEST(Draft18StructuresTest, RejectsInvalidFilterTypeTrailingBytesAndRangeOverflow) {
     const std::vector<std::vector<std::byte>> invalid{
         bytes({}),
@@ -1441,6 +1594,25 @@ TEST(Draft18StructuresTest, RejectsInvalidFilterTypeTrailingBytesAndRangeOverflo
     EXPECT_EQ(incomplete_input.offset(), 65u);
 }
 
+TEST(Draft18StructuresTest, InvalidTypedSubscriptionFilterEncodersAreAtomic) {
+    const std::vector<SubscriptionFilter> invalid{
+        {static_cast<SubscriptionFilterType>(0), std::nullopt, std::nullopt},
+        {SubscriptionFilterType::NextGroupStart, Location{0, 0}, std::nullopt},
+        {SubscriptionFilterType::AbsoluteStart, std::nullopt, std::nullopt},
+        {SubscriptionFilterType::AbsoluteStart, Location{0, 0}, 1},
+        {SubscriptionFilterType::AbsoluteRange, Location{0, 0}, std::nullopt},
+        {SubscriptionFilterType::AbsoluteRange,
+         Location{std::numeric_limits<std::uint64_t>::max(), 0}, 1},
+    };
+    for (const auto& filter : invalid) {
+        expect_atomic_encode_error(
+            [&](ByteWriter& output) {
+                return encode_subscription_filter(filter, output);
+            },
+            EncodeErrorCode::InvalidValue);
+    }
+}
+
 TEST(Draft18StructuresTest, DecodesEveryTokenFormAndPreservesOpaqueValue) {
     struct Vector {
         std::vector<std::byte> encoded;
@@ -1460,6 +1632,30 @@ TEST(Draft18StructuresTest, DecodesEveryTokenFormAndPreservesOpaqueValue) {
         ByteWriter output(vector.encoded.size());
         ASSERT_TRUE(encode_token(std::get<Token>(decoded), output).has_value());
         expect_bytes(output.bytes(), vector.encoded);
+    }
+}
+
+TEST(Draft18StructuresTest,
+     EveryTokenVi64AcceptsNonMinimalAndEncodesCanonically) {
+    struct Vector {
+        std::vector<std::byte> encoded;
+        std::vector<std::byte> canonical;
+    };
+    const std::vector<Vector> vectors{
+        {bytes({0x80, 0x00, 0x80, 0x25}), bytes({0x00, 0x25})},
+        {bytes({0x80, 0x01, 0x80, 0x25, 0x80, 0x07, 0xaa}),
+         bytes({0x01, 0x25, 0x07, 0xaa})},
+        {bytes({0x80, 0x02, 0x80, 0x25}), bytes({0x02, 0x25})},
+        {bytes({0x80, 0x03, 0x80, 0x07, 0xaa}),
+         bytes({0x03, 0x07, 0xaa})},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.encoded);
+        const auto decoded = decode_token(input, vector.encoded.size());
+        ASSERT_TRUE(std::holds_alternative<Token>(decoded));
+        ByteWriter output(vector.canonical.size());
+        ASSERT_TRUE(encode_token(std::get<Token>(decoded), output).has_value());
+        expect_bytes(output.bytes(), vector.canonical);
     }
 }
 
@@ -1495,6 +1691,24 @@ TEST(Draft18StructuresTest, TokenRejectsMissingTrailingAndUnknownAliasForms) {
     ByteWriter output(16);
     EXPECT_FALSE(encode_token(invalid_token, output).has_value());
     EXPECT_TRUE(output.bytes().empty());
+}
+
+TEST(Draft18StructuresTest, InvalidTypedTokenEncoderShapesAreAtomic) {
+    const std::vector<Token> invalid{
+        Token{static_cast<TokenAliasType>(4), std::nullopt, std::nullopt, {}},
+        Token{TokenAliasType::Delete, std::nullopt, std::nullopt, {}},
+        Token{TokenAliasType::Delete, 1, 2, {}},
+        Token{TokenAliasType::Register, 1, std::nullopt, {}},
+        Token{TokenAliasType::Register, std::nullopt, 2, {}},
+        Token{TokenAliasType::UseAlias, 1, std::nullopt, bytes({0xaa})},
+        Token{TokenAliasType::UseValue, 1, 2, bytes({0xaa})},
+        Token{TokenAliasType::UseValue, std::nullopt, std::nullopt, {}},
+    };
+    for (const auto& token : invalid) {
+        expect_atomic_encode_error(
+            [&](ByteWriter& output) { return encode_token(token, output); },
+            EncodeErrorCode::InvalidValue);
+    }
 }
 
 TEST(Draft18StructuresTest, ProtocolViolationsRemainDistinctFromTokenFormatting) {
@@ -1615,6 +1829,47 @@ TEST(Draft18ParametersTest, AcceptsNonMinimalValueAndEmitsCanonicalParameterByte
                                   ParameterContext::Subscribe, output)
                     .has_value());
     expect_bytes(output.bytes(), bytes({0x02, 0x25}));
+}
+
+TEST(Draft18ParametersTest,
+     EveryVi64BearingParameterFamilyAcceptsNonMinimalAndCanonicalizes) {
+    struct Vector {
+        std::vector<std::byte> encoded;
+        std::vector<std::byte> canonical;
+        std::uint64_t count;
+        ParameterContext context;
+    };
+    const std::vector<Vector> vectors{
+        {bytes({0x80, 0x02, 0x80, 0x25}), bytes({0x02, 0x25}), 1,
+         ParameterContext::Subscribe},
+        {bytes({0x80, 0x03, 0x80, 0x05, 0x80, 0x03, 0x80, 0x07,
+                0xaa}),
+         bytes({0x03, 0x03, 0x03, 0x07, 0xaa}), 1,
+         ParameterContext::Subscribe},
+        {bytes({0x80, 0x09, 0x80, 0x05, 0x80, 0x06}),
+         bytes({0x09, 0x05, 0x06}), 1, ParameterContext::SubscribeOk},
+        {bytes({0x80, 0x21, 0x80, 0x08, 0x80, 0x04, 0x80, 0x01,
+                0x80, 0x02, 0x80, 0x03}),
+         bytes({0x21, 0x04, 0x04, 0x01, 0x02, 0x03}), 1,
+         ParameterContext::Subscribe},
+        {bytes({0x80, 0x34, 0x80, 0x01, 0x80, 0x01, 'n'}),
+         bytes({0x34, 0x01, 0x01, 'n'}), 1,
+         ParameterContext::RequestUpdateSubscribeNamespace},
+        {bytes({0x80, 0x02, 0x80, 0x25, 0x80, 0x04, 0x80, 0x07}),
+         bytes({0x02, 0x25, 0x04, 0x07}), 2,
+         ParameterContext::Subscribe},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.encoded);
+        const auto decoded =
+            decode_parameters(input, vector.count, vector.context, {});
+        ASSERT_TRUE(std::holds_alternative<Parameters>(decoded));
+        ByteWriter output(vector.canonical.size());
+        ASSERT_TRUE(encode_parameters(std::get<Parameters>(decoded),
+                                      vector.context, output)
+                        .has_value());
+        expect_bytes(output.bytes(), vector.canonical);
+    }
 }
 
 TEST(Draft18ParametersTest, ConfiguredLimitBoundsLengthPrefixedFilter) {
@@ -1758,6 +2013,65 @@ TEST(Draft18ParametersTest, TimeoutAmbiguityFollowsKnownScopeValidation) {
     EXPECT_TRUE(encode_result.is_ambiguity());
     EXPECT_FALSE(encode_result.has_value());
     EXPECT_TRUE(output.bytes().empty());
+}
+
+TEST(Draft18ParametersTest,
+     DraftAmbiguityAndPeerErrorsHaveDistinctPublicClassifications) {
+    const auto ambiguous_bytes = bytes({0x04});
+    Cursor ambiguous_input(ambiguous_bytes, 125);
+    const auto ambiguous = decode_parameters(
+        ambiguous_input, 1, ParameterContext::Subscribe, {});
+    ASSERT_TRUE(std::holds_alternative<DraftAmbiguity>(ambiguous));
+    EXPECT_FALSE(std::get<DraftAmbiguity>(ambiguous).detail.empty());
+    EXPECT_EQ(ambiguous_input.offset(), 125u);
+
+    const auto peer_error_bytes = bytes({0x04});
+    Cursor peer_error_input(peer_error_bytes, 126);
+    const auto peer_error = decode_parameters(
+        peer_error_input, 1, ParameterContext::Fetch, {});
+    ASSERT_TRUE(std::holds_alternative<DecodeError>(peer_error));
+    EXPECT_EQ(std::get<DecodeError>(peer_error).code,
+              DecodeErrorCode::ProtocolViolation);
+    EXPECT_FALSE(std::get<DecodeError>(peer_error).detail.empty());
+    EXPECT_EQ(peer_error_input.offset(), 126u);
+}
+
+TEST(Draft18ParametersTest, InvalidTypedParameterEncodersAreAtomic) {
+    const Token malformed_token{TokenAliasType::UseAlias, std::nullopt,
+                                std::nullopt, {}};
+    const SubscriptionFilter malformed_filter{
+        SubscriptionFilterType::AbsoluteRange, Location{0, 0}, std::nullopt};
+    const TrackNamespace malformed_namespace{{{}}};
+    const std::vector<std::pair<Parameters, ParameterContext>> invalid{
+        {{Parameter{0x05, VarIntParameterValue{1}}},
+         ParameterContext::Unresolved},
+        {{Parameter{0x06, VarIntParameterValue{1}},
+          Parameter{0x02, VarIntParameterValue{1}}},
+         ParameterContext::Subscribe},
+        {{Parameter{0x02, VarIntParameterValue{1}},
+          Parameter{0x02, VarIntParameterValue{2}}},
+         ParameterContext::Subscribe},
+        {{Parameter{0x02, VarIntParameterValue{1}}}, ParameterContext::Fetch},
+        {{Parameter{0x02, Uint8ParameterValue{1}}},
+         ParameterContext::Subscribe},
+        {{Parameter{0x03, malformed_token}}, ParameterContext::Subscribe},
+        {{Parameter{0x09, Uint8ParameterValue{1}}},
+         ParameterContext::SubscribeOk},
+        {{Parameter{0x10, Uint8ParameterValue{2}}},
+         ParameterContext::Subscribe},
+        {{Parameter{0x22, Uint8ParameterValue{0}}},
+         ParameterContext::Subscribe},
+        {{Parameter{0x21, malformed_filter}}, ParameterContext::Subscribe},
+        {{Parameter{0x34, malformed_namespace}},
+         ParameterContext::RequestUpdateSubscribeNamespace},
+    };
+    for (const auto& [parameters, context] : invalid) {
+        expect_atomic_encode_error(
+            [&](ByteWriter& output) {
+                return encode_parameters(parameters, context, output);
+            },
+            EncodeErrorCode::InvalidValue);
+    }
 }
 
 TEST(Draft18ParametersTest, TruncationCountFeasibilityAndCapacityAreAtomic) {

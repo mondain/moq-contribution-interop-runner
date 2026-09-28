@@ -1,6 +1,7 @@
 #include "moq/interop/wire/draft18/messages.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -57,6 +58,27 @@ std::size_t framed_size(std::span<const std::byte> input) {
     return framing.offset() + payload_size;
 }
 
+void exercise_ambiguity_classification_oracle() {
+    constexpr std::array rendezvous_timeout{
+        std::byte{0x03}, std::byte{0x00}, std::byte{0x08}, std::byte{0x02},
+        std::byte{0x01}, std::byte{0x01}, std::byte{'n'}, std::byte{0x01},
+        std::byte{'t'}, std::byte{0x01}, std::byte{0x04},
+    };
+    constexpr std::array fill_timeout{
+        std::byte{0x16}, std::byte{0x00}, std::byte{0x06},
+        std::byte{0x0a}, std::byte{0x02}, std::byte{0x02},
+        std::byte{0x05}, std::byte{0x01}, std::byte{0x0a},
+    };
+    for (const auto frame : {std::span<const std::byte>(rendezvous_timeout),
+                             std::span<const std::byte>(fill_timeout)}) {
+        Cursor cursor(frame, 31);
+        const auto result = decode_message(StreamRole::Request, cursor, {});
+        require(std::holds_alternative<DraftAmbiguity>(result));
+        require(!std::get<DraftAmbiguity>(result).detail.empty());
+        require(cursor.offset() == 31u);
+    }
+}
+
 void exercise_role(std::span<const std::byte> fuzz_input, StreamRole role,
                    const Limits& limits) {
     std::vector<std::byte> owned_input(fuzz_input.begin(), fuzz_input.end());
@@ -64,8 +86,12 @@ void exercise_role(std::span<const std::byte> fuzz_input, StreamRole role,
     const auto result = decode_message(role, cursor, limits);
     if (!std::holds_alternative<Message>(result)) {
         require(cursor.offset() == 17u);
-        require(!(std::holds_alternative<DraftAmbiguity>(result) &&
-                  std::holds_alternative<DecodeError>(result)));
+        if (const auto* ambiguity = std::get_if<DraftAmbiguity>(&result)) {
+            require(!ambiguity->detail.empty());
+        }
+        if (const auto* error = std::get_if<DecodeError>(&result)) {
+            require(!error->detail.empty());
+        }
         return;
     }
 
@@ -111,6 +137,7 @@ void exercise_role(std::span<const std::byte> fuzz_input, StreamRole role,
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
                                       std::size_t size) {
+    exercise_ambiguity_classification_oracle();
     const auto input = std::as_bytes(std::span(data, size));
     Limits limits;
     if (size != 0) {
