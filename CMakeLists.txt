@@ -57,6 +57,7 @@ add_library(moq-interop-requirements
     src/requirements/draft_source.cpp
     src/requirements/catalog.cpp
     src/requirements/audit.cpp
+    src/requirements/scoring.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
@@ -87,6 +88,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-catalog-tests PRIVATE moq-interop-requirements
                           nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME catalog COMMAND moq-interop-catalog-tests)
+
+    add_executable(moq-interop-scoring-tests tests/unit/scoring_test.cpp)
+    target_link_libraries(moq-interop-scoring-tests PRIVATE moq-interop-requirements
+                          GTest::gtest_main)
+    add_test(NAME scoring COMMAND moq-interop-scoring-tests)
 
     add_executable(moq-interop-draft18-catalog-part-01-tests
                    tests/unit/draft18_catalog_part_01_test.cpp)
