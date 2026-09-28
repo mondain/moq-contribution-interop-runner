@@ -715,7 +715,7 @@ TEST(Draft18SubgroupTest, PreservesPropertiesStatusAndRecommendationEvidence) {
               DecoderObservationKind::DraftAmbiguity);
     EXPECT_EQ(result.observations[1].kind,
               DecoderObservationKind::ShouldClose);
-    EXPECT_FALSE(result.clean_fin);
+    EXPECT_TRUE(result.clean_fin);
 
     AccumulatedSubgroupResult one_shot;
     accumulate(result, one_shot);
@@ -723,7 +723,7 @@ TEST(Draft18SubgroupTest, PreservesPropertiesStatusAndRecommendationEvidence) {
     AccumulatedSubgroupResult split;
     accumulate(split_decoder.push(encoded, false), split);
     const auto split_fin = split_decoder.push({}, true);
-    EXPECT_FALSE(split_fin.clean_fin);
+    EXPECT_TRUE(split_fin.clean_fin);
     accumulate(split_fin, split);
     expect_same_result(split, one_shot, encoded.size());
 }
@@ -1622,6 +1622,7 @@ TEST(Draft18FetchTest, ClassifiesFinInEveryRecordPhase) {
         ASSERT_EQ(result.observations.size(), 1u) << index;
         EXPECT_EQ(result.observations[0].kind,
                   DecoderObservationKind::ShouldClose) << index;
+        EXPECT_EQ(result.observations[0].offset, partials[index].size()) << index;
         EXPECT_FALSE(result.clean_fin) << index;
     }
 }

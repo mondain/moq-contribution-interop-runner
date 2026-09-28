@@ -54,15 +54,18 @@ bool terminal_ambiguity(const FetchDecoderObservation& observation) {
 }
 
 template <typename Observation>
-bool has_should_close(const std::vector<Observation>& observations) {
-    return std::ranges::any_of(observations, [](const auto& observation) {
-        return observation.kind == DecoderObservationKind::ShouldClose;
-    });
+bool has_boundary_should_close(const std::vector<Observation>& observations,
+                               std::size_t supplied, bool fin) {
+    return fin &&
+           std::ranges::any_of(observations, [supplied](const auto& observation) {
+               return observation.kind == DecoderObservationKind::ShouldClose &&
+                      observation.offset == supplied;
+           });
 }
 
 void check_subgroup_result(const SubgroupPushResult& result,
                            std::size_t supplied, const Limits& limits,
-                           bool header_complete, bool should_close_seen) {
+                           bool header_complete, bool fin) {
     const bool evidence = result.header.has_value() || !result.objects.empty() ||
                           !result.observations.empty() ||
                           result.error.has_value() ||
@@ -79,12 +82,12 @@ void check_subgroup_result(const SubgroupPushResult& result,
     if (result.error) require(result.error->offset <= supplied);
     require(!result.clean_fin ||
             (header_complete && !result.error.has_value() &&
-             !should_close_seen));
+             !has_boundary_should_close(result.observations, supplied, fin)));
 }
 
 void check_fetch_result(const FetchPushResult& result, std::size_t supplied,
                         const Limits& limits, bool header_complete,
-                        bool should_close_seen) {
+                        bool fin) {
     const bool evidence = result.header.has_value() || !result.events.empty() ||
                           !result.observations.empty() ||
                           result.error.has_value() || result.clean_fin;
@@ -108,12 +111,12 @@ void check_fetch_result(const FetchPushResult& result, std::size_t supplied,
     if (result.error) require(result.error->offset <= supplied);
     require(!result.clean_fin ||
             (header_complete && !result.error.has_value() &&
-             !should_close_seen));
+             !has_boundary_should_close(result.observations, supplied, fin)));
 }
 
 void check_padding_result(const PaddingStreamPushResult& result,
                           std::size_t supplied, std::size_t chunk_size,
-                          bool header_complete, bool should_close_seen) {
+                          bool header_complete, bool fin) {
     const bool evidence = result.discarded_byte_count != 0u ||
                           result.first_nonzero_offset.has_value() ||
                           !result.observations.empty() ||
@@ -129,7 +132,7 @@ void check_padding_result(const PaddingStreamPushResult& result,
     if (result.error) require(result.error->offset <= supplied);
     require(!result.clean_fin ||
             (header_complete && !result.error.has_value() &&
-             !should_close_seen));
+             !has_boundary_should_close(result.observations, supplied, fin)));
 }
 
 enum class DeliveryMode { OneShot, MultiChunk, ByteAtATime };
@@ -205,7 +208,6 @@ void exercise_subgroup(std::span<const std::byte> input, DeliveryMode mode,
 
     auto supplied = std::size_t{0};
     bool header_complete = false;
-    bool should_close_seen = false;
     bool terminal = false;
     const auto parts = chunks(input, mode, control);
     for (std::size_t index = 0; index < parts.size(); ++index) {
@@ -213,20 +215,16 @@ void exercise_subgroup(std::span<const std::byte> input, DeliveryMode mode,
         supplied += parts[index].size();
         const auto result = decoder.push(parts[index], push_fin);
         header_complete = header_complete || result.header.has_value();
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_subgroup_result(result, supplied, limits, header_complete,
-                              should_close_seen);
+                              push_fin);
         require(decoder.buffered_byte_count() <= memory_bound(limits));
         terminal = result.error.has_value() || push_fin;
         if (terminal) break;
     }
     if (parts.empty() && fin) {
         const auto result = decoder.push({}, true);
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_subgroup_result(result, supplied, limits, header_complete,
-                              should_close_seen);
+                              true);
         terminal = true;
     }
     if (terminal) require_empty_misuse(decoder.push(kTerminalProbe, false));
@@ -258,7 +256,6 @@ void exercise_fetch(std::span<const std::byte> input, DeliveryMode mode,
 
     auto supplied = std::size_t{0};
     bool header_complete = false;
-    bool should_close_seen = false;
     bool terminal = false;
     const auto parts = chunks(input, mode, control);
     for (std::size_t index = 0; index < parts.size(); ++index) {
@@ -266,10 +263,8 @@ void exercise_fetch(std::span<const std::byte> input, DeliveryMode mode,
         supplied += parts[index].size();
         const auto result = decoder.push(parts[index], push_fin);
         header_complete = header_complete || result.header.has_value();
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_fetch_result(result, supplied, limits, header_complete,
-                           should_close_seen);
+                           push_fin);
         require(decoder.buffered_byte_count() <= memory_bound(limits));
         terminal = result.error.has_value() || push_fin ||
                    std::ranges::any_of(result.observations,
@@ -278,10 +273,8 @@ void exercise_fetch(std::span<const std::byte> input, DeliveryMode mode,
     }
     if (parts.empty() && fin) {
         const auto result = decoder.push({}, true);
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_fetch_result(result, supplied, limits, header_complete,
-                           should_close_seen);
+                           true);
         terminal = true;
     }
     if (terminal) require_empty_misuse(decoder.push(kTerminalProbe, false));
@@ -297,7 +290,6 @@ void exercise_padding(std::span<const std::byte> input, DeliveryMode mode,
     auto supplied = std::size_t{0};
     auto discarded = std::size_t{0};
     bool header_complete = false;
-    bool should_close_seen = false;
     bool terminal = false;
     const auto parts = chunks(input, mode, control);
     const auto header_width = input.empty()
@@ -310,10 +302,8 @@ void exercise_padding(std::span<const std::byte> input, DeliveryMode mode,
         if (!result.error && header_width && supplied >= *header_width) {
             header_complete = true;
         }
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_padding_result(result, supplied, parts[index].size(),
-                             header_complete, should_close_seen);
+                             header_complete, push_fin);
         discarded += result.discarded_byte_count;
         const auto bytes_after_header =
             header_width && supplied > *header_width
@@ -326,10 +316,8 @@ void exercise_padding(std::span<const std::byte> input, DeliveryMode mode,
     }
     if (parts.empty() && fin) {
         const auto result = decoder.push({}, true);
-        should_close_seen =
-            should_close_seen || has_should_close(result.observations);
         check_padding_result(result, supplied, 0u, header_complete,
-                             should_close_seen);
+                             true);
         terminal = true;
     }
     if (terminal) require_empty_misuse(decoder.push(kTerminalProbe, false));
@@ -346,6 +334,29 @@ void exercise_fixed_oracles() {
         std::byte{0x3e}, std::byte{0x29}, std::byte{0x00}};
     const auto padding = decode_datagram(padding_datagram, {});
     require(std::holds_alternative<DiscardedPaddingDatagram>(padding));
+
+    constexpr std::array advisory_status_stream{
+        std::byte{0x3a}, std::byte{0x05}, std::byte{0x00},
+        std::byte{0x0f}, std::byte{0x00}, std::byte{0x60}};
+    SubgroupDecoder advisory_decoder;
+    const auto advisory = advisory_decoder.push(advisory_status_stream, true);
+    require(advisory.clean_fin);
+    require(std::ranges::any_of(
+        advisory.observations,
+        [stream_size = advisory_status_stream.size()](const auto& observation) {
+            return observation.kind == DecoderObservationKind::ShouldClose &&
+                   observation.offset < stream_size;
+        }));
+
+    SubgroupDecoder split_advisory_decoder;
+    const auto advisory_body =
+        split_advisory_decoder.push(advisory_status_stream, false);
+    require(!advisory_body.clean_fin);
+    require(std::ranges::any_of(
+        advisory_body.observations, [](const auto& observation) {
+            return observation.kind == DecoderObservationKind::ShouldClose;
+        }));
+    require(split_advisory_decoder.push({}, true).clean_fin);
 
     for (std::uint64_t type = 0; type < 128u; ++type) {
         if ((type & 0x10u) == 0u) continue;
