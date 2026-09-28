@@ -1,6 +1,7 @@
 #include "moq/interop/wire/cursor.h"
 
 #include <array>
+#include <functional>
 #include <limits>
 #include <utility>
 
@@ -49,6 +50,24 @@ bool ByteWriter::append_byte(std::byte value) {
 
 bool ByteWriter::append_bytes(std::span<const std::byte> values) {
     if (values.size() > remaining()) return false;
+    if (values.empty()) return true;
+    if (bytes_.empty()) {
+        bytes_.insert(bytes_.end(), values.begin(), values.end());
+        return true;
+    }
+
+    const auto* input_begin = values.data();
+    const auto* input_end = input_begin + values.size();
+    const auto* storage_begin = bytes_.data();
+    const auto* storage_end = storage_begin + bytes_.size();
+    const std::less<const std::byte*> pointer_less;
+    const bool overlaps_storage = pointer_less(input_begin, storage_end) &&
+                                  pointer_less(storage_begin, input_end);
+    if (overlaps_storage) {
+        const std::vector<std::byte> staged(values.begin(), values.end());
+        bytes_.insert(bytes_.end(), staged.begin(), staged.end());
+        return true;
+    }
     bytes_.insert(bytes_.end(), values.begin(), values.end());
     return true;
 }
@@ -175,8 +194,11 @@ bool write_length_prefixed_bytes(std::span<const std::byte> value,
     if (!write_vi64(static_cast<std::uint64_t>(value.size()), prefix)) return false;
     if (prefix.size() > output.remaining()) return false;
     if (value.size() > output.remaining() - prefix.size()) return false;
-    if (!output.append_bytes(prefix.bytes())) return false;
-    return output.append_bytes(value);
+
+    ByteWriter frame(prefix.size() + value.size());
+    if (!frame.append_bytes(prefix.bytes())) return false;
+    if (!frame.append_bytes(value)) return false;
+    return output.append_bytes(frame.bytes());
 }
 
 bool write_length_prefixed_string(std::string_view value, ByteWriter& output) {

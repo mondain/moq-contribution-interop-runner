@@ -320,5 +320,44 @@ TEST(CursorTest, WritesLengthPrefixedValuesAtomically) {
     expect_bytes(limited.bytes(), before);
 }
 
+TEST(CursorTest, WriterSupportsAliasedSelfAppendAndSubspans) {
+    ByteWriter direct(6);
+    ASSERT_TRUE(direct.append_bytes(bytes({0x61, 0x62, 0x63})));
+    const auto entire_value = direct.bytes();
+    ASSERT_TRUE(direct.append_bytes(entire_value));
+    expect_bytes(direct.bytes(), bytes({0x61, 0x62, 0x63, 0x61, 0x62, 0x63}));
+
+    ByteWriter subspan(6);
+    ASSERT_TRUE(subspan.append_bytes(bytes({0x61, 0x62, 0x63, 0x64})));
+    const auto middle = subspan.bytes().subspan(1, 2);
+    ASSERT_TRUE(subspan.append_bytes(middle));
+    expect_bytes(subspan.bytes(), bytes({0x61, 0x62, 0x63, 0x64, 0x62, 0x63}));
+
+    const auto empty = subspan.bytes().subspan(subspan.size(), 0);
+    ASSERT_TRUE(subspan.append_bytes(empty));
+    expect_bytes(subspan.bytes(), bytes({0x61, 0x62, 0x63, 0x64, 0x62, 0x63}));
+}
+
+TEST(CursorTest, AliasedWritesRemainAtomicAtTheOutputLimit) {
+    ByteWriter output(5);
+    ASSERT_TRUE(output.append_bytes(bytes({0x61, 0x62, 0x63})));
+    const auto alias = output.bytes();
+    const auto before = std::vector<std::byte>(alias.begin(), alias.end());
+    EXPECT_FALSE(output.append_bytes(alias));
+    expect_bytes(output.bytes(), before);
+
+    EXPECT_FALSE(write_length_prefixed_bytes(alias, output));
+    expect_bytes(output.bytes(), before);
+}
+
+TEST(CursorTest, LengthPrefixesAliasedWriterBytesBeforeAppendingTheirCopy) {
+    ByteWriter output(7);
+    ASSERT_TRUE(output.append_bytes(bytes({0x61, 0x62, 0x63})));
+    const auto alias = output.bytes();
+    ASSERT_TRUE(write_length_prefixed_bytes(alias, output));
+    expect_bytes(output.bytes(),
+                 bytes({0x61, 0x62, 0x63, 0x03, 0x61, 0x62, 0x63}));
+}
+
 }  // namespace
 }  // namespace moq::interop::wire

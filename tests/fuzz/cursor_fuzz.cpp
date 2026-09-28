@@ -50,6 +50,20 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         require(round_trip.remaining() == 0);
     }
 
+    if (size <= (std::numeric_limits<std::size_t>::max() - 9u) / 2u) {
+        ByteWriter self_append(size * 2u);
+        require(self_append.append_bytes(input));
+        const auto self_alias = self_append.bytes();
+        require(self_append.append_bytes(self_alias));
+        require(self_append.size() == size * 2u);
+
+        ByteWriter framed(size * 2u + 9u);
+        require(framed.append_bytes(input));
+        const auto framed_alias = framed.bytes();
+        require(moq::interop::wire::write_length_prefixed_bytes(framed_alias, framed));
+        require(framed.size() > size);
+    }
+
     const auto limit = size == 0 ? std::size_t{0}
                                  : static_cast<std::size_t>(data[0]);
     Cursor bytes_cursor(input);
