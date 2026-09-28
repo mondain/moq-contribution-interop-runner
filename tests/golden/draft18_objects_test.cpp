@@ -76,6 +76,35 @@ void append_subgroup_object(std::vector<std::byte>& output,
     output.insert(output.end(), payload.begin(), payload.end());
 }
 
+std::vector<std::byte> fetch_header(std::uint64_t request_id = 7) {
+    std::vector<std::byte> result;
+    append_vi64(result, 0x05);
+    append_vi64(result, request_id);
+    return result;
+}
+
+void append_safe_fetch_object(std::vector<std::byte>& output,
+                              std::uint64_t flags,
+                              std::uint64_t group = 2,
+                              std::uint64_t object = 4,
+                              std::uint8_t priority = 5) {
+    append_vi64(output, flags);
+    if ((flags & 0x08u) != 0u) append_vi64(output, group);
+    if ((flags & 0x40u) == 0u && (flags & 0x03u) == 3u) {
+        append_vi64(output, 3);
+    }
+    if ((flags & 0x04u) != 0u) append_vi64(output, object);
+    if ((flags & 0x10u) != 0u) output.push_back(static_cast<std::byte>(priority));
+    if ((flags & 0x20u) != 0u) append_vi64(output, 0);
+    append_vi64(output, 0);
+}
+
+FetchGroupOrderResolver ascending_order() {
+    return [](std::uint64_t) {
+        return std::optional{FetchGroupOrder::Ascending};
+    };
+}
+
 const ObjectEvent& require_object(const DatagramDecodeResult& result) {
     EXPECT_TRUE(std::holds_alternative<ObjectEvent>(result));
     return std::get<ObjectEvent>(result);
@@ -171,6 +200,92 @@ void expect_same_event(const ObjectEvent& actual, const ObjectEvent& expected,
     EXPECT_EQ(actual.priority_inherited, expected.priority_inherited) << split;
     EXPECT_EQ(actual.stream_offset, expected.stream_offset) << split;
     EXPECT_EQ(actual.stream_end_offset, expected.stream_end_offset) << split;
+    EXPECT_EQ(actual.request_id, expected.request_id) << split;
+    EXPECT_EQ(actual.serialization_flags, expected.serialization_flags) << split;
+}
+
+struct AccumulatedFetchResult {
+    std::optional<FetchHeader> header;
+    std::vector<FetchEvent> events;
+    std::vector<FetchDecoderObservation> observations;
+    std::optional<DecodeError> error;
+    bool clean_fin{false};
+    bool local_api_misuse{false};
+};
+
+void accumulate(const FetchPushResult& source, AccumulatedFetchResult& target) {
+    if (source.header) {
+        EXPECT_FALSE(target.header.has_value());
+        target.header = source.header;
+    }
+    target.events.insert(target.events.end(), source.events.begin(),
+                         source.events.end());
+    target.observations.insert(target.observations.end(),
+                               source.observations.begin(),
+                               source.observations.end());
+    if (source.error) {
+        EXPECT_FALSE(target.error.has_value());
+        target.error = source.error;
+    }
+    target.clean_fin = target.clean_fin || source.clean_fin;
+    target.local_api_misuse =
+        target.local_api_misuse || source.local_api_misuse;
+}
+
+void expect_same_fetch_result(const AccumulatedFetchResult& actual,
+                              const AccumulatedFetchResult& expected,
+                              std::size_t split) {
+    ASSERT_EQ(actual.header.has_value(), expected.header.has_value()) << split;
+    if (actual.header) {
+        EXPECT_EQ(actual.header->raw_type, expected.header->raw_type) << split;
+        EXPECT_EQ(actual.header->request_id, expected.header->request_id) << split;
+        EXPECT_EQ(actual.header->stream_offset, expected.header->stream_offset)
+            << split;
+        EXPECT_EQ(actual.header->stream_end_offset,
+                  expected.header->stream_end_offset) << split;
+    }
+    ASSERT_EQ(actual.events.size(), expected.events.size()) << split;
+    for (std::size_t index = 0; index < actual.events.size(); ++index) {
+        ASSERT_EQ(actual.events[index].index(), expected.events[index].index())
+            << split << ':' << index;
+        if (const auto* object = std::get_if<ObjectEvent>(&actual.events[index])) {
+            expect_same_event(*object,
+                              std::get<ObjectEvent>(expected.events[index]),
+                              split);
+        } else {
+            const auto& range = std::get<FetchRangeEvent>(actual.events[index]);
+            const auto& expected_range =
+                std::get<FetchRangeEvent>(expected.events[index]);
+            EXPECT_EQ(range.kind, expected_range.kind) << split << ':' << index;
+            EXPECT_EQ(range.serialization_flags,
+                      expected_range.serialization_flags) << split << ':' << index;
+            EXPECT_EQ(range.group_id, expected_range.group_id) << split << ':' << index;
+            EXPECT_EQ(range.object_id, expected_range.object_id) << split << ':' << index;
+            EXPECT_EQ(range.stream_offset, expected_range.stream_offset)
+                << split << ':' << index;
+            EXPECT_EQ(range.stream_end_offset, expected_range.stream_end_offset)
+                << split << ':' << index;
+        }
+    }
+    ASSERT_EQ(actual.observations.size(), expected.observations.size()) << split;
+    for (std::size_t index = 0; index < actual.observations.size(); ++index) {
+        EXPECT_EQ(actual.observations[index].kind,
+                  expected.observations[index].kind) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].phase,
+                  expected.observations[index].phase) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].offset,
+                  expected.observations[index].offset) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].detail,
+                  expected.observations[index].detail) << split << ':' << index;
+    }
+    ASSERT_EQ(actual.error.has_value(), expected.error.has_value()) << split;
+    if (actual.error) {
+        EXPECT_EQ(actual.error->code, expected.error->code) << split;
+        EXPECT_EQ(actual.error->offset, expected.error->offset) << split;
+        EXPECT_EQ(actual.error->detail, expected.error->detail) << split;
+    }
+    EXPECT_EQ(actual.clean_fin, expected.clean_fin) << split;
+    EXPECT_EQ(actual.local_api_misuse, expected.local_api_misuse) << split;
 }
 
 void expect_same_result(const AccumulatedSubgroupResult& actual,
@@ -987,6 +1102,569 @@ TEST(Draft18SubgroupTest, ResolvesSparseSecondObjectAndPreservesOffsets) {
     EXPECT_EQ(result.objects[0].stream_end_offset, second_offset);
     EXPECT_EQ(result.objects[1].stream_offset, second_offset);
     EXPECT_EQ(result.objects[1].stream_end_offset, encoded.size());
+}
+
+TEST(Draft18FetchTest, DecodesHeaderAndFirstObject) {
+    const auto encoded = bytes({0x05, 0x07, 0x1f, 0x02, 0x03, 0x04,
+                                0x05, 0x02, 0xaa, 0xbb});
+    FetchDecoder decoder([](std::uint64_t request_id) {
+        EXPECT_EQ(request_id, 7u);
+        return std::optional{FetchGroupOrder::Ascending};
+    });
+    const auto result = decoder.push(encoded, true);
+    ASSERT_TRUE(result.header.has_value());
+    EXPECT_EQ(result.header->request_id, 7u);
+    ASSERT_EQ(result.events.size(), 1u);
+    const auto& object = std::get<ObjectEvent>(result.events[0]);
+    EXPECT_EQ(object.request_id, 7u);
+    EXPECT_EQ(object.serialization_flags, 0x1fu);
+    EXPECT_FALSE(object.track_alias.has_value());
+    EXPECT_EQ(object.group_id, 2u);
+    EXPECT_EQ(object.subgroup_id, 3u);
+    EXPECT_EQ(object.object_id, 4u);
+    EXPECT_EQ(object.publisher_priority, 5u);
+    EXPECT_EQ(object.payload_length, 2u);
+    EXPECT_TRUE(std::ranges::equal(object.retained_payload,
+                                   bytes({0xaa, 0xbb})));
+    EXPECT_TRUE(result.clean_fin);
+}
+
+TEST(Draft18PaddingStreamTest, DiscardsBodyAndReportsNonzeroEvidence) {
+    PaddingStreamDecoder decoder;
+    const auto result = decoder.push(
+        bytes({0xf0, 0x13, 0x2b, 0x3e, 0x28, 0x00, 0x01, 0x00}), true);
+    EXPECT_EQ(result.discarded_byte_count, 3u);
+    EXPECT_EQ(result.first_nonzero_offset, 6u);
+    EXPECT_EQ(decoder.buffered_byte_count(), 0u);
+    EXPECT_TRUE(result.clean_fin);
+}
+
+TEST(Draft18FetchTest, AcceptsNonMinimalHeaderAndEveryHeaderSplit) {
+    const auto encoded = bytes({0x80, 0x05, 0x80, 0x07});
+    for (std::size_t split = 0; split <= encoded.size(); ++split) {
+        FetchDecoder decoder(ascending_order());
+        const auto first = decoder.push(
+            std::span<const std::byte>(encoded).first(split), false);
+        EXPECT_FALSE(first.error.has_value()) << split;
+        const auto second = decoder.push(
+            std::span<const std::byte>(encoded).subspan(split), true);
+        EXPECT_FALSE(second.error.has_value()) << split;
+        const auto& header = first.header ? *first.header : *second.header;
+        EXPECT_EQ(header.raw_type, 5u) << split;
+        EXPECT_EQ(header.request_id, 7u) << split;
+        EXPECT_TRUE(second.clean_fin) << split;
+    }
+
+    for (std::size_t split = 0; split < encoded.size(); ++split) {
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(
+            std::span<const std::byte>(encoded).first(split), true);
+        ASSERT_EQ(result.observations.size(), 1u) << split;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::DraftAmbiguity) << split;
+        EXPECT_FALSE(result.clean_fin) << split;
+    }
+}
+
+TEST(Draft18FetchTest, CoversAllNormalFlagsAndFirstObjectPredicate) {
+    for (std::uint64_t flags = 0; flags < 128; ++flags) {
+        auto encoded = fetch_header();
+        append_safe_fetch_object(encoded, 0x1cu, 10, 20, 30);
+        append_safe_fetch_object(encoded, flags, 0, 0, 31);
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(encoded, true);
+        ASSERT_FALSE(result.error.has_value()) << flags;
+        ASSERT_EQ(result.events.size(), 2u) << flags;
+        const auto& object = std::get<ObjectEvent>(result.events[1]);
+        EXPECT_EQ(object.serialization_flags, flags) << flags;
+        EXPECT_EQ(object.forwarding_preference,
+                  (flags & 0x40u) != 0u
+                      ? ObjectForwardingPreference::Datagram
+                      : ObjectForwardingPreference::Subgroup) << flags;
+    }
+
+    for (std::uint64_t flags = 0; flags < 128; ++flags) {
+        auto encoded = fetch_header();
+        append_safe_fetch_object(encoded, flags);
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(encoded, true);
+        const bool valid = (flags & 0x1cu) == 0x1cu &&
+                           ((flags & 0x40u) != 0u ||
+                            (flags & 0x03u) == 0u ||
+                            (flags & 0x03u) == 3u);
+        EXPECT_EQ(!result.error.has_value(), valid) << flags;
+        if (valid) {
+            EXPECT_EQ(result.events.size(), 1u) << flags;
+        }
+    }
+}
+
+TEST(Draft18FetchTest, DatagramIgnoresAndPreservesEveryLowMode) {
+    for (std::uint64_t mode = 0; mode < 4; ++mode) {
+        auto encoded = fetch_header();
+        append_safe_fetch_object(encoded, 0x5cu | mode, 7, 9, 11);
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(encoded, true);
+        ASSERT_FALSE(result.error.has_value()) << mode;
+        ASSERT_EQ(result.events.size(), 1u) << mode;
+        const auto& object = std::get<ObjectEvent>(result.events[0]);
+        EXPECT_EQ(object.serialization_flags, 0x5cu | mode) << mode;
+        EXPECT_FALSE(object.subgroup_id.has_value()) << mode;
+        EXPECT_EQ(object.object_id, 9u) << mode;
+        EXPECT_EQ(result.observations.size(), mode == 0u ? 0u : 1u) << mode;
+        if (mode != 0u) {
+            EXPECT_EQ(result.observations[0].kind,
+                      DecoderObservationKind::ShouldViolation) << mode;
+        }
+    }
+}
+
+TEST(Draft18FetchTest, AppliesGroupAndObjectDeltaArithmeticForBothOrders) {
+    for (const auto order : {FetchGroupOrder::Ascending,
+                             FetchGroupOrder::Descending}) {
+        auto encoded = fetch_header();
+        append_safe_fetch_object(encoded, 0x1cu, 10, 20, 30);
+        append_safe_fetch_object(encoded, 0x00u);
+        append_safe_fetch_object(encoded, 0x0cu, 1, 4);
+        append_safe_fetch_object(encoded, 0x08u, 0, 0);
+        append_safe_fetch_object(encoded, 0x04u, 0, 7);
+        FetchDecoder decoder([order](std::uint64_t) {
+            return std::optional{order};
+        });
+        const auto result = decoder.push(encoded, true);
+        ASSERT_FALSE(result.error.has_value());
+        ASSERT_EQ(result.events.size(), 5u);
+        const auto& same_group = std::get<ObjectEvent>(result.events[1]);
+        EXPECT_EQ(same_group.group_id, 10u);
+        EXPECT_EQ(same_group.object_id, 21u);
+        const auto& new_group = std::get<ObjectEvent>(result.events[2]);
+        EXPECT_EQ(new_group.group_id,
+                  order == FetchGroupOrder::Ascending ? 12u : 8u);
+        EXPECT_EQ(new_group.object_id, 4u);
+        const auto& new_group_implicit_object =
+            std::get<ObjectEvent>(result.events[3]);
+        EXPECT_EQ(new_group_implicit_object.group_id,
+                  order == FetchGroupOrder::Ascending ? 13u : 7u);
+        EXPECT_EQ(new_group_implicit_object.object_id, 5u);
+        const auto& same_group_explicit_object =
+            std::get<ObjectEvent>(result.events[4]);
+        EXPECT_EQ(same_group_explicit_object.group_id,
+                  new_group_implicit_object.group_id);
+        EXPECT_EQ(same_group_explicit_object.object_id, 12u);
+    }
+}
+
+TEST(Draft18FetchTest, ClassifiesLocationAndSubgroupArithmeticFailures) {
+    auto ascending = fetch_header();
+    append_safe_fetch_object(ascending, 0x1cu,
+                             std::numeric_limits<std::uint64_t>::max(), 0, 1);
+    append_safe_fetch_object(ascending, 0x0cu, 0, 0);
+    FetchDecoder ascending_decoder(ascending_order());
+    const auto ascending_result = ascending_decoder.push(ascending, true);
+    ASSERT_TRUE(ascending_result.error.has_value());
+    EXPECT_EQ(ascending_result.error->code, DecodeErrorCode::ProtocolViolation);
+
+    auto descending = fetch_header();
+    append_safe_fetch_object(descending, 0x1cu, 0, 0, 1);
+    append_safe_fetch_object(descending, 0x0cu, 0, 0);
+    FetchDecoder descending_decoder([](std::uint64_t) {
+        return std::optional{FetchGroupOrder::Descending};
+    });
+    const auto descending_result = descending_decoder.push(descending, true);
+    ASSERT_TRUE(descending_result.error.has_value());
+    EXPECT_EQ(descending_result.error->code, DecodeErrorCode::ProtocolViolation);
+
+    auto object = fetch_header();
+    append_safe_fetch_object(object, 0x1cu, 1,
+                             std::numeric_limits<std::uint64_t>::max(), 1);
+    append_safe_fetch_object(object, 0x04u, 0, 1);
+    FetchDecoder object_decoder(ascending_order());
+    const auto object_result = object_decoder.push(object, true);
+    ASSERT_TRUE(object_result.error.has_value());
+    EXPECT_EQ(object_result.error->code, DecodeErrorCode::ProtocolViolation);
+
+    auto subgroup = fetch_header();
+    append_vi64(subgroup, 0x1fu);
+    append_vi64(subgroup, 1);
+    append_vi64(subgroup, std::numeric_limits<std::uint64_t>::max());
+    append_vi64(subgroup, 1);
+    subgroup.push_back(std::byte{1});
+    append_vi64(subgroup, 0);
+    append_safe_fetch_object(subgroup, 0x02u);
+    FetchDecoder subgroup_decoder(ascending_order());
+    const auto subgroup_result = subgroup_decoder.push(subgroup, true);
+    EXPECT_FALSE(subgroup_result.error.has_value());
+    ASSERT_EQ(subgroup_result.observations.size(), 1u);
+    EXPECT_EQ(subgroup_result.observations[0].kind,
+              DecoderObservationKind::DraftAmbiguity);
+}
+
+TEST(Draft18FetchTest, MissingGroupOrderIsOnlyAmbiguousWhenNeeded) {
+    auto no_delta = fetch_header();
+    append_safe_fetch_object(no_delta, 0x1cu, 1, 1, 1);
+    append_safe_fetch_object(no_delta, 0x00u);
+    FetchDecoder no_delta_decoder(
+        [](std::uint64_t) -> std::optional<FetchGroupOrder> { return std::nullopt; });
+    const auto no_delta_result = no_delta_decoder.push(no_delta, true);
+    EXPECT_FALSE(no_delta_result.error.has_value());
+    EXPECT_TRUE(no_delta_result.clean_fin);
+
+    auto delta = fetch_header();
+    append_safe_fetch_object(delta, 0x1cu, 1, 1, 1);
+    append_safe_fetch_object(delta, 0x0cu, 0, 0);
+    FetchDecoder delta_decoder(
+        [](std::uint64_t) -> std::optional<FetchGroupOrder> { return std::nullopt; });
+    const auto delta_result = delta_decoder.push(delta, true);
+    EXPECT_FALSE(delta_result.error.has_value());
+    ASSERT_EQ(delta_result.observations.size(), 1u);
+    EXPECT_EQ(delta_result.observations[0].kind,
+              DecoderObservationKind::DraftAmbiguity);
+    EXPECT_FALSE(delta_result.clean_fin);
+}
+
+TEST(Draft18FetchTest, PreservesOrderedRangeEventsAndPostRangeState) {
+    auto encoded = fetch_header();
+    append_vi64(encoded, 0x8c);
+    append_vi64(encoded, 4);
+    append_vi64(encoded, 5);
+    append_safe_fetch_object(encoded, 0x1fu, 10, 12, 7);
+    append_vi64(encoded, 0x10c);
+    append_vi64(encoded, 20);
+    append_vi64(encoded, 30);
+    append_safe_fetch_object(encoded, 0x01u);
+    FetchDecoder decoder(ascending_order());
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    ASSERT_EQ(result.events.size(), 4u);
+    EXPECT_EQ(std::get<FetchRangeEvent>(result.events[0]).kind,
+              FetchRangeKind::NonExistent);
+    const auto& first = std::get<ObjectEvent>(result.events[1]);
+    EXPECT_EQ(first.group_id, 10u);
+    EXPECT_EQ(first.object_id, 12u);
+    EXPECT_EQ(std::get<FetchRangeEvent>(result.events[2]).kind,
+              FetchRangeKind::Unknown);
+    const auto& after = std::get<ObjectEvent>(result.events[3]);
+    EXPECT_EQ(after.group_id, 20u);
+    EXPECT_EQ(after.object_id, 31u);
+    EXPECT_EQ(after.subgroup_id, 3u);
+    EXPECT_EQ(after.publisher_priority, 7u);
+}
+
+TEST(Draft18FetchTest, RejectsEveryUnsupportedSpecialFlag) {
+    for (const auto flags : {0x80u, 0x8bu, 0x8du, 0x10bu, 0x10du,
+                             0x1ffu, 0x132b3e28u}) {
+        auto encoded = fetch_header();
+        append_vi64(encoded, flags);
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(encoded, false);
+        ASSERT_TRUE(result.error.has_value()) << flags;
+        EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation)
+            << flags;
+    }
+}
+
+TEST(Draft18FetchTest, BoundsPropertiesAndPayloadEvidence) {
+    auto encoded = fetch_header();
+    append_vi64(encoded, 0x3cu);
+    append_vi64(encoded, 1);
+    append_vi64(encoded, 2);
+    encoded.push_back(std::byte{3});
+    const auto property = bytes({0x3c, 0x80, 0x09, 0x3d, 0x02, 0xaa, 0xbb});
+    append_vi64(encoded, property.size());
+    encoded.insert(encoded.end(), property.begin(), property.end());
+    append_vi64(encoded, 1000);
+    encoded.insert(encoded.end(), 1000, std::byte{0x5a});
+    Limits limits;
+    limits.maximum_retained_payload_length = 3;
+    FetchDecoder decoder(ascending_order(), limits);
+    FetchPushResult final;
+    for (const auto octet : encoded) {
+        const std::array one{octet};
+        auto part = decoder.push(one, false);
+        final.events.insert(final.events.end(), part.events.begin(),
+                            part.events.end());
+        ASSERT_FALSE(part.error.has_value());
+    }
+    const auto fin = decoder.push({}, true);
+    ASSERT_EQ(final.events.size(), 1u);
+    const auto& object = std::get<ObjectEvent>(final.events[0]);
+    ASSERT_EQ(object.properties.size(), 2u);
+    EXPECT_TRUE(std::ranges::equal(
+        std::get<VarIntValue>(object.properties[0].value).raw_bytes,
+        bytes({0x80, 0x09})));
+    EXPECT_EQ(object.payload_length, 1000u);
+    EXPECT_EQ(object.retained_payload.size(), 3u);
+    EXPECT_TRUE(fin.clean_fin);
+    EXPECT_LT(decoder.buffered_byte_count(), 256u);
+
+    auto malformed = fetch_header();
+    append_vi64(malformed, 0x3cu);
+    append_vi64(malformed, 1);
+    append_vi64(malformed, 2);
+    malformed.push_back(std::byte{3});
+    append_vi64(malformed, 1);
+    malformed.push_back(std::byte{0x3c});
+    FetchDecoder malformed_decoder(ascending_order());
+    const auto malformed_result = malformed_decoder.push(malformed, false);
+    ASSERT_TRUE(malformed_result.error.has_value());
+    EXPECT_EQ(malformed_result.error->code,
+              DecodeErrorCode::KeyValueFormattingError);
+}
+
+TEST(Draft18FetchTest, EnforcesPropertyLengthAndOddValueLimits) {
+    auto excessive = fetch_header();
+    append_vi64(excessive, 0x3cu);
+    append_vi64(excessive, 1);
+    append_vi64(excessive, 2);
+    excessive.push_back(std::byte{3});
+    append_vi64(excessive, 2);
+    Limits length_limits;
+    length_limits.maximum_object_properties_length = 1;
+    FetchDecoder length_decoder(ascending_order(), length_limits);
+    const auto length_result = length_decoder.push(excessive, false);
+    ASSERT_TRUE(length_result.error.has_value());
+    EXPECT_EQ(length_result.error->code, DecodeErrorCode::LengthExceedsLimit);
+
+    auto odd = fetch_header();
+    append_vi64(odd, 0x3cu);
+    append_vi64(odd, 1);
+    append_vi64(odd, 2);
+    odd.push_back(std::byte{3});
+    const auto property = bytes({0x79, 0x03, 0xaa, 0xbb, 0xcc});
+    append_vi64(odd, property.size());
+    odd.insert(odd.end(), property.begin(), property.end());
+    Limits odd_limits;
+    odd_limits.maximum_odd_value_length = 2;
+    FetchDecoder odd_decoder(ascending_order(), odd_limits);
+    const auto odd_result = odd_decoder.push(odd, false);
+    ASSERT_TRUE(odd_result.error.has_value());
+    EXPECT_EQ(odd_result.error->code, DecodeErrorCode::LengthExceedsLimit);
+}
+
+TEST(Draft18FetchTest, ClassifiesFinInEveryRecordPhase) {
+    std::vector<std::vector<std::byte>> partials;
+
+    auto flags = fetch_header();
+    flags.push_back(std::byte{0x80});
+    partials.push_back(flags);
+
+    auto group = fetch_header();
+    append_vi64(group, 0x1cu);
+    group.push_back(std::byte{0x80});
+    partials.push_back(group);
+
+    auto subgroup = fetch_header();
+    append_vi64(subgroup, 0x1fu);
+    append_vi64(subgroup, 1);
+    subgroup.push_back(std::byte{0x80});
+    partials.push_back(subgroup);
+
+    auto object = fetch_header();
+    append_vi64(object, 0x1cu);
+    append_vi64(object, 1);
+    object.push_back(std::byte{0x80});
+    partials.push_back(object);
+
+    auto priority = fetch_header();
+    append_vi64(priority, 0x1cu);
+    append_vi64(priority, 1);
+    append_vi64(priority, 2);
+    partials.push_back(priority);
+
+    auto properties_length = priority;
+    properties_length[2] = std::byte{0x3c};
+    properties_length.push_back(std::byte{3});
+    properties_length.push_back(std::byte{0x80});
+    partials.push_back(properties_length);
+
+    auto properties = priority;
+    properties[2] = std::byte{0x3c};
+    properties.push_back(std::byte{3});
+    append_vi64(properties, 2);
+    properties.push_back(std::byte{0x3c});
+    partials.push_back(properties);
+
+    auto payload_length = priority;
+    payload_length.push_back(std::byte{3});
+    payload_length.push_back(std::byte{0x80});
+    partials.push_back(payload_length);
+
+    auto payload = priority;
+    payload.push_back(std::byte{3});
+    append_vi64(payload, 2);
+    payload.push_back(std::byte{0xaa});
+    partials.push_back(payload);
+
+    auto range_group = fetch_header();
+    append_vi64(range_group, 0x8c);
+    range_group.push_back(std::byte{0x80});
+    partials.push_back(range_group);
+
+    auto range_object = fetch_header();
+    append_vi64(range_object, 0x8c);
+    append_vi64(range_object, 1);
+    range_object.push_back(std::byte{0x80});
+    partials.push_back(range_object);
+
+    for (std::size_t index = 0; index < partials.size(); ++index) {
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(partials[index], true);
+        ASSERT_FALSE(result.error.has_value()) << index;
+        ASSERT_EQ(result.observations.size(), 1u) << index;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::ShouldClose) << index;
+        EXPECT_FALSE(result.clean_fin) << index;
+    }
+}
+
+TEST(Draft18FetchTest, AcceptsConsecutiveRangeRecordsAndTerminalMisuse) {
+    auto encoded = fetch_header();
+    for (const auto flags : {0x8cu, 0x10cu, 0x8cu}) {
+        append_vi64(encoded, flags);
+        append_vi64(encoded, flags);
+        append_vi64(encoded, flags + 1u);
+    }
+    FetchDecoder decoder(ascending_order());
+    const auto empty = decoder.push({}, false);
+    EXPECT_TRUE(empty.events.empty());
+    const auto repeated_empty = decoder.push({}, false);
+    EXPECT_TRUE(repeated_empty.events.empty());
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    EXPECT_EQ(result.events.size(), 3u);
+    EXPECT_TRUE(result.clean_fin);
+    EXPECT_TRUE(decoder.push({}, false).local_api_misuse);
+
+    auto invalid = fetch_header();
+    append_vi64(invalid, 0x80);
+    FetchDecoder invalid_decoder(ascending_order());
+    ASSERT_TRUE(invalid_decoder.push(invalid, false).error.has_value());
+    EXPECT_TRUE(invalid_decoder.push({}, true).local_api_misuse);
+}
+
+TEST(Draft18FetchTest, PreservesCompleteTranscriptAcrossAllChunkings) {
+    auto encoded = fetch_header(17);
+    append_vi64(encoded, 0x3fu);
+    append_vi64(encoded, 2);
+    append_vi64(encoded, 3);
+    append_vi64(encoded, 4);
+    encoded.push_back(std::byte{5});
+    const auto property = bytes({0x3c, 0x80, 0x09});
+    append_vi64(encoded, property.size());
+    encoded.insert(encoded.end(), property.begin(), property.end());
+    append_vi64(encoded, 2);
+    encoded.push_back(std::byte{0xaa});
+    encoded.push_back(std::byte{0xbb});
+    append_vi64(encoded, 0x10c);
+    append_vi64(encoded, 4);
+    append_vi64(encoded, 8);
+    append_vi64(encoded, 0x43);
+    append_vi64(encoded, 1);
+    encoded.push_back(std::byte{0xcc});
+
+    FetchDecoder one_shot(ascending_order());
+    AccumulatedFetchResult expected;
+    accumulate(one_shot.push(encoded, true), expected);
+    ASSERT_FALSE(expected.error.has_value());
+    ASSERT_EQ(expected.events.size(), 3u);
+    ASSERT_EQ(expected.observations.size(), 1u);
+
+    for (std::size_t split = 0; split <= encoded.size(); ++split) {
+        FetchDecoder decoder(ascending_order());
+        AccumulatedFetchResult actual;
+        accumulate(decoder.push(
+                       std::span<const std::byte>(encoded).first(split), false),
+                   actual);
+        accumulate(decoder.push(
+                       std::span<const std::byte>(encoded).subspan(split), true),
+                   actual);
+        expect_same_fetch_result(actual, expected, split);
+    }
+
+    FetchDecoder bytewise(ascending_order());
+    AccumulatedFetchResult bytewise_result;
+    for (const auto octet : encoded) {
+        const std::array one{octet};
+        accumulate(bytewise.push(one, false), bytewise_result);
+    }
+    accumulate(bytewise.push({}, true), bytewise_result);
+    expect_same_fetch_result(bytewise_result, expected, encoded.size() + 1u);
+}
+
+TEST(Draft18FetchTest, IsStableAcrossSplitsAndClassifiesFin) {
+    auto encoded = fetch_header();
+    append_safe_fetch_object(encoded, 0x1cu, 2, 4, 5);
+    for (std::size_t split = 0; split <= encoded.size(); ++split) {
+        FetchDecoder decoder(ascending_order());
+        std::vector<FetchEvent> events;
+        const auto first = decoder.push(
+            std::span<const std::byte>(encoded).first(split), false);
+        events.insert(events.end(), first.events.begin(), first.events.end());
+        const auto second = decoder.push(
+            std::span<const std::byte>(encoded).subspan(split), true);
+        events.insert(events.end(), second.events.begin(), second.events.end());
+        ASSERT_EQ(events.size(), 1u) << split;
+        const auto& object = std::get<ObjectEvent>(events[0]);
+        EXPECT_EQ(object.group_id, 2u) << split;
+        EXPECT_EQ(object.object_id, 4u) << split;
+        EXPECT_EQ(object.stream_end_offset, encoded.size()) << split;
+        EXPECT_TRUE(second.clean_fin) << split;
+    }
+
+    for (std::size_t split = 3; split < encoded.size(); ++split) {
+        FetchDecoder decoder(ascending_order());
+        const auto result = decoder.push(
+            std::span<const std::byte>(encoded).first(split), true);
+        ASSERT_EQ(result.observations.size(), 1u) << split;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::ShouldClose) << split;
+        EXPECT_FALSE(result.clean_fin) << split;
+        EXPECT_TRUE(decoder.push({}, false).local_api_misuse) << split;
+    }
+}
+
+TEST(Draft18PaddingStreamTest, AcceptsNonMinimalTypeAndEverySplitWithoutRetention) {
+    const auto encoded = bytes({0xff, 0x00, 0x00, 0x00, 0x00, 0x13, 0x2b,
+                                0x3e, 0x28, 0x00, 0x00, 0x01});
+    for (std::size_t split = 0; split <= encoded.size(); ++split) {
+        PaddingStreamDecoder decoder;
+        const auto first = decoder.push(
+            std::span<const std::byte>(encoded).first(split), false);
+        const auto second = decoder.push(
+            std::span<const std::byte>(encoded).subspan(split), true);
+        EXPECT_EQ(first.discarded_byte_count + second.discarded_byte_count, 3u)
+            << split;
+        const auto nonzero = first.first_nonzero_offset
+                                 ? first.first_nonzero_offset
+                                 : second.first_nonzero_offset;
+        EXPECT_EQ(nonzero, 11u) << split;
+        EXPECT_EQ(decoder.buffered_byte_count(), 0u) << split;
+        EXPECT_TRUE(second.clean_fin) << split;
+        EXPECT_TRUE(decoder.push({}, false).local_api_misuse) << split;
+    }
+}
+
+TEST(Draft18PaddingStreamTest, ClassifiesTruncatedHeaderAsAmbiguity) {
+    const auto header = bytes({0xf0, 0x13, 0x2b, 0x3e, 0x28});
+    for (std::size_t split = 0; split < header.size(); ++split) {
+        PaddingStreamDecoder decoder;
+        const auto result = decoder.push(
+            std::span<const std::byte>(header).first(split), true);
+        EXPECT_FALSE(result.error.has_value()) << split;
+        ASSERT_EQ(result.observations.size(), 1u) << split;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::DraftAmbiguity) << split;
+        EXPECT_EQ(decoder.buffered_byte_count(), split) << split;
+    }
+}
+
+TEST(Draft18PaddingStreamTest, RejectsWrongStreamType) {
+    PaddingStreamDecoder decoder;
+    const auto result = decoder.push(bytes({0x05}), false);
+    ASSERT_TRUE(result.error.has_value());
+    EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(result.error->offset, 0u);
+    EXPECT_TRUE(decoder.push({}, true).local_api_misuse);
 }
 
 }  // namespace

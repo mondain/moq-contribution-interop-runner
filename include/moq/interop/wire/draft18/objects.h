@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,7 +21,7 @@ enum class ObjectForwardingPreference {
 
 struct ObjectEvent {
     std::optional<std::uint64_t> datagram_type;
-    std::uint64_t track_alias;
+    std::optional<std::uint64_t> track_alias;
     std::uint64_t group_id;
     std::uint64_t object_id;
     std::optional<std::uint8_t> publisher_priority;
@@ -37,6 +38,8 @@ struct ObjectEvent {
     bool priority_inherited{false};
     std::size_t stream_offset{0};
     std::size_t stream_end_offset{0};
+    std::optional<std::uint64_t> request_id;
+    std::optional<std::uint64_t> serialization_flags;
 };
 
 struct DiscardedPaddingDatagram {
@@ -66,6 +69,7 @@ struct SubgroupHeader {
 
 enum class DecoderObservationKind {
     ShouldClose,
+    ShouldViolation,
     DraftAmbiguity,
 };
 
@@ -112,6 +116,117 @@ public:
 
     [[nodiscard]] SubgroupPushResult push(std::span<const std::byte> bytes,
                                           bool fin);
+    [[nodiscard]] std::size_t buffered_byte_count() const noexcept;
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+enum class FetchGroupOrder {
+    Ascending,
+    Descending,
+};
+
+using FetchGroupOrderResolver =
+    std::function<std::optional<FetchGroupOrder>(std::uint64_t request_id)>;
+
+struct FetchHeader {
+    std::uint64_t raw_type;
+    std::uint64_t request_id;
+    std::size_t stream_offset;
+    std::size_t stream_end_offset;
+};
+
+enum class FetchRangeKind {
+    NonExistent,
+    Unknown,
+};
+
+struct FetchRangeEvent {
+    FetchRangeKind kind;
+    std::uint64_t serialization_flags;
+    std::uint64_t group_id;
+    std::uint64_t object_id;
+    std::size_t stream_offset;
+    std::size_t stream_end_offset;
+};
+
+using FetchEvent = std::variant<ObjectEvent, FetchRangeEvent>;
+
+enum class FetchDecodePhase {
+    Type,
+    RequestId,
+    SerializationFlags,
+    GroupIdDelta,
+    SubgroupId,
+    ObjectIdDelta,
+    Priority,
+    PropertiesLength,
+    Properties,
+    PayloadLength,
+    Payload,
+    RangeGroupId,
+    RangeObjectId,
+};
+
+struct FetchDecoderObservation {
+    DecoderObservationKind kind;
+    FetchDecodePhase phase;
+    std::size_t offset;
+    std::string detail;
+};
+
+struct FetchPushResult {
+    std::optional<FetchHeader> header;
+    std::vector<FetchEvent> events;
+    std::vector<FetchDecoderObservation> observations;
+    std::optional<DecodeError> error;
+    bool clean_fin{false};
+    bool local_api_misuse{false};
+};
+
+class FetchDecoder {
+public:
+    explicit FetchDecoder(FetchGroupOrderResolver group_order_resolver,
+                          Limits limits = {});
+    ~FetchDecoder();
+
+    FetchDecoder(const FetchDecoder&) = delete;
+    FetchDecoder& operator=(const FetchDecoder&) = delete;
+    FetchDecoder(FetchDecoder&&) noexcept;
+    FetchDecoder& operator=(FetchDecoder&&) noexcept;
+
+    [[nodiscard]] FetchPushResult push(std::span<const std::byte> bytes,
+                                       bool fin);
+    [[nodiscard]] std::size_t buffered_byte_count() const noexcept;
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+struct PaddingStreamPushResult {
+    std::size_t discarded_byte_count{0};
+    std::optional<std::size_t> first_nonzero_offset;
+    std::vector<FetchDecoderObservation> observations;
+    std::optional<DecodeError> error;
+    bool clean_fin{false};
+    bool local_api_misuse{false};
+};
+
+class PaddingStreamDecoder {
+public:
+    PaddingStreamDecoder();
+    ~PaddingStreamDecoder();
+
+    PaddingStreamDecoder(const PaddingStreamDecoder&) = delete;
+    PaddingStreamDecoder& operator=(const PaddingStreamDecoder&) = delete;
+    PaddingStreamDecoder(PaddingStreamDecoder&&) noexcept;
+    PaddingStreamDecoder& operator=(PaddingStreamDecoder&&) noexcept;
+
+    [[nodiscard]] PaddingStreamPushResult push(
+        std::span<const std::byte> bytes, bool fin);
     [[nodiscard]] std::size_t buffered_byte_count() const noexcept;
 
 private:
