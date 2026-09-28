@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MOQ_INTEROP_BUILD_TESTS "Build unit tests" ON)
+option(MOQ_INTEROP_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
 
 include(cmake/Dependencies.cmake)
 
@@ -49,6 +50,7 @@ execute_process(
 if(NOT MOQ_INTEROP_ACTUAL_NLOHMANN_JSON_REVISION STREQUAL MOQ_INTEROP_EXPECTED_NLOHMANN_JSON_COMMIT)
     message(FATAL_ERROR "nlohmann_json revision mismatch: pinned ${MOQ_INTEROP_NLOHMANN_JSON_REVISION} resolves to ${MOQ_INTEROP_EXPECTED_NLOHMANN_JSON_COMMIT}, actual ${MOQ_INTEROP_ACTUAL_NLOHMANN_JSON_REVISION}")
 endif()
+
 execute_process(
     COMMAND "${GIT_EXECUTABLE}" rev-parse "${MOQ_INTEROP_CPP_HTTPLIB_REVISION}^{commit}"
     WORKING_DIRECTORY "${cpp_httplib_SOURCE_DIR}"
@@ -66,6 +68,7 @@ execute_process(
 if(NOT MOQ_INTEROP_ACTUAL_CPP_HTTPLIB_REVISION STREQUAL MOQ_INTEROP_EXPECTED_CPP_HTTPLIB_COMMIT)
     message(FATAL_ERROR "cpp-httplib revision mismatch: pinned ${MOQ_INTEROP_CPP_HTTPLIB_REVISION} resolves to ${MOQ_INTEROP_EXPECTED_CPP_HTTPLIB_COMMIT}, actual ${MOQ_INTEROP_ACTUAL_CPP_HTTPLIB_REVISION}")
 endif()
+
 set(MOQ_INTEROP_SOURCE_REVISION "" CACHE STRING "Source commit revision")
 if(NOT MOQ_INTEROP_SOURCE_REVISION)
     execute_process(
@@ -87,6 +90,12 @@ target_compile_definitions(moq-interop-app INTERFACE
     MOQ_INTEROP_CPP_HTTPLIB_REVISION="${MOQ_INTEROP_CPP_HTTPLIB_REVISION}"
     MOQ_INTEROP_GOOGLETEST_REVISION="${MOQ_INTEROP_GOOGLETEST_REVISION}"
     MOQ_INTEROP_SQLITE3_REVISION="${SQLite3_VERSION}"
+)
+
+add_library(moq-interop-wire src/wire/common/cursor.cpp)
+target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
+target_compile_options(moq-interop-wire PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
 add_library(moq-interop-requirements
@@ -163,6 +172,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)
+
+    add_executable(moq-interop-cursor-tests tests/golden/cursor_test.cpp)
+    target_link_libraries(moq-interop-cursor-tests PRIVATE moq-interop-wire GTest::gtest_main)
+    target_compile_options(moq-interop-cursor-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME cursor COMMAND moq-interop-cursor-tests)
 
     add_executable(moq-interop-draft18-catalog-part-01-tests
                    tests/unit/draft18_catalog_part_01_test.cpp)
@@ -280,4 +296,23 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft21-catalog-part-07-tests PRIVATE
                           moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft21-catalog-part-07 COMMAND moq-interop-draft21-catalog-part-07-tests)
+endif()
+
+if(MOQ_INTEROP_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "MOQT interop fuzz targets require Clang and libFuzzer")
+    endif()
+
+    add_executable(moq-interop-cursor-fuzz
+        tests/fuzz/cursor_fuzz.cpp
+        src/wire/common/cursor.cpp
+    )
+    target_link_libraries(moq-interop-cursor-fuzz PRIVATE moq-interop-app)
+    target_compile_options(moq-interop-cursor-fuzz PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(moq-interop-cursor-fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
 endif()
