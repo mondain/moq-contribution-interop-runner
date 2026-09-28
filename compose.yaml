@@ -4,7 +4,7 @@ services:
     build:
       context: .
       args:
-        SOURCE_REVISION: ${MOQ_INTEROP_SOURCE_REVISION:-unknown}
+        SOURCE_REVISION: ${MOQ_INTEROP_SOURCE_REVISION:?set MOQ_INTEROP_SOURCE_REVISION to the exact source revision}
     user: "10001:10001"
     read_only: true
     tmpfs:

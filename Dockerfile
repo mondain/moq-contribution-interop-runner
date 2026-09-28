@@ -1,6 +1,22 @@
 ARG DEBIAN_BASE=debian@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+ARG DEBIAN_SNAPSHOT=20260927T000000Z
 
-FROM ${DEBIAN_BASE} AS builder
+FROM ${DEBIAN_BASE} AS apt-base
+
+ARG DEBIAN_SNAPSHOT
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main" \
+        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} bookworm-security main" \
+        > /etc/apt/sources.list
+
+FROM apt-base AS builder
+
+ARG SOURCE_REVISION
+RUN case "${SOURCE_REVISION}" in ""|unknown) \
+        echo 'SOURCE_REVISION must be a concrete source revision' >&2; exit 2;; esac
+
+ENV SOURCE_DATE_EPOCH=1790467200
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -21,16 +37,19 @@ COPY src/ src/
 COPY docs/*.txt docs/
 COPY requirements/*.json requirements/
 
-ARG SOURCE_REVISION=unknown
 RUN cmake -S . -B /build \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=none \
         -DCMAKE_INSTALL_PREFIX=/opt/moq-interop \
         -DMOQ_INTEROP_BUILD_TESTS=OFF \
         -DMOQ_INTEROP_SOURCE_REVISION=${SOURCE_REVISION} \
     && cmake --build /build --parallel 2 \
     && cmake --install /build --strip
 
-FROM ${DEBIAN_BASE} AS runtime
+FROM apt-base AS runtime
+
+ARG DEBIAN_SNAPSHOT
+LABEL org.moq-interop.debian-snapshot="${DEBIAN_SNAPSHOT}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
