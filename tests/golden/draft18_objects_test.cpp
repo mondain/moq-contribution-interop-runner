@@ -1139,6 +1139,36 @@ TEST(Draft18PaddingStreamTest, DiscardsBodyAndReportsNonzeroEvidence) {
     EXPECT_TRUE(result.clean_fin);
 }
 
+TEST(Draft18PaddingStreamTest, CoversEmptyZeroAndFirstByteNonzeroBodies) {
+    const auto header = bytes({0xf0, 0x13, 0x2b, 0x3e, 0x28});
+
+    PaddingStreamDecoder empty_decoder;
+    const auto empty = empty_decoder.push(header, true);
+    EXPECT_EQ(empty.discarded_byte_count, 0u);
+    EXPECT_FALSE(empty.first_nonzero_offset.has_value());
+    EXPECT_EQ(empty_decoder.buffered_byte_count(), 0u);
+    EXPECT_TRUE(empty.clean_fin);
+
+    auto all_zero = header;
+    all_zero.insert(all_zero.end(), 4, std::byte{0});
+    PaddingStreamDecoder zero_decoder;
+    const auto zero = zero_decoder.push(all_zero, true);
+    EXPECT_EQ(zero.discarded_byte_count, 4u);
+    EXPECT_FALSE(zero.first_nonzero_offset.has_value());
+    EXPECT_EQ(zero_decoder.buffered_byte_count(), 0u);
+    EXPECT_TRUE(zero.clean_fin);
+
+    auto first_nonzero = header;
+    first_nonzero.push_back(std::byte{1});
+    first_nonzero.push_back(std::byte{0});
+    PaddingStreamDecoder nonzero_decoder;
+    const auto nonzero = nonzero_decoder.push(first_nonzero, true);
+    EXPECT_EQ(nonzero.discarded_byte_count, 2u);
+    EXPECT_EQ(nonzero.first_nonzero_offset, header.size());
+    EXPECT_EQ(nonzero_decoder.buffered_byte_count(), 0u);
+    EXPECT_TRUE(nonzero.clean_fin);
+}
+
 TEST(Draft18FetchTest, AcceptsNonMinimalHeaderAndEveryHeaderSplit) {
     const auto encoded = bytes({0x80, 0x05, 0x80, 0x07});
     for (std::size_t split = 0; split <= encoded.size(); ++split) {
@@ -1217,6 +1247,31 @@ TEST(Draft18FetchTest, DatagramIgnoresAndPreservesEveryLowMode) {
                       DecoderObservationKind::ShouldViolation) << mode;
         }
     }
+}
+
+TEST(Draft18FetchTest, ResolvesEverySubgroupModeFromLastActualObject) {
+    auto encoded = fetch_header();
+    append_vi64(encoded, 0x1fu);
+    append_vi64(encoded, 1);
+    append_vi64(encoded, 7);
+    append_vi64(encoded, 10);
+    encoded.push_back(std::byte{9});
+    append_vi64(encoded, 0);
+    append_safe_fetch_object(encoded, 0x01u);
+    append_safe_fetch_object(encoded, 0x02u);
+    append_safe_fetch_object(encoded, 0x00u);
+    append_safe_fetch_object(encoded, 0x03u);
+
+    FetchDecoder decoder(ascending_order());
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    ASSERT_EQ(result.events.size(), 5u);
+    EXPECT_EQ(std::get<ObjectEvent>(result.events[0]).subgroup_id, 7u);
+    EXPECT_EQ(std::get<ObjectEvent>(result.events[1]).subgroup_id, 7u);
+    EXPECT_EQ(std::get<ObjectEvent>(result.events[2]).subgroup_id, 8u);
+    EXPECT_EQ(std::get<ObjectEvent>(result.events[3]).subgroup_id, 0u);
+    EXPECT_EQ(std::get<ObjectEvent>(result.events[4]).subgroup_id, 3u);
+    EXPECT_TRUE(result.clean_fin);
 }
 
 TEST(Draft18FetchTest, AppliesGroupAndObjectDeltaArithmeticForBothOrders) {
@@ -1409,6 +1464,49 @@ TEST(Draft18FetchTest, BoundsPropertiesAndPayloadEvidence) {
     ASSERT_TRUE(malformed_result.error.has_value());
     EXPECT_EQ(malformed_result.error->code,
               DecodeErrorCode::KeyValueFormattingError);
+}
+
+TEST(Draft18FetchTest, AccountsForDecodedPropertiesDuringIncompletePayload) {
+    std::vector<std::byte> property;
+    append_vi64(property, 0x3c);
+    const auto raw_integer =
+        bytes({0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09});
+    property.insert(property.end(), raw_integer.begin(), raw_integer.end());
+    append_vi64(property, 0x79 - 0x3c);
+    append_vi64(property, 100);
+    property.insert(property.end(), 100, std::byte{0x5a});
+
+    auto prefix = fetch_header();
+    append_vi64(prefix, 0x3cu);
+    append_vi64(prefix, 1);
+    append_vi64(prefix, 2);
+    prefix.push_back(std::byte{3});
+    append_vi64(prefix, property.size());
+    prefix.insert(prefix.end(), property.begin(), property.end());
+    append_vi64(prefix, 1000);
+    prefix.push_back(std::byte{0xaa});
+
+    Limits limits;
+    limits.maximum_retained_payload_length = 3;
+    FetchDecoder decoder(ascending_order(), limits);
+    const auto prefix_result = decoder.push(prefix, false);
+    ASSERT_FALSE(prefix_result.error.has_value());
+    EXPECT_TRUE(prefix_result.events.empty());
+
+    const auto decoded_property_storage = 2u * sizeof(KeyValuePair) + 108u;
+    EXPECT_GE(decoder.buffered_byte_count(), decoded_property_storage);
+    EXPECT_LE(decoder.buffered_byte_count(),
+              decoded_property_storage +
+                  limits.maximum_retained_payload_length + 8u);
+
+    const auto payload_chunk = bytes({0xbb, 0xcc, 0xdd, 0xee});
+    const auto payload_result = decoder.push(payload_chunk, false);
+    ASSERT_FALSE(payload_result.error.has_value());
+    EXPECT_TRUE(payload_result.events.empty());
+    EXPECT_GE(decoder.buffered_byte_count(), decoded_property_storage);
+    EXPECT_LE(decoder.buffered_byte_count(),
+              decoded_property_storage +
+                  limits.maximum_retained_payload_length + 8u);
 }
 
 TEST(Draft18FetchTest, EnforcesPropertyLengthAndOddValueLimits) {
