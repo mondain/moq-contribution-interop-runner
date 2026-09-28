@@ -20,6 +20,8 @@ enum class StreamRole {
 struct Limits {
     std::size_t maximum_odd_value_length{65'535};
     std::size_t maximum_parameter_count{32'767};
+    std::size_t maximum_object_properties_length{65'535};
+    std::size_t maximum_retained_payload_length{4'096};
 };
 
 struct DraftAmbiguity {

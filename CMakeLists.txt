@@ -95,6 +95,7 @@ target_compile_definitions(moq-interop-app INTERFACE
 add_library(moq-interop-wire
     src/wire/common/cursor.cpp
     src/wire/draft18/messages.cpp
+    src/wire/draft18/objects.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -191,6 +192,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     )
     add_test(NAME draft18-messages COMMAND moq-interop-draft18-messages-tests)
+
+    add_executable(moq-interop-draft18-objects-tests
+                   tests/golden/draft18_objects_test.cpp)
+    target_link_libraries(moq-interop-draft18-objects-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    target_compile_options(moq-interop-draft18-objects-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME draft18-objects COMMAND moq-interop-draft18-objects-tests)
 
     add_executable(moq-interop-draft18-catalog-part-01-tests
                    tests/unit/draft18_catalog_part_01_test.cpp)
