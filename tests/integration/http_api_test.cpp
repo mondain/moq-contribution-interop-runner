@@ -10,6 +10,8 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,6 +37,31 @@ private:
     inline static unsigned long long next_ = 0;
     std::filesystem::path directory_;
     std::filesystem::path path_;
+};
+
+class FailingRunStore final : public storage::RunStore {
+public:
+    app::RunId create_run(const app::RunConfig&) override { throw_failure(); }
+    void append_events(const app::RunId&, std::span<const storage::EvidenceEvent>) override {
+        throw_failure();
+    }
+    void finalize(const app::RunId&, const requirements::ScoreSummary&,
+                  std::span<const requirements::Outcome>) override {
+        throw_failure();
+    }
+    storage::RunRecord load(const app::RunId&) const override { throw_failure(); }
+    storage::Page<storage::RunSummary> list(storage::RunQuery) const override {
+        throw_failure();
+    }
+    storage::Page<storage::EvidenceEvent> list_events(const app::RunId&,
+                                                       storage::RunQuery) const override {
+        throw_failure();
+    }
+
+private:
+    [[noreturn]] static void throw_failure() {
+        throw std::runtime_error("secret database path /private/runs.sqlite3");
+    }
 };
 
 std::shared_ptr<const requirements::RequirementCatalog> catalog(unsigned draft) {
@@ -87,6 +114,25 @@ TEST(HttpServerConfigTest, DefaultsToLocalhostPort8080) {
     const ServerConfig config;
     EXPECT_EQ(config.bind_address, "127.0.0.1");
     EXPECT_EQ(config.port, 8080);
+}
+
+TEST(HttpServerHealthTest, ReturnsSanitizedUnavailableWhenStoreReadinessFails) {
+    auto server = HttpServer(catalog(18), catalog(21), std::make_shared<FailingRunStore>(),
+                             test_build(), ServerConfig{.port = 0});
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+    client.set_connection_timeout(2s);
+    client.set_read_timeout(2s);
+
+    const auto response = client.Get("/healthz");
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 503);
+    EXPECT_EQ(response->get_header_value("Content-Type"), "application/json");
+    const auto body = Json::parse(response->body);
+    EXPECT_EQ(body.at("schema_version"), 1);
+    EXPECT_EQ(body.at("error").at("status"), 503);
+    EXPECT_EQ(body.at("error").at("code"), "database_not_ready");
+    EXPECT_EQ(response->body.find("/private/runs.sqlite3"), std::string::npos);
 }
 
 TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {

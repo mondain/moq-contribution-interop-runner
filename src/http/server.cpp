@@ -159,6 +159,15 @@ public:
     void register_routes() {
         server.Get("/healthz", [this](const httplib::Request&, httplib::Response& response) {
             guarded(response, [this, &response] {
+                try {
+                    static_cast<void>(store->list({1, 0}));
+                } catch (const std::exception& error) {
+                    std::cerr << "Database readiness check failed: " << error.what() << '\n';
+                    throw ApiError{503, "database_not_ready", "The database is not ready."};
+                } catch (...) {
+                    std::cerr << "Database readiness check failed with an unknown exception\n";
+                    throw ApiError{503, "database_not_ready", "The database is not ready."};
+                }
                 json_response(response, {{"schema_version", 1},
                                          {"status", "ok"},
                                          {"database", {{"ready", true}}},
