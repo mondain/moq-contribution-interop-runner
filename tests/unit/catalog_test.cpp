@@ -6,7 +6,9 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace moq::interop::requirements {
@@ -33,6 +35,11 @@ nlohmann::json valid_record() {
 nlohmann::json valid_catalog() {
     return {{"draft", 18}, {"source_sha256", "abc123"}, {"complete", true},
             {"requirements", {valid_record()}}};
+}
+
+nlohmann::json load_json(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    return nlohmann::json::parse(input);
 }
 
 class CatalogTest : public ::testing::Test {
@@ -83,18 +90,52 @@ TEST_F(CatalogTest, IncompleteEnvelopeRequiresExplicitAssemblyMode) {
     EXPECT_TRUE(catalog.requirements.empty());
 }
 
-TEST_F(CatalogTest, CheckedInEnvelopesArePinnedButRejectedForProduction) {
+TEST_F(CatalogTest, CheckedInCatalogsExactlyAssembleReviewedPartitionsAndPassFullAudit) {
     const std::filesystem::path root = MOQ_INTEROP_PROJECT_SOURCE_DIR;
-    for (const unsigned number : {18u, 21u}) {
+    const std::vector<std::tuple<unsigned, std::size_t, std::vector<std::string>>> drafts{
+        {18,
+         598,
+         {"draft18-lines-0001-1254.json", "draft18-lines-1255-2564.json",
+          "draft18-lines-2565-3508.json", "draft18-lines-3509-4935.json",
+          "draft18-lines-4936-6108.json", "draft18-lines-6109-7840.json"}},
+        {21,
+         638,
+         {"draft21-lines-0001-1647.json", "draft21-lines-1648-2430.json",
+          "draft21-lines-2431-3338.json", "draft21-lines-3339-4260.json",
+          "draft21-lines-4261-5364.json", "draft21-lines-5365-6710.json",
+          "draft21-lines-6711-8904.json"}},
+    };
+    std::set<std::string> global_ids;
+    for (const auto& [number, expected_count, partitions] : drafts) {
+        SCOPED_TRACE(number);
         const auto source = load_draft_source(number, root / "docs",
                                                root / "requirements/draft-digests.json");
-        const auto path = root / "requirements" / ("draft" + std::to_string(number) + ".json");
-        EXPECT_THROW(RequirementCatalog::load(source, path), std::runtime_error);
-        const auto catalog = RequirementCatalog::load(source, path, CatalogLoadMode::AllowIncomplete);
-        EXPECT_EQ(catalog.draft, number);
-        EXPECT_EQ(catalog.source_sha256, source.sha256);
-        EXPECT_FALSE(catalog.complete);
-        EXPECT_TRUE(catalog.requirements.empty());
+        const auto catalog_path = root / "requirements" /
+                                  ("draft" + std::to_string(number) + ".json");
+        const auto catalog = RequirementCatalog::load(source, catalog_path);
+        EXPECT_TRUE(catalog.complete);
+        EXPECT_EQ(catalog.requirements.size(), expected_count);
+        for (const auto& row : catalog.requirements) {
+            EXPECT_TRUE(global_ids.insert(row.id).second) << row.id;
+        }
+
+        const auto audit = audit_normative_occurrences(source, catalog);
+        EXPECT_TRUE(audit.ok());
+        EXPECT_TRUE(audit.missing.empty());
+        EXPECT_TRUE(audit.multiply_classified.empty());
+        EXPECT_TRUE(audit.errors.empty());
+
+        auto expected_requirements = nlohmann::json::array();
+        for (const auto& partition : partitions) {
+            const auto partition_document =
+                load_json(root / "requirements/parts" / partition);
+            for (const auto& record : partition_document.at("requirements")) {
+                expected_requirements.push_back(record);
+            }
+        }
+        const auto assembled = load_json(catalog_path);
+        EXPECT_TRUE(assembled.at("complete").get<bool>());
+        EXPECT_EQ(assembled.at("requirements"), expected_requirements);
     }
 }
 

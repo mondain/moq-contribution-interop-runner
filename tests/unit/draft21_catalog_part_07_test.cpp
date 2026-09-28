@@ -29,10 +29,10 @@ TEST_F(Draft21CatalogPart07Test, CoversEveryOwnedAnchorWithContiguousClausesAndM
     }
 }
 
-TEST_F(Draft21CatalogPart07Test, IdsRemainGloballyUniqueAcrossDraft21CatalogAndPartitions) {
+TEST_F(Draft21CatalogPart07Test, IdsRemainGloballyUniqueAcrossDraft21Partitions) {
     const std::filesystem::path root = MOQ_INTEROP_PROJECT_SOURCE_DIR;
     std::set<std::string> ids;
-    std::vector<std::filesystem::path> paths = {root / "requirements/draft21.json"};
+    std::vector<std::filesystem::path> paths;
     for (const auto& entry : std::filesystem::directory_iterator(root / "requirements/parts")) {
         if (entry.is_regular_file() && entry.path().extension() == ".json" &&
             entry.path().filename().string().starts_with("draft21-")) {
