@@ -10,9 +10,19 @@ namespace moq::interop::wire::draft18 {
 namespace {
 
 constexpr std::uint64_t kSetupMessageType = 0x2f00;
+constexpr std::uint64_t kGoawayMessageType = 0x10;
+constexpr std::uint64_t kRequestUpdateMessageType = 0x02;
 constexpr std::uint64_t kSubscribeMessageType = 0x03;
+constexpr std::uint64_t kSubscribeOkMessageType = 0x04;
+constexpr std::uint64_t kRequestErrorMessageType = 0x05;
+constexpr std::uint64_t kRequestOkMessageType = 0x07;
+constexpr std::uint64_t kNamespaceMessageType = 0x08;
+constexpr std::uint64_t kPublishDoneMessageType = 0x0b;
+constexpr std::uint64_t kNamespaceDoneMessageType = 0x0e;
+constexpr std::uint64_t kPublishBlockedMessageType = 0x0f;
 constexpr std::uint64_t kPublishMessageType = 0x1d;
 constexpr std::uint64_t kFetchMessageType = 0x16;
+constexpr std::uint64_t kFetchOkMessageType = 0x18;
 constexpr std::uint64_t kTrackStatusMessageType = 0x0d;
 constexpr std::uint64_t kPublishNamespaceMessageType = 0x06;
 constexpr std::uint64_t kSubscribeNamespaceMessageType = 0x50;
@@ -20,6 +30,8 @@ constexpr std::uint64_t kSubscribeTracksMessageType = 0x51;
 constexpr std::size_t kMaximumMessagePayload = 65'535;
 constexpr std::size_t kMaximumFrameSize = kMaximumMessagePayload + 11;
 constexpr std::size_t kMaximumFullTrackName = 4'096;
+constexpr std::size_t kMaximumReasonPhrase = 1'024;
+constexpr std::size_t kMaximumNewSessionUri = 8'192;
 
 DecodeError invalid(std::size_t offset, std::string detail) {
     return {DecodeErrorCode::InvalidValue, offset, std::move(detail)};
@@ -166,17 +178,17 @@ bool is_opening_request_type(std::uint64_t type) {
            type == kSubscribeTracksMessageType;
 }
 
-bool is_pending_request_only_type(std::uint64_t type) {
+bool is_continuation_request_type(std::uint64_t type) {
     switch (type) {
-        case 0x02:
-        case 0x04:
-        case 0x05:
-        case 0x07:
-        case 0x08:
-        case 0x0b:
-        case 0x0e:
-        case 0x0f:
-        case 0x18:
+        case kRequestUpdateMessageType:
+        case kSubscribeOkMessageType:
+        case kRequestErrorMessageType:
+        case kRequestOkMessageType:
+        case kNamespaceMessageType:
+        case kPublishDoneMessageType:
+        case kNamespaceDoneMessageType:
+        case kPublishBlockedMessageType:
+        case kFetchOkMessageType:
             return true;
         default:
             return false;
@@ -355,6 +367,102 @@ EncodeResult encode_namespace_opening_fields(
     }
     auto result = encode_track_namespace(name_space, output);
     if (!result.has_value()) return result;
+    if (!write_vi64(parameters.size(), output)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "parameter count exceeds payload capacity");
+    }
+    return encode_parameters(parameters, context, output);
+}
+
+DraftDecodeResult<ReasonPhrase> decode_reason_phrase(Cursor& input) {
+    Cursor working = input;
+    const auto length_result = read_vi64(working);
+    if (const auto* need = std::get_if<NeedMore>(&length_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&length_result)) return *error;
+    const auto length = std::get<std::uint64_t>(length_result);
+    if (length > kMaximumReasonPhrase) {
+        return protocol_violation(input.offset(),
+                                  "reason phrase exceeds 1024 bytes");
+    }
+    const auto bytes_result =
+        read_bytes(working, static_cast<std::size_t>(length));
+    if (const auto* need = std::get_if<NeedMore>(&bytes_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&bytes_result)) return *error;
+    input = working;
+    return ReasonPhrase{copy_bytes(
+        std::get<std::span<const std::byte>>(bytes_result))};
+}
+
+EncodeResult encode_reason_phrase(const ReasonPhrase& reason,
+                                  ByteWriter& output) {
+    if (reason.bytes.size() > kMaximumReasonPhrase) {
+        return EncodeResult::failure(EncodeErrorCode::PayloadTooLarge,
+                                     "reason phrase exceeds 1024 bytes");
+    }
+    ByteWriter staged(kMaximumReasonPhrase + 2);
+    if (!write_length_prefixed_bytes(reason.bytes, staged)) {
+        return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                     "reason phrase exceeds staging capacity");
+    }
+    return append_staged(staged, output,
+                         "reason phrase exceeds output capacity");
+}
+
+DraftDecodeResult<Redirect> decode_redirect(Cursor& input,
+                                            const Limits& limits) {
+    Cursor working = input;
+    const auto uri_result =
+        read_length_prefixed_bytes(working, kMaximumMessagePayload);
+    if (const auto* need = std::get_if<NeedMore>(&uri_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&uri_result)) return *error;
+    const auto name_space = decode_track_namespace(working, limits);
+    if (const auto* need = std::get_if<NeedMore>(&name_space)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&name_space)) return *error;
+    const auto decoded_namespace = std::get<TrackNamespace>(name_space);
+    const auto name = decode_track_name(working, decoded_namespace, limits);
+    if (const auto* need = std::get_if<NeedMore>(&name)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&name)) return *error;
+    input = working;
+    return Redirect{
+        copy_bytes(std::get<std::span<const std::byte>>(uri_result)),
+        decoded_namespace, std::get<TrackName>(name)};
+}
+
+EncodeResult encode_redirect(const Redirect& redirect, ByteWriter& output) {
+    ByteWriter staged(kMaximumMessagePayload);
+    if (!write_length_prefixed_bytes(redirect.connect_uri, staged)) {
+        return EncodeResult::failure(EncodeErrorCode::PayloadTooLarge,
+                                     "redirect URI exceeds payload capacity");
+    }
+    auto result = encode_track_namespace(redirect.track_namespace, staged);
+    if (result.has_value()) {
+        result = encode_track_name(redirect.track_name,
+                                   redirect.track_namespace, staged);
+    }
+    if (!result.has_value()) return result;
+    return append_staged(staged, output, "redirect exceeds output capacity");
+}
+
+DraftDecodeResult<Parameters> decode_counted_parameters(
+    Cursor& input, ParameterContext context, const Limits& limits) {
+    Cursor working = input;
+    const auto count_result = read_vi64(working);
+    if (const auto* need = std::get_if<NeedMore>(&count_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&count_result)) return *error;
+    const auto parameters = decode_parameters(
+        working, std::get<std::uint64_t>(count_result), context, limits);
+    if (const auto* need = std::get_if<NeedMore>(&parameters)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&parameters)) return *error;
+    if (const auto* ambiguity = std::get_if<DraftAmbiguity>(&parameters)) {
+        return *ambiguity;
+    }
+    input = working;
+    return std::get<Parameters>(parameters);
+}
+
+EncodeResult encode_counted_parameters(const Parameters& parameters,
+                                       ParameterContext context,
+                                       ByteWriter& output) {
     if (!write_vi64(parameters.size(), output)) {
         return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
                                      "parameter count exceeds payload capacity");
@@ -1123,19 +1231,14 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
         return protocol_violation(input.offset(),
                                   "SETUP is not valid on a request stream");
     }
-    if (is_opening_request_type(type) && role != StreamRole::Request) {
+    if ((is_opening_request_type(type) || is_continuation_request_type(type)) &&
+        role != StreamRole::Request) {
         return protocol_violation(input.offset(),
                                   "request message is not valid on control stream");
     }
-    if (is_pending_request_only_type(type)) {
-        if (role != StreamRole::Request) {
-            return protocol_violation(
-                input.offset(), "request message is not valid on control stream");
-        }
-        return UnsupportedMessage{type, role};
-    }
-    if (type == 0x10) return UnsupportedMessage{type, role};
-    if (type != kSetupMessageType && !is_opening_request_type(type)) {
+    if (type != kSetupMessageType && type != kGoawayMessageType &&
+        !is_opening_request_type(type) &&
+        !is_continuation_request_type(type)) {
         return protocol_violation(
             input.offset(), "unknown, reserved, or removed message type");
     }
@@ -1173,6 +1276,203 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
             return *duplicate;
         }
         message = SetupMessage{std::move(options)};
+    } else if (type == kGoawayMessageType) {
+        const auto uri_result =
+            read_length_prefixed_bytes(payload_cursor, kMaximumNewSessionUri);
+        if (const auto* need = std::get_if<NeedMore>(&uri_result)) {
+            return protocol_violation(need->offset,
+                                      "GOAWAY URI exceeds framed payload");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&uri_result)) {
+            if (error->code == DecodeErrorCode::LengthExceedsLimit) {
+                return protocol_violation(error->offset,
+                                          "GOAWAY URI exceeds 8192 bytes");
+            }
+            return *error;
+        }
+        const auto timeout_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&timeout_result)) {
+            return protocol_violation(need->offset,
+                                      "GOAWAY timeout exceeds framed payload");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&timeout_result)) {
+            return *error;
+        }
+        std::optional<std::uint64_t> request_id;
+        if (role == StreamRole::Control) {
+            const auto request_id_result = read_vi64(payload_cursor);
+            if (const auto* need = std::get_if<NeedMore>(&request_id_result)) {
+                return protocol_violation(
+                    need->offset, "GOAWAY request ID exceeds framed payload");
+            }
+            if (const auto* error =
+                    std::get_if<DecodeError>(&request_id_result)) {
+                return *error;
+            }
+            request_id = std::get<std::uint64_t>(request_id_result);
+        }
+        message = GoawayMessage{
+            copy_bytes(std::get<std::span<const std::byte>>(uri_result)),
+            std::get<std::uint64_t>(timeout_result), request_id};
+    } else if (type == kSubscribeOkMessageType ||
+               type == kRequestOkMessageType) {
+        std::uint64_t track_alias = 0;
+        if (type == kSubscribeOkMessageType) {
+            const auto alias_result = read_vi64(payload_cursor);
+            if (const auto* need = std::get_if<NeedMore>(&alias_result)) {
+                return protocol_violation(
+                    need->offset, "SUBSCRIBE_OK alias exceeds framed payload");
+            }
+            if (const auto* error = std::get_if<DecodeError>(&alias_result)) {
+                return *error;
+            }
+            track_alias = std::get<std::uint64_t>(alias_result);
+        }
+        const auto context = type == kSubscribeOkMessageType
+                                 ? ParameterContext::SubscribeOk
+                                 : ParameterContext::Unresolved;
+        const auto parameters =
+            decode_counted_parameters(payload_cursor, context, limits);
+        if (const auto failure = bounded_message_failure(parameters)) {
+            return *failure;
+        }
+        const auto properties = decode_track_properties(
+            payload_cursor, payload_cursor.remaining(), limits);
+        if (const auto failure = bounded_message_failure(properties)) {
+            return *failure;
+        }
+        if (type == kSubscribeOkMessageType) {
+            message = SubscribeOkMessage{
+                track_alias, std::get<Parameters>(parameters),
+                std::get<TrackProperties>(properties)};
+        } else {
+            message = RequestOkMessage{
+                std::get<Parameters>(parameters),
+                std::get<TrackProperties>(properties)};
+        }
+    } else if (type == kRequestErrorMessageType) {
+        const auto code_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&code_result)) {
+            return protocol_violation(need->offset,
+                                      "REQUEST_ERROR code is truncated");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&code_result)) {
+            return *error;
+        }
+        const auto retry_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&retry_result)) {
+            return protocol_violation(need->offset,
+                                      "REQUEST_ERROR retry is truncated");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&retry_result)) {
+            return *error;
+        }
+        const auto reason = decode_reason_phrase(payload_cursor);
+        if (const auto failure = bounded_message_failure(reason)) return *failure;
+        const auto code = std::get<std::uint64_t>(code_result);
+        std::optional<Redirect> redirect;
+        if (code == 0x34) {
+            const auto decoded = decode_redirect(payload_cursor, limits);
+            if (const auto failure = bounded_message_failure(decoded)) {
+                return *failure;
+            }
+            redirect = std::get<Redirect>(decoded);
+        }
+        message = RequestErrorMessage{
+            code, std::get<std::uint64_t>(retry_result),
+            std::get<ReasonPhrase>(reason), std::move(redirect)};
+    } else if (type == kRequestUpdateMessageType) {
+        const auto request_id_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&request_id_result)) {
+            return protocol_violation(need->offset,
+                                      "REQUEST_UPDATE ID is truncated");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&request_id_result)) {
+            return *error;
+        }
+        const auto parameters = decode_counted_parameters(
+            payload_cursor, ParameterContext::Unresolved, limits);
+        if (const auto failure = bounded_message_failure(parameters)) {
+            return *failure;
+        }
+        message = RequestUpdateMessage{
+            std::get<std::uint64_t>(request_id_result),
+            std::get<Parameters>(parameters)};
+    } else if (type == kPublishDoneMessageType) {
+        const auto status_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&status_result)) {
+            return protocol_violation(need->offset,
+                                      "PUBLISH_DONE status is truncated");
+        }
+        if (const auto* error = std::get_if<DecodeError>(&status_result)) {
+            return *error;
+        }
+        const auto stream_count_result = read_vi64(payload_cursor);
+        if (const auto* need = std::get_if<NeedMore>(&stream_count_result)) {
+            return protocol_violation(need->offset,
+                                      "PUBLISH_DONE stream count is truncated");
+        }
+        if (const auto* error =
+                std::get_if<DecodeError>(&stream_count_result)) {
+            return *error;
+        }
+        const auto reason = decode_reason_phrase(payload_cursor);
+        if (const auto failure = bounded_message_failure(reason)) return *failure;
+        message = PublishDoneMessage{
+            std::get<std::uint64_t>(status_result),
+            std::get<std::uint64_t>(stream_count_result),
+            std::get<ReasonPhrase>(reason)};
+    } else if (type == kFetchOkMessageType) {
+        const auto end_of_track_result = read_bytes(payload_cursor, 1);
+        if (const auto* need = std::get_if<NeedMore>(&end_of_track_result)) {
+            return protocol_violation(need->offset,
+                                      "FETCH_OK end-of-track is truncated");
+        }
+        if (const auto* error =
+                std::get_if<DecodeError>(&end_of_track_result)) {
+            return *error;
+        }
+        const auto end_location = decode_location(payload_cursor);
+        if (const auto failure = bounded_message_failure(end_location)) {
+            return *failure;
+        }
+        const auto parameters = decode_counted_parameters(
+            payload_cursor, ParameterContext::FetchOk, limits);
+        if (const auto failure = bounded_message_failure(parameters)) {
+            return *failure;
+        }
+        const auto properties = decode_track_properties(
+            payload_cursor, payload_cursor.remaining(), limits);
+        if (const auto failure = bounded_message_failure(properties)) {
+            return *failure;
+        }
+        message = FetchOkMessage{
+            std::to_integer<std::uint8_t>(
+                std::get<std::span<const std::byte>>(end_of_track_result)[0]),
+            std::get<Location>(end_location), std::get<Parameters>(parameters),
+            std::get<TrackProperties>(properties)};
+    } else if (type == kNamespaceMessageType ||
+               type == kNamespaceDoneMessageType) {
+        const auto name_space = decode_track_namespace(payload_cursor, limits);
+        if (const auto failure = bounded_message_failure(name_space)) {
+            return *failure;
+        }
+        if (type == kNamespaceMessageType) {
+            message = NamespaceMessage{std::get<TrackNamespace>(name_space)};
+        } else {
+            message = NamespaceDoneMessage{std::get<TrackNamespace>(name_space)};
+        }
+    } else if (type == kPublishBlockedMessageType) {
+        const auto name_space = decode_track_namespace(payload_cursor, limits);
+        if (const auto failure = bounded_message_failure(name_space)) {
+            return *failure;
+        }
+        const auto decoded_namespace = std::get<TrackNamespace>(name_space);
+        const auto name =
+            decode_track_name(payload_cursor, decoded_namespace, limits);
+        if (const auto failure = bounded_message_failure(name)) return *failure;
+        message = PublishBlockedMessage{decoded_namespace,
+                                        std::get<TrackName>(name)};
     } else if (type == kSubscribeMessageType ||
                type == kTrackStatusMessageType ||
                type == kPublishMessageType) {
@@ -1254,6 +1554,113 @@ EncodeResult encode_message(const Message& message, ByteWriter& output) {
                                          duplicate->detail);
         }
         payload_result = encode_key_value_pairs_to(setup->options, payload);
+    } else if (const auto* goaway = std::get_if<GoawayMessage>(&message)) {
+        type = kGoawayMessageType;
+        if (goaway->new_session_uri.size() > kMaximumNewSessionUri) {
+            return EncodeResult::failure(EncodeErrorCode::PayloadTooLarge,
+                                         "GOAWAY URI exceeds 8192 bytes");
+        }
+        if (!write_length_prefixed_bytes(goaway->new_session_uri, payload) ||
+            !write_vi64(goaway->timeout, payload) ||
+            (goaway->request_id.has_value() &&
+             !write_vi64(*goaway->request_id, payload))) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "GOAWAY exceeds payload capacity");
+        }
+    } else if (const auto* subscribe_ok =
+                   std::get_if<SubscribeOkMessage>(&message)) {
+        type = kSubscribeOkMessageType;
+        if (!write_vi64(subscribe_ok->track_alias, payload)) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "SUBSCRIBE_OK alias exceeds capacity");
+        }
+        payload_result = encode_counted_parameters(
+            subscribe_ok->parameters, ParameterContext::SubscribeOk, payload);
+        if (payload_result.has_value()) {
+            payload_result = encode_key_value_pairs(
+                subscribe_ok->track_properties.entries, payload);
+        }
+    } else if (const auto* request_ok =
+                   std::get_if<RequestOkMessage>(&message)) {
+        type = kRequestOkMessageType;
+        payload_result = encode_counted_parameters(
+            request_ok->parameters, ParameterContext::Unresolved, payload);
+        if (payload_result.has_value()) {
+            payload_result = encode_key_value_pairs(
+                request_ok->track_properties.entries, payload);
+        }
+    } else if (const auto* request_error =
+                   std::get_if<RequestErrorMessage>(&message)) {
+        type = kRequestErrorMessageType;
+        if ((request_error->error_code == 0x34) !=
+            request_error->redirect.has_value()) {
+            return EncodeResult::failure(
+                EncodeErrorCode::InvalidValue,
+                "REQUEST_ERROR redirect does not match error code");
+        }
+        if (!write_vi64(request_error->error_code, payload) ||
+            !write_vi64(request_error->retry_interval, payload)) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "REQUEST_ERROR exceeds capacity");
+        }
+        payload_result =
+            encode_reason_phrase(request_error->reason_phrase, payload);
+        if (payload_result.has_value() && request_error->redirect) {
+            payload_result = encode_redirect(*request_error->redirect, payload);
+        }
+    } else if (const auto* request_update =
+                   std::get_if<RequestUpdateMessage>(&message)) {
+        type = kRequestUpdateMessageType;
+        if (!write_vi64(request_update->request_id, payload)) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "REQUEST_UPDATE ID exceeds capacity");
+        }
+        payload_result = encode_counted_parameters(
+            request_update->parameters, ParameterContext::Unresolved, payload);
+    } else if (const auto* publish_done =
+                   std::get_if<PublishDoneMessage>(&message)) {
+        type = kPublishDoneMessageType;
+        if (!write_vi64(publish_done->status_code, payload) ||
+            !write_vi64(publish_done->stream_count, payload)) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "PUBLISH_DONE exceeds capacity");
+        }
+        payload_result =
+            encode_reason_phrase(publish_done->reason_phrase, payload);
+    } else if (const auto* fetch_ok = std::get_if<FetchOkMessage>(&message)) {
+        type = kFetchOkMessageType;
+        if (!payload.append_byte(static_cast<std::byte>(fetch_ok->end_of_track))) {
+            return EncodeResult::failure(EncodeErrorCode::OutputCapacity,
+                                         "FETCH_OK flag exceeds capacity");
+        }
+        payload_result = encode_location(fetch_ok->end_location, payload);
+        if (payload_result.has_value()) {
+            payload_result = encode_counted_parameters(
+                fetch_ok->parameters, ParameterContext::FetchOk, payload);
+        }
+        if (payload_result.has_value()) {
+            payload_result = encode_key_value_pairs(
+                fetch_ok->track_properties.entries, payload);
+        }
+    } else if (const auto* name_space =
+                   std::get_if<NamespaceMessage>(&message)) {
+        type = kNamespaceMessageType;
+        payload_result =
+            encode_track_namespace(name_space->track_namespace_suffix, payload);
+    } else if (const auto* name_space_done =
+                   std::get_if<NamespaceDoneMessage>(&message)) {
+        type = kNamespaceDoneMessageType;
+        payload_result = encode_track_namespace(
+            name_space_done->track_namespace_suffix, payload);
+    } else if (const auto* blocked =
+                   std::get_if<PublishBlockedMessage>(&message)) {
+        type = kPublishBlockedMessageType;
+        payload_result =
+            encode_track_namespace(blocked->track_namespace_suffix, payload);
+        if (payload_result.has_value()) {
+            payload_result = encode_track_name(
+                blocked->track_name, blocked->track_namespace_suffix, payload);
+        }
     } else if (const auto* subscribe = std::get_if<SubscribeMessage>(&message)) {
         type = kSubscribeMessageType;
         payload_result = encode_track_opening_fields(
@@ -1349,14 +1756,17 @@ EncodeResult encode_message(const Message& message, ByteWriter& output) {
             subscribe_namespace->track_namespace_prefix,
             subscribe_namespace->parameters,
             ParameterContext::SubscribeNamespace, payload);
-    } else {
-        const auto& subscribe_tracks = std::get<SubscribeTracksMessage>(message);
+    } else if (const auto* subscribe_tracks =
+                   std::get_if<SubscribeTracksMessage>(&message)) {
         type = kSubscribeTracksMessageType;
         payload_result = encode_namespace_opening_fields(
-            subscribe_tracks.request_id,
-            subscribe_tracks.track_namespace_prefix,
-            subscribe_tracks.parameters, ParameterContext::SubscribeTracks,
+            subscribe_tracks->request_id,
+            subscribe_tracks->track_namespace_prefix,
+            subscribe_tracks->parameters, ParameterContext::SubscribeTracks,
             payload);
+    } else {
+        return EncodeResult::failure(EncodeErrorCode::InvalidValue,
+                                     "unknown typed message variant");
     }
     if (!payload_result.has_value()) return payload_result;
     if (payload.size() > kMaximumMessagePayload) {

@@ -144,6 +144,71 @@ struct SetupMessage {
     KeyValuePairs options;
 };
 
+struct ReasonPhrase {
+    std::vector<std::byte> bytes;
+};
+
+struct Redirect {
+    std::vector<std::byte> connect_uri;
+    TrackNamespace track_namespace;
+    TrackName track_name;
+};
+
+struct GoawayMessage {
+    std::vector<std::byte> new_session_uri;
+    std::uint64_t timeout;
+    std::optional<std::uint64_t> request_id;
+};
+
+struct SubscribeOkMessage {
+    std::uint64_t track_alias;
+    Parameters parameters;
+    TrackProperties track_properties;
+};
+
+struct RequestOkMessage {
+    Parameters parameters;
+    TrackProperties track_properties;
+};
+
+struct RequestErrorMessage {
+    std::uint64_t error_code;
+    std::uint64_t retry_interval;
+    ReasonPhrase reason_phrase;
+    std::optional<Redirect> redirect;
+};
+
+struct RequestUpdateMessage {
+    std::uint64_t request_id;
+    Parameters parameters;
+};
+
+struct PublishDoneMessage {
+    std::uint64_t status_code;
+    std::uint64_t stream_count;
+    ReasonPhrase reason_phrase;
+};
+
+struct FetchOkMessage {
+    std::uint8_t end_of_track;
+    Location end_location;
+    Parameters parameters;
+    TrackProperties track_properties;
+};
+
+struct NamespaceMessage {
+    TrackNamespace track_namespace_suffix;
+};
+
+struct NamespaceDoneMessage {
+    TrackNamespace track_namespace_suffix;
+};
+
+struct PublishBlockedMessage {
+    TrackNamespace track_namespace_suffix;
+    TrackName track_name;
+};
+
 struct SubscribeMessage {
     std::uint64_t request_id;
     TrackNamespace track_namespace;
@@ -211,23 +276,20 @@ struct SubscribeTracksMessage {
     Parameters parameters;
 };
 
-using Message = std::variant<SetupMessage, SubscribeMessage, PublishMessage,
-                             FetchMessage, TrackStatusMessage,
-                             PublishNamespaceMessage,
-                             SubscribeNamespaceMessage,
-                             SubscribeTracksMessage>;
-
-struct UnsupportedMessage {
-    std::uint64_t type;
-    StreamRole role;
-};
+using Message = std::variant<SetupMessage, GoawayMessage, SubscribeMessage,
+                             SubscribeOkMessage, PublishMessage,
+                             PublishDoneMessage, FetchMessage, FetchOkMessage,
+                             TrackStatusMessage, PublishNamespaceMessage,
+                             SubscribeNamespaceMessage, SubscribeTracksMessage,
+                             NamespaceMessage, NamespaceDoneMessage,
+                             PublishBlockedMessage, RequestUpdateMessage,
+                             RequestOkMessage, RequestErrorMessage>;
 
 template <class T>
 using DraftDecodeResult = std::variant<T, NeedMore, DecodeError, DraftAmbiguity>;
 
 using MessageDecodeResult =
-    std::variant<Message, NeedMore, DecodeError, DraftAmbiguity,
-                 UnsupportedMessage>;
+    std::variant<Message, NeedMore, DecodeError, DraftAmbiguity>;
 using KeyValueDecodeResult = DraftDecodeResult<KeyValuePairs>;
 using TrackPropertiesDecodeResult = DraftDecodeResult<TrackProperties>;
 using LocationDecodeResult = DraftDecodeResult<Location>;
