@@ -29,6 +29,7 @@ struct FakeApiState {
     quiche_shutdown shutdown_direction = QUICHE_SHUTDOWN_READ;
     std::uint64_t shutdown_error = 0;
     std::vector<std::byte> datagram_bytes;
+    bool datagram_pointer_nonnull = false;
     int free_calls = 0;
     std::uint64_t peer_bidi_left = 8;
     std::uint64_t peer_uni_left = 8;
@@ -95,6 +96,7 @@ std::int64_t fake_datagram_max(const quiche_conn*) {
 
 std::int64_t fake_datagram_send(quiche_conn*, const std::uint8_t* data,
                                 std::size_t size) {
+    fake_state->datagram_pointer_nonnull = data != nullptr;
     fake_state->datagram_bytes.clear();
     if (size != 0) {
         fake_state->datagram_bytes.assign(
@@ -373,7 +375,7 @@ TEST(QuicheConnectionShutdown, UsesExactWriteAndReadDirectionsAndErrorCodes) {
 
     for (const auto& [raw, expected] : {
              std::pair<int, TransportStatus>{QUICHE_ERR_DONE,
-                                             TransportStatus::WouldBlock},
+                                             TransportStatus::InvalidState},
              std::pair<int, TransportStatus>{QUICHE_ERR_INVALID_STATE,
                                              TransportStatus::InvalidState},
              std::pair<int, TransportStatus>{
@@ -384,12 +386,13 @@ TEST(QuicheConnectionShutdown, UsesExactWriteAndReadDirectionsAndErrorCodes) {
              std::pair<int, TransportStatus>{QUICHE_ERR_STREAM_RESET,
                                              TransportStatus::PeerReset},
              std::pair<int, TransportStatus>{QUICHE_ERR_STREAM_LIMIT,
-                                             TransportStatus::StreamLimit},
+                                             TransportStatus::InternalError},
              std::pair<int, TransportStatus>{-999,
                                              TransportStatus::InternalError},
          }) {
         state.shutdown_result = raw;
         EXPECT_EQ(connection->reset(13, 1).status, expected) << raw;
+        EXPECT_EQ(connection->stop_sending(17, 1).status, expected) << raw;
     }
 }
 
@@ -431,7 +434,7 @@ TEST(QuicheConnectionDatagram, ChecksSizeBeforeSendAndMapsReturnValues) {
 
     state.datagram_max = QUICHE_ERR_DONE;
     EXPECT_EQ(connection->send_datagram(payload).status,
-              TransportStatus::WouldBlock);
+              TransportStatus::InvalidState);
     state.datagram_max = QUICHE_ERR_INVALID_STATE;
     EXPECT_EQ(connection->send_datagram(payload).status,
               TransportStatus::InvalidState);
@@ -441,6 +444,19 @@ TEST(QuicheConnectionDatagram, ChecksSizeBeforeSendAndMapsReturnValues) {
     EXPECT_EQ(connection->last_transport_diagnostic(),
               (TransportDiagnostic{TransportOperation::DatagramCapacity,
                                    -999}));
+}
+
+TEST(QuicheConnectionDatagram, PassesNonNullPointerForEmptyDatagram) {
+    FakeApiState state;
+    auto connection = make_connection(state);
+    state.datagram_max = 3;
+    state.datagram_send_result = 0;
+
+    const auto result = connection->send_datagram({});
+    EXPECT_EQ(result.status, TransportStatus::Success);
+    EXPECT_EQ(result.accepted, 0u);
+    EXPECT_TRUE(state.datagram_pointer_nonnull);
+    EXPECT_TRUE(state.datagram_bytes.empty());
 }
 
 TEST(QuicheConnectionEvents, PreservesFifoAndOwnsPayloadAfterCallerMutation) {

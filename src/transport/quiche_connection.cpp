@@ -44,7 +44,7 @@ bool is_overflow(const TransportEvent& event) {
     return std::holds_alternative<EventQueueOverflowEvent>(event);
 }
 
-TransportStatus map_common_error(std::int64_t result) {
+TransportStatus map_stream_send_error(std::int64_t result) {
     switch (result) {
         case QUICHE_ERR_DONE:
             return TransportStatus::WouldBlock;
@@ -56,6 +56,42 @@ TransportStatus map_common_error(std::int64_t result) {
             return TransportStatus::StreamLimit;
         case QUICHE_ERR_INVALID_STATE:
         case QUICHE_ERR_INVALID_STREAM_STATE:
+            return TransportStatus::InvalidState;
+        default:
+            return TransportStatus::InternalError;
+    }
+}
+
+TransportStatus map_stream_shutdown_error(int result) {
+    switch (result) {
+        case QUICHE_ERR_DONE:
+        case QUICHE_ERR_INVALID_STATE:
+        case QUICHE_ERR_INVALID_STREAM_STATE:
+            return TransportStatus::InvalidState;
+        case QUICHE_ERR_STREAM_STOPPED:
+            return TransportStatus::PeerStopped;
+        case QUICHE_ERR_STREAM_RESET:
+            return TransportStatus::PeerReset;
+        default:
+            return TransportStatus::InternalError;
+    }
+}
+
+TransportStatus map_datagram_capacity_error(std::int64_t result) {
+    switch (result) {
+        case QUICHE_ERR_DONE:
+        case QUICHE_ERR_INVALID_STATE:
+            return TransportStatus::InvalidState;
+        default:
+            return TransportStatus::InternalError;
+    }
+}
+
+TransportStatus map_datagram_send_error(std::int64_t result) {
+    switch (result) {
+        case QUICHE_ERR_DONE:
+            return TransportStatus::WouldBlock;
+        case QUICHE_ERR_INVALID_STATE:
             return TransportStatus::InvalidState;
         default:
             return TransportStatus::InternalError;
@@ -271,7 +307,7 @@ OperationResult QuicheConnection::write(StreamId stream_id,
                          static_cast<std::size_t>(accepted));
     }
 
-    const auto status = map_common_error(result);
+    const auto status = map_stream_send_error(result);
     if (status != TransportStatus::WouldBlock) {
         impl_->abandon_if_reserved(stream_id);
     }
@@ -295,7 +331,8 @@ OperationResult QuicheConnection::reset(StreamId stream_id,
         impl_->connection, stream_id, QUICHE_SHUTDOWN_WRITE,
         application_error);
     const auto status =
-        result == 0 ? TransportStatus::Success : map_common_error(result);
+        result == 0 ? TransportStatus::Success
+                    : map_stream_shutdown_error(result);
     if (status == TransportStatus::InternalError) {
         impl_->last_diagnostic = TransportDiagnostic{
             TransportOperation::StreamShutdown, result};
@@ -311,7 +348,8 @@ OperationResult QuicheConnection::stop_sending(
         impl_->connection, stream_id, QUICHE_SHUTDOWN_READ,
         application_error);
     const auto status =
-        result == 0 ? TransportStatus::Success : map_common_error(result);
+        result == 0 ? TransportStatus::Success
+                    : map_stream_shutdown_error(result);
     if (status == TransportStatus::InternalError) {
         impl_->last_diagnostic = TransportDiagnostic{
             TransportOperation::StreamShutdown, result};
@@ -326,7 +364,7 @@ OperationResult QuicheConnection::send_datagram(
     const auto maximum =
         impl_->api.datagram_max_writable_len(impl_->connection);
     if (maximum < 0) {
-        const auto status = map_common_error(maximum);
+        const auto status = map_datagram_capacity_error(maximum);
         if (status == TransportStatus::InternalError) {
             impl_->last_diagnostic = TransportDiagnostic{
                 TransportOperation::DatagramCapacity, maximum};
@@ -337,9 +375,12 @@ OperationResult QuicheConnection::send_datagram(
         return operation(TransportStatus::DatagramTooLarge);
     }
 
+    static constexpr std::uint8_t kEmptyDatagramByte = 0;
+    const auto* data_pointer =
+        data.empty() ? &kEmptyDatagramByte
+                     : reinterpret_cast<const std::uint8_t*>(data.data());
     const auto result = impl_->api.datagram_send(
-        impl_->connection,
-        reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        impl_->connection, data_pointer, data.size());
     if (result >= 0) {
         const auto accepted = static_cast<std::uint64_t>(result);
         if (accepted > data.size()) {
@@ -357,7 +398,7 @@ OperationResult QuicheConnection::send_datagram(
     if (result == QUICHE_ERR_BUFFER_TOO_SHORT) {
         return operation(TransportStatus::DatagramTooLarge);
     }
-    const auto status = map_common_error(result);
+    const auto status = map_datagram_send_error(result);
     if (status == TransportStatus::InternalError) {
         impl_->last_diagnostic =
             TransportDiagnostic{TransportOperation::DatagramSend, result};
