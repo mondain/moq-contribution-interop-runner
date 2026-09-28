@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -63,6 +64,69 @@ void expect_error_code(const Result& result, DecodeErrorCode code) {
     EXPECT_EQ(std::get<DecodeError>(result).code, code);
 }
 
+struct MessageAuditVector {
+    std::uint64_t type;
+    StreamRole role;
+    std::vector<std::byte> frame;
+    std::size_t variant_index;
+    bool also_valid_on_other_role;
+};
+
+const std::vector<MessageAuditVector>& message_audit_vectors() {
+    static const std::vector<MessageAuditVector> vectors{
+        {0x2f00, StreamRole::Control, bytes({0xaf, 0x00, 0x00, 0x00}),
+         Message{SetupMessage{}}.index(), false},
+        {0x10, StreamRole::Control,
+         bytes({0x10, 0x00, 0x03, 0x00, 0x00, 0x02}),
+         Message{GoawayMessage{}}.index(), true},
+        {0x10, StreamRole::Request, bytes({0x10, 0x00, 0x02, 0x00, 0x00}),
+         Message{GoawayMessage{}}.index(), true},
+        {0x03, StreamRole::Request,
+         bytes({0x03, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}),
+         Message{SubscribeMessage{}}.index(), false},
+        {0x04, StreamRole::Request, bytes({0x04, 0x00, 0x02, 0x00, 0x00}),
+         Message{SubscribeOkMessage{}}.index(), false},
+        {0x1d, StreamRole::Request,
+         bytes({0x1d, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00}),
+         Message{PublishMessage{}}.index(), false},
+        {0x0b, StreamRole::Request,
+         bytes({0x0b, 0x00, 0x03, 0x00, 0x00, 0x00}),
+         Message{PublishDoneMessage{}}.index(), false},
+        {0x16, StreamRole::Request,
+         bytes({0x16, 0x00, 0x05, 0x0a, 0x02, 0x02, 0x05, 0x00}),
+         Message{FetchMessage{}}.index(), false},
+        {0x18, StreamRole::Request,
+         bytes({0x18, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}),
+         Message{FetchOkMessage{}}.index(), false},
+        {0x0d, StreamRole::Request,
+         bytes({0x0d, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}),
+         Message{TrackStatusMessage{}}.index(), false},
+        {0x06, StreamRole::Request,
+         bytes({0x06, 0x00, 0x03, 0x00, 0x00, 0x00}),
+         Message{PublishNamespaceMessage{}}.index(), false},
+        {0x50, StreamRole::Request,
+         bytes({0x50, 0x00, 0x03, 0x00, 0x00, 0x00}),
+         Message{SubscribeNamespaceMessage{}}.index(), false},
+        {0x51, StreamRole::Request,
+         bytes({0x51, 0x00, 0x03, 0x00, 0x00, 0x00}),
+         Message{SubscribeTracksMessage{}}.index(), false},
+        {0x08, StreamRole::Request, bytes({0x08, 0x00, 0x01, 0x00}),
+         Message{NamespaceMessage{}}.index(), false},
+        {0x0e, StreamRole::Request, bytes({0x0e, 0x00, 0x01, 0x00}),
+         Message{NamespaceDoneMessage{}}.index(), false},
+        {0x0f, StreamRole::Request, bytes({0x0f, 0x00, 0x02, 0x00, 0x00}),
+         Message{PublishBlockedMessage{}}.index(), false},
+        {0x02, StreamRole::Request, bytes({0x02, 0x00, 0x02, 0x00, 0x00}),
+         Message{RequestUpdateMessage{}}.index(), false},
+        {0x07, StreamRole::Request, bytes({0x07, 0x00, 0x01, 0x00}),
+         Message{RequestOkMessage{}}.index(), false},
+        {0x05, StreamRole::Request,
+         bytes({0x05, 0x00, 0x03, 0x00, 0x00, 0x00}),
+         Message{RequestErrorMessage{}}.index(), false},
+    };
+    return vectors;
+}
+
 TEST(Draft18MessagesTest, DecodesAndEncodesEmptySetup) {
     const auto encoded = bytes({0xaf, 0x00, 0x00, 0x00});
     Cursor input(encoded);
@@ -105,6 +169,30 @@ TEST(Draft18MessagesTest, DecodesEveryKnownSetupOptionFromHandAuthoredBytes) {
     expect_bytes(output.bytes(), encoded);
 }
 
+TEST(Draft18MessagesTest, EachRegisteredSetupOptionHasIndependentGoldenBytes) {
+    struct Vector {
+        std::uint64_t type;
+        std::vector<std::byte> frame;
+    };
+    const std::vector<Vector> vectors{
+        {0x01, bytes({0xaf, 0x00, 0x00, 0x02, 0x01, 0x00})},
+        {0x03, bytes({0xaf, 0x00, 0x00, 0x02, 0x03, 0x00})},
+        {0x04, bytes({0xaf, 0x00, 0x00, 0x02, 0x04, 0x00})},
+        {0x05, bytes({0xaf, 0x00, 0x00, 0x02, 0x05, 0x00})},
+        {0x07, bytes({0xaf, 0x00, 0x00, 0x02, 0x07, 0x00})},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.frame);
+        const auto decoded = decode_message(StreamRole::Control, input, {});
+        const auto& setup = require_setup(decoded);
+        ASSERT_EQ(setup.options.size(), 1u);
+        EXPECT_EQ(setup.options[0].type, vector.type);
+        ByteWriter output(vector.frame.size());
+        ASSERT_TRUE(encode_message(std::get<Message>(decoded), output).has_value());
+        expect_bytes(output.bytes(), vector.frame);
+    }
+}
+
 TEST(Draft18MessagesTest, PreservesUnknownOddEvenAndDuplicateOptionsInOrder) {
     const auto encoded = bytes({
         0xaf, 0x00, 0x00, 0x0a,
@@ -145,7 +233,7 @@ TEST(Draft18MessagesTest, AcceptsRepeatedAuthorizationTokens) {
     EXPECT_EQ(options[1].type, 3u);
 }
 
-TEST(Draft18MessagesTest, RejectsDuplicateKnownNonRepeatableOptionsAtomically) {
+TEST(Draft18MessagesTest, PreservesDuplicateKnownNonRepeatableOptionsForScoring) {
     const std::vector<std::vector<std::byte>> encoded{
         bytes({0xaf, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00}),
         bytes({0xaf, 0x00, 0x00, 0x04, 0x04, 0x01, 0x00, 0x02}),
@@ -153,9 +241,19 @@ TEST(Draft18MessagesTest, RejectsDuplicateKnownNonRepeatableOptionsAtomically) {
         bytes({0xaf, 0x00, 0x00, 0x04, 0x07, 0x00, 0x00, 0x00}),
     };
     for (const auto& frame : encoded) {
-        Cursor input(frame, 50);
-        expect_decode_error(decode_message(StreamRole::Control, input, {}));
-        EXPECT_EQ(input.offset(), 50u);
+        Cursor input(frame);
+        const auto result = decode_message(StreamRole::Control, input, {});
+        const auto& setup = require_setup(result);
+        ASSERT_EQ(setup.options.size(), 2u);
+        EXPECT_EQ(setup.options[0].type, setup.options[1].type);
+        EXPECT_EQ(input.remaining(), 0u);
+
+        ByteWriter output(frame.size());
+        const auto encode_result = encode_message(std::get<Message>(result), output);
+        EXPECT_FALSE(encode_result.has_value());
+        ASSERT_NE(encode_result.error(), nullptr);
+        EXPECT_EQ(encode_result.error()->code, EncodeErrorCode::InvalidValue);
+        EXPECT_TRUE(output.bytes().empty());
     }
 }
 
@@ -1686,6 +1784,169 @@ TEST(Draft18ParametersTest, TruncationCountFeasibilityAndCapacityAreAtomic) {
     EXPECT_FALSE(encode_parameters(parameters, ParameterContext::Subscribe, output)
                      .has_value());
     expect_bytes(output.bytes(), bytes({0xcc}));
+}
+
+TEST(Draft18ExhaustiveAuditTest, EveryRuledMessageTypeHasExactTypedRoundTrip) {
+    std::array<bool, std::variant_size_v<Message>> seen{};
+    for (const auto& vector : message_audit_vectors()) {
+        SCOPED_TRACE(vector.type);
+        Cursor input(vector.frame, 1'000);
+        const auto result = decode_message(vector.role, input, {});
+        ASSERT_TRUE(std::holds_alternative<Message>(result));
+        const auto& message = std::get<Message>(result);
+        EXPECT_EQ(message.index(), vector.variant_index);
+        EXPECT_EQ(input.remaining(), 0u);
+        seen[message.index()] = true;
+
+        ByteWriter output(vector.frame.size());
+        ASSERT_TRUE(encode_message(message, output).has_value());
+        expect_bytes(output.bytes(), vector.frame);
+    }
+    EXPECT_TRUE(std::ranges::all_of(seen, [](bool value) { return value; }));
+}
+
+TEST(Draft18ExhaustiveAuditTest, EveryMinimalFrameTruncationIsAtomic) {
+    for (const auto& vector : message_audit_vectors()) {
+        for (std::size_t available = 0; available < vector.frame.size();
+             ++available) {
+            SCOPED_TRACE(vector.type);
+            SCOPED_TRACE(available);
+            Cursor input(std::span<const std::byte>(vector.frame).first(available),
+                         1'100);
+            const auto result = decode_message(vector.role, input, {});
+            ASSERT_TRUE(std::holds_alternative<NeedMore>(result));
+            EXPECT_EQ(input.offset(), 1'100u);
+        }
+    }
+}
+
+TEST(Draft18ExhaustiveAuditTest, WrongRolesFailImmediatelyAfterType) {
+    for (const auto& vector : message_audit_vectors()) {
+        if (vector.also_valid_on_other_role) continue;
+        SCOPED_TRACE(vector.type);
+        const auto type_size = vector.type == 0x2f00 ? 2u : 1u;
+        Cursor input(std::span<const std::byte>(vector.frame).first(type_size),
+                     1'200);
+        const auto wrong_role = vector.role == StreamRole::Control
+                                    ? StreamRole::Request
+                                    : StreamRole::Control;
+        expect_error_code(decode_message(wrong_role, input, {}),
+                          DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.offset(), 1'200u);
+    }
+}
+
+TEST(Draft18ExhaustiveAuditTest, ReservedRemovedAndUnknownTypesAreProtocolErrors) {
+    const std::vector<std::vector<std::byte>> types{
+        bytes({0x01}), bytes({0x20}), bytes({0x21}), bytes({0x40}),
+        bytes({0x41}), bytes({0x1e}), bytes({0x7f}), bytes({0x80, 0x7f}),
+    };
+    for (const auto& type : types) {
+        Cursor input(type, 1'300);
+        const auto result = decode_message(StreamRole::Control, input, {});
+        expect_error_code(result, DecodeErrorCode::ProtocolViolation);
+        EXPECT_FALSE(std::holds_alternative<DraftAmbiguity>(result));
+        EXPECT_EQ(input.offset(), 1'300u);
+    }
+}
+
+TEST(Draft18ExhaustiveAuditTest, CompleteBoundedKvpFailuresHaveExactErrors) {
+    const auto malformed = bytes({0xaf, 0x00, 0x00, 0x01, 0x01});
+    Cursor malformed_input(malformed, 1'400);
+    expect_error_code(decode_message(StreamRole::Control, malformed_input, {}),
+                      DecodeErrorCode::KeyValueFormattingError);
+    EXPECT_EQ(malformed_input.offset(), 1'400u);
+
+    const auto overflow = bytes({
+        0xaf, 0x00, 0x00, 0x0b,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0x00, 0x01,
+    });
+    Cursor overflow_input(overflow, 1'410);
+    expect_error_code(decode_message(StreamRole::Control, overflow_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(overflow_input.offset(), 1'410u);
+
+    const auto draft_oversize =
+        bytes({0xaf, 0x00, 0x00, 0x04, 0x01, 0xc1, 0x00, 0x00});
+    Cursor draft_limit_input(draft_oversize, 1'420);
+    expect_error_code(decode_message(StreamRole::Control, draft_limit_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(draft_limit_input.offset(), 1'420u);
+
+    const auto configured_oversize =
+        bytes({0xaf, 0x00, 0x00, 0x05, 0x01, 0x03, 0xaa, 0xbb, 0xcc});
+    Limits limits;
+    limits.maximum_odd_value_length = 2;
+    Cursor configured_limit_input(configured_oversize, 1'430);
+    expect_error_code(
+        decode_message(StreamRole::Control, configured_limit_input, limits),
+        DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(configured_limit_input.offset(), 1'430u);
+}
+
+TEST(Draft18ExhaustiveAuditTest, NonMinimalStructuralFamiliesCanonicalize) {
+    struct Vector {
+        StreamRole role;
+        std::vector<std::byte> encoded;
+        std::vector<std::byte> canonical;
+    };
+    const std::vector<Vector> vectors{
+        {StreamRole::Control,
+         bytes({0xc0, 0x2f, 0x00, 0x00, 0x04, 0x80, 0x04, 0x80, 0x25}),
+         bytes({0xaf, 0x00, 0x00, 0x02, 0x04, 0x25})},
+        {StreamRole::Request,
+         bytes({0x10, 0x00, 0x04, 0x80, 0x00, 0x80, 0x00}),
+         bytes({0x10, 0x00, 0x02, 0x00, 0x00})},
+        {StreamRole::Request,
+         bytes({0x03, 0x00, 0x08, 0x80, 0x00, 0x80, 0x00,
+                0x80, 0x00, 0x80, 0x00}),
+         bytes({0x03, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00})},
+        {StreamRole::Request,
+         bytes({0x0b, 0x00, 0x06, 0x80, 0x00, 0x80, 0x00,
+                0x80, 0x00}),
+         bytes({0x0b, 0x00, 0x03, 0x00, 0x00, 0x00})},
+    };
+    for (const auto& vector : vectors) {
+        Cursor input(vector.encoded);
+        const auto result = decode_message(vector.role, input, {});
+        ASSERT_TRUE(std::holds_alternative<Message>(result));
+        ByteWriter output(vector.canonical.size());
+        ASSERT_TRUE(encode_message(std::get<Message>(result), output).has_value());
+        expect_bytes(output.bytes(), vector.canonical);
+    }
+}
+
+TEST(Draft18ExhaustiveAuditTest, ConcatenatedFramesConsumeExactlyOneAtATime) {
+    for (const auto& vector : message_audit_vectors()) {
+        std::vector<std::byte> concatenated = vector.frame;
+        concatenated.insert(concatenated.end(), vector.frame.begin(),
+                            vector.frame.end());
+        Cursor input(concatenated);
+        for (const auto expected_remaining : {vector.frame.size(), std::size_t{0}}) {
+            const auto result = decode_message(vector.role, input, {});
+            ASSERT_TRUE(std::holds_alternative<Message>(result));
+            EXPECT_EQ(input.remaining(), expected_remaining);
+        }
+    }
+}
+
+TEST(Draft18ExhaustiveAuditTest, EveryEncoderVariantIsCapacityAtomic) {
+    for (const auto& vector : message_audit_vectors()) {
+        Cursor input(vector.frame);
+        const auto decoded = decode_message(vector.role, input, {});
+        ASSERT_TRUE(std::holds_alternative<Message>(decoded));
+
+        ByteWriter output(vector.frame.size());
+        ASSERT_TRUE(output.append_byte(std::byte{0xcc}));
+        const auto before =
+            std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+        const auto result = encode_message(std::get<Message>(decoded), output);
+        EXPECT_FALSE(result.has_value());
+        ASSERT_NE(result.error(), nullptr);
+        EXPECT_EQ(result.error()->code, EncodeErrorCode::OutputCapacity);
+        expect_bytes(output.bytes(), before);
+    }
 }
 
 }  // namespace

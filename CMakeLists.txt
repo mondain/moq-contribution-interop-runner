@@ -327,4 +327,18 @@ if(MOQ_INTEROP_BUILD_FUZZERS)
     target_link_options(moq-interop-cursor-fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
     )
+
+    add_executable(moq-interop-draft18-message-fuzz
+        tests/fuzz/draft18_message_fuzz.cpp
+        src/wire/common/cursor.cpp
+        src/wire/draft18/messages.cpp
+    )
+    target_link_libraries(moq-interop-draft18-message-fuzz PRIVATE moq-interop-app)
+    target_compile_options(moq-interop-draft18-message-fuzz PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(moq-interop-draft18-message-fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
 endif()

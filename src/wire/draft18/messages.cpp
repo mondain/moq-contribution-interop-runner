@@ -1272,15 +1272,16 @@ MessageDecodeResult decode_message(StreamRole role, Cursor& input,
             return invalid(need->offset, "SETUP option exceeds framed payload");
         }
         if (const auto* error = std::get_if<DecodeError>(&options_result)) {
+            if (error->code == DecodeErrorCode::InvalidValue) {
+                return key_value_formatting_error(
+                    error->offset, "SETUP option KVP is malformed");
+            }
             return *error;
         }
         if (const auto* ambiguity = std::get_if<DraftAmbiguity>(&options_result)) {
             return *ambiguity;
         }
         auto options = std::get<KeyValuePairs>(options_result);
-        if (const auto duplicate = validate_setup_options(options, payload_offset)) {
-            return *duplicate;
-        }
         message = SetupMessage{std::move(options)};
     } else if (type == kGoawayMessageType) {
         const auto uri_result =
