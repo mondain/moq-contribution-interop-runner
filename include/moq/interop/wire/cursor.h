@@ -18,6 +18,8 @@ struct NeedMore {
 
 enum class DecodeErrorCode {
     InvalidValue,
+    ProtocolViolation,
+    KeyValueFormattingError,
     LengthExceedsLimit,
     LengthNotRepresentable,
     OffsetOverflow,

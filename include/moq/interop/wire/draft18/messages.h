@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
@@ -18,6 +19,7 @@ enum class StreamRole {
 
 struct Limits {
     std::size_t maximum_odd_value_length{65'535};
+    std::size_t maximum_parameter_count{32'767};
 };
 
 struct DraftAmbiguity {
@@ -47,6 +49,95 @@ struct TrackProperties {
     KeyValuePairs entries;
 };
 
+struct Location {
+    std::uint64_t group;
+    std::uint64_t object;
+};
+
+struct TrackNamespace {
+    std::vector<std::vector<std::byte>> fields;
+};
+
+struct TrackName {
+    std::vector<std::byte> bytes;
+};
+
+enum class SubscriptionFilterType : std::uint64_t {
+    NextGroupStart = 1,
+    LargestObject = 2,
+    AbsoluteStart = 3,
+    AbsoluteRange = 4,
+};
+
+struct SubscriptionFilter {
+    SubscriptionFilterType type;
+    std::optional<Location> start;
+    std::optional<std::uint64_t> end_group_delta;
+};
+
+enum class TokenAliasType : std::uint64_t {
+    Delete = 0,
+    Register = 1,
+    UseAlias = 2,
+    UseValue = 3,
+};
+
+struct Token {
+    TokenAliasType alias_type{TokenAliasType::Delete};
+    std::optional<std::uint64_t> alias;
+    std::optional<std::uint64_t> token_type;
+    std::vector<std::byte> token_value;
+};
+
+struct VarIntParameterValue {
+    std::uint64_t value;
+};
+
+struct Uint8ParameterValue {
+    std::uint8_t value;
+};
+
+using ParameterValue = std::variant<VarIntParameterValue, Uint8ParameterValue,
+                                    Token, Location, SubscriptionFilter,
+                                    TrackNamespace>;
+
+struct Parameter {
+    std::uint64_t type;
+    ParameterValue value;
+};
+
+using Parameters = std::vector<Parameter>;
+
+enum class ParameterContext {
+    Unresolved,
+    Subscribe,
+    SubscribeOk,
+    Publish,
+    PublishOk,
+    Fetch,
+    FetchOk,
+    TrackStatus,
+    TrackStatusOk,
+    PublishNamespace,
+    PublishNamespaceOk,
+    SubscribeNamespace,
+    SubscribeNamespaceOk,
+    SubscribeTracks,
+    SubscribeTracksOk,
+    RequestUpdateSubscription,
+    RequestUpdateFetch,
+    RequestUpdatePublishNamespace,
+    RequestUpdateSubscribeNamespace,
+    RequestUpdateSubscribeTracks,
+    RequestUpdateOk,
+};
+
+enum class ParameterScopeResult {
+    Allowed,
+    Forbidden,
+    Unresolved,
+};
+
 struct SetupMessage {
     KeyValuePairs options;
 };
@@ -59,6 +150,12 @@ using DraftDecodeResult = std::variant<T, NeedMore, DecodeError, DraftAmbiguity>
 using MessageDecodeResult = DraftDecodeResult<Message>;
 using KeyValueDecodeResult = DraftDecodeResult<KeyValuePairs>;
 using TrackPropertiesDecodeResult = DraftDecodeResult<TrackProperties>;
+using LocationDecodeResult = DraftDecodeResult<Location>;
+using TrackNamespaceDecodeResult = DraftDecodeResult<TrackNamespace>;
+using TrackNameDecodeResult = DraftDecodeResult<TrackName>;
+using SubscriptionFilterDecodeResult = DraftDecodeResult<SubscriptionFilter>;
+using TokenDecodeResult = DraftDecodeResult<Token>;
+using ParametersDecodeResult = DraftDecodeResult<Parameters>;
 
 enum class EncodeErrorCode {
     InvalidValue,
@@ -75,15 +172,25 @@ class EncodeResult {
 public:
     static EncodeResult success();
     static EncodeResult failure(EncodeErrorCode code, std::string detail);
+    static EncodeResult ambiguity(std::size_t offset, std::string detail);
 
     [[nodiscard]] bool has_value() const noexcept;
+    [[nodiscard]] bool is_ambiguity() const noexcept;
     [[nodiscard]] const EncodeError* error() const noexcept;
+    [[nodiscard]] const DraftAmbiguity* draft_ambiguity() const noexcept;
 
 private:
-    explicit EncodeResult(bool success, EncodeError error = {});
+    enum class State {
+        Success,
+        Error,
+        Ambiguity,
+    };
+    explicit EncodeResult(State state, EncodeError error = {},
+                          DraftAmbiguity ambiguity = {});
 
-    bool success_;
+    State state_;
     EncodeError error_;
+    DraftAmbiguity ambiguity_;
 };
 
 MessageDecodeResult decode_message(StreamRole role, Cursor& input,
@@ -101,5 +208,36 @@ TrackPropertiesDecodeResult decode_track_properties(Cursor& input,
                                                      const Limits& limits);
 
 [[nodiscard]] bool is_mandatory_track_property(const KeyValuePair& property) noexcept;
+
+LocationDecodeResult decode_location(Cursor& input);
+EncodeResult encode_location(const Location& location, ByteWriter& output);
+
+TrackNamespaceDecodeResult decode_track_namespace(Cursor& input,
+                                                   const Limits& limits);
+EncodeResult encode_track_namespace(const TrackNamespace& name_space,
+                                    ByteWriter& output);
+
+TrackNameDecodeResult decode_track_name(Cursor& input,
+                                        const TrackNamespace& name_space,
+                                        const Limits& limits);
+EncodeResult encode_track_name(const TrackName& name,
+                               const TrackNamespace& name_space,
+                               ByteWriter& output);
+
+SubscriptionFilterDecodeResult decode_subscription_filter(
+    Cursor& input, std::size_t encoded_length);
+EncodeResult encode_subscription_filter(const SubscriptionFilter& filter,
+                                        ByteWriter& output);
+
+TokenDecodeResult decode_token(Cursor& input, std::size_t encoded_length);
+EncodeResult encode_token(const Token& token, ByteWriter& output);
+
+[[nodiscard]] ParameterScopeResult validate_parameter_scope(
+    std::uint64_t type, ParameterContext context) noexcept;
+ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
+                                         ParameterContext context,
+                                         const Limits& limits);
+EncodeResult encode_parameters(std::span<const Parameter> parameters,
+                               ParameterContext context, ByteWriter& output);
 
 }  // namespace moq::interop::wire::draft18
