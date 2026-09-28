@@ -128,9 +128,14 @@ target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::n
 
 add_library(moq-interop-transport
     src/transport/quiche_connection.cpp
+    src/transport/quiche_native_listener.cpp
 )
 target_link_libraries(moq-interop-transport PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-transport PRIVATE moq-interop-quiche)
+target_include_directories(moq-interop-transport PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(moq-interop-transport SYSTEM PRIVATE
+    "${MOQ_INTEROP_BORINGSSL_INCLUDE_DIR}")
 target_compile_options(moq-interop-transport PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -197,6 +202,20 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     )
     add_test(NAME quiche-connection COMMAND moq-interop-quiche-connection-tests)
+
+    add_executable(moq-interop-native-quic-tests
+                   tests/integration/native_quic_test.cpp
+                   tests/support/quiche_client.cpp)
+    target_include_directories(moq-interop-native-quic-tests PRIVATE
+                               "${PROJECT_SOURCE_DIR}/src"
+                               "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-native-quic-tests PRIVATE
+                          moq-interop-transport moq-interop-quiche
+                          GTest::gtest_main)
+    target_compile_options(moq-interop-native-quic-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

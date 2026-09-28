@@ -5,6 +5,7 @@
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace moq::interop::transport::detail {
@@ -26,7 +27,8 @@ std::size_t payload_size(const TransportEvent& event) {
         [](const auto& item) -> std::size_t {
             using T = std::decay_t<decltype(item)>;
             if constexpr (std::is_same_v<T, ConnectionEstablishedEvent>) {
-                return item.alpn.size();
+                return item.alpn.size() + item.local_connection_id.size() +
+                       item.peer_connection_id.size();
             } else if constexpr (std::is_same_v<T, StreamDataEvent> ||
                                  std::is_same_v<T, DatagramEvent>) {
                 return item.data.size();
@@ -121,6 +123,7 @@ struct QuicheConnection::Impl {
     bool uni_ids_exhausted = false;
     bool terminal = false;
     std::unordered_map<StreamId, LocalStreamState> local_streams;
+    std::unordered_set<StreamId> peer_stop_reported;
     std::deque<TransportEvent> events;
     std::size_t normal_event_count = 0;
     std::size_t owned_payload_bytes = 0;
@@ -201,7 +204,7 @@ QuicheApi default_quiche_api() noexcept {
             quiche_conn_peer_streams_left_bidi,
             quiche_conn_peer_streams_left_uni,
             quiche_conn_dgram_max_writable_len, quiche_conn_dgram_send,
-            quiche_conn_free};
+            quiche_conn_close, quiche_conn_free};
 }
 
 QuicheConnectionCreateResult QuicheConnection::create(
@@ -217,7 +220,8 @@ QuicheConnectionCreateResult QuicheConnection::create(
         api.peer_streams_left_bidi == nullptr ||
         api.peer_streams_left_uni == nullptr ||
         api.datagram_max_writable_len == nullptr ||
-        api.datagram_send == nullptr || api.connection_free == nullptr) {
+        api.datagram_send == nullptr || api.connection_close == nullptr ||
+        api.connection_free == nullptr) {
         return {nullptr, ConstructionError::InvalidApi};
     }
     if ((initial_stream_ids.bidi & 3u) != 1u ||
@@ -320,6 +324,11 @@ OperationResult QuicheConnection::write(StreamId stream_id,
         status == TransportStatus::PeerReset) {
         mapped.application_error = application_error;
     }
+    if (status == TransportStatus::PeerStopped &&
+        impl_->peer_stop_reported.insert(stream_id).second) {
+        impl_->enqueue(PeerStopSendingEvent{stream_id, application_error},
+                       false);
+    }
     return mapped;
 }
 
@@ -406,6 +415,26 @@ OperationResult QuicheConnection::send_datagram(
     return operation(status);
 }
 
+OperationResult QuicheConnection::close(
+    std::uint64_t application_error, std::span<const std::byte> reason) {
+    if (!impl_) return operation(TransportStatus::InvalidState);
+    if (impl_->terminal) return operation(TransportStatus::ConnectionClosed);
+    static constexpr std::uint8_t kEmptyReasonByte = 0;
+    const auto* reason_pointer =
+        reason.empty() ? &kEmptyReasonByte
+                       : reinterpret_cast<const std::uint8_t*>(reason.data());
+    const auto result = impl_->api.connection_close(
+        impl_->connection, true, application_error, reason_pointer,
+        reason.size());
+    if (result == 0 || result == QUICHE_ERR_DONE) {
+        return operation(TransportStatus::Success);
+    }
+    if (result == QUICHE_ERR_INVALID_STATE) {
+        return operation(TransportStatus::InvalidState);
+    }
+    return operation(TransportStatus::InternalError);
+}
+
 std::vector<TransportEvent> QuicheConnection::poll(std::size_t max_events) {
     std::vector<TransportEvent> output;
     if (!impl_) return output;
@@ -423,10 +452,20 @@ std::vector<TransportEvent> QuicheConnection::poll(std::size_t max_events) {
     return output;
 }
 
-bool QuicheConnection::notify_established(std::span<const std::byte> alpn) {
+bool QuicheConnection::notify_established(
+    std::span<const std::byte> alpn,
+    std::span<const std::byte> local_connection_id,
+    std::span<const std::byte> peer_connection_id,
+    std::size_t max_datagram_payload) {
     if (!impl_ || impl_->terminal) return false;
     return impl_->enqueue(
-        ConnectionEstablishedEvent{{alpn.begin(), alpn.end()}}, false);
+        ConnectionEstablishedEvent{{alpn.begin(), alpn.end()},
+                                   {local_connection_id.begin(),
+                                    local_connection_id.end()},
+                                   {peer_connection_id.begin(),
+                                    peer_connection_id.end()},
+                                   max_datagram_payload},
+        false);
 }
 
 bool QuicheConnection::notify_stream_data(StreamId stream_id,
@@ -456,18 +495,22 @@ bool QuicheConnection::notify_datagram(std::span<const std::byte> data) {
 }
 
 bool QuicheConnection::notify_peer_close(
-    std::uint64_t application_error, std::span<const std::byte> reason) {
+    CloseErrorSpace error_space, std::uint64_t error_code,
+    std::span<const std::byte> reason) {
     if (!impl_ || impl_->terminal) return false;
     return impl_->enqueue(
-        PeerCloseEvent{application_error, {reason.begin(), reason.end()}},
+        PeerCloseEvent{error_space, error_code,
+                       {reason.begin(), reason.end()}},
         true);
 }
 
 bool QuicheConnection::notify_local_close(
-    std::uint64_t application_error, std::span<const std::byte> reason) {
+    CloseErrorSpace error_space, std::uint64_t error_code,
+    std::span<const std::byte> reason) {
     if (!impl_ || impl_->terminal) return false;
     return impl_->enqueue(
-        LocalCloseEvent{application_error, {reason.begin(), reason.end()}},
+        LocalCloseEvent{error_space, error_code,
+                        {reason.begin(), reason.end()}},
         true);
 }
 
@@ -485,6 +528,10 @@ std::optional<TransportDiagnostic>
 QuicheConnection::last_transport_diagnostic() const {
     if (!impl_) return std::nullopt;
     return impl_->last_diagnostic;
+}
+
+quiche_conn* QuicheConnection::native_handle() noexcept {
+    return impl_ ? impl_->connection : nullptr;
 }
 
 }  // namespace moq::interop::transport::detail

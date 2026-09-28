@@ -22,6 +22,7 @@ struct QuicheApi {
     decltype(&quiche_conn_dgram_max_writable_len) datagram_max_writable_len =
         nullptr;
     decltype(&quiche_conn_dgram_send) datagram_send = nullptr;
+    decltype(&quiche_conn_close) connection_close = nullptr;
     decltype(&quiche_conn_free) connection_free = nullptr;
 };
 
@@ -88,9 +89,14 @@ public:
                                  std::uint64_t application_error) override;
     OperationResult send_datagram(
         std::span<const std::byte> data) override;
+    OperationResult close(std::uint64_t application_error,
+                          std::span<const std::byte> reason) override;
     std::vector<TransportEvent> poll(std::size_t max_events) override;
 
-    bool notify_established(std::span<const std::byte> alpn);
+    bool notify_established(std::span<const std::byte> alpn,
+                            std::span<const std::byte> local_connection_id,
+                            std::span<const std::byte> peer_connection_id,
+                            std::size_t max_datagram_payload);
     bool notify_stream_data(StreamId stream_id,
                             std::span<const std::byte> data, bool fin);
     bool notify_peer_reset(StreamId stream_id,
@@ -98,13 +104,16 @@ public:
     bool notify_peer_stop_sending(StreamId stream_id,
                                   std::uint64_t application_error);
     bool notify_datagram(std::span<const std::byte> data);
-    bool notify_peer_close(std::uint64_t application_error,
+    bool notify_peer_close(CloseErrorSpace error_space,
+                           std::uint64_t error_code,
                            std::span<const std::byte> reason);
-    bool notify_local_close(std::uint64_t application_error,
+    bool notify_local_close(CloseErrorSpace error_space,
+                            std::uint64_t error_code,
                             std::span<const std::byte> reason);
     bool notify_idle_timeout();
     bool notify_transport_error(TransportError error);
     std::optional<TransportDiagnostic> last_transport_diagnostic() const;
+    quiche_conn* native_handle() noexcept;
 
 private:
     struct Impl;

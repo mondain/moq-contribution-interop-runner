@@ -38,6 +38,10 @@ struct FakeApiState {
     std::uint64_t opened_uni = 0;
     int bidi_credit_calls = 0;
     int uni_credit_calls = 0;
+    int close_result = 0;
+    bool close_application = false;
+    std::uint64_t close_error = 0;
+    std::vector<std::byte> close_reason;
 };
 
 FakeApiState* fake_state = nullptr;
@@ -108,10 +112,24 @@ std::int64_t fake_datagram_send(quiche_conn*, const std::uint8_t* data,
 
 void fake_connection_free(quiche_conn*) { ++fake_state->free_calls; }
 
+int fake_connection_close(quiche_conn*, bool application,
+                          std::uint64_t error, const std::uint8_t* reason,
+                          std::size_t reason_size) {
+    fake_state->close_application = application;
+    fake_state->close_error = error;
+    fake_state->close_reason.clear();
+    if (reason_size != 0) {
+        fake_state->close_reason.assign(
+            reinterpret_cast<const std::byte*>(reason),
+            reinterpret_cast<const std::byte*>(reason) + reason_size);
+    }
+    return fake_state->close_result;
+}
+
 QuicheApi fake_api() {
     return {fake_stream_send, fake_shutdown, fake_peer_bidi_left,
             fake_peer_uni_left, fake_datagram_max, fake_datagram_send,
-            fake_connection_free};
+            fake_connection_close, fake_connection_free};
 }
 
 std::vector<std::byte> bytes(std::initializer_list<unsigned> values) {
@@ -264,6 +282,18 @@ TEST(QuicheConnectionWrite, MapsEveryDocumentedStreamSendError) {
     EXPECT_EQ(stopped.status, TransportStatus::PeerStopped);
     ASSERT_TRUE(stopped.application_error.has_value());
     EXPECT_EQ(*stopped.application_error, 77u);
+    auto stopped_events = connection->poll(8);
+    ASSERT_EQ(stopped_events.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<PeerStopSendingEvent>(
+        stopped_events.front()));
+    EXPECT_EQ(std::get<PeerStopSendingEvent>(stopped_events.front()).stream_id,
+              stream);
+    EXPECT_EQ(std::get<PeerStopSendingEvent>(stopped_events.front())
+                  .application_error,
+              77u);
+    EXPECT_EQ(connection->write(stream, bytes({3}), false).status,
+              TransportStatus::PeerStopped);
+    EXPECT_TRUE(connection->poll(8).empty());
 
     state.stream_send_error = 88;
     state.stream_send_result = QUICHE_ERR_STREAM_RESET;
@@ -459,6 +489,33 @@ TEST(QuicheConnectionDatagram, PassesNonNullPointerForEmptyDatagram) {
     EXPECT_TRUE(state.datagram_bytes.empty());
 }
 
+TEST(QuicheConnectionClose, MapsResultsAndOwnsNoCallerMemory) {
+    FakeApiState state;
+    auto connection = make_connection(state);
+    auto reason = bytes({1, 0, 2});
+
+    EXPECT_EQ(connection->close(71, reason).status, TransportStatus::Success);
+    EXPECT_TRUE(state.close_application);
+    EXPECT_EQ(state.close_error, 71u);
+    EXPECT_EQ(state.close_reason, reason);
+
+    state.close_result = QUICHE_ERR_DONE;
+    EXPECT_EQ(connection->close(72, {}).status, TransportStatus::Success);
+    EXPECT_TRUE(state.close_reason.empty());
+    state.close_result = QUICHE_ERR_INVALID_STATE;
+    EXPECT_EQ(connection->close(73, {}).status, TransportStatus::InvalidState);
+    state.close_result = QUICHE_ERR_TLS_FAIL;
+    EXPECT_EQ(connection->close(74, {}).status, TransportStatus::InternalError);
+}
+
+TEST(QuicheConnectionClose, RejectsCloseAfterTerminalEvidence) {
+    FakeApiState state;
+    auto connection = make_connection(state);
+    ASSERT_TRUE(connection->notify_idle_timeout());
+    EXPECT_EQ(connection->close(1, {}).status,
+              TransportStatus::ConnectionClosed);
+}
+
 TEST(QuicheConnectionEvents, PreservesFifoAndOwnsPayloadAfterCallerMutation) {
     FakeApiState state;
     auto connection = make_connection(state);
@@ -466,7 +523,8 @@ TEST(QuicheConnectionEvents, PreservesFifoAndOwnsPayloadAfterCallerMutation) {
     auto data = bytes({1, 2});
     auto datagram = bytes({3, 4, 5});
 
-    EXPECT_TRUE(connection->notify_established(alpn));
+    EXPECT_TRUE(connection->notify_established(
+        alpn, bytes({0, 1}), bytes({2, 0}), 1200));
     EXPECT_TRUE(connection->notify_stream_data(7, data, true));
     EXPECT_TRUE(connection->notify_datagram(datagram));
     alpn[0] = std::byte{0};
@@ -478,6 +536,15 @@ TEST(QuicheConnectionEvents, PreservesFifoAndOwnsPayloadAfterCallerMutation) {
     ASSERT_TRUE(std::holds_alternative<ConnectionEstablishedEvent>(first[0]));
     EXPECT_EQ(std::get<ConnectionEstablishedEvent>(first[0]).alpn,
               bytes({'m', 'o', 'q'}));
+    EXPECT_EQ(std::get<ConnectionEstablishedEvent>(first[0])
+                  .local_connection_id,
+              bytes({0, 1}));
+    EXPECT_EQ(std::get<ConnectionEstablishedEvent>(first[0])
+                  .peer_connection_id,
+              bytes({2, 0}));
+    EXPECT_EQ(std::get<ConnectionEstablishedEvent>(first[0])
+                  .max_datagram_payload,
+              1200u);
     ASSERT_TRUE(std::holds_alternative<StreamDataEvent>(first[1]));
     const auto& stream = std::get<StreamDataEvent>(first[1]);
     EXPECT_EQ(stream.stream_id, 7u);
@@ -535,11 +602,15 @@ TEST(QuicheConnectionEvents, EmitsEachTerminalKindAtMostOnce) {
     for (const auto terminal : {0, 1, 2, 3}) {
         auto connection = make_connection(state);
         if (terminal == 0) {
-            EXPECT_TRUE(connection->notify_peer_close(9, bytes({1})));
-            EXPECT_FALSE(connection->notify_peer_close(10, bytes({2})));
+            EXPECT_TRUE(connection->notify_peer_close(
+                CloseErrorSpace::Application, 9, bytes({1})));
+            EXPECT_FALSE(connection->notify_peer_close(
+                CloseErrorSpace::Transport, 10, bytes({2})));
         } else if (terminal == 1) {
-            EXPECT_TRUE(connection->notify_local_close(9, bytes({1})));
-            EXPECT_FALSE(connection->notify_local_close(10, bytes({2})));
+            EXPECT_TRUE(connection->notify_local_close(
+                CloseErrorSpace::Application, 9, bytes({1})));
+            EXPECT_FALSE(connection->notify_local_close(
+                CloseErrorSpace::Transport, 10, bytes({2})));
         } else if (terminal == 2) {
             EXPECT_TRUE(connection->notify_idle_timeout());
             EXPECT_FALSE(connection->notify_idle_timeout());
@@ -554,12 +625,14 @@ TEST(QuicheConnectionEvents, EmitsEachTerminalKindAtMostOnce) {
         if (terminal == 0) {
             EXPECT_TRUE(std::holds_alternative<PeerCloseEvent>(events[0]));
             const auto& close = std::get<PeerCloseEvent>(events[0]);
-            EXPECT_EQ(close.application_error, 9u);
+            EXPECT_EQ(close.error_space, CloseErrorSpace::Application);
+            EXPECT_EQ(close.error_code, 9u);
             EXPECT_EQ(close.reason, bytes({1}));
         } else if (terminal == 1) {
             EXPECT_TRUE(std::holds_alternative<LocalCloseEvent>(events[0]));
             const auto& close = std::get<LocalCloseEvent>(events[0]);
-            EXPECT_EQ(close.application_error, 9u);
+            EXPECT_EQ(close.error_space, CloseErrorSpace::Application);
+            EXPECT_EQ(close.error_code, 9u);
             EXPECT_EQ(close.reason, bytes({1}));
         } else if (terminal == 2) {
             EXPECT_TRUE(std::holds_alternative<IdleTimeoutEvent>(events[0]));

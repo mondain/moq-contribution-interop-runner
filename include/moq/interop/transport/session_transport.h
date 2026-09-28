@@ -37,6 +37,9 @@ struct OperationResult {
 
 struct ConnectionEstablishedEvent {
     std::vector<std::byte> alpn;
+    std::vector<std::byte> local_connection_id;
+    std::vector<std::byte> peer_connection_id;
+    std::size_t max_datagram_payload = 0;
 };
 
 struct StreamDataEvent {
@@ -59,13 +62,17 @@ struct DatagramEvent {
     std::vector<std::byte> data;
 };
 
+enum class CloseErrorSpace { Transport, Application };
+
 struct PeerCloseEvent {
-    std::uint64_t application_error = 0;
+    CloseErrorSpace error_space = CloseErrorSpace::Transport;
+    std::uint64_t error_code = 0;
     std::vector<std::byte> reason;
 };
 
 struct LocalCloseEvent {
-    std::uint64_t application_error = 0;
+    CloseErrorSpace error_space = CloseErrorSpace::Transport;
+    std::uint64_t error_code = 0;
     std::vector<std::byte> reason;
 };
 
@@ -103,6 +110,8 @@ public:
         StreamId stream_id, std::uint64_t application_error) = 0;
     virtual OperationResult send_datagram(
         std::span<const std::byte> data) = 0;
+    virtual OperationResult close(std::uint64_t application_error,
+                                  std::span<const std::byte> reason) = 0;
     virtual std::vector<TransportEvent> poll(std::size_t max_events) = 0;
 };
 

@@ -33,6 +33,8 @@ set(MOQ_INTEROP_QUICHE_CARGO_HOME
 set(MOQ_INTEROP_QUICHE_ARCHIVE
     "${MOQ_INTEROP_QUICHE_CARGO_TARGET_DIR}/release/libquiche.a")
 set(MOQ_INTEROP_FETCHED_QUICHE_LOCK_FILE "${quiche_SOURCE_DIR}/Cargo.lock")
+set(MOQ_INTEROP_BORINGSSL_INCLUDE_DIR
+    "${quiche_SOURCE_DIR}/quiche/deps/boringssl/src/include")
 
 add_custom_command(
     OUTPUT "${MOQ_INTEROP_QUICHE_ARCHIVE}"
