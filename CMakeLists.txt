@@ -13,6 +13,21 @@ find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
 FetchContent_MakeAvailable(nlohmann_json)
+
+set(MOQ_INTEROP_SCHEMA_FILE "${PROJECT_SOURCE_DIR}/src/storage/schema.sql")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MOQ_INTEROP_SCHEMA_FILE}")
+file(READ "${MOQ_INTEROP_SCHEMA_FILE}" MOQ_INTEROP_SCHEMA_SQL)
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/generated/moq/interop/storage")
+file(CONFIGURE
+    OUTPUT "${PROJECT_BINARY_DIR}/generated/moq/interop/storage/schema_sql.h"
+    CONTENT [=[#pragma once
+
+namespace moq::interop::storage::detail {
+inline constexpr const char kSchemaSql[] = R"moq_schema(@MOQ_INTEROP_SCHEMA_SQL@)moq_schema";
+}  // namespace moq::interop::storage::detail
+]=]
+    @ONLY
+)
 execute_process(
     COMMAND "${GIT_EXECUTABLE}" rev-parse "${MOQ_INTEROP_NLOHMANN_JSON_REVISION}^{commit}"
     WORKING_DIRECTORY "${nlohmann_json_SOURCE_DIR}"
@@ -62,6 +77,11 @@ add_library(moq-interop-requirements
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
 
+add_library(moq-interop-storage src/storage/sqlite_run_store.cpp)
+target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/generated")
+target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
+                      SQLite::SQLite3)
+
 add_executable(moq-interop-runner src/app/main.cpp)
 target_link_libraries(moq-interop-runner PRIVATE moq-interop-app)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
@@ -93,6 +113,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-scoring-tests PRIVATE moq-interop-requirements
                           GTest::gtest_main)
     add_test(NAME scoring COMMAND moq-interop-scoring-tests)
+
+    add_executable(moq-interop-run-store-tests tests/unit/run_store_test.cpp)
+    target_link_libraries(moq-interop-run-store-tests PRIVATE moq-interop-storage
+                          GTest::gtest_main)
+    add_test(NAME run-store COMMAND moq-interop-run-store-tests)
 
     add_executable(moq-interop-draft18-catalog-part-01-tests
                    tests/unit/draft18_catalog_part_01_test.cpp)
