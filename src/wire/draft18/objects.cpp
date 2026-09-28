@@ -1,8 +1,10 @@
 #include "moq/interop/wire/draft18/objects.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <span>
+#include <string>
 #include <utility>
 
 namespace moq::interop::wire::draft18 {
@@ -193,7 +195,494 @@ DatagramDecodeResult decode_datagram(std::span<const std::byte> bytes,
         status,
         payload_length,
         std::move(retained_payload),
+        ObjectForwardingPreference::Datagram,
+        std::nullopt,
+        std::nullopt,
+        false,
+        (type & 0x08u) != 0u,
+        0,
+        bytes.size(),
     };
+}
+
+class SubgroupDecoder::Impl {
+public:
+    explicit Impl(Limits limits) : limits_(limits) {}
+
+    SubgroupPushResult push(std::span<const std::byte> bytes, bool fin) {
+        SubgroupPushResult result;
+        if (terminal_) {
+            result.local_api_misuse = true;
+            return result;
+        }
+        if (bytes.size() > std::numeric_limits<std::size_t>::max() - offset_) {
+            fail(result, DecodeErrorCode::OffsetOverflow, offset_,
+                 "subgroup stream offset overflows size_t");
+            return result;
+        }
+
+        std::size_t index = 0;
+        while (index < bytes.size() && !terminal_) {
+            if (phase_ == Phase::ObjectDelta && terminal_status_) {
+                fail(result, DecodeErrorCode::ProtocolViolation, offset_,
+                     "Object follows End of Group or End of Track status");
+                break;
+            }
+
+            switch (phase_) {
+                case Phase::Type:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        raw_type_ = *value;
+                        if (!valid_subgroup_type(raw_type_)) {
+                            fail(result, DecodeErrorCode::ProtocolViolation,
+                                 vi_offset_,
+                                 "unknown, invalid, or reserved subgroup stream type");
+                            break;
+                        }
+                        properties_present_ = (raw_type_ & 0x01u) != 0u;
+                        subgroup_mode_ = static_cast<unsigned>((raw_type_ & 0x06u) >> 1u);
+                        end_of_group_ = (raw_type_ & 0x08u) != 0u;
+                        priority_inherited_ = (raw_type_ & 0x20u) != 0u;
+                        first_object_ = (raw_type_ & 0x40u) != 0u;
+                        phase_ = Phase::TrackAlias;
+                    }
+                    break;
+                case Phase::TrackAlias:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        track_alias_ = *value;
+                        phase_ = Phase::GroupId;
+                    }
+                    break;
+                case Phase::GroupId:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        group_id_ = *value;
+                        if (subgroup_mode_ == 0u) {
+                            subgroup_id_ = 0;
+                            next_after_subgroup_id(result);
+                        } else if (subgroup_mode_ == 1u) {
+                            next_after_subgroup_id(result);
+                        } else {
+                            phase_ = Phase::SubgroupId;
+                        }
+                    }
+                    break;
+                case Phase::SubgroupId:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        subgroup_id_ = *value;
+                        next_after_subgroup_id(result);
+                    }
+                    break;
+                case Phase::Priority:
+                    publisher_priority_ =
+                        std::to_integer<std::uint8_t>(bytes[index]);
+                    ++index;
+                    ++offset_;
+                    finish_header(result);
+                    break;
+                case Phase::ObjectDelta:
+                    if (vi_size_ == 0u) current_object_offset_ = offset_;
+                    if (const auto value = consume_vi(bytes, index)) {
+                        if (!previous_object_id_) {
+                            current_object_id_ = *value;
+                            if (subgroup_mode_ == 1u) subgroup_id_ = *value;
+                        } else {
+                            if (*previous_object_id_ ==
+                                    std::numeric_limits<std::uint64_t>::max() ||
+                                *value > std::numeric_limits<std::uint64_t>::max() -
+                                             *previous_object_id_ - 1u) {
+                                fail(result, DecodeErrorCode::ProtocolViolation,
+                                     current_object_offset_,
+                                     "subgroup Object ID delta overflows uint64");
+                                break;
+                            }
+                            current_object_id_ = *previous_object_id_ + *value + 1u;
+                        }
+                        current_properties_.clear();
+                        properties_length_ = 0;
+                        property_bytes_.clear();
+                        retained_payload_.clear();
+                        current_payload_length_ = 0;
+                        payload_remaining_ = 0;
+                        current_status_.reset();
+                        phase_ = properties_present_ ? Phase::PropertiesLength
+                                                     : Phase::PayloadLength;
+                    }
+                    break;
+                case Phase::PropertiesLength:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        if (*value > std::numeric_limits<std::size_t>::max()) {
+                            fail(result, DecodeErrorCode::LengthNotRepresentable,
+                                 vi_offset_,
+                                 "Object Properties length is not representable");
+                            break;
+                        }
+                        properties_length_ = static_cast<std::size_t>(*value);
+                        if (properties_length_ >
+                            limits_.maximum_object_properties_length) {
+                            fail(result, DecodeErrorCode::LengthExceedsLimit,
+                                 vi_offset_,
+                                 "Object Properties exceed configured limit");
+                            break;
+                        }
+                        property_bytes_.reserve(properties_length_);
+                        if (properties_length_ == 0u) {
+                            phase_ = Phase::PayloadLength;
+                        } else {
+                            properties_payload_offset_ = offset_;
+                            phase_ = Phase::PropertiesBytes;
+                        }
+                    }
+                    break;
+                case Phase::PropertiesBytes:
+                    consume_properties(bytes, index, result);
+                    break;
+                case Phase::PayloadLength:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        current_payload_length_ = *value;
+                        payload_remaining_ = *value;
+                        if (payload_remaining_ == 0u) {
+                            phase_ = Phase::Status;
+                        } else {
+                            phase_ = Phase::Payload;
+                        }
+                    }
+                    break;
+                case Phase::Status:
+                    if (const auto value = consume_vi(bytes, index)) {
+                        status_offset_ = vi_offset_;
+                        current_status_ = *value;
+                        finish_object(result);
+                    }
+                    break;
+                case Phase::Payload:
+                    consume_payload(bytes, index, result);
+                    break;
+            }
+        }
+
+        if (fin && !terminal_) finish_stream(result);
+        return result;
+    }
+
+    [[nodiscard]] std::size_t buffered_byte_count() const noexcept {
+        return vi_size_ + property_bytes_.size() + retained_payload_.size();
+    }
+
+private:
+    enum class Phase {
+        Type,
+        TrackAlias,
+        GroupId,
+        SubgroupId,
+        Priority,
+        ObjectDelta,
+        PropertiesLength,
+        PropertiesBytes,
+        PayloadLength,
+        Status,
+        Payload,
+    };
+
+    static std::size_t vi_width(std::byte first_byte) {
+        const auto first = std::to_integer<std::uint8_t>(first_byte);
+        if (first == 0xffu) return 9u;
+        std::size_t leading_ones = 0;
+        auto mask = std::uint8_t{0x80};
+        while ((first & mask) != 0u) {
+            ++leading_ones;
+            mask = static_cast<std::uint8_t>(mask >> 1u);
+        }
+        return leading_ones + 1u;
+    }
+
+    static bool valid_subgroup_type(std::uint64_t type) {
+        if (type > 0x7fu || (type & 0x10u) == 0u) return false;
+        return (type & 0x06u) != 0x06u;
+    }
+
+    std::optional<std::uint64_t> consume_vi(std::span<const std::byte> bytes,
+                                             std::size_t& index) {
+        if (vi_size_ == 0u) {
+            vi_offset_ = offset_;
+            vi_expected_ = vi_width(bytes[index]);
+        }
+        while (index < bytes.size() && vi_size_ < vi_expected_) {
+            vi_bytes_[vi_size_++] = bytes[index++];
+            ++offset_;
+        }
+        if (vi_size_ != vi_expected_) return std::nullopt;
+
+        const auto first = std::to_integer<std::uint8_t>(vi_bytes_[0]);
+        std::uint64_t value = 0;
+        if (vi_expected_ < 9u) {
+            const auto payload_bits = static_cast<unsigned>(8u - vi_expected_);
+            const auto payload_mask = static_cast<std::uint8_t>(
+                (std::uint32_t{1} << payload_bits) - 1u);
+            value = first & payload_mask;
+        }
+        for (std::size_t byte_index = 1; byte_index < vi_expected_; ++byte_index) {
+            value = (value << 8u) |
+                    std::to_integer<std::uint8_t>(vi_bytes_[byte_index]);
+        }
+        vi_size_ = 0;
+        vi_expected_ = 0;
+        return value;
+    }
+
+    void next_after_subgroup_id(SubgroupPushResult& result) {
+        if (priority_inherited_) {
+            finish_header(result);
+        } else {
+            phase_ = Phase::Priority;
+        }
+    }
+
+    void finish_header(SubgroupPushResult& result) {
+        header_ = SubgroupHeader{raw_type_,
+                                 track_alias_,
+                                 group_id_,
+                                 subgroup_id_,
+                                 publisher_priority_,
+                                 properties_present_,
+                                 end_of_group_,
+                                 first_object_,
+                                 priority_inherited_,
+                                 0,
+                                 offset_};
+        result.header = header_;
+        header_complete_ = true;
+        phase_ = Phase::ObjectDelta;
+    }
+
+    void consume_properties(std::span<const std::byte> bytes,
+                            std::size_t& index,
+                            SubgroupPushResult& result) {
+        const auto needed = properties_length_ - property_bytes_.size();
+        const auto available = bytes.size() - index;
+        const auto count = std::min(needed, available);
+        property_bytes_.insert(property_bytes_.end(), bytes.begin() +
+                                                        static_cast<std::ptrdiff_t>(index),
+                               bytes.begin() + static_cast<std::ptrdiff_t>(index + count));
+        index += count;
+        offset_ += count;
+        if (property_bytes_.size() != properties_length_) return;
+
+        Cursor cursor(property_bytes_, properties_payload_offset_);
+        auto decoded =
+            decode_key_value_pairs(cursor, property_bytes_.size(), limits_);
+        if (auto* entries = std::get_if<KeyValuePairs>(&decoded)) {
+            current_properties_ = std::move(*entries);
+            phase_ = Phase::PayloadLength;
+            return;
+        }
+        if (const auto* error = std::get_if<DecodeError>(&decoded)) {
+            auto code = error->code;
+            if (code == DecodeErrorCode::InvalidValue) {
+                code = DecodeErrorCode::KeyValueFormattingError;
+            }
+            fail(result, code, error->offset, error->detail);
+            return;
+        }
+        if (const auto* need = std::get_if<NeedMore>(&decoded)) {
+            fail(result, DecodeErrorCode::KeyValueFormattingError, need->offset,
+                 "Object Property KVP is malformed");
+            return;
+        }
+        const auto& ambiguity = std::get<DraftAmbiguity>(decoded);
+        result.observations.push_back(
+            {DecoderObservationKind::DraftAmbiguity,
+             SubgroupDecodePhase::Properties, ambiguity.offset,
+             ambiguity.detail});
+        phase_ = Phase::PayloadLength;
+    }
+
+    void consume_payload(std::span<const std::byte> bytes,
+                         std::size_t& index,
+                         SubgroupPushResult& result) {
+        const auto available = bytes.size() - index;
+        const auto count64 = std::min<std::uint64_t>(payload_remaining_, available);
+        const auto count = static_cast<std::size_t>(count64);
+        const auto retain_capacity = limits_.maximum_retained_payload_length -
+                                     retained_payload_.size();
+        const auto retain = std::min(count, retain_capacity);
+        retained_payload_.insert(
+            retained_payload_.end(),
+            bytes.begin() + static_cast<std::ptrdiff_t>(index),
+            bytes.begin() + static_cast<std::ptrdiff_t>(index + retain));
+        index += count;
+        offset_ += count;
+        payload_remaining_ -= count64;
+        if (payload_remaining_ == 0u) finish_object(result);
+    }
+
+    void finish_object(SubgroupPushResult& result) {
+        if (current_status_ && *current_status_ != 0u &&
+            !current_properties_.empty()) {
+            fail(result, DecodeErrorCode::ProtocolViolation, status_offset_,
+                 "non-Normal status has nonempty Object Properties");
+            return;
+        }
+        if (current_status_ && *current_status_ != 0u && properties_present_ &&
+            properties_length_ == 0u) {
+            result.observations.push_back({
+                DecoderObservationKind::DraftAmbiguity,
+                SubgroupDecodePhase::Status, status_offset_,
+                "empty Properties on non-Normal subgroup Object has conflicting draft wording"});
+        }
+        if (current_status_ && *current_status_ != 0u &&
+            *current_status_ != 3u && *current_status_ != 4u) {
+            result.observations.push_back({
+                DecoderObservationKind::ShouldClose,
+                SubgroupDecodePhase::Status, status_offset_,
+                "undefined Object Status should be treated as a protocol error"});
+        }
+
+        const auto object_id = current_object_id_;
+        result.objects.push_back(ObjectEvent{
+            std::nullopt,
+            track_alias_,
+            group_id_,
+            object_id,
+            publisher_priority_,
+            current_status_ && *current_status_ == 3u,
+            std::move(current_properties_),
+            current_status_,
+            current_payload_length_,
+            std::move(retained_payload_),
+            ObjectForwardingPreference::Subgroup,
+            subgroup_id_,
+            raw_type_,
+            first_object_ && object_count_ == 0u,
+            priority_inherited_,
+            current_object_offset_,
+            offset_,
+        });
+        previous_object_id_ = object_id;
+        ++object_count_;
+        if (current_status_ && (*current_status_ == 3u || *current_status_ == 4u)) {
+            terminal_status_ = true;
+        }
+        phase_ = Phase::ObjectDelta;
+    }
+
+    void finish_stream(SubgroupPushResult& result) {
+        if (!header_complete_) {
+            fail(result, DecodeErrorCode::ProtocolViolation, offset_,
+                 "FIN truncates SUBGROUP_HEADER");
+            return;
+        }
+        if (phase_ == Phase::ObjectDelta && vi_size_ == 0u) {
+            result.clean_fin = true;
+            if (subgroup_mode_ == 1u && object_count_ == 0u) {
+                result.observations.push_back({
+                    DecoderObservationKind::DraftAmbiguity,
+                    SubgroupDecodePhase::ObjectIdDelta, offset_,
+                    "mode-1 Subgroup ID is undefined when FIN precedes every Object"});
+            }
+            if (end_of_group_ && previous_object_id_) {
+                result.final_object_id = previous_object_id_;
+            }
+            terminal_ = true;
+            return;
+        }
+
+        result.observations.push_back({
+            DecoderObservationKind::ShouldClose, public_phase(), offset_,
+            "FIN terminates subgroup stream in the middle of a serialized Object"});
+        terminal_ = true;
+    }
+
+    [[nodiscard]] SubgroupDecodePhase public_phase() const noexcept {
+        switch (phase_) {
+            case Phase::Type:
+                return SubgroupDecodePhase::Type;
+            case Phase::TrackAlias:
+                return SubgroupDecodePhase::TrackAlias;
+            case Phase::GroupId:
+                return SubgroupDecodePhase::GroupId;
+            case Phase::SubgroupId:
+                return SubgroupDecodePhase::SubgroupId;
+            case Phase::Priority:
+                return SubgroupDecodePhase::Priority;
+            case Phase::ObjectDelta:
+                return SubgroupDecodePhase::ObjectIdDelta;
+            case Phase::PropertiesLength:
+                return SubgroupDecodePhase::PropertiesLength;
+            case Phase::PropertiesBytes:
+                return SubgroupDecodePhase::Properties;
+            case Phase::PayloadLength:
+                return SubgroupDecodePhase::PayloadLength;
+            case Phase::Status:
+                return SubgroupDecodePhase::Status;
+            case Phase::Payload:
+                return SubgroupDecodePhase::Payload;
+        }
+        return SubgroupDecodePhase::Type;
+    }
+
+    void fail(SubgroupPushResult& result, DecodeErrorCode code,
+              std::size_t error_offset, std::string detail) {
+        result.error = DecodeError{code, error_offset, std::move(detail)};
+        terminal_ = true;
+    }
+
+    Limits limits_;
+    Phase phase_{Phase::Type};
+    bool terminal_{false};
+    bool header_complete_{false};
+    bool terminal_status_{false};
+    std::size_t offset_{0};
+    std::array<std::byte, 9> vi_bytes_{};
+    std::size_t vi_size_{0};
+    std::size_t vi_expected_{0};
+    std::size_t vi_offset_{0};
+
+    std::uint64_t raw_type_{0};
+    std::uint64_t track_alias_{0};
+    std::uint64_t group_id_{0};
+    unsigned subgroup_mode_{0};
+    std::optional<std::uint64_t> subgroup_id_;
+    std::optional<std::uint8_t> publisher_priority_;
+    bool properties_present_{false};
+    bool end_of_group_{false};
+    bool first_object_{false};
+    bool priority_inherited_{false};
+    SubgroupHeader header_{};
+
+    std::size_t current_object_offset_{0};
+    std::uint64_t current_object_id_{0};
+    std::optional<std::uint64_t> previous_object_id_;
+    std::size_t object_count_{0};
+    std::size_t properties_length_{0};
+    std::size_t properties_payload_offset_{0};
+    std::vector<std::byte> property_bytes_;
+    KeyValuePairs current_properties_;
+    std::uint64_t current_payload_length_{0};
+    std::uint64_t payload_remaining_{0};
+    std::vector<std::byte> retained_payload_;
+    std::optional<std::uint64_t> current_status_;
+    std::size_t status_offset_{0};
+};
+
+SubgroupDecoder::SubgroupDecoder(Limits limits)
+    : impl_(std::make_unique<Impl>(limits)) {}
+
+SubgroupDecoder::~SubgroupDecoder() = default;
+SubgroupDecoder::SubgroupDecoder(SubgroupDecoder&&) noexcept = default;
+SubgroupDecoder& SubgroupDecoder::operator=(SubgroupDecoder&&) noexcept = default;
+
+SubgroupPushResult SubgroupDecoder::push(std::span<const std::byte> bytes,
+                                         bool fin) {
+    if (!impl_) {
+        SubgroupPushResult result;
+        result.local_api_misuse = true;
+        return result;
+    }
+    return impl_->push(bytes, fin);
+}
+
+std::size_t SubgroupDecoder::buffered_byte_count() const noexcept {
+    return impl_ ? impl_->buffered_byte_count() : 0u;
 }
 
 }  // namespace moq::interop::wire::draft18

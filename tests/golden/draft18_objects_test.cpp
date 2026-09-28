@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <optional>
 #include <span>
 #include <variant>
@@ -47,6 +48,32 @@ std::vector<std::byte> object_datagram(std::uint64_t type) {
         result.push_back(std::byte{0xbb});
     }
     return result;
+}
+
+std::vector<std::byte> subgroup_header(std::uint64_t type) {
+    std::vector<std::byte> result;
+    append_vi64(result, type);
+    append_vi64(result, 17);
+    append_vi64(result, 23);
+    if ((type & 0x06u) == 0x04u) append_vi64(result, 29);
+    if ((type & 0x20u) == 0u) result.push_back(std::byte{37});
+    return result;
+}
+
+void append_subgroup_object(std::vector<std::byte>& output,
+                            std::uint64_t delta,
+                            std::span<const std::byte> properties,
+                            std::uint64_t payload_length,
+                            std::optional<std::uint64_t> status,
+                            std::span<const std::byte> payload) {
+    append_vi64(output, delta);
+    if (!properties.empty()) {
+        append_vi64(output, properties.size());
+        output.insert(output.end(), properties.begin(), properties.end());
+    }
+    append_vi64(output, payload_length);
+    if (status) append_vi64(output, *status);
+    output.insert(output.end(), payload.begin(), payload.end());
 }
 
 const ObjectEvent& require_object(const DatagramDecodeResult& result) {
@@ -309,6 +336,460 @@ TEST(Draft18ObjectsTest, DiscardsOnlyValidPaddingDatagrams) {
     const auto nonminimal_type = bytes({0xf8, 0x00, 0x13, 0x2b, 0x3e, 0x29, 0x00});
     EXPECT_TRUE(std::holds_alternative<DiscardedPaddingDatagram>(
         decode_datagram(nonminimal_type, {})));
+}
+
+TEST(Draft18SubgroupTest, DecodesAllLegalHeadersAndRejectsReservedModes) {
+    for (const auto properties : {0u, 1u}) {
+        for (const auto mode : {0u, 1u, 2u}) {
+            for (const auto end_of_group : {0u, 1u}) {
+                for (const auto default_priority : {0u, 1u}) {
+                    for (const auto first_object : {0u, 1u}) {
+                        const auto type = 0x10u | properties | (mode << 1u) |
+                                          (end_of_group << 3u) |
+                                          (default_priority << 5u) |
+                                          (first_object << 6u);
+                        SubgroupDecoder decoder;
+                        const auto encoded = subgroup_header(type);
+                        const auto result = decoder.push(encoded, false);
+                        ASSERT_TRUE(result.header.has_value()) << type;
+                        EXPECT_EQ(result.header->raw_type, type) << type;
+                        EXPECT_EQ(result.header->track_alias, 17u) << type;
+                        EXPECT_EQ(result.header->group_id, 23u) << type;
+                        EXPECT_EQ(result.header->subgroup_id,
+                                  mode == 0u ? std::optional<std::uint64_t>{0}
+                                  : mode == 2u ? std::optional<std::uint64_t>{29}
+                                               : std::nullopt) << type;
+                        EXPECT_EQ(result.header->publisher_priority,
+                                  default_priority != 0u
+                                      ? std::nullopt
+                                      : std::optional<std::uint8_t>{37}) << type;
+                        EXPECT_EQ(result.header->properties_present,
+                                  properties != 0u) << type;
+                        EXPECT_EQ(result.header->end_of_group,
+                                  end_of_group != 0u) << type;
+                        EXPECT_EQ(result.header->first_object,
+                                  first_object != 0u) << type;
+                        EXPECT_EQ(result.header->priority_inherited,
+                                  default_priority != 0u) << type;
+                        EXPECT_FALSE(result.error.has_value()) << type;
+                    }
+                }
+            }
+        }
+    }
+
+    for (const auto high : {0x10u, 0x30u, 0x50u, 0x70u}) {
+        for (const auto low : {0x06u, 0x07u, 0x0eu, 0x0fu}) {
+            SubgroupDecoder decoder;
+            const auto encoded = bytes({high | low});
+            const auto result = decoder.push(encoded, false);
+            ASSERT_TRUE(result.error.has_value()) << (high | low);
+            EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation);
+            EXPECT_EQ(result.error->offset, 0u);
+        }
+    }
+
+    for (const auto type : {0x05u, 0x0fu, 0x80u, 0x132b3e28u}) {
+        SubgroupDecoder decoder;
+        std::vector<std::byte> encoded;
+        append_vi64(encoded, type);
+        const auto result = decoder.push(encoded, false);
+        ASSERT_TRUE(result.error.has_value()) << type;
+        EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(result.error->offset, 0u);
+    }
+}
+
+TEST(Draft18SubgroupTest, PreservesExampleHeadersAndDecodesObjectIds) {
+    auto encoded = subgroup_header(0x14);
+    const auto first_offset = encoded.size();
+    append_subgroup_object(encoded, 0, {}, 1, std::nullopt, bytes({0xaa}));
+    const auto second_offset = encoded.size();
+    append_subgroup_object(encoded, 0, {}, 1, std::nullopt, bytes({0xbb}));
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_TRUE(result.header.has_value());
+    EXPECT_EQ(result.header->raw_type, 0x14u);
+    EXPECT_EQ(result.header->subgroup_id, 29u);
+    ASSERT_EQ(result.objects.size(), 2u);
+    EXPECT_EQ(result.objects[0].object_id, 0u);
+    EXPECT_EQ(result.objects[1].object_id, 1u);
+    EXPECT_EQ(result.objects[0].stream_offset, first_offset);
+    EXPECT_EQ(result.objects[1].stream_offset, second_offset);
+    EXPECT_EQ(result.objects[1].stream_end_offset, encoded.size());
+    EXPECT_EQ(result.objects[0].forwarding_preference,
+              ObjectForwardingPreference::Subgroup);
+    EXPECT_EQ(result.objects[0].subgroup_id, 29u);
+    EXPECT_EQ(result.objects[0].subgroup_header_type, 0x14u);
+    EXPECT_TRUE(result.clean_fin);
+}
+
+TEST(Draft18SubgroupTest, DerivesModeOneSubgroupAndHandlesHeaderOnlyFin) {
+    auto encoded = subgroup_header(0x12);
+    append_subgroup_object(encoded, 41, {}, 0, 0, {});
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_TRUE(result.header.has_value());
+    ASSERT_EQ(result.objects.size(), 1u);
+    EXPECT_EQ(result.objects[0].subgroup_id, 41u);
+
+    SubgroupDecoder no_object;
+    const auto header = subgroup_header(0x12);
+    const auto no_object_result = no_object.push(header, true);
+    ASSERT_EQ(no_object_result.observations.size(), 1u);
+    EXPECT_EQ(no_object_result.observations[0].kind,
+              DecoderObservationKind::DraftAmbiguity);
+    EXPECT_EQ(no_object_result.observations[0].offset, header.size());
+    EXPECT_TRUE(no_object_result.clean_fin);
+}
+
+TEST(Draft18SubgroupTest, PreservesPropertiesStatusAndRecommendationEvidence) {
+    auto properties = bytes({0x3c, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                             0x09, 0x3d, 0x02, 0xaa, 0xbb});
+    auto encoded = subgroup_header(0x35);
+    append_subgroup_object(encoded, 0, properties, 0, 0, {});
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 9);
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    ASSERT_EQ(result.objects.size(), 2u);
+    ASSERT_EQ(result.objects[0].properties.size(), 2u);
+    const auto& raw = std::get<VarIntValue>(result.objects[0].properties[0].value);
+    EXPECT_TRUE(std::ranges::equal(
+        raw.raw_bytes,
+        bytes({0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09})));
+    EXPECT_EQ(result.objects[1].status, 9u);
+    ASSERT_EQ(result.observations.size(), 2u);
+    EXPECT_EQ(result.observations[0].kind,
+              DecoderObservationKind::DraftAmbiguity);
+    EXPECT_EQ(result.observations[1].kind,
+              DecoderObservationKind::ShouldClose);
+}
+
+TEST(Draft18SubgroupTest, DistinguishesStatusPropertyRules) {
+    auto nonempty = subgroup_header(0x11);
+    append_subgroup_object(nonempty, 0, bytes({0x3c, 0x01}), 0, 3, {});
+    SubgroupDecoder hard_decoder;
+    const auto hard = hard_decoder.push(nonempty, true);
+    ASSERT_TRUE(hard.error.has_value());
+    EXPECT_EQ(hard.error->code, DecodeErrorCode::ProtocolViolation);
+
+    auto empty = subgroup_header(0x11);
+    append_vi64(empty, 0);
+    append_vi64(empty, 0);
+    append_vi64(empty, 0);
+    append_vi64(empty, 3);
+    SubgroupDecoder ambiguous_decoder;
+    const auto ambiguous = ambiguous_decoder.push(empty, true);
+    ASSERT_FALSE(ambiguous.error.has_value());
+    ASSERT_EQ(ambiguous.objects.size(), 1u);
+    ASSERT_EQ(ambiguous.observations.size(), 1u);
+    EXPECT_EQ(ambiguous.observations[0].kind,
+              DecoderObservationKind::DraftAmbiguity);
+}
+
+TEST(Draft18SubgroupTest, EnforcesObjectIdOverflowAndTerminalStatus) {
+    auto overflow = subgroup_header(0x10);
+    append_subgroup_object(overflow, std::numeric_limits<std::uint64_t>::max(),
+                           {}, 0, 0, {});
+    const auto overflow_offset = overflow.size();
+    append_subgroup_object(overflow, 0, {}, 0, 0, {});
+    SubgroupDecoder overflow_decoder;
+    const auto overflow_result = overflow_decoder.push(overflow, true);
+    ASSERT_TRUE(overflow_result.error.has_value());
+    EXPECT_EQ(overflow_result.error->code, DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(overflow_result.error->offset, overflow_offset);
+
+    for (const auto status : {3u, 4u}) {
+        auto terminal = subgroup_header(0x10);
+        append_subgroup_object(terminal, 0, {}, 0, status, {});
+        const auto next_offset = terminal.size();
+        append_subgroup_object(terminal, 0, {}, 0, 0, {});
+        SubgroupDecoder decoder;
+        const auto result = decoder.push(terminal, true);
+        ASSERT_TRUE(result.error.has_value()) << status;
+        EXPECT_EQ(result.error->offset, next_offset) << status;
+    }
+}
+
+TEST(Draft18SubgroupTest, RetainsOnlyConfiguredPayloadPrefixAcrossChunks) {
+    auto encoded = subgroup_header(0x10);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 1000);
+    encoded.insert(encoded.end(), 1000, std::byte{0x5a});
+    Limits limits;
+    limits.maximum_retained_payload_length = 3;
+    SubgroupDecoder decoder(limits);
+    SubgroupPushResult final;
+    for (const auto octet : encoded) {
+        const std::array one{octet};
+        auto result = decoder.push(one, false);
+        final.objects.insert(final.objects.end(), result.objects.begin(),
+                             result.objects.end());
+    }
+    auto fin = decoder.push({}, true);
+    final.objects.insert(final.objects.end(), fin.objects.begin(), fin.objects.end());
+    ASSERT_EQ(final.objects.size(), 1u);
+    EXPECT_EQ(final.objects[0].payload_length, 1000u);
+    EXPECT_TRUE(std::ranges::equal(final.objects[0].retained_payload,
+                                   bytes({0x5a, 0x5a, 0x5a})));
+    EXPECT_LE(decoder.buffered_byte_count(),
+              limits.maximum_object_properties_length + 3u + 8u);
+}
+
+TEST(Draft18SubgroupTest, IsStableAcrossEveryChunkSplit) {
+    auto encoded = subgroup_header(0x59);
+    append_vi64(encoded, 7);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 2);
+    const auto payload = bytes({0xaa, 0xbb});
+    encoded.insert(encoded.end(), payload.begin(), payload.end());
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 0);
+    append_vi64(encoded, 4);
+
+    SubgroupDecoder one_shot;
+    const auto expected = one_shot.push(encoded, true);
+    ASSERT_FALSE(expected.error.has_value());
+    ASSERT_EQ(expected.objects.size(), 2u);
+
+    for (std::size_t split = 0; split <= encoded.size(); ++split) {
+        SubgroupDecoder split_decoder;
+        auto first = split_decoder.push(
+            std::span<const std::byte>(encoded).first(split), false);
+        auto second = split_decoder.push(
+            std::span<const std::byte>(encoded).subspan(split), true);
+        std::vector<ObjectEvent> objects = std::move(first.objects);
+        objects.insert(objects.end(), second.objects.begin(), second.objects.end());
+        ASSERT_EQ(objects.size(), expected.objects.size()) << split;
+        for (std::size_t index = 0; index < objects.size(); ++index) {
+            EXPECT_EQ(objects[index].object_id, expected.objects[index].object_id)
+                << split;
+            EXPECT_EQ(objects[index].status, expected.objects[index].status)
+                << split;
+            EXPECT_EQ(objects[index].stream_offset,
+                      expected.objects[index].stream_offset) << split;
+            EXPECT_EQ(objects[index].stream_end_offset,
+                      expected.objects[index].stream_end_offset) << split;
+        }
+        EXPECT_EQ(second.clean_fin, expected.clean_fin) << split;
+        EXPECT_EQ(second.error.has_value(), expected.error.has_value()) << split;
+    }
+}
+
+TEST(Draft18SubgroupTest, ClassifiesFinByParserPhaseAndIsTerminal) {
+    const auto header = subgroup_header(0x10);
+    for (std::size_t split = 0; split < header.size(); ++split) {
+        SubgroupDecoder decoder;
+        const auto result = decoder.push(
+            std::span<const std::byte>(header).first(split), true);
+        ASSERT_TRUE(result.error.has_value()) << split;
+        EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation) << split;
+        EXPECT_EQ(result.error->offset, split) << split;
+    }
+
+    auto mid_payload = header;
+    append_vi64(mid_payload, 0);
+    append_vi64(mid_payload, 3);
+    mid_payload.push_back(std::byte{0xaa});
+    SubgroupDecoder decoder;
+    const auto partial = decoder.push(mid_payload, true);
+    ASSERT_FALSE(partial.error.has_value());
+    ASSERT_EQ(partial.observations.size(), 1u);
+    EXPECT_EQ(partial.observations[0].kind,
+              DecoderObservationKind::ShouldClose);
+    EXPECT_EQ(partial.observations[0].offset, mid_payload.size());
+    EXPECT_FALSE(partial.clean_fin);
+
+    const auto misuse = decoder.push({}, false);
+    EXPECT_TRUE(misuse.local_api_misuse);
+    EXPECT_FALSE(misuse.error.has_value());
+}
+
+TEST(Draft18SubgroupTest, AcceptsNonMinimalStructuralIntegersAndEmptyPushes) {
+    const auto encoded = bytes({
+        0x80, 0x10, 0x80, 0x01, 0x80, 0x02, 0x03,
+        0x80, 0x00, 0x80, 0x01, 0xaa,
+    });
+    SubgroupDecoder decoder;
+    const auto empty = decoder.push({}, false);
+    EXPECT_FALSE(empty.header.has_value());
+    EXPECT_TRUE(empty.objects.empty());
+    const auto first = decoder.push(encoded, false);
+    ASSERT_TRUE(first.header.has_value());
+    ASSERT_EQ(first.objects.size(), 1u);
+    EXPECT_EQ(first.objects[0].payload_length, 1u);
+    const auto repeated = decoder.push({}, false);
+    EXPECT_FALSE(repeated.header.has_value());
+    EXPECT_TRUE(repeated.objects.empty());
+    EXPECT_TRUE(repeated.observations.empty());
+    const auto fin = decoder.push({}, true);
+    EXPECT_TRUE(fin.clean_fin);
+}
+
+TEST(Draft18SubgroupTest, EnforcesPropertyBoundsAndFormatting) {
+    auto malformed = subgroup_header(0x11);
+    append_vi64(malformed, 0);
+    append_vi64(malformed, 1);
+    malformed.push_back(std::byte{0x3c});
+    SubgroupDecoder malformed_decoder;
+    const auto malformed_result = malformed_decoder.push(malformed, false);
+    ASSERT_TRUE(malformed_result.error.has_value());
+    EXPECT_EQ(malformed_result.error->code,
+              DecodeErrorCode::KeyValueFormattingError);
+
+    auto too_large = subgroup_header(0x11);
+    append_vi64(too_large, 0);
+    const auto length_offset = too_large.size();
+    append_vi64(too_large, 2);
+    Limits length_limits;
+    length_limits.maximum_object_properties_length = 1;
+    SubgroupDecoder length_decoder(length_limits);
+    const auto length_result = length_decoder.push(too_large, false);
+    ASSERT_TRUE(length_result.error.has_value());
+    EXPECT_EQ(length_result.error->code, DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(length_result.error->offset, length_offset);
+
+    auto odd_too_large = subgroup_header(0x11);
+    append_vi64(odd_too_large, 0);
+    append_vi64(odd_too_large, 5);
+    const auto odd_property = bytes({0x79, 0x03, 0xaa, 0xbb, 0xcc});
+    odd_too_large.insert(odd_too_large.end(), odd_property.begin(),
+                         odd_property.end());
+    Limits odd_limits;
+    odd_limits.maximum_odd_value_length = 2;
+    SubgroupDecoder odd_decoder(odd_limits);
+    const auto odd_result = odd_decoder.push(odd_too_large, false);
+    ASSERT_TRUE(odd_result.error.has_value());
+    EXPECT_EQ(odd_result.error->code, DecodeErrorCode::LengthExceedsLimit);
+}
+
+TEST(Draft18SubgroupTest, ReportsEveryMidObjectFinAsRecommendation) {
+    std::vector<std::vector<std::byte>> partials;
+    constexpr std::array expected_phases{
+        SubgroupDecodePhase::ObjectIdDelta,
+        SubgroupDecodePhase::PropertiesLength,
+        SubgroupDecodePhase::Properties,
+        SubgroupDecodePhase::PayloadLength,
+        SubgroupDecodePhase::Status,
+    };
+    const auto plain_header = subgroup_header(0x10);
+    const auto properties_header = subgroup_header(0x11);
+
+    auto partial_delta = plain_header;
+    partial_delta.push_back(std::byte{0x80});
+    partials.push_back(partial_delta);
+
+    auto partial_properties_length = properties_header;
+    append_vi64(partial_properties_length, 0);
+    partial_properties_length.push_back(std::byte{0x80});
+    partials.push_back(partial_properties_length);
+
+    auto partial_properties = properties_header;
+    append_vi64(partial_properties, 0);
+    append_vi64(partial_properties, 2);
+    partial_properties.push_back(std::byte{0x3c});
+    partials.push_back(partial_properties);
+
+    auto partial_payload_length = plain_header;
+    append_vi64(partial_payload_length, 0);
+    partial_payload_length.push_back(std::byte{0x80});
+    partials.push_back(partial_payload_length);
+
+    auto partial_status = plain_header;
+    append_vi64(partial_status, 0);
+    append_vi64(partial_status, 0);
+    partial_status.push_back(std::byte{0x80});
+    partials.push_back(partial_status);
+
+    for (std::size_t index = 0; index < partials.size(); ++index) {
+        SubgroupDecoder decoder;
+        const auto result = decoder.push(partials[index], true);
+        ASSERT_FALSE(result.error.has_value()) << index;
+        ASSERT_EQ(result.observations.size(), 1u) << index;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::ShouldClose) << index;
+        EXPECT_EQ(result.observations[0].offset, partials[index].size()) << index;
+        EXPECT_EQ(result.observations[0].phase, expected_phases[index]) << index;
+        EXPECT_FALSE(result.clean_fin) << index;
+    }
+}
+
+TEST(Draft18SubgroupTest, InfersFinalObjectOnlyFromEndOfGroupCleanFin) {
+    auto encoded = subgroup_header(0x18);
+    append_subgroup_object(encoded, 8, {}, 1, std::nullopt, bytes({0xaa}));
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_EQ(result.objects.size(), 1u);
+    EXPECT_TRUE(result.clean_fin);
+    EXPECT_EQ(result.final_object_id, 8u);
+
+    auto ordinary = subgroup_header(0x10);
+    append_subgroup_object(ordinary, 8, {}, 1, std::nullopt, bytes({0xaa}));
+    SubgroupDecoder ordinary_decoder;
+    const auto ordinary_result = ordinary_decoder.push(ordinary, true);
+    EXPECT_TRUE(ordinary_result.clean_fin);
+    EXPECT_FALSE(ordinary_result.final_object_id.has_value());
+}
+
+TEST(Draft18SubgroupTest, AppliesFirstObjectBitOnlyToFirstStreamObject) {
+    auto encoded = subgroup_header(0x50);
+    append_subgroup_object(encoded, 0, {}, 1, std::nullopt, bytes({0xaa}));
+    append_subgroup_object(encoded, 0, {}, 1, std::nullopt, bytes({0xbb}));
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_EQ(result.objects.size(), 2u);
+    EXPECT_TRUE(result.objects[0].first_object);
+    EXPECT_FALSE(result.objects[1].first_object);
+}
+
+TEST(Draft18SubgroupTest, AcceptsNonMinimalOptionalSubgroupPropertyAndStatusFields) {
+    auto encoded = bytes({
+        0x80, 0x15,
+        0x80, 0x01,
+        0x80, 0x02,
+        0x80, 0x03,
+        0x04,
+        0x80, 0x00,
+        0x80, 0x04,
+        0x80, 0x3c, 0x80, 0x07,
+        0x80, 0x00,
+        0x80, 0x00,
+    });
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    ASSERT_EQ(result.objects.size(), 1u);
+    EXPECT_EQ(result.objects[0].subgroup_id, 3u);
+    ASSERT_EQ(result.objects[0].properties.size(), 1u);
+    EXPECT_TRUE(std::ranges::equal(
+        std::get<VarIntValue>(result.objects[0].properties[0].value).raw_bytes,
+        bytes({0x80, 0x07})));
+    EXPECT_EQ(result.objects[0].status, 0u);
+}
+
+TEST(Draft18SubgroupTest, SupportsZeroPayloadEvidenceLimitAndErrorStickiness) {
+    auto encoded = subgroup_header(0x10);
+    append_subgroup_object(encoded, 0, {}, 2, std::nullopt,
+                           bytes({0xaa, 0xbb}));
+    Limits limits;
+    limits.maximum_retained_payload_length = 0;
+    SubgroupDecoder decoder(limits);
+    const auto result = decoder.push(encoded, true);
+    ASSERT_EQ(result.objects.size(), 1u);
+    EXPECT_TRUE(result.objects[0].retained_payload.empty());
+    EXPECT_EQ(result.objects[0].payload_length, 2u);
+
+    SubgroupDecoder invalid;
+    const auto failed = invalid.push(bytes({0x05}), false);
+    ASSERT_TRUE(failed.error.has_value());
+    const auto misuse = invalid.push(bytes({0x10}), true);
+    EXPECT_TRUE(misuse.local_api_misuse);
+    EXPECT_FALSE(misuse.error.has_value());
 }
 
 }  // namespace
