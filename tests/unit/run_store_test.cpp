@@ -186,6 +186,49 @@ TEST(RunStoreTest, AllocatesUniqueRunIdsAcrossStoresOpenedAtTheSameDatabaseState
     EXPECT_EQ(first.load(second_id).id, second_id);
 }
 
+TEST(RunStoreTest, FinalizationTimestampAdvancesPastRunsCreatedByAnotherStore) {
+    TemporaryDatabase database;
+    app::RunId seed_id;
+    {
+        SqliteRunStore bootstrap(database.path(), sample_build());
+        seed_id = bootstrap.create_run(sample_config());
+    }
+
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    sqlite3_stmt* update = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(raw, "UPDATE runs SET created_at_unix_ns=? WHERE id=?", -1,
+                                 &update, nullptr),
+              SQLITE_OK);
+    const auto future =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            (std::chrono::system_clock::now() + std::chrono::hours(24)).time_since_epoch())
+            .count();
+    ASSERT_EQ(sqlite3_bind_int64(update, 1, future), SQLITE_OK);
+    ASSERT_EQ(sqlite3_bind_text(update, 2, seed_id.data(), static_cast<int>(seed_id.size()),
+                                SQLITE_TRANSIENT),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(update), SQLITE_DONE);
+    sqlite3_finalize(update);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+
+    SqliteRunStore creator(database.path(), sample_build());
+    SqliteRunStore stale_finalizer(database.path(), sample_build());
+    creator.create_run(sample_config());
+    creator.create_run(sample_config());
+    creator.create_run(sample_config());
+    const auto target_id = creator.create_run(sample_config());
+    const auto before = stale_finalizer.load(target_id);
+    const std::vector outcomes{
+        requirements::Outcome{"D21-MUST-1", requirements::OutcomeState::Pass}};
+
+    stale_finalizer.finalize(target_id, sample_score(), outcomes);
+    const auto finalized = stale_finalizer.load(target_id);
+
+    ASSERT_TRUE(finalized.finalized_at_unix_ns.has_value());
+    EXPECT_GT(*finalized.finalized_at_unix_ns, before.created_at_unix_ns);
+}
+
 TEST(RunStoreTest, AppendsEventsInCallerOrderAndPaginatesWithoutGaps) {
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());

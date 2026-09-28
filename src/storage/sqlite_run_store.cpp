@@ -260,7 +260,11 @@ public:
             throw std::runtime_error("enable SQLite foreign keys: pragma remained disabled");
         }
         initialize_schema();
-        Statement latest(database.get(), "SELECT COALESCE(MAX(created_at_unix_ns), 0) FROM runs");
+        Statement latest(
+            database.get(),
+            "SELECT COALESCE(MAX(value), 0) FROM ("
+            "SELECT created_at_unix_ns AS value FROM runs UNION ALL "
+            "SELECT finalized_at_unix_ns FROM runs WHERE finalized_at_unix_ns IS NOT NULL)");
         if (!latest.row()) throw std::runtime_error("initialize run timestamps: query returned no row");
         last_timestamp = sqlite3_column_int64(latest.get(), 0);
     }
@@ -307,41 +311,29 @@ public:
         }
     }
 
-    std::int64_t timestamp() {
-        const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             std::chrono::system_clock::now().time_since_epoch())
-                             .count();
-        if (last_timestamp == std::numeric_limits<std::int64_t>::max()) {
-            throw std::runtime_error("create run: timestamp space exhausted");
-        }
-        last_timestamp = std::max(now, last_timestamp + 1);
-        return last_timestamp;
-    }
-
-    std::int64_t creation_timestamp() {
-        Statement latest(database.get(), "SELECT MAX(created_at_unix_ns) FROM runs");
+    std::int64_t logical_timestamp() {
+        Statement latest(
+            database.get(),
+            "SELECT MAX(value) FROM ("
+            "SELECT created_at_unix_ns AS value FROM runs UNION ALL "
+            "SELECT finalized_at_unix_ns FROM runs WHERE finalized_at_unix_ns IS NOT NULL)");
         if (!latest.row()) {
-            throw std::runtime_error("allocate run timestamp: query returned no row");
+            throw std::runtime_error("allocate logical timestamp: query returned no row");
         }
 
         const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::system_clock::now().time_since_epoch())
                              .count();
-        auto candidate = std::max(now, last_timestamp);
+        auto lower_bound = last_timestamp;
         if (sqlite3_column_type(latest.get(), 0) != SQLITE_NULL) {
             const auto stored =
                 static_cast<std::int64_t>(sqlite3_column_int64(latest.get(), 0));
-            if (stored == std::numeric_limits<std::int64_t>::max()) {
-                throw std::runtime_error("allocate run timestamp: timestamp space exhausted");
-            }
-            candidate = std::max(candidate, stored + 1);
+            lower_bound = std::max(lower_bound, stored);
         }
-        if (candidate <= last_timestamp) {
-            if (last_timestamp == std::numeric_limits<std::int64_t>::max()) {
-                throw std::runtime_error("allocate run timestamp: timestamp space exhausted");
-            }
-            candidate = last_timestamp + 1;
+        if (lower_bound == std::numeric_limits<std::int64_t>::max()) {
+            throw std::runtime_error("allocate logical timestamp: timestamp space exhausted");
         }
+        const auto candidate = std::max(now, lower_bound + 1);
         last_timestamp = candidate;
         return candidate;
     }
@@ -374,7 +366,7 @@ SqliteRunStore::~SqliteRunStore() = default;
 app::RunId SqliteRunStore::create_run(const app::RunConfig& config) {
     std::lock_guard lock(impl_->mutex);
     Transaction transaction(impl_->database.get(), "create run");
-    const auto created_at = impl_->creation_timestamp();
+    const auto created_at = impl_->logical_timestamp();
     const auto id = Impl::run_id(created_at);
 
     Statement insert_run(
@@ -492,7 +484,7 @@ void SqliteRunStore::finalize(const app::RunId& id,
     Statement update_run(
         impl_->database.get(),
         "UPDATE runs SET state=1, finalized_at_unix_ns=? WHERE id=? AND state=0");
-    update_run.bind(1, impl_->timestamp());
+    update_run.bind(1, impl_->logical_timestamp());
     update_run.bind(2, id);
     update_run.done("finalize run lifecycle");
     if (sqlite3_changes(impl_->database.get()) != 1) {

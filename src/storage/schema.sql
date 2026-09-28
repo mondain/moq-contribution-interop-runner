@@ -13,7 +13,7 @@ CREATE TABLE runs (
     created_at_unix_ns INTEGER NOT NULL,
     finalized_at_unix_ns INTEGER,
     CHECK ((state = 0 AND finalized_at_unix_ns IS NULL) OR
-           (state = 1 AND finalized_at_unix_ns IS NOT NULL))
+           (state = 1 AND finalized_at_unix_ns > created_at_unix_ns))
 );
 
 CREATE TABLE run_builds (
