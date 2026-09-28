@@ -140,6 +140,18 @@ target_compile_options(moq-interop-transport PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(moq-interop-session
+    src/session/publisher_session.cpp
+    src/session/draft18_dispatch.cpp
+)
+target_link_libraries(moq-interop-session PUBLIC
+    moq-interop-app moq-interop-wire)
+target_include_directories(moq-interop-session PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_compile_options(moq-interop-session PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -216,6 +228,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     )
     add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
+
+    add_executable(moq-interop-draft18-session-tests
+                   tests/protocol/draft18_session_test.cpp)
+    target_link_libraries(moq-interop-draft18-session-tests PRIVATE
+                          moq-interop-session GTest::gtest_main)
+    target_compile_options(moq-interop-draft18-session-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME draft18-session COMMAND moq-interop-draft18-session-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
