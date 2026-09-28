@@ -92,6 +92,37 @@ TEST(RunStoreTest, CreatesVersionOneSchemaAndEnablesForeignKeys) {
     EXPECT_TRUE(store.foreign_keys_enabled());
 }
 
+TEST(RunStoreTest, SchemaRejectsFinalizedStateWithoutFinalizationTimestamp) {
+    TemporaryDatabase database;
+    app::RunId active_id;
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        active_id = store.create_run(sample_config());
+    }
+
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    EXPECT_EQ(sqlite3_exec(raw,
+                           "INSERT INTO runs("
+                           "id,draft,transport,mode,timeout_ms,state,created_at_unix_ns,"
+                           "finalized_at_unix_ns) "
+                           "VALUES('invalid-finalized',21,0,0,1000,1,1,NULL)",
+                           nullptr, nullptr, nullptr),
+              SQLITE_CONSTRAINT);
+
+    sqlite3_stmt* update = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(
+                  raw, "UPDATE runs SET state=1, finalized_at_unix_ns=NULL WHERE id=?", -1,
+                  &update, nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_bind_text(update, 1, active_id.data(), static_cast<int>(active_id.size()),
+                                SQLITE_TRANSIENT),
+              SQLITE_OK);
+    EXPECT_EQ(sqlite3_step(update), SQLITE_CONSTRAINT);
+    sqlite3_finalize(update);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+}
+
 TEST(RunStoreTest, RefusesUnknownNewerSchemaWithoutMutation) {
     TemporaryDatabase database;
     sqlite3* raw = nullptr;
