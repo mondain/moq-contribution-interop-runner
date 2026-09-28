@@ -378,13 +378,20 @@ TrackNameDecodeResult decode_track_name(Cursor& input,
                                         const Limits&) {
     const auto namespace_length = namespace_value_length(name_space);
     if (namespace_length > kMaximumFullTrackName) {
-        return invalid(input.offset(), "track namespace exceeds 4096 bytes");
+        return protocol_violation(input.offset(),
+                                  "track namespace exceeds 4096 bytes");
     }
     Cursor working = input;
     const auto name_result = read_length_prefixed_bytes(
         working, kMaximumFullTrackName - namespace_length);
     if (const auto* need = std::get_if<NeedMore>(&name_result)) return *need;
-    if (const auto* error = std::get_if<DecodeError>(&name_result)) return *error;
+    if (const auto* error = std::get_if<DecodeError>(&name_result)) {
+        if (error->code == DecodeErrorCode::LengthExceedsLimit) {
+            return protocol_violation(error->offset,
+                                      "full track name exceeds 4096 bytes");
+        }
+        return *error;
+    }
     const auto name = std::get<std::span<const std::byte>>(name_result);
     input = working;
     return TrackName{copy_bytes(name)};
@@ -417,7 +424,8 @@ SubscriptionFilterDecodeResult decode_subscription_filter(
     Cursor bounded(encoded, input.offset());
     const auto type_result = read_vi64(bounded);
     if (const auto* need = std::get_if<NeedMore>(&type_result)) {
-        return invalid(need->offset, "subscription filter type is missing");
+        return protocol_violation(need->offset,
+                                  "subscription filter type is missing");
     }
     if (const auto* error = std::get_if<DecodeError>(&type_result)) return *error;
     const auto raw_type = std::get<std::uint64_t>(type_result);
@@ -430,7 +438,8 @@ SubscriptionFilterDecodeResult decode_subscription_filter(
     if (raw_type == 3 || raw_type == 4) {
         const auto location = decode_location(bounded);
         if (const auto* need = std::get_if<NeedMore>(&location)) {
-            return invalid(need->offset, "subscription filter location is truncated");
+            return protocol_violation(
+                need->offset, "subscription filter location is truncated");
         }
         if (const auto* error = std::get_if<DecodeError>(&location)) return *error;
         result.start = std::get<Location>(location);
@@ -438,17 +447,20 @@ SubscriptionFilterDecodeResult decode_subscription_filter(
     if (raw_type == 4) {
         const auto delta = read_vi64(bounded);
         if (const auto* need = std::get_if<NeedMore>(&delta)) {
-            return invalid(need->offset, "subscription filter delta is truncated");
+            return protocol_violation(
+                need->offset, "subscription filter delta is truncated");
         }
         if (const auto* error = std::get_if<DecodeError>(&delta)) return *error;
         result.end_group_delta = std::get<std::uint64_t>(delta);
         if (*result.end_group_delta >
             std::numeric_limits<std::uint64_t>::max() - result.start->group) {
-            return invalid(input.offset(), "subscription filter range overflows");
+            return protocol_violation(input.offset(),
+                                      "subscription filter range overflows");
         }
     }
     if (bounded.remaining() != 0) {
-        return invalid(bounded.offset(), "subscription filter has trailing bytes");
+        return protocol_violation(bounded.offset(),
+                                  "subscription filter has trailing bytes");
     }
     input = working;
     return result;
@@ -670,7 +682,8 @@ ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
         if (const auto* error = std::get_if<DecodeError>(&delta_result)) return *error;
         const auto delta = std::get<std::uint64_t>(delta_result);
         if (delta > std::numeric_limits<std::uint64_t>::max() - previous_type) {
-            return invalid(entry_offset, "parameter resolved type overflows uint64");
+            return protocol_violation(
+                entry_offset, "parameter resolved type overflows uint64");
         }
         const auto type = previous_type + delta;
         if (!is_known_parameter(type)) {
@@ -678,11 +691,13 @@ ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
                                       "unknown message parameter");
         }
         if (index != 0 && type == previous_type && type != 0x03) {
-            return invalid(entry_offset, "duplicate non-repeatable parameter");
+            return protocol_violation(entry_offset,
+                                      "duplicate non-repeatable parameter");
         }
         const auto scope = validate_parameter_scope(type, context);
         if (scope == ParameterScopeResult::Forbidden) {
-            return invalid(entry_offset, "message parameter is forbidden in context");
+            return protocol_violation(
+                entry_offset, "message parameter is forbidden in context");
         }
         if (type == 0x04 || type == 0x0a) {
             return DraftAmbiguity{entry_offset,
@@ -701,8 +716,11 @@ ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
             if (const auto* need = std::get_if<NeedMore>(&length_result)) return *need;
             if (const auto* error = std::get_if<DecodeError>(&length_result)) return *error;
             const auto length = std::get<std::uint64_t>(length_result);
-            if (length > limits.maximum_odd_value_length ||
-                length > kMaximumMessagePayload) {
+            if (length > kMaximumMessagePayload) {
+                return protocol_violation(
+                    entry_offset, "authorization token exceeds draft limit");
+            }
+            if (length > limits.maximum_odd_value_length) {
                 return DecodeError{DecodeErrorCode::LengthExceedsLimit, entry_offset,
                                    "authorization token exceeds configured limit"};
             }
@@ -728,7 +746,8 @@ ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
                 std::get<std::span<const std::byte>>(decoded)[0]);
             if ((type == 0x10 && byte > 1) ||
                 (type == 0x22 && (byte < 1 || byte > 2))) {
-                return invalid(entry_offset, "parameter enum value is invalid");
+                return protocol_violation(entry_offset,
+                                          "parameter enum value is invalid");
             }
             value = Uint8ParameterValue{byte};
         } else if (type == 0x21) {
@@ -737,10 +756,13 @@ ParametersDecodeResult decode_parameters(Cursor& input, std::uint64_t count,
             if (const auto* need = std::get_if<NeedMore>(&length_result)) return *need;
             if (const auto* error = std::get_if<DecodeError>(&length_result)) return *error;
             const auto length = std::get<std::uint64_t>(length_result);
-            if (length > limits.maximum_odd_value_length ||
-                length > kMaximumMessagePayload) {
+            if (length > kMaximumMessagePayload) {
+                return protocol_violation(
+                    entry_offset, "subscription filter exceeds draft limit");
+            }
+            if (length > limits.maximum_odd_value_length) {
                 return DecodeError{DecodeErrorCode::LengthExceedsLimit, entry_offset,
-                                   "subscription filter exceeds draft limit"};
+                                   "subscription filter exceeds configured limit"};
             }
             working = length_cursor;
             const auto decoded = decode_subscription_filter(

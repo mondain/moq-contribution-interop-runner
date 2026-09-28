@@ -49,6 +49,12 @@ void expect_decode_error(const MessageDecodeResult& result) {
     EXPECT_FALSE(std::holds_alternative<DraftAmbiguity>(result));
 }
 
+template <class Result>
+void expect_error_code(const Result& result, DecodeErrorCode code) {
+    ASSERT_TRUE(std::holds_alternative<DecodeError>(result));
+    EXPECT_EQ(std::get<DecodeError>(result).code, code);
+}
+
 TEST(Draft18MessagesTest, DecodesAndEncodesEmptySetup) {
     const auto encoded = bytes({0xaf, 0x00, 0x00, 0x00});
     Cursor input(encoded);
@@ -414,7 +420,8 @@ TEST(Draft18StructuresTest, NamespaceRejectsCountEmptyFieldAndValueOverflowAtomi
     };
     for (const auto& encoded : invalid) {
         Cursor input(encoded, 30);
-        expect_peer_error(decode_track_namespace(input, {}));
+        expect_error_code(decode_track_namespace(input, {}),
+                          DecodeErrorCode::ProtocolViolation);
         EXPECT_EQ(input.offset(), 30u);
     }
 
@@ -429,7 +436,8 @@ TEST(Draft18StructuresTest, NamespaceRejectsCountEmptyFieldAndValueOverflowAtomi
                                     std::byte{0x10}, std::byte{0x01}};
     overflow.resize(4u + 4'097u, std::byte{0xee});
     Cursor overflow_input(overflow, 40);
-    expect_peer_error(decode_track_namespace(overflow_input, {}));
+    expect_error_code(decode_track_namespace(overflow_input, {}),
+                      DecodeErrorCode::ProtocolViolation);
     EXPECT_EQ(overflow_input.offset(), 40u);
 }
 
@@ -449,8 +457,17 @@ TEST(Draft18StructuresTest, TrackNameAllowsEmptyAndEnforcesFullNameBoundary) {
 
     const auto two = bytes({0x02, 0x00, 0xff});
     Cursor overflow_input(two, 50);
-    expect_peer_error(decode_track_name(overflow_input, large_namespace, {}));
+    expect_error_code(decode_track_name(overflow_input, large_namespace, {}),
+                      DecodeErrorCode::ProtocolViolation);
     EXPECT_EQ(overflow_input.offset(), 50u);
+
+    TrackNamespace oversized_namespace{
+        {std::vector<std::byte>(4'097u, std::byte{0xaa})}};
+    Cursor oversized_namespace_input(empty, 55);
+    expect_error_code(
+        decode_track_name(oversized_namespace_input, oversized_namespace, {}),
+        DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(oversized_namespace_input.offset(), 55u);
 
     ByteWriter encoded_name(2);
     ASSERT_TRUE(encode_track_name(TrackName{bytes({0xff})}, large_namespace,
@@ -485,6 +502,10 @@ TEST(Draft18StructuresTest, DecodesAndEncodesEverySubscriptionFilterForm) {
 
 TEST(Draft18StructuresTest, RejectsInvalidFilterTypeTrailingBytesAndRangeOverflow) {
     const std::vector<std::vector<std::byte>> invalid{
+        bytes({}),
+        bytes({0x03}),
+        bytes({0x03, 0x00}),
+        bytes({0x04, 0x00, 0x00}),
         bytes({0x05}),
         bytes({0x01, 0x00}),
         bytes({0x04, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -492,9 +513,16 @@ TEST(Draft18StructuresTest, RejectsInvalidFilterTypeTrailingBytesAndRangeOverflo
     };
     for (const auto& encoded : invalid) {
         Cursor input(encoded, 60);
-        expect_peer_error(decode_subscription_filter(input, encoded.size()));
+        expect_error_code(decode_subscription_filter(input, encoded.size()),
+                          DecodeErrorCode::ProtocolViolation);
         EXPECT_EQ(input.offset(), 60u);
     }
+
+    const auto incomplete = bytes({0x04, 0x00});
+    Cursor incomplete_input(incomplete, 65);
+    EXPECT_TRUE(std::holds_alternative<NeedMore>(
+        decode_subscription_filter(incomplete_input, incomplete.size() + 1)));
+    EXPECT_EQ(incomplete_input.offset(), 65u);
 }
 
 TEST(Draft18StructuresTest, DecodesEveryTokenFormAndPreservesOpaqueValue) {
@@ -751,19 +779,34 @@ TEST(Draft18ParametersTest, RepeatedAuthorizationTokensRemainOrdered) {
     EXPECT_EQ(parameters[1].type, 3u);
 }
 
-TEST(Draft18ParametersTest, RejectsDuplicateUnknownOverflowAndInvalidEnums) {
-    const std::vector<std::pair<std::vector<std::byte>, std::uint64_t>> invalid{
-        {bytes({0x02, 0x01, 0x00, 0x02}), 2},
-        {bytes({0x05}), 1},
-        {bytes({0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                0x00, 0x01}), 2},
-        {bytes({0x10, 0x02}), 1},
-        {bytes({0x22, 0x00}), 1},
+TEST(Draft18ParametersTest, ProtocolViolationPathsUseExactSessionError) {
+    struct InvalidParameterList {
+        std::vector<std::byte> encoded;
+        std::uint64_t count;
+        ParameterContext context;
     };
-    for (const auto& [encoded, count] : invalid) {
-        Cursor input(encoded, 100);
-        expect_peer_error(
-            decode_parameters(input, count, ParameterContext::Unresolved, {}));
+    const std::vector<InvalidParameterList> invalid{
+        {bytes({0x02, 0x01, 0x00, 0x02}), 2, ParameterContext::Unresolved},
+        {bytes({0x05}), 1, ParameterContext::Unresolved},
+        {bytes({0x34, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                0xff, 0xff}), 2, ParameterContext::Unresolved},
+        {bytes({0x02, 0x01}), 1, ParameterContext::Fetch},
+        {bytes({0x10, 0x02}), 1, ParameterContext::Unresolved},
+        {bytes({0x03, 0xc1, 0x00, 0x00}), 1,
+         ParameterContext::Unresolved},
+        {bytes({0x21, 0xc1, 0x00, 0x00}), 1,
+         ParameterContext::Unresolved},
+        {bytes({0x21, 0x02, 0x03, 0x00}), 1,
+         ParameterContext::Unresolved},
+        {bytes({0x21, 0x02, 0x01, 0x00}), 1,
+         ParameterContext::Unresolved},
+        {bytes({0x22, 0x00}), 1, ParameterContext::Unresolved},
+    };
+    for (const auto& test : invalid) {
+        Cursor input(test.encoded, 100);
+        expect_error_code(
+            decode_parameters(input, test.count, test.context, {}),
+            DecodeErrorCode::ProtocolViolation);
         EXPECT_EQ(input.offset(), 100u);
     }
 }
@@ -785,8 +828,9 @@ TEST(Draft18ParametersTest, TimeoutAmbiguityFollowsKnownScopeValidation) {
 
     const auto forbidden_bytes = bytes({0x04});
     Cursor forbidden(forbidden_bytes, 120);
-    expect_peer_error(
-        decode_parameters(forbidden, 1, ParameterContext::Fetch, {}));
+    expect_error_code(
+        decode_parameters(forbidden, 1, ParameterContext::Fetch, {}),
+        DecodeErrorCode::ProtocolViolation);
     EXPECT_EQ(forbidden.offset(), 120u);
 
     const Parameters timeout{
