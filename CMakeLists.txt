@@ -159,6 +159,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
             "-DVERIFY_SCRIPT=${PROJECT_SOURCE_DIR}/cmake/VerifyQuiche.cmake"
             "-DQUICHE_REVISION=${MOQ_INTEROP_QUICHE_REVISION}"
             "-DBORINGSSL_REVISION=${MOQ_INTEROP_BORINGSSL_REVISION}"
+            "-DCARGO_EXECUTABLE=${MOQ_INTEROP_CARGO_EXECUTABLE}"
+            "-DCARGO_HOME=${MOQ_INTEROP_QUICHE_CARGO_HOME}"
+            "-DCARGO_TARGET_DIR=${MOQ_INTEROP_QUICHE_CARGO_TARGET_DIR}"
+            "-DREAL_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DFIXTURE_ROOT=${PROJECT_BINARY_DIR}/quiche-contract-fixtures"
             -P "${PROJECT_SOURCE_DIR}/tests/integration/quiche_dependency_contract.cmake"
     )
 

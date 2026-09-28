@@ -1,7 +1,9 @@
+get_filename_component(MOQ_INTEROP_ROOT_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(MOQ_INTEROP_BORINGSSL_REVISION
     "f1c75347daa2ea81a941e953f2263e0a4d970c8d")
 set(MOQ_INTEROP_QUICHE_LOCK_FILE
-    "${PROJECT_SOURCE_DIR}/dependencies/quiche-0.24.9.Cargo.lock")
+    "${MOQ_INTEROP_ROOT_DIR}/dependencies/quiche-0.24.9.Cargo.lock")
 
 find_program(MOQ_INTEROP_CARGO_EXECUTABLE NAMES cargo REQUIRED)
 find_package(Threads REQUIRED)
@@ -17,7 +19,7 @@ execute_process(
         "-DQUICHE_SOURCE_DIR=${quiche_SOURCE_DIR}"
         "-DEXPECTED_QUICHE_REVISION=${MOQ_INTEROP_QUICHE_REVISION}"
         "-DEXPECTED_BORINGSSL_REVISION=${MOQ_INTEROP_BORINGSSL_REVISION}"
-        -P "${PROJECT_SOURCE_DIR}/cmake/VerifyQuiche.cmake"
+        -P "${CMAKE_CURRENT_LIST_DIR}/VerifyQuiche.cmake"
     RESULT_VARIABLE quiche_verification_result
 )
 if(NOT quiche_verification_result EQUAL 0)
