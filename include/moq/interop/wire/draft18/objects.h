@@ -39,7 +39,9 @@ struct ObjectEvent {
     std::size_t stream_end_offset{0};
 };
 
-struct DiscardedPaddingDatagram {};
+struct DiscardedPaddingDatagram {
+    std::optional<std::size_t> first_nonzero_offset;
+};
 
 using DatagramDecodeResult =
     std::variant<ObjectEvent, DiscardedPaddingDatagram, DecodeError,

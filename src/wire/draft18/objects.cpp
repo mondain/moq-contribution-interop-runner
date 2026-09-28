@@ -32,6 +32,7 @@ bool is_valid_object_type(std::uint64_t type) {
 }
 
 DatagramDecodeResult decode_padding(Cursor& working) {
+    std::optional<std::size_t> first_nonzero_offset;
     while (working.remaining() != 0) {
         const auto byte_offset = working.offset();
         const auto byte_result = read_bytes(working, 1);
@@ -41,11 +42,10 @@ DatagramDecodeResult decode_padding(Cursor& working) {
         if (const auto* error = std::get_if<DecodeError>(&byte_result)) return *error;
         if (std::get<std::span<const std::byte>>(byte_result).front() !=
             std::byte{0}) {
-            return protocol_violation(byte_offset,
-                                      "padding datagram contains nonzero data");
+            if (!first_nonzero_offset) first_nonzero_offset = byte_offset;
         }
     }
-    return DiscardedPaddingDatagram{};
+    return DiscardedPaddingDatagram{first_nonzero_offset};
 }
 
 }  // namespace
@@ -365,7 +365,21 @@ public:
     }
 
     [[nodiscard]] std::size_t buffered_byte_count() const noexcept {
-        return vi_size_ + property_bytes_.size() + retained_payload_.size();
+        auto total = vi_size_;
+        total = saturating_add(total, property_bytes_.capacity());
+        total = saturating_add(total, retained_payload_.capacity());
+        total = saturating_add(
+            total, saturating_multiply(current_properties_.capacity(),
+                                       sizeof(KeyValuePair)));
+        for (const auto& property : current_properties_) {
+            if (const auto* integer = std::get_if<VarIntValue>(&property.value)) {
+                total = saturating_add(total, integer->raw_bytes.capacity());
+            } else {
+                total = saturating_add(
+                    total, std::get<ByteValue>(property.value).bytes.capacity());
+            }
+        }
+        return total;
     }
 
 private:
@@ -398,6 +412,23 @@ private:
     static bool valid_subgroup_type(std::uint64_t type) {
         if (type > 0x7fu || (type & 0x10u) == 0u) return false;
         return (type & 0x06u) != 0x06u;
+    }
+
+    static std::size_t saturating_add(std::size_t left,
+                                      std::size_t right) noexcept {
+        if (right > std::numeric_limits<std::size_t>::max() - left) {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        return left + right;
+    }
+
+    static std::size_t saturating_multiply(std::size_t left,
+                                           std::size_t right) noexcept {
+        if (left != 0u &&
+            right > std::numeric_limits<std::size_t>::max() / left) {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        return left * right;
     }
 
     std::optional<std::uint64_t> consume_vi(std::span<const std::byte> bytes,
@@ -472,6 +503,7 @@ private:
             decode_key_value_pairs(cursor, property_bytes_.size(), limits_);
         if (auto* entries = std::get_if<KeyValuePairs>(&decoded)) {
             current_properties_ = std::move(*entries);
+            std::vector<std::byte>().swap(property_bytes_);
             phase_ = Phase::PayloadLength;
             return;
         }
@@ -567,8 +599,10 @@ private:
 
     void finish_stream(SubgroupPushResult& result) {
         if (!header_complete_) {
-            fail(result, DecodeErrorCode::ProtocolViolation, offset_,
-                 "FIN truncates SUBGROUP_HEADER");
+            result.observations.push_back({
+                DecoderObservationKind::DraftAmbiguity, public_phase(), offset_,
+                "draft does not prescribe receiver behavior for FIN in SUBGROUP_HEADER"});
+            terminal_ = true;
             return;
         }
         if (phase_ == Phase::ObjectDelta && vi_size_ == 0u) {

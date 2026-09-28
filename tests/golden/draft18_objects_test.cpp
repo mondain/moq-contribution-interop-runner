@@ -90,6 +90,136 @@ const DecodeError& require_error(const DatagramDecodeResult& result,
     return error;
 }
 
+struct AccumulatedSubgroupResult {
+    std::optional<SubgroupHeader> header;
+    std::vector<ObjectEvent> objects;
+    std::vector<DecoderObservation> observations;
+    std::optional<DecodeError> error;
+    std::optional<std::uint64_t> final_object_id;
+    bool clean_fin{false};
+    bool local_api_misuse{false};
+};
+
+void accumulate(const SubgroupPushResult& source,
+                AccumulatedSubgroupResult& target) {
+    if (source.header) {
+        EXPECT_FALSE(target.header.has_value());
+        target.header = source.header;
+    }
+    target.objects.insert(target.objects.end(), source.objects.begin(),
+                          source.objects.end());
+    target.observations.insert(target.observations.end(),
+                               source.observations.begin(),
+                               source.observations.end());
+    if (source.error) {
+        EXPECT_FALSE(target.error.has_value());
+        target.error = source.error;
+    }
+    if (source.final_object_id) {
+        EXPECT_FALSE(target.final_object_id.has_value());
+        target.final_object_id = source.final_object_id;
+    }
+    if (source.clean_fin) {
+        EXPECT_FALSE(target.clean_fin);
+    }
+    target.clean_fin = target.clean_fin || source.clean_fin;
+    target.local_api_misuse =
+        target.local_api_misuse || source.local_api_misuse;
+}
+
+void expect_same_properties(const KeyValuePairs& actual,
+                            const KeyValuePairs& expected,
+                            std::size_t split) {
+    ASSERT_EQ(actual.size(), expected.size()) << split;
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        EXPECT_EQ(actual[index].type, expected[index].type) << split << ':' << index;
+        ASSERT_EQ(actual[index].value.index(), expected[index].value.index())
+            << split << ':' << index;
+        if (const auto* integer = std::get_if<VarIntValue>(&actual[index].value)) {
+            const auto& expected_integer =
+                std::get<VarIntValue>(expected[index].value);
+            EXPECT_EQ(integer->value, expected_integer.value) << split << ':' << index;
+            EXPECT_TRUE(std::ranges::equal(integer->raw_bytes,
+                                           expected_integer.raw_bytes))
+                << split << ':' << index;
+        } else {
+            EXPECT_TRUE(std::ranges::equal(
+                std::get<ByteValue>(actual[index].value).bytes,
+                std::get<ByteValue>(expected[index].value).bytes))
+                << split << ':' << index;
+        }
+    }
+}
+
+void expect_same_event(const ObjectEvent& actual, const ObjectEvent& expected,
+                       std::size_t split) {
+    EXPECT_EQ(actual.datagram_type, expected.datagram_type) << split;
+    EXPECT_EQ(actual.track_alias, expected.track_alias) << split;
+    EXPECT_EQ(actual.group_id, expected.group_id) << split;
+    EXPECT_EQ(actual.object_id, expected.object_id) << split;
+    EXPECT_EQ(actual.publisher_priority, expected.publisher_priority) << split;
+    EXPECT_EQ(actual.end_of_group, expected.end_of_group) << split;
+    expect_same_properties(actual.properties, expected.properties, split);
+    EXPECT_EQ(actual.status, expected.status) << split;
+    EXPECT_EQ(actual.payload_length, expected.payload_length) << split;
+    EXPECT_TRUE(std::ranges::equal(actual.retained_payload,
+                                   expected.retained_payload)) << split;
+    EXPECT_EQ(actual.forwarding_preference, expected.forwarding_preference) << split;
+    EXPECT_EQ(actual.subgroup_id, expected.subgroup_id) << split;
+    EXPECT_EQ(actual.subgroup_header_type, expected.subgroup_header_type) << split;
+    EXPECT_EQ(actual.first_object, expected.first_object) << split;
+    EXPECT_EQ(actual.priority_inherited, expected.priority_inherited) << split;
+    EXPECT_EQ(actual.stream_offset, expected.stream_offset) << split;
+    EXPECT_EQ(actual.stream_end_offset, expected.stream_end_offset) << split;
+}
+
+void expect_same_result(const AccumulatedSubgroupResult& actual,
+                        const AccumulatedSubgroupResult& expected,
+                        std::size_t split) {
+    ASSERT_EQ(actual.header.has_value(), expected.header.has_value()) << split;
+    if (actual.header) {
+        EXPECT_EQ(actual.header->raw_type, expected.header->raw_type) << split;
+        EXPECT_EQ(actual.header->track_alias, expected.header->track_alias) << split;
+        EXPECT_EQ(actual.header->group_id, expected.header->group_id) << split;
+        EXPECT_EQ(actual.header->subgroup_id, expected.header->subgroup_id) << split;
+        EXPECT_EQ(actual.header->publisher_priority,
+                  expected.header->publisher_priority) << split;
+        EXPECT_EQ(actual.header->properties_present,
+                  expected.header->properties_present) << split;
+        EXPECT_EQ(actual.header->end_of_group, expected.header->end_of_group) << split;
+        EXPECT_EQ(actual.header->first_object, expected.header->first_object) << split;
+        EXPECT_EQ(actual.header->priority_inherited,
+                  expected.header->priority_inherited) << split;
+        EXPECT_EQ(actual.header->stream_offset, expected.header->stream_offset) << split;
+        EXPECT_EQ(actual.header->stream_end_offset,
+                  expected.header->stream_end_offset) << split;
+    }
+    ASSERT_EQ(actual.objects.size(), expected.objects.size()) << split;
+    for (std::size_t index = 0; index < actual.objects.size(); ++index) {
+        expect_same_event(actual.objects[index], expected.objects[index], split);
+    }
+    ASSERT_EQ(actual.observations.size(), expected.observations.size()) << split;
+    for (std::size_t index = 0; index < actual.observations.size(); ++index) {
+        EXPECT_EQ(actual.observations[index].kind,
+                  expected.observations[index].kind) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].phase,
+                  expected.observations[index].phase) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].offset,
+                  expected.observations[index].offset) << split << ':' << index;
+        EXPECT_EQ(actual.observations[index].detail,
+                  expected.observations[index].detail) << split << ':' << index;
+    }
+    ASSERT_EQ(actual.error.has_value(), expected.error.has_value()) << split;
+    if (actual.error) {
+        EXPECT_EQ(actual.error->code, expected.error->code) << split;
+        EXPECT_EQ(actual.error->offset, expected.error->offset) << split;
+        EXPECT_EQ(actual.error->detail, expected.error->detail) << split;
+    }
+    EXPECT_EQ(actual.final_object_id, expected.final_object_id) << split;
+    EXPECT_EQ(actual.clean_fin, expected.clean_fin) << split;
+    EXPECT_EQ(actual.local_api_misuse, expected.local_api_misuse) << split;
+}
+
 TEST(Draft18ObjectsTest, DecodesAllTwentyFourValidTypeForms) {
     constexpr std::array<std::uint64_t, 24> valid_types{
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
@@ -318,7 +448,9 @@ TEST(Draft18ObjectsTest, DiscardsOnlyValidPaddingDatagrams) {
         auto encoded = prefix;
         encoded.insert(encoded.end(), body.begin(), body.end());
         const auto result = decode_datagram(encoded, {});
-        EXPECT_TRUE(std::holds_alternative<DiscardedPaddingDatagram>(result));
+        ASSERT_TRUE(std::holds_alternative<DiscardedPaddingDatagram>(result));
+        EXPECT_FALSE(std::get<DiscardedPaddingDatagram>(result)
+                         .first_nonzero_offset.has_value());
     }
     struct BadPadding {
         std::vector<std::byte> body;
@@ -329,8 +461,9 @@ TEST(Draft18ObjectsTest, DiscardsOnlyValidPaddingDatagrams) {
         auto encoded = prefix;
         encoded.insert(encoded.end(), bad.body.begin(), bad.body.end());
         const auto result = decode_datagram(encoded, {});
-        const auto& error = require_error(result, DecodeErrorCode::ProtocolViolation);
-        EXPECT_EQ(error.offset, bad.error_offset);
+        ASSERT_TRUE(std::holds_alternative<DiscardedPaddingDatagram>(result));
+        EXPECT_EQ(std::get<DiscardedPaddingDatagram>(result).first_nonzero_offset,
+                  bad.error_offset);
     }
 
     const auto nonminimal_type = bytes({0xf8, 0x00, 0x13, 0x2b, 0x3e, 0x29, 0x00});
@@ -553,43 +686,42 @@ TEST(Draft18SubgroupTest, IsStableAcrossEveryChunkSplit) {
     append_vi64(encoded, 4);
 
     SubgroupDecoder one_shot;
-    const auto expected = one_shot.push(encoded, true);
+    AccumulatedSubgroupResult expected;
+    accumulate(one_shot.push(encoded, true), expected);
     ASSERT_FALSE(expected.error.has_value());
     ASSERT_EQ(expected.objects.size(), 2u);
 
     for (std::size_t split = 0; split <= encoded.size(); ++split) {
         SubgroupDecoder split_decoder;
-        auto first = split_decoder.push(
-            std::span<const std::byte>(encoded).first(split), false);
-        auto second = split_decoder.push(
-            std::span<const std::byte>(encoded).subspan(split), true);
-        std::vector<ObjectEvent> objects = std::move(first.objects);
-        objects.insert(objects.end(), second.objects.begin(), second.objects.end());
-        ASSERT_EQ(objects.size(), expected.objects.size()) << split;
-        for (std::size_t index = 0; index < objects.size(); ++index) {
-            EXPECT_EQ(objects[index].object_id, expected.objects[index].object_id)
-                << split;
-            EXPECT_EQ(objects[index].status, expected.objects[index].status)
-                << split;
-            EXPECT_EQ(objects[index].stream_offset,
-                      expected.objects[index].stream_offset) << split;
-            EXPECT_EQ(objects[index].stream_end_offset,
-                      expected.objects[index].stream_end_offset) << split;
-        }
-        EXPECT_EQ(second.clean_fin, expected.clean_fin) << split;
-        EXPECT_EQ(second.error.has_value(), expected.error.has_value()) << split;
+        AccumulatedSubgroupResult actual;
+        accumulate(split_decoder.push(
+                       std::span<const std::byte>(encoded).first(split), false),
+                   actual);
+        accumulate(split_decoder.push(
+                       std::span<const std::byte>(encoded).subspan(split), true),
+                   actual);
+        expect_same_result(actual, expected, split);
     }
 }
 
 TEST(Draft18SubgroupTest, ClassifiesFinByParserPhaseAndIsTerminal) {
     const auto header = subgroup_header(0x10);
+    constexpr std::array header_phases{
+        SubgroupDecodePhase::Type,
+        SubgroupDecodePhase::TrackAlias,
+        SubgroupDecodePhase::GroupId,
+        SubgroupDecodePhase::Priority,
+    };
     for (std::size_t split = 0; split < header.size(); ++split) {
         SubgroupDecoder decoder;
         const auto result = decoder.push(
             std::span<const std::byte>(header).first(split), true);
-        ASSERT_TRUE(result.error.has_value()) << split;
-        EXPECT_EQ(result.error->code, DecodeErrorCode::ProtocolViolation) << split;
-        EXPECT_EQ(result.error->offset, split) << split;
+        EXPECT_FALSE(result.error.has_value()) << split;
+        ASSERT_EQ(result.observations.size(), 1u) << split;
+        EXPECT_EQ(result.observations[0].kind,
+                  DecoderObservationKind::DraftAmbiguity) << split;
+        EXPECT_EQ(result.observations[0].phase, header_phases[split]) << split;
+        EXPECT_EQ(result.observations[0].offset, split) << split;
     }
 
     auto mid_payload = header;
@@ -790,6 +922,71 @@ TEST(Draft18SubgroupTest, SupportsZeroPayloadEvidenceLimitAndErrorStickiness) {
     const auto misuse = invalid.push(bytes({0x10}), true);
     EXPECT_TRUE(misuse.local_api_misuse);
     EXPECT_FALSE(misuse.error.has_value());
+}
+
+TEST(Draft18SubgroupTest, AccountsForDecodedPropertiesWithoutRetainingRawBlock) {
+    std::vector<std::byte> property;
+    append_vi64(property, 0x3c);
+    const auto raw_integer =
+        bytes({0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09});
+    property.insert(property.end(), raw_integer.begin(), raw_integer.end());
+    append_vi64(property, 0x79 - 0x3c);
+    append_vi64(property, 100);
+    property.insert(property.end(), 100, std::byte{0x5a});
+
+    auto prefix = subgroup_header(0x11);
+    append_vi64(prefix, 0);
+    append_vi64(prefix, property.size());
+    prefix.insert(prefix.end(), property.begin(), property.end());
+    append_vi64(prefix, 1000);
+
+    Limits limits;
+    limits.maximum_retained_payload_length = 3;
+    SubgroupDecoder decoder(limits);
+    const auto prefix_result = decoder.push(prefix, false);
+    ASSERT_FALSE(prefix_result.error.has_value());
+
+    const auto decoded_property_storage = 2u * sizeof(KeyValuePair) + 108u;
+    EXPECT_GE(decoder.buffered_byte_count(), decoded_property_storage);
+    EXPECT_LE(decoder.buffered_byte_count(),
+              decoded_property_storage + limits.maximum_retained_payload_length + 8u);
+    for (std::size_t index = 0; index < 999u; ++index) {
+        const std::array payload_byte{std::byte{0xaa}};
+        const auto result = decoder.push(payload_byte, false);
+        ASSERT_FALSE(result.error.has_value()) << index;
+        EXPECT_GE(decoder.buffered_byte_count(), decoded_property_storage) << index;
+        EXPECT_LE(decoder.buffered_byte_count(),
+                  decoded_property_storage +
+                      limits.maximum_retained_payload_length + 8u) << index;
+    }
+    const std::array final_byte{std::byte{0xbb}};
+    const auto completed = decoder.push(final_byte, true);
+    ASSERT_EQ(completed.objects.size(), 1u);
+    ASSERT_EQ(completed.objects[0].properties.size(), 2u);
+    EXPECT_TRUE(std::ranges::equal(
+        std::get<VarIntValue>(completed.objects[0].properties[0].value).raw_bytes,
+        raw_integer));
+    EXPECT_EQ(std::get<ByteValue>(completed.objects[0].properties[1].value)
+                  .bytes.size(),
+              100u);
+}
+
+TEST(Draft18SubgroupTest, ResolvesSparseSecondObjectAndPreservesOffsets) {
+    auto encoded = subgroup_header(0x10);
+    const auto first_offset = encoded.size();
+    append_subgroup_object(encoded, 10, {}, 1, std::nullopt, bytes({0xaa}));
+    const auto second_offset = encoded.size();
+    append_subgroup_object(encoded, 5, {}, 1, std::nullopt, bytes({0xbb}));
+    SubgroupDecoder decoder;
+    const auto result = decoder.push(encoded, true);
+    ASSERT_FALSE(result.error.has_value());
+    ASSERT_EQ(result.objects.size(), 2u);
+    EXPECT_EQ(result.objects[0].object_id, 10u);
+    EXPECT_EQ(result.objects[1].object_id, 16u);
+    EXPECT_EQ(result.objects[0].stream_offset, first_offset);
+    EXPECT_EQ(result.objects[0].stream_end_offset, second_offset);
+    EXPECT_EQ(result.objects[1].stream_offset, second_offset);
+    EXPECT_EQ(result.objects[1].stream_end_offset, encoded.size());
 }
 
 }  // namespace
