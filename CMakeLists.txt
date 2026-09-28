@@ -13,6 +13,7 @@ include(cmake/Dependencies.cmake)
 find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
+include(cmake/Quiche.cmake)
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -129,7 +130,8 @@ add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
-target_link_libraries(moq-interop-runner PRIVATE moq-interop-http)
+target_link_libraries(moq-interop-runner PRIVATE moq-interop-http
+                      moq-interop-quiche)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
 install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
         FILES_MATCHING PATTERN "*.txt")
@@ -139,6 +141,26 @@ install(DIRECTORY requirements/ DESTINATION share/moq-interop/requirements
 if(MOQ_INTEROP_BUILD_TESTS)
     enable_testing()
     FetchContent_MakeAvailable(googletest)
+
+    add_executable(moq-interop-quiche-link-tests
+                   tests/integration/quiche_link_test.cpp)
+    target_link_libraries(moq-interop-quiche-link-tests PRIVATE
+                          moq-interop-quiche)
+    target_compile_options(moq-interop-quiche-link-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_test(NAME quiche-link COMMAND moq-interop-quiche-link-tests)
+    add_test(NAME quiche-dependency-contract
+        COMMAND "${CMAKE_COMMAND}"
+            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+            "-DQUICHE_SOURCE_DIR=${quiche_SOURCE_DIR}"
+            "-DPROJECT_LOCK_FILE=${MOQ_INTEROP_QUICHE_LOCK_FILE}"
+            "-DFETCHED_LOCK_FILE=${MOQ_INTEROP_FETCHED_QUICHE_LOCK_FILE}"
+            "-DVERIFY_SCRIPT=${PROJECT_SOURCE_DIR}/cmake/VerifyQuiche.cmake"
+            "-DQUICHE_REVISION=${MOQ_INTEROP_QUICHE_REVISION}"
+            "-DBORINGSSL_REVISION=${MOQ_INTEROP_BORINGSSL_REVISION}"
+            -P "${PROJECT_SOURCE_DIR}/tests/integration/quiche_dependency_contract.cmake"
+    )
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

@@ -9,6 +9,8 @@ FetchContent_Declare(
     quiche
     GIT_REPOSITORY https://github.com/cloudflare/quiche.git
     GIT_TAG ${MOQ_INTEROP_QUICHE_REVISION}
+    GIT_SUBMODULES quiche/deps/boringssl
+    GIT_SUBMODULES_RECURSE FALSE
 )
 FetchContent_Declare(
     nlohmann_json

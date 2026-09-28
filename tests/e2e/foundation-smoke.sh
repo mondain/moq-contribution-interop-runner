@@ -165,7 +165,14 @@ assert_runtime_hardening() {
     [[ "$(docker exec "${container}" /usr/local/bin/moq-interop-runner --version | \
         awk '$1 == "source:" {print $2}')" == "${source_revision}" ]]
     docker exec "${container}" sh -ec \
-        'test -w /var/lib/moq-interop &&
+        '! command -v cargo &&
+         ! command -v rustc &&
+         test ! -e /usr/local/cargo &&
+         test ! -e /usr/local/rustup &&
+         ! find / -type f \( -name "libquiche.so" -o -name "libquiche.so.*" \) \
+             -print -quit 2>/dev/null | grep -q . &&
+         ! ldd /usr/local/bin/moq-interop-runner | grep -qi quiche &&
+         test -w /var/lib/moq-interop &&
          test ! -w /usr/share/moq-interop/docs/draft-ietf-moq-transport-18.txt &&
          test ! -w /usr/share/moq-interop/requirements/draft18.json &&
          touch /var/lib/moq-interop/smoke-write &&

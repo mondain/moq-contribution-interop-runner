@@ -12,6 +12,8 @@ TEST(Version, ReportsBuildAndDependencyRevisions) {
 
     EXPECT_TRUE(std::regex_match(info.version, std::regex(R"([0-9]+\.[0-9]+\.[0-9]+)")));
     EXPECT_FALSE(info.source_revision.empty());
+    EXPECT_EQ(info.dependencies.at("quiche"),
+              "bbfe6205b8af2e6fadbb6d7818de463fbe123342");
 
     for (const char* dependency : {"quiche", "nlohmann_json", "cpp_httplib", "googletest", "sqlite3"}) {
         const auto it = info.dependencies.find(dependency);
