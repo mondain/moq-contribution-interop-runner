@@ -101,8 +101,15 @@ TEST(Draft18SessionRequests, ObservesAllSevenPeerAndLocalOpeningRequests) {
                             }),
               7);
     for (std::size_t index = 0; index < peer_messages.size(); ++index) {
-        const auto& observed = std::get<RequestObservedEvidence>(
-            peer_evidence[index * 2 + 1].data);
+        const auto event = std::find_if(
+            peer_evidence.begin(), peer_evidence.end(),
+            [index](const EvidenceEvent& value) {
+                const auto* observed =
+                    std::get_if<RequestObservedEvidence>(&value.data);
+                return observed && observed->stream_id == index * 4;
+            });
+        ASSERT_NE(event, peer_evidence.end());
+        const auto& observed = std::get<RequestObservedEvidence>(event->data);
         EXPECT_EQ(observed.initiator, RequestInitiator::Peer);
         EXPECT_EQ(observed.request_id, index * 2);
         EXPECT_EQ(observed.stream_id, index * 4);
@@ -229,10 +236,13 @@ TEST(Draft18SessionRequests, CorrelatesEveryInitialResponseFamily) {
             StreamDataEvent{stream_id, response, false});
         EXPECT_EQ(close_action(transition), nullptr) << index;
         const auto evidence = session.take_evidence(32);
-        ASSERT_EQ(evidence.size(), 1u) << index;
-        EXPECT_EQ(evidence.front().kind, EvidenceKind::InitialResponseObserved);
+        const auto event = std::find_if(
+            evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+                return value.kind == EvidenceKind::InitialResponseObserved;
+            });
+        ASSERT_NE(event, evidence.end()) << index;
         const auto& observed =
-            std::get<InitialResponseEvidence>(evidence.front().data);
+            std::get<InitialResponseEvidence>(event->data);
         EXPECT_EQ(observed.original_request_id, index * 2 + 1);
         EXPECT_EQ(observed.request_kind, kinds[index]);
     }
@@ -1579,6 +1589,603 @@ TEST(Draft18Session, EvidenceSequencesRemainContiguousAcrossBoundedDrains) {
     ASSERT_EQ(third.size(), 1u);
     EXPECT_EQ(second.front().sequence, 1u);
     EXPECT_EQ(third.front().sequence, 2u);
+}
+
+TEST(Draft18SessionSubscriptions, PeerRequestsCreateExactLocalRolesAndPhases) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'a'}},
+                                     {std::byte{'b'}, std::byte{0}}}};
+    const TrackName name{{std::byte{'t'}}};
+    const TrackKey expected{{name_space.fields}, name.bytes};
+
+    PublisherSession subscribe;
+    activate(subscribe);
+    subscribe.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, name_space, name, {}}), false});
+    subscribe.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    auto evidence = subscribe.take_evidence(64);
+    auto created = std::find_if(evidence.begin(), evidence.end(),
+                                [](const EvidenceEvent& event) {
+                                    return event.kind ==
+                                           EvidenceKind::SubscriptionCreated;
+                                });
+    ASSERT_NE(created, evidence.end());
+    const auto& subscription =
+        std::get<SubscriptionCreatedEvidence>(created->data);
+    EXPECT_EQ(subscription.track, expected);
+    EXPECT_EQ(subscription.local_role, LocalSubscriptionRole::Publisher);
+    EXPECT_EQ(subscription.phase, SubscriptionPhase::Pending);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& event) {
+                               const auto* phase =
+                                   std::get_if<SubscriptionPhaseEvidence>(
+                                       &event.data);
+                               return phase != nullptr &&
+                                      phase->new_phase ==
+                                          SubscriptionPhase::Established;
+                           }),
+              evidence.end());
+
+    PublisherSession publish;
+    activate(publish);
+    publish.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 9, {}, {}}), false});
+    publish.observe_local_message(0, RequestOkMessage{}, false);
+    evidence = publish.take_evidence(64);
+    created = std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& event) {
+                               return event.kind ==
+                                      EvidenceKind::SubscriptionCreated;
+                           });
+    ASSERT_NE(created, evidence.end());
+    EXPECT_EQ(std::get<SubscriptionCreatedEvidence>(created->data).local_role,
+              LocalSubscriptionRole::Subscriber);
+}
+
+TEST(Draft18SessionSubscriptions, LocalRequestsMapToSenderRole) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'x'}}};
+
+    PublisherSession session;
+    activate(session);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, SubscribeMessage{1, name_space, name, {}}, false);
+    session.observe_local_stream(5, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        5, PublishMessage{3, name_space, name, 4, {}, {}}, false);
+    const auto evidence = session.take_evidence(64);
+    std::vector<LocalSubscriptionRole> roles;
+    for (const auto& event : evidence) {
+        if (const auto* created =
+                std::get_if<SubscriptionCreatedEvidence>(&event.data)) {
+            roles.push_back(created->local_role);
+        }
+    }
+    EXPECT_EQ(roles, (std::vector<LocalSubscriptionRole>{
+                         LocalSubscriptionRole::Subscriber,
+                         LocalSubscriptionRole::Publisher}));
+}
+
+TEST(Draft18SessionSubscriptions, DuplicatePeerPublicationReturnsRequestError) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 7, {}, {}}), false});
+    const auto duplicate = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, name, 9, {}, {}}), false});
+    ASSERT_EQ(duplicate.actions.size(), 1u);
+    const auto* send = std::get_if<SendMessageAction>(&duplicate.actions[0]);
+    ASSERT_NE(send, nullptr);
+    EXPECT_EQ(send->stream_id, 4u);
+    const auto* error = std::get_if<RequestErrorMessage>(&send->message);
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->error_code, 0x19u);
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::DuplicateSubscription;
+                            }), 1);
+}
+
+TEST(Draft18SessionSubscriptions, DotAndSessionNamespaceReturnDoesNotExist) {
+    using namespace wire::draft18;
+    const std::vector<TrackNamespace> namespaces{
+        {{{std::byte{'.'}}}},
+        {{{std::byte{'.'}, std::byte{'s'}, std::byte{'e'}, std::byte{'s'},
+           std::byte{'s'}, std::byte{'i'}, std::byte{'o'}, std::byte{'n'}}}}};
+    for (const auto& name_space : namespaces) {
+        PublisherSession session;
+        activate(session);
+        const auto result = session.on_event(StreamDataEvent{
+            0, encode(PublishMessage{0, name_space, {{std::byte{'t'}}}, 1, {}, {}}),
+            false});
+        ASSERT_EQ(result.actions.size(), 1u);
+        const auto* send = std::get_if<SendMessageAction>(&result.actions[0]);
+        ASSERT_NE(send, nullptr);
+        const auto* error = std::get_if<RequestErrorMessage>(&send->message);
+        ASSERT_NE(error, nullptr);
+        EXPECT_EQ(error->error_code, 0x10u);
+        EXPECT_EQ(session.phase(), SessionPhase::Active);
+    }
+}
+
+TEST(Draft18SessionSubscriptions, RejectedSubscriptionReleasesTrackRole) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 7, {}, {}}), false});
+    session.observe_local_message(
+        0, RequestErrorMessage{0x20, 0, {}, std::nullopt}, true);
+    const auto later = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, name, 9, {}, {}}), false});
+    EXPECT_TRUE(later.actions.empty());
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::SubscriptionCreated;
+                            }), 2);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::DuplicateSubscription;
+                            }), 0);
+}
+
+TEST(Draft18SessionSubscriptions, PeerPublishReplacesPendingLocalSubscribe) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, SubscribeMessage{1, name_space, name, {}}, false);
+    const auto incoming = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 7, {}, {}}), false});
+    ASSERT_EQ(incoming.actions.size(), 1u);
+    const auto* stop = std::get_if<StopSendingAction>(&incoming.actions[0]);
+    ASSERT_NE(stop, nullptr);
+    EXPECT_EQ(stop->stream_id, 1u);
+    EXPECT_EQ(stop->application_error, 0x1u);
+    const auto evidence = session.take_evidence(64);
+    const auto replacement = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::PendingSubscriptionReplaced;
+        });
+    ASSERT_NE(replacement, evidence.end());
+    const auto created = std::find_if(
+        replacement, evidence.end(), [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::SubscriptionCreated;
+        });
+    ASSERT_NE(created, evidence.end());
+    EXPECT_EQ(std::get<SubscriptionCreatedEvidence>(created->data).stream_id, 0u);
+    const auto old_terminal = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            const auto* terminal =
+                std::get_if<RequestTerminalEvidence>(&value.data);
+            return terminal && terminal->stream_id == 1;
+        });
+    ASSERT_NE(old_terminal, evidence.end());
+    EXPECT_LT(old_terminal->sequence, replacement->sequence);
+    EXPECT_LT(replacement->sequence, created->sequence);
+}
+
+TEST(Draft18SessionSubscriptions, KeyByteLimitCountsBothRetainedCopies) {
+    using namespace wire::draft18;
+    PublisherSessionConfig config;
+    config.maximum_subscription_key_bytes = 3;
+    PublisherSession session(config);
+    activate(session);
+    const auto result = session.on_event(StreamDataEvent{
+        0,
+        encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                              {{std::byte{'t'}}}, 1, {}, {}}),
+        false});
+    ASSERT_NE(close_action(result), nullptr);
+    const auto evidence = session.take_evidence(64);
+    const auto limit = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            const auto* exhausted =
+                std::get_if<HarnessLimitEvidence>(&value.data);
+            return exhausted &&
+                   exhausted->limit == HarnessLimitKind::SubscriptionKeyBytes;
+        });
+    EXPECT_NE(limit, evidence.end());
+}
+
+TEST(Draft18SessionSubscriptions, BinaryTrackIdentityPreservesFieldBoundaries) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const std::vector<TrackNamespace> namespaces{
+        {{{std::byte{'a'}}, {std::byte{'b'}}}},
+        {{{std::byte{'a'}, std::byte{'b'}}}},
+        {{{std::byte{'a'}}, {std::byte{'b'}, std::byte{0}}}},
+        {{{std::byte{'a'}, std::byte{0}}}}};
+    // Empty fields remain distinct in the key type, although draft-18
+    // forbids transmitting them (Section 2.4.1).
+    EXPECT_NE((TrackKey{{{{}}}, {}}), (TrackKey{{}, {}}));
+    for (std::size_t index = 0; index < namespaces.size(); ++index) {
+        const auto stream = static_cast<transport::StreamId>(index * 4);
+        const auto result = session.on_event(StreamDataEvent{
+            stream,
+            encode(PublishMessage{index * 2, namespaces[index],
+                                  {}, 1, {}, {}}),
+            false});
+        EXPECT_TRUE(result.actions.empty()) << index;
+    }
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::SubscriptionCreated;
+                            }),
+              namespaces.size());
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::DuplicateSubscription;
+                            }),
+              0);
+}
+
+TEST(Draft18SessionSubscriptions, OppositeLocalRolesCoexistForExactTrack) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    const auto published = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 1, {}, {}}), false});
+    ASSERT_TRUE(published.actions.empty());
+    const auto subscribed = session.on_event(StreamDataEvent{
+        4, encode(SubscribeMessage{2, name_space, name, {}}), false});
+    EXPECT_TRUE(subscribed.actions.empty());
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::OppositeRoleCoexistence;
+                            }),
+              1);
+}
+
+TEST(Draft18SessionSubscriptions, SameRoleDuplicateForBothOperationsAndSenders) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    for (const bool peer : {false, true}) {
+        for (const bool publish : {false, true}) {
+            PublisherSession session;
+            activate(session);
+            const auto request = [&](std::uint64_t id) -> Message {
+                if (publish) {
+                    return PublishMessage{id, name_space, name, 1, {}, {}};
+                }
+                return SubscribeMessage{id, name_space, name, {}};
+            };
+            SessionTransition duplicate;
+            if (peer) {
+                session.on_event(StreamDataEvent{0, encode(request(0)), false});
+                duplicate = session.on_event(
+                    StreamDataEvent{4, encode(request(2)), false});
+                ASSERT_EQ(duplicate.actions.size(), 1u);
+                const auto* send =
+                    std::get_if<SendMessageAction>(&duplicate.actions.front());
+                ASSERT_NE(send, nullptr);
+                const auto* error =
+                    std::get_if<RequestErrorMessage>(&send->message);
+                ASSERT_NE(error, nullptr);
+                EXPECT_EQ(error->error_code, 0x19u);
+            } else {
+                session.observe_local_stream(1, LocalStreamPurpose::Request);
+                session.observe_local_message(1, request(1), false);
+                session.observe_local_stream(5, LocalStreamPurpose::Request);
+                duplicate = session.observe_local_message(5, request(3), false);
+                EXPECT_TRUE(duplicate.actions.empty());
+            }
+            const auto evidence = session.take_evidence(64);
+            EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                                    [](const EvidenceEvent& value) {
+                                        return value.kind ==
+                                               EvidenceKind::DuplicateSubscription;
+                                    }),
+                      1);
+        }
+    }
+}
+
+TEST(Draft18SessionSubscriptions, ReservedCategoriesAreByteExact) {
+    using namespace wire::draft18;
+    const std::vector<std::pair<TrackNamespace, TrackName>> cases{
+        {{{{std::byte{'.'}}}}, {{}}},
+        {{{{std::byte{'.'}, std::byte{'s'}, std::byte{'e'},
+            std::byte{'s'}, std::byte{'s'}, std::byte{'i'},
+            std::byte{'o'}, std::byte{'n'}}}}, {{}}},
+        {{{{std::byte{'.'}, std::byte{'s'}, std::byte{'e'},
+            std::byte{'s'}, std::byte{'s'}, std::byte{'i'},
+            std::byte{'o'}, std::byte{'n'}}}}, {{std::byte{'x'}}}}};
+    const std::array categories{
+        ReservedNamespaceCategory::Dot,
+        ReservedNamespaceCategory::SessionEmptyTrack,
+        ReservedNamespaceCategory::SessionUnrecognized};
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        PublisherSession session;
+        activate(session);
+        const auto result = session.on_event(StreamDataEvent{
+            0, encode(PublishMessage{0, cases[index].first,
+                                     cases[index].second, 1, {}, {}}),
+            false});
+        ASSERT_EQ(result.actions.size(), 1u);
+        const auto evidence = session.take_evidence(64);
+        const auto found = std::find_if(
+            evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+                return value.kind == EvidenceKind::ReservedNamespaceRejected;
+            });
+        ASSERT_NE(found, evidence.end());
+        EXPECT_EQ(std::get<ReservedNamespaceEvidence>(found->data).category,
+                  categories[index]);
+    }
+    for (const TrackNamespace& name_space : {
+             TrackNamespace{{{std::byte{'.'}, std::byte{'x'}}}},
+             TrackNamespace{}}) {
+        PublisherSession session;
+        activate(session);
+        const auto result = session.on_event(StreamDataEvent{
+            0, encode(PublishMessage{0, name_space, {}, 1, {}, {}}), false});
+        EXPECT_TRUE(result.actions.empty());
+    }
+}
+
+TEST(Draft18SessionSubscriptions, ActiveAndHistoryLimitsRemainIndependent) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const auto publish = [&](std::uint64_t id, char name) {
+        return PublishMessage{id, name_space,
+                              {{static_cast<std::byte>(name)}}, 1, {}, {}};
+    };
+    PublisherSessionConfig active_config;
+    active_config.maximum_active_subscriptions = 1;
+    PublisherSession active(active_config);
+    activate(active);
+    active.on_event(StreamDataEvent{0, encode(publish(0, 'a')), false});
+    const auto active_limit = active.on_event(
+        StreamDataEvent{4, encode(publish(2, 'b')), false});
+    ASSERT_NE(close_action(active_limit), nullptr);
+    auto evidence = active.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& value) {
+                               const auto* limit =
+                                   std::get_if<HarnessLimitEvidence>(&value.data);
+                               return limit && limit->limit ==
+                                   HarnessLimitKind::ActiveSubscriptions;
+                           }),
+              evidence.end());
+
+    PublisherSessionConfig history_config;
+    history_config.maximum_subscription_history = 1;
+    PublisherSession history(history_config);
+    activate(history);
+    history.on_event(StreamDataEvent{0, encode(publish(0, 'a')), false});
+    history.observe_local_message(
+        0, RequestErrorMessage{0x20, 0, {}, std::nullopt}, true);
+    const auto history_limit = history.on_event(
+        StreamDataEvent{4, encode(publish(2, 'b')), false});
+    ASSERT_NE(close_action(history_limit), nullptr);
+    evidence = history.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& value) {
+                               const auto* limit =
+                                   std::get_if<HarnessLimitEvidence>(&value.data);
+                               return limit && limit->limit ==
+                                   HarnessLimitKind::SubscriptionHistory;
+                           }),
+              evidence.end());
+}
+
+TEST(Draft18SessionSubscriptions, SessionCloseRecordsSubscriptionTermination) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'t'}}}, 1, {}, {}}), false});
+    session.take_evidence(64);
+    session.on_event(transport::PeerCloseEvent{
+        transport::CloseErrorSpace::Application, 9, {}});
+    const auto evidence = session.take_evidence(64);
+    const auto phase = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            const auto* changed =
+                std::get_if<SubscriptionPhaseEvidence>(&value.data);
+            return changed &&
+                   changed->new_phase == SubscriptionPhase::Terminated;
+        });
+    ASSERT_NE(phase, evidence.end());
+    const auto terminal = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::RequestTerminal;
+        });
+    ASSERT_NE(terminal, evidence.end());
+    EXPECT_LT(phase->sequence, terminal->sequence);
+}
+
+TEST(Draft18SessionSubscriptions, TerminalCausesReleaseSameRoleSlot) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    const auto first = encode(PublishMessage{0, name_space, name, 1, {}, {}});
+    const auto second = encode(PublishMessage{2, name_space, name, 1, {}, {}});
+    for (int cause = 0; cause < 5; ++cause) {
+        PublisherSession session;
+        activate(session);
+        session.on_event(StreamDataEvent{0, first, false});
+        switch (cause) {
+            case 0:
+                session.observe_local_message(
+                    0, RequestErrorMessage{0x20, 0, {}, std::nullopt}, true);
+                break;
+            case 1:
+                session.on_event(transport::PeerResetEvent{0, 9});
+                break;
+            case 2:
+                session.on_event(transport::PeerStopSendingEvent{0, 9});
+                break;
+            case 3:
+                session.on_event(StreamDataEvent{0, {}, true});
+                session.observe_local_fin(0);
+                break;
+            case 4:
+                session.observe_local_fin(0);
+                session.on_event(StreamDataEvent{0, {}, true});
+                break;
+        }
+        const auto result = session.on_event(StreamDataEvent{4, second, false});
+        EXPECT_TRUE(result.actions.empty()) << cause;
+        const auto evidence = session.take_evidence(64);
+        EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                                [](const EvidenceEvent& value) {
+                                    return value.kind ==
+                                           EvidenceKind::DuplicateSubscription;
+                                }),
+                  0) << cause;
+    }
+}
+
+TEST(Draft18SessionSubscriptions, PeerRejectionHasOneTerminalAfterLocalSend) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 1, {}, {}}), false});
+    const auto duplicate = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, name, 1, {}, {}}), false});
+    ASSERT_EQ(duplicate.actions.size(), 1u);
+    session.observe_local_message(
+        4, RequestErrorMessage{0x19, 0, {}, std::nullopt}, true);
+    session.observe_local_message(
+        4, RequestErrorMessage{0x19, 0, {}, std::nullopt}, true);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                const auto* terminal =
+                                    std::get_if<RequestTerminalEvidence>(&value.data);
+                                return terminal && terminal->stream_id == 4;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind ==
+                                       EvidenceKind::SubscriptionPhaseChanged;
+                            }),
+              0);
+}
+
+TEST(Draft18SessionSubscriptions, LocalReservedPublicationIsNotPeerFault) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    const auto result = session.observe_local_message(
+        1, PublishMessage{1, {{{std::byte{'.'}}}}, {}, 1, {}, {}}, false);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& value) {
+                               return value.kind ==
+                                      EvidenceKind::LocalObservationError;
+                           }),
+              evidence.end());
+}
+
+TEST(Draft18SessionSubscriptions, AllRoleOriginsReachEstablishedAndTerminated) {
+    using namespace wire::draft18;
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    for (const bool peer : {false, true}) {
+        for (const bool publish : {false, true}) {
+            PublisherSession session;
+            activate(session);
+            const auto stream = peer ? 0u : 1u;
+            const auto request_id = peer ? 0u : 1u;
+            const Message request = publish
+                ? Message{PublishMessage{request_id, name_space, name,
+                                         1, {}, {}}}
+                : Message{SubscribeMessage{request_id, name_space, name, {}}};
+            if (peer) {
+                session.on_event(StreamDataEvent{stream, encode(request), false});
+                session.observe_local_message(
+                    stream,
+                    publish ? Message{RequestOkMessage{}}
+                            : Message{SubscribeOkMessage{7, {}, {}}},
+                    false);
+            } else {
+                session.observe_local_stream(stream, LocalStreamPurpose::Request);
+                session.observe_local_message(stream, request, false);
+                session.on_event(StreamDataEvent{
+                    stream,
+                    encode(publish ? Message{RequestOkMessage{}}
+                                   : Message{SubscribeOkMessage{7, {}, {}}}),
+                    false});
+            }
+            session.observe_local_stop_sending(stream, 1);
+            const auto evidence = session.take_evidence(64);
+            std::vector<SubscriptionPhase> phases;
+            for (const auto& value : evidence) {
+                if (const auto* changed =
+                        std::get_if<SubscriptionPhaseEvidence>(&value.data)) {
+                    phases.push_back(changed->new_phase);
+                }
+            }
+            EXPECT_EQ(phases, (std::vector<SubscriptionPhase>{
+                                  SubscriptionPhase::Established,
+                                  SubscriptionPhase::Terminated}))
+                << peer << publish;
+        }
+    }
+}
+
+TEST(Draft18SessionSubscriptions, RequiredRejectionsSurviveNoOptionalEvidenceSpace) {
+    using namespace wire::draft18;
+    PublisherSessionConfig config;
+    config.maximum_evidence_count = 4;
+    PublisherSession duplicate(config);
+    activate_with_small_evidence_queue(duplicate);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const TrackName name{{std::byte{'t'}}};
+    duplicate.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, name, 1, {}, {}}), false});
+    duplicate.take_evidence(64);
+    const auto rejected = duplicate.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, name, 1, {}, {}}), false});
+    ASSERT_EQ(rejected.actions.size(), 1u);
+    const auto* duplicate_action =
+        std::get_if<SendMessageAction>(&rejected.actions.front());
+    ASSERT_NE(duplicate_action, nullptr);
+    ASSERT_NE(std::get_if<RequestErrorMessage>(&duplicate_action->message),
+              nullptr);
+    EXPECT_EQ(std::get<RequestErrorMessage>(duplicate_action->message).error_code,
+              0x19u);
+
+    PublisherSession reserved(config);
+    activate_with_small_evidence_queue(reserved);
+    const auto reserved_result = reserved.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'.'}}}}, name, 1, {}, {}}),
+        false});
+    ASSERT_EQ(reserved_result.actions.size(), 1u);
+    const auto* reserved_action =
+        std::get_if<SendMessageAction>(&reserved_result.actions.front());
+    ASSERT_NE(reserved_action, nullptr);
+    EXPECT_EQ(std::get<RequestErrorMessage>(reserved_action->message).error_code,
+              0x10u);
 }
 
 }  // namespace

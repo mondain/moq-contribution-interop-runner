@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <deque>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
@@ -57,6 +58,12 @@ std::size_t track_namespace_bytes(
     const wire::draft18::TrackNamespace& value) {
     std::size_t result = 0;
     for (const auto& field : value.fields) result += field.size();
+    return result;
+}
+
+std::size_t track_key_bytes(const TrackKey& value) {
+    std::size_t result = value.track_name.size();
+    for (const auto& field : value.name_space.fields) result += field.size();
     return result;
 }
 
@@ -220,6 +227,24 @@ std::size_t evidence_owned_bytes(const EvidenceData& data) {
             [](const RequestMessageObservedEvidence& value) {
                 return message_owned_bytes(value.message);
             },
+            [](const SubscriptionCreatedEvidence& value) {
+                return track_key_bytes(value.track);
+            },
+            [](const SubscriptionPhaseEvidence& value) {
+                return track_key_bytes(value.track);
+            },
+            [](const DuplicateSubscriptionEvidence& value) {
+                return track_key_bytes(value.track);
+            },
+            [](const OppositeRoleCoexistenceEvidence& value) {
+                return track_key_bytes(value.track);
+            },
+            [](const PendingSubscriptionReplacementEvidence& value) {
+                return track_key_bytes(value.track);
+            },
+            [](const ReservedNamespaceEvidence& value) {
+                return track_key_bytes(value.track);
+            },
             [](const auto&) -> std::size_t { return 0; }},
         data);
 }
@@ -261,7 +286,10 @@ bool valid_config(const PublisherSessionConfig& config) {
            config.maximum_active_requests != 0 &&
            config.maximum_outstanding_updates_per_request != 0 &&
            config.maximum_request_history != 0 &&
-           config.maximum_local_stream_history != 0;
+           config.maximum_local_stream_history != 0 &&
+           config.maximum_active_subscriptions != 0 &&
+           config.maximum_subscription_history != 0 &&
+           config.maximum_subscription_key_bytes != 0;
 }
 
 bool peer_initiated(transport::StreamId stream_id) {
@@ -336,6 +364,66 @@ RequestInitiator opposite(RequestInitiator value) {
                                            : RequestInitiator::Peer;
 }
 
+struct SubscriptionIdentity {
+    TrackKey track;
+    LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
+};
+
+struct SubscriptionIdentityLess {
+    bool operator()(const SubscriptionIdentity& lhs,
+                    const SubscriptionIdentity& rhs) const {
+        if (lhs.track.name_space.fields != rhs.track.name_space.fields) {
+            return lhs.track.name_space.fields < rhs.track.name_space.fields;
+        }
+        if (lhs.track.track_name != rhs.track.track_name) {
+            return lhs.track.track_name < rhs.track.track_name;
+        }
+        return lhs.local_role < rhs.local_role;
+    }
+};
+
+std::optional<std::pair<TrackKey, LocalSubscriptionRole>>
+subscription_identity(const wire::draft18::Message& message,
+                      RequestInitiator initiator) {
+    if (const auto* subscribe =
+            std::get_if<wire::draft18::SubscribeMessage>(&message)) {
+        return {{TrackKey{{subscribe->track_namespace.fields},
+                           subscribe->track_name.bytes},
+                 initiator == RequestInitiator::Peer
+                     ? LocalSubscriptionRole::Publisher
+                     : LocalSubscriptionRole::Subscriber}};
+    }
+    if (const auto* publish =
+            std::get_if<wire::draft18::PublishMessage>(&message)) {
+        return {{TrackKey{{publish->track_namespace.fields},
+                           publish->track_name.bytes},
+                 initiator == RequestInitiator::Peer
+                     ? LocalSubscriptionRole::Subscriber
+                     : LocalSubscriptionRole::Publisher}};
+    }
+    return std::nullopt;
+}
+
+std::optional<ReservedNamespaceCategory> reserved_namespace(
+    const TrackKey& track) {
+    if (track.name_space.fields.empty()) return std::nullopt;
+    const auto& first = track.name_space.fields.front();
+    if (first == std::vector<std::byte>{std::byte{'.'}}) {
+        return ReservedNamespaceCategory::Dot;
+    }
+    constexpr char kSession[] = ".session";
+    if (first.size() == sizeof(kSession) - 1 &&
+        std::equal(first.begin(), first.end(), kSession,
+                   [](std::byte actual, char expected) {
+                       return actual == static_cast<std::byte>(expected);
+                   })) {
+        return track.track_name.empty()
+                   ? ReservedNamespaceCategory::SessionEmptyTrack
+                   : ReservedNamespaceCategory::SessionUnrecognized;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 class PublisherSession::Impl {
@@ -359,6 +447,14 @@ public:
             RequestInitiator initiator{RequestInitiator::Peer};
         };
 
+        struct SubscriptionState {
+            TrackKey track;
+            LocalSubscriptionRole local_role{
+                LocalSubscriptionRole::Publisher};
+            SubscriptionPhase phase{SubscriptionPhase::Pending};
+            std::size_t retained_key_bytes{0};
+        };
+
         std::uint64_t request_id{0};
         transport::StreamId stream_id{0};
         RequestInitiator initiator{RequestInitiator::Peer};
@@ -371,6 +467,7 @@ public:
         bool peer_goaway_observed{false};
         bool local_goaway_observed{false};
         bool terminal{false};
+        std::optional<SubscriptionState> subscription;
     };
 
     PublisherSessionConfig config;
@@ -385,12 +482,17 @@ public:
         local_stream_purposes;
     std::unordered_map<transport::StreamId, RequestRecord> requests;
     std::unordered_map<std::uint64_t, RequestInitiator> request_owners;
+    std::map<SubscriptionIdentity, transport::StreamId,
+             SubscriptionIdentityLess>
+        active_subscriptions;
     std::optional<std::uint64_t> highest_peer_request_id;
     std::optional<std::uint64_t> highest_local_request_id;
     std::optional<std::uint64_t> peer_goaway_cutoff;
     bool peer_control_goaway_observed{false};
     bool local_control_goaway_observed{false};
     std::size_t active_requests{0};
+    std::size_t subscription_history{0};
+    std::size_t subscription_key_bytes{0};
     std::size_t partial_bytes{0};
     std::size_t early_streams{0};
     std::size_t early_bytes{0};
@@ -472,6 +574,17 @@ public:
                    config.maximum_evidence_bytes -
                        std::min(evidence_bytes,
                                 config.maximum_evidence_bytes);
+    }
+
+    bool optional_subscription_evidence_available(
+        std::size_t additional_count, std::size_t additional_bytes) const {
+        const auto free_count = config.maximum_evidence_count -
+            std::min(evidence.size(), config.maximum_evidence_count);
+        // Keep space for active request terminals and a protocol outcome.
+        return active_requests + 1 < free_count &&
+            additional_count <= free_count - active_requests - 2 &&
+            evidence_capacity_available(additional_count + 1,
+                                        additional_bytes);
     }
 
     bool preflight_evidence(SessionTransition& transition,
@@ -603,9 +716,170 @@ public:
         record.kind = kind;
         requests.emplace(stream_id, std::move(record));
         ++active_requests;
-        return emit(transition, EvidenceKind::RequestObserved,
-                    RequestObservedEvidence{initiator, request_id, kind,
-                                            stream_id, message});
+        if (!emit(transition, EvidenceKind::RequestObserved,
+                  RequestObservedEvidence{initiator, request_id, kind,
+                                          stream_id, message})) {
+            return false;
+        }
+        return register_subscription(transition, requests.at(stream_id),
+                                     message);
+    }
+
+    bool register_subscription(SessionTransition& transition,
+                               RequestRecord& request,
+                               const wire::draft18::Message& message) {
+        const auto identity = subscription_identity(message, request.initiator);
+        if (!identity) return true;
+        const auto& [track, local_role] = *identity;
+        // The request record and the active-role index each own a TrackKey.
+        const auto key_bytes = track_key_bytes(track);
+        const auto retained_bytes =
+            key_bytes > std::numeric_limits<std::size_t>::max() / 2
+                ? std::numeric_limits<std::size_t>::max()
+                : key_bytes * 2;
+        const auto reject = [&](std::uint64_t error_code) {
+            if (request.initiator == RequestInitiator::Peer) {
+                transition.actions.emplace_back(SendMessageAction{
+                    request.stream_id,
+                    wire::draft18::RequestErrorMessage{
+                        error_code, 0, {}, std::nullopt},
+                    true});
+            } else {
+                emit(transition, EvidenceKind::LocalObservationError,
+                     LocalObservationErrorEvidence{request.stream_id});
+            }
+            return true;
+        };
+        if (const auto category = reserved_namespace(track)) {
+            if (optional_subscription_evidence_available(1, key_bytes)) {
+                emit(transition, EvidenceKind::ReservedNamespaceRejected,
+                     ReservedNamespaceEvidence{track, *category,
+                                               request.initiator,
+                                               request.request_id,
+                                               request.stream_id});
+            }
+            return reject(0x10);
+        }
+        const SubscriptionIdentity active_key{track, local_role};
+        if (const auto existing = active_subscriptions.find(active_key);
+            existing != active_subscriptions.end()) {
+            const auto prior = requests.find(existing->second);
+            const bool replace_pending_subscribe =
+                request.initiator == RequestInitiator::Peer &&
+                request.kind == RequestKind::Publish &&
+                prior != requests.end() &&
+                prior->second.initiator == RequestInitiator::Local &&
+                prior->second.kind == RequestKind::Subscribe &&
+                prior->second.subscription &&
+                prior->second.subscription->phase == SubscriptionPhase::Pending;
+            if (replace_pending_subscribe) {
+                const auto cancelled_id = prior->second.request_id;
+                const auto cancelled_stream = prior->second.stream_id;
+                terminalize_request(transition, prior->second,
+                                    RequestTerminalCause::LocalStopSending, 0x1);
+                if (terminal()) return false;
+                transition.actions.emplace_back(
+                    StopSendingAction{cancelled_stream, 0x1});
+                if (optional_subscription_evidence_available(1, key_bytes)) {
+                    emit(transition, EvidenceKind::PendingSubscriptionReplaced,
+                         PendingSubscriptionReplacementEvidence{
+                             track, cancelled_id, cancelled_stream,
+                             request.request_id, request.stream_id});
+                }
+                return register_subscription(transition, request, message);
+            }
+            if (prior != requests.end() &&
+                optional_subscription_evidence_available(1, key_bytes)) {
+                emit(transition, EvidenceKind::DuplicateSubscription,
+                     DuplicateSubscriptionEvidence{
+                         track, local_role, prior->second.request_id,
+                         request.request_id, request.stream_id});
+            }
+            return reject(0x19);
+        }
+        if (subscription_history >= config.maximum_subscription_history) {
+            harness_limit(transition, HarnessLimitKind::SubscriptionHistory,
+                          subscription_history + 1,
+                          config.maximum_subscription_history);
+            return false;
+        }
+        if (active_subscriptions.size() >=
+            config.maximum_active_subscriptions) {
+            harness_limit(transition, HarnessLimitKind::ActiveSubscriptions,
+                          active_subscriptions.size() + 1,
+                          config.maximum_active_subscriptions);
+            return false;
+        }
+        if (key_bytes > config.maximum_subscription_key_bytes / 2 ||
+            retained_bytes >
+            config.maximum_subscription_key_bytes -
+                std::min(subscription_key_bytes,
+                         config.maximum_subscription_key_bytes)) {
+            harness_limit(transition, HarnessLimitKind::SubscriptionKeyBytes,
+                          subscription_key_bytes + retained_bytes,
+                          config.maximum_subscription_key_bytes);
+            return false;
+        }
+        const auto other_role =
+            local_role == LocalSubscriptionRole::Publisher
+                ? LocalSubscriptionRole::Subscriber
+                : LocalSubscriptionRole::Publisher;
+        const auto opposite_subscription = active_subscriptions.find(
+            SubscriptionIdentity{track, other_role});
+        const auto additional_count =
+            opposite_subscription == active_subscriptions.end() ? 1u : 2u;
+        const auto additional_bytes = key_bytes * additional_count;
+        const bool emit_optional = optional_subscription_evidence_available(
+            additional_count, additional_bytes);
+        request.subscription = RequestRecord::SubscriptionState{
+            track, local_role, SubscriptionPhase::Pending, retained_bytes};
+        active_subscriptions.emplace(active_key, request.stream_id);
+        ++subscription_history;
+        subscription_key_bytes += retained_bytes;
+        if (emit_optional && !emit(transition, EvidenceKind::SubscriptionCreated,
+                  SubscriptionCreatedEvidence{
+                      track, local_role, SubscriptionPhase::Pending,
+                      request.initiator, request.request_id,
+                      request.stream_id})) {
+            return false;
+        }
+        if (emit_optional && opposite_subscription != active_subscriptions.end()) {
+            const auto existing = requests.find(opposite_subscription->second);
+            const auto existing_id =
+                existing == requests.end() ? 0 : existing->second.request_id;
+            return emit(transition, EvidenceKind::OppositeRoleCoexistence,
+                        OppositeRoleCoexistenceEvidence{
+                            track, existing_id, request.request_id});
+        }
+        return true;
+    }
+
+    void transition_subscription(SessionTransition& transition,
+                                 RequestRecord& request,
+                                 SubscriptionPhase next) {
+        if (!request.subscription || request.subscription->phase == next) {
+            return;
+        }
+        const auto previous = request.subscription->phase;
+        request.subscription->phase = next;
+        const auto retained_bytes = request.subscription->retained_key_bytes;
+        if (next == SubscriptionPhase::Terminated) {
+            active_subscriptions.erase(SubscriptionIdentity{
+                request.subscription->track,
+                request.subscription->local_role});
+            subscription_key_bytes -= retained_bytes;
+        }
+        if (optional_subscription_evidence_available(
+                1, track_key_bytes(request.subscription->track))) {
+            emit(transition, EvidenceKind::SubscriptionPhaseChanged,
+                 SubscriptionPhaseEvidence{
+                     request.subscription->track,
+                     request.subscription->local_role, request.request_id,
+                     request.stream_id, previous, next});
+        }
+        if (next == SubscriptionPhase::Terminated) {
+            request.subscription.reset();
+        }
     }
 
     bool validate_request_id(SessionTransition& transition,
@@ -727,6 +1001,8 @@ public:
                                  std::nullopt) {
         if (request.terminal) return;
         if (!preflight_evidence(transition, 1, 0)) return;
+        transition_subscription(transition, request,
+                                SubscriptionPhase::Terminated);
         request.terminal = true;
         request.request_phase = RequestPhase::Terminal;
         std::deque<RequestRecord::PendingUpdate>{}.swap(
@@ -765,6 +1041,21 @@ public:
 
     void terminalize_request_for_session(RequestRecord& request) {
         if (request.terminal) return;
+        if (request.subscription) {
+            reserved_request_terminal_evidence.push_back(EvidenceEvent{
+                next_sequence++, EvidenceKind::SubscriptionPhaseChanged,
+                SubscriptionPhaseEvidence{
+                    request.subscription->track,
+                    request.subscription->local_role, request.request_id,
+                    request.stream_id, request.subscription->phase,
+                    SubscriptionPhase::Terminated}});
+            active_subscriptions.erase(SubscriptionIdentity{
+                request.subscription->track,
+                request.subscription->local_role});
+            subscription_key_bytes -=
+                request.subscription->retained_key_bytes;
+            request.subscription.reset();
+        }
         request.terminal = true;
         request.request_phase = RequestPhase::Terminal;
         std::deque<RequestRecord::PendingUpdate>{}.swap(
@@ -920,6 +1211,10 @@ public:
                      InitialResponseEvidence{responder, request.request_id,
                                              request.kind, request.stream_id,
                                              message});
+            if (emitted && request.subscription && !error) {
+                transition_subscription(transition, request,
+                                        SubscriptionPhase::Established);
+            }
             if (emitted && error) {
                 terminalize_request(transition, request,
                                     RequestTerminalCause::ResponseError);

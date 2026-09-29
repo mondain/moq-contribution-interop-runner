@@ -56,6 +56,25 @@ enum class RequestPhase {
     Terminal,
 };
 
+struct NamespaceKey {
+    std::vector<std::vector<std::byte>> fields;
+    bool operator==(const NamespaceKey&) const = default;
+};
+
+struct TrackKey {
+    NamespaceKey name_space;
+    std::vector<std::byte> track_name;
+    bool operator==(const TrackKey&) const = default;
+};
+
+enum class LocalSubscriptionRole { Publisher, Subscriber };
+enum class SubscriptionPhase { Pending, Established, Ending, Terminated };
+enum class ReservedNamespaceCategory {
+    Dot,
+    SessionEmptyTrack,
+    SessionUnrecognized,
+};
+
 enum class EvidenceKind {
     TransportEstablished,
     LocalStreamObserved,
@@ -86,6 +105,12 @@ enum class EvidenceKind {
     RequestUpdateFailed,
     RequestStateViolation,
     RequestMessageObserved,
+    SubscriptionCreated,
+    SubscriptionPhaseChanged,
+    DuplicateSubscription,
+    OppositeRoleCoexistence,
+    PendingSubscriptionReplaced,
+    ReservedNamespaceRejected,
 };
 
 enum class HarnessLimitKind {
@@ -100,6 +125,9 @@ enum class HarnessLimitKind {
     OutstandingUpdates,
     RequestHistory,
     LocalStreamHistory,
+    ActiveSubscriptions,
+    SubscriptionHistory,
+    SubscriptionKeyBytes,
 };
 
 struct TransportEstablishedEvidence {
@@ -258,6 +286,54 @@ struct RequestMessageObservedEvidence {
     wire::draft18::Message message;
 };
 
+struct SubscriptionCreatedEvidence {
+    TrackKey track;
+    LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
+    SubscriptionPhase phase{SubscriptionPhase::Pending};
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t request_id{0};
+    transport::StreamId stream_id{0};
+};
+
+struct SubscriptionPhaseEvidence {
+    TrackKey track;
+    LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
+    std::uint64_t request_id{0};
+    transport::StreamId stream_id{0};
+    SubscriptionPhase old_phase{SubscriptionPhase::Pending};
+    SubscriptionPhase new_phase{SubscriptionPhase::Terminated};
+};
+
+struct DuplicateSubscriptionEvidence {
+    TrackKey track;
+    LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
+    std::uint64_t existing_request_id{0};
+    std::uint64_t rejected_request_id{0};
+    transport::StreamId rejected_stream_id{0};
+};
+
+struct OppositeRoleCoexistenceEvidence {
+    TrackKey track;
+    std::uint64_t existing_request_id{0};
+    std::uint64_t admitted_request_id{0};
+};
+
+struct PendingSubscriptionReplacementEvidence {
+    TrackKey track;
+    std::uint64_t cancelled_request_id{0};
+    transport::StreamId cancelled_stream_id{0};
+    std::uint64_t admitted_request_id{0};
+    transport::StreamId admitted_stream_id{0};
+};
+
+struct ReservedNamespaceEvidence {
+    TrackKey track;
+    ReservedNamespaceCategory category{ReservedNamespaceCategory::Dot};
+    RequestInitiator initiator{RequestInitiator::Peer};
+    std::uint64_t request_id{0};
+    transport::StreamId stream_id{0};
+};
+
 using EvidenceData =
     std::variant<TransportEstablishedEvidence, StreamEvidence,
                  LocalStreamEvidence, SetupEvidence,
@@ -271,7 +347,12 @@ using EvidenceData =
                  ResponseViolationEvidence, GoawayEvidence,
                  RequestTerminalEvidence, RequestUpdateFailedEvidence,
                  RequestStateViolationEvidence,
-                 RequestMessageObservedEvidence>;
+                 RequestMessageObservedEvidence,
+                 SubscriptionCreatedEvidence, SubscriptionPhaseEvidence,
+                 DuplicateSubscriptionEvidence,
+                 OppositeRoleCoexistenceEvidence,
+                 PendingSubscriptionReplacementEvidence,
+                 ReservedNamespaceEvidence>;
 
 struct EvidenceEvent {
     std::uint64_t sequence{0};
@@ -320,6 +401,9 @@ struct PublisherSessionConfig {
     std::size_t maximum_outstanding_updates_per_request{64};
     std::size_t maximum_request_history{4'096};
     std::size_t maximum_local_stream_history{4'096};
+    std::size_t maximum_active_subscriptions{256};
+    std::size_t maximum_subscription_history{4'096};
+    std::size_t maximum_subscription_key_bytes{1u << 20};
     wire::draft18::Limits wire_limits{};
 };
 
