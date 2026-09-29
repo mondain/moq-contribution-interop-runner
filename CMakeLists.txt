@@ -145,6 +145,15 @@ add_library(moq-interop-transport
     src/transport/quiche_connection.cpp
     src/transport/quiche_native_listener.cpp
 )
+add_library(moq-interop-picoquic-native
+    src/transport/picoquic_connection.cpp
+    src/transport/picoquic_native_listener.cpp)
+target_include_directories(moq-interop-picoquic-native PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(moq-interop-picoquic-native PUBLIC
+    moq-interop-app moq-interop-picoquic)
+target_compile_options(moq-interop-picoquic-native PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
 target_link_libraries(moq-interop-transport PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-transport PRIVATE moq-interop-quiche)
 target_include_directories(moq-interop-transport PRIVATE
@@ -226,6 +235,26 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-picoquic-link-tests PRIVATE
                           moq-interop-picoquic)
     add_test(NAME picoquic-link COMMAND moq-interop-picoquic-link-tests)
+    add_executable(moq-interop-picoquic-native-tests
+                   tests/transport/picoquic_native_listener_test.cpp)
+    add_executable(moq-interop-quiche-peer
+                   tests/support/quiche_peer_main.cpp
+                   tests/support/quiche_client.cpp)
+    target_include_directories(moq-interop-picoquic-native-tests PRIVATE
+                               "${PROJECT_SOURCE_DIR}/tests")
+    target_include_directories(moq-interop-quiche-peer PRIVATE
+                               "${PROJECT_SOURCE_DIR}/tests")
+    target_compile_definitions(moq-interop-picoquic-native-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
+        QUICHE_TEST_PEER_PATH="$<TARGET_FILE:moq-interop-quiche-peer>")
+    target_link_libraries(moq-interop-picoquic-native-tests PRIVATE
+        moq-interop-app moq-interop-picoquic-native
+        GTest::gtest_main)
+    target_link_libraries(moq-interop-quiche-peer PRIVATE
+                          moq-interop-quiche)
+    add_dependencies(moq-interop-picoquic-native-tests moq-interop-quiche-peer)
+    add_test(NAME picoquic-native-listener
+             COMMAND moq-interop-picoquic-native-tests)
     add_test(NAME picoquic-dependency-contract
         COMMAND "${CMAKE_COMMAND}"
             "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
