@@ -98,6 +98,7 @@ add_library(moq-interop-wire
     src/wire/draft18/messages.cpp
     src/wire/draft18/objects.cpp
     src/wire/draft21/message_types.cpp
+    src/wire/draft21/goaway.cpp
     src/wire/draft21/setup.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
@@ -364,6 +365,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-message-types
              COMMAND moq-interop-draft21-message-types-tests)
+
+    add_executable(moq-interop-draft21-goaway-tests
+                   tests/golden/draft21_goaway_test.cpp)
+    target_link_libraries(moq-interop-draft21-goaway-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft21-goaway COMMAND moq-interop-draft21-goaway-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
