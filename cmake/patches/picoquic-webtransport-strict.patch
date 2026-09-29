@@ -1,0 +1,104 @@
+diff --git a/picohttp/h3zero.c b/picohttp/h3zero.c
+--- a/picohttp/h3zero.c
++++ b/picohttp/h3zero.c
+@@ -1220,3 +1220,3 @@ static uint8_t const h3zero_default_setting_frame_val[] = {
+     0, /* Control Stream ID, varint = 0 */
+     (uint8_t)h3zero_frame_settings, /* var int frame type ( < 64) */
+-    0x25, /* Length of setting frame content */
++    0x12, /* Length of setting frame content: draft WT only */
+@@ -1238,23 +1238,4 @@ static uint8_t const h3zero_default_setting_frame_val[] = {
+     (uint8_t)((h3zero_settings_wt_enabled >> 16)&0xff),
+     (uint8_t)((h3zero_settings_wt_enabled >> 8)&0xff),
+     (uint8_t)((h3zero_settings_wt_enabled)&0xff), 1,
+-    /* WT_MAX_SESSIONS, drafts 13-14 */
+-    ((h3zero_settings_webtransport_max_sessions >> 24)&0xff)|0x80,
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions >> 16)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions >> 8)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions)&0xff), 1,
+-    /* WEBTRANSPORT_MAX_SESSIONS, drafts 7-12 */
+-    (uint8_t)(((h3zero_settings_webtransport_max_sessions_old >> 56)&0xff)|0xc0),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 48)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 40)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 32)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 24)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 16)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old >> 8)&0xff),
+-    (uint8_t)((h3zero_settings_webtransport_max_sessions_old)&0xff), 1,
+-    /* ENABLE_WEBTRANSPORT, draft 2-6 */
+-    ((h3zero_settings_enable_webtransport >> 24) & 0xff) | 0x80,
+-    (uint8_t)((h3zero_settings_enable_webtransport >> 16) & 0xff),
+-    (uint8_t)((h3zero_settings_enable_webtransport >> 8) & 0xff),
+-    (uint8_t)((h3zero_settings_enable_webtransport) & 0xff), 1
+ };
+diff --git a/picohttp/h3zero_common.c b/picohttp/h3zero_common.c
+--- a/picohttp/h3zero_common.c
++++ b/picohttp/h3zero_common.c
+@@ -1125,7 +1125,1 @@ h3zero_content_type_enum h3zero_get_content_type_by_path(const uint8_t* path,
+-/* In theory, there is exactly one accepted protocol for each
+-* path over which we accept an extended connect request, but in practice
+-* there are two versions of the "web transport" protocol: "webtransport"
+-* in the old drafts and "webtransport-h3" in the recent drafts. We expect the
+-* old drafts to coexist with the new ones for some time, so we need to
+-* be lenient and treat both versions as equivalent.
+- */
++/* A configured extended CONNECT protocol must match exactly. */
+@@ -1141,12 +1135,4 @@ int h3zero_check_connect_protocol(const picohttp_server_path_item_t* item, h3zero_stream_ctx_t* stream_ctx)
+ 			memcmp(stream_ctx->ps.stream_state.header.protocol,
+ 				item->connect_protocol, item->connect_protocol_length) != 0)) {
+-		size_t old_length = strlen(H3ZERO_WEBTRANSPORT_H3_PROTOCOL_OLD);
+-		if (stream_ctx->ps.stream_state.header.protocol_length < old_length ||
+-			item->connect_protocol_length < old_length ||
+-			memcmp(H3ZERO_WEBTRANSPORT_H3_PROTOCOL_OLD,
+-				item->connect_protocol, old_length) != 0 ||
+-			memcmp(H3ZERO_WEBTRANSPORT_H3_PROTOCOL_OLD,
+-				stream_ctx->ps.stream_state.header.protocol, old_length) != 0) {
+-			ret = -1;
+-		}
++		ret = -1;
+ 	}
+@@ -2152,6 +2139,3 @@ uint8_t* h3zero_settings_encode(uint8_t* bytes, const uint8_t* bytes_max, const h3zero_settings_t* settings)
+ 				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_enable_connect_protocol, settings->enable_connect_protocol, 0)) != NULL &&
+ 				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_setting_h3_datagram, settings->h3_datagram, 0)) != NULL &&
+-				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_wt_enabled, settings->webtransport_enabled, 0)) != NULL &&
+-				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_webtransport_max_sessions, settings->webtransport_max_sessions, 0)) != NULL &&
+-				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_webtransport_max_sessions_old, settings->webtransport_max_sessions, 0)) != NULL &&
+-				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_enable_webtransport, settings->webtransport_enabled, 0)) != NULL){
++				(bytes = h3zero_settings_component_encode(bytes, bytes_max, h3zero_settings_wt_enabled, settings->webtransport_enabled, 0)) != NULL){
+@@ -2197,13 +2181,3 @@ const uint8_t* h3zero_settings_components_decode(const uint8_t* bytes, const uint8_t* bytes_max, h3zero_settings_t* settings)
+ 		case h3zero_settings_wt_enabled:
+ 			settings->webtransport_enabled = component_value;
+ 			break;
+-		case h3zero_settings_webtransport_max_sessions:
+-		case h3zero_settings_webtransport_max_sessions_old:
+-			settings->webtransport_max_sessions = component_value;
+-			break;
+-		case h3zero_settings_enable_webtransport:
+-			/* Chrome sends SETTINGS_ENABLE_WEBTRANSPORT (0x2b603742) instead of WT_MAX_SESSIONS */
+-			if (component_value > 0 && settings->webtransport_max_sessions == 0) {
+-				settings->webtransport_max_sessions = 1;
+-			}
+-			break;
+diff --git a/picohttp/webtransport.c b/picohttp/webtransport.c
+--- a/picohttp/webtransport.c
++++ b/picohttp/webtransport.c
+@@ -346,3 +346,3 @@ static const char* picowt_connect_protocol_from_settings(const h3zero_settings_t* settings)
+-    return (settings != NULL && settings->webtransport_enabled > 0) ?
+-        H3ZERO_WEBTRANSPORT_H3_PROTOCOL : H3ZERO_WEBTRANSPORT_H3_PROTOCOL_OLD;
++    (void)settings;
++    return H3ZERO_WEBTRANSPORT_H3_PROTOCOL;
+ }
+@@ -354,12 +350,8 @@ int picowt_webtransport_requirements_met(picoquic_cnx_t* cnx, h3zero_callback_ctx_t* ctx)
+     const picoquic_tp_t* remote_tp = (cnx == NULL) ? NULL : picoquic_get_transport_parameters(cnx, 0);
+-    int has_webtransport_settings = ctx != NULL &&
+-        (ctx->settings.webtransport_enabled > 0 || ctx->settings.webtransport_max_sessions > 0);
+-    int has_connect_settings = ctx != NULL &&
+-        (ctx->settings.webtransport_enabled == 0 || ctx->settings.enable_connect_protocol);
+ 
+     return ctx != NULL &&
+         ctx->settings.settings_received &&
+         ctx->settings.h3_datagram &&
+-        has_webtransport_settings &&
+-        has_connect_settings &&
++        ctx->settings.webtransport_enabled == 1 &&
++        ctx->settings.enable_connect_protocol &&
+         remote_tp != NULL &&

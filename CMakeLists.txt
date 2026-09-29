@@ -146,6 +146,7 @@ target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::n
 add_library(moq-interop-transport
     src/transport/picoquic_connection.cpp
     src/transport/picoquic_native_listener.cpp
+    src/transport/webtransport_connect.cpp
 )
 target_include_directories(moq-interop-transport PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -221,6 +222,20 @@ if(MOQ_INTEROP_BUILD_TESTS)
     enable_testing()
     FetchContent_MakeAvailable(googletest)
 
+    add_executable(moq-interop-webtransport-connect-tests
+                   tests/transport/webtransport_connect_test.cpp)
+    target_include_directories(moq-interop-webtransport-connect-tests PRIVATE
+                               "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(moq-interop-webtransport-connect-tests PRIVATE
+                          moq-interop-transport GTest::gtest_main)
+    add_test(NAME webtransport-connect COMMAND moq-interop-webtransport-connect-tests)
+    add_executable(moq-interop-webtransport-h3-admission-tests
+                   tests/integration/webtransport_h3_admission_test.cpp)
+    target_link_libraries(moq-interop-webtransport-h3-admission-tests PRIVATE
+                          moq-interop-picoquic GTest::gtest_main)
+    add_test(NAME webtransport-h3-admission
+             COMMAND moq-interop-webtransport-h3-admission-tests)
+
     add_executable(moq-interop-picoquic-link-tests
                    tests/integration/picoquic_link_test.cpp)
     target_link_libraries(moq-interop-picoquic-link-tests PRIVATE
@@ -275,6 +290,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
             "-DPICOTLS_SOURCE_DIR=${picotls_SOURCE_DIR}"
             "-DEXPECTED_PICOQUIC_REVISION=${MOQ_INTEROP_PICOQUIC_REVISION}"
             "-DEXPECTED_PICOTLS_REVISION=${MOQ_INTEROP_PICOTLS_REVISION}"
+            "-DWEBTRANSPORT_PATCH=${MOQ_INTEROP_PICOQUIC_WT_PATCH}"
             -P "${PROJECT_SOURCE_DIR}/tests/integration/picoquic_dependency_contract.cmake")
     add_test(NAME picoquic-dependency-rejects-mismatch
         COMMAND "${CMAKE_COMMAND}"
@@ -283,6 +299,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
             "-DPICOTLS_SOURCE_DIR=${picotls_SOURCE_DIR}"
             "-DEXPECTED_PICOQUIC_REVISION=0000000000000000000000000000000000000000"
             "-DEXPECTED_PICOTLS_REVISION=${MOQ_INTEROP_PICOTLS_REVISION}"
+            "-DWEBTRANSPORT_PATCH=${MOQ_INTEROP_PICOQUIC_WT_PATCH}"
             -P "${PROJECT_SOURCE_DIR}/tests/integration/picoquic_dependency_contract.cmake")
     set_tests_properties(picoquic-dependency-rejects-mismatch PROPERTIES
                          WILL_FAIL TRUE)
