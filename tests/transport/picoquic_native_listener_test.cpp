@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -81,6 +82,20 @@ bool pump_until_established(NativeQuicListener& listener, PeerProcess& peer,
             received.push_back(std::move(event));
         }
         if (peer.exited_successfully()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    return false;
+}
+
+bool pump_until_ready(NativeQuicListener& listener) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (const auto& event : listener.poll(32)) {
+            if (std::holds_alternative<ConnectionEstablishedEvent>(event)) {
+                return true;
+            }
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     return false;
@@ -167,6 +182,351 @@ TEST(PicoquicNativeListener, BoundsQueuedPeerEvents) {
     const auto events = result.listener->poll(8);
     ASSERT_EQ(events.size(), 1U);
     EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[0]));
+}
+
+TEST(PicoquicNativeListener, ReservesServerStreamIdsAfterHandshake) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18");
+    ASSERT_TRUE(peer.valid());
+    std::vector<TransportEvent> events;
+    ASSERT_TRUE(pump_until_established(*result.listener, peer, events));
+
+    const auto first_bidi = result.listener->open_bidi();
+    const auto first_uni = result.listener->open_uni();
+    const auto second_bidi = result.listener->open_bidi();
+    const auto second_uni = result.listener->open_uni();
+    EXPECT_EQ(first_bidi.status, TransportStatus::Success);
+    EXPECT_EQ(first_bidi.stream_id, 1U);
+    EXPECT_EQ(first_uni.status, TransportStatus::Success);
+    EXPECT_EQ(first_uni.stream_id, 3U);
+    EXPECT_EQ(second_bidi.status, TransportStatus::Success);
+    EXPECT_EQ(second_bidi.stream_id, 5U);
+    EXPECT_EQ(second_uni.status, TransportStatus::Success);
+    EXPECT_EQ(second_uni.stream_id, 7U);
+}
+
+TEST(PicoquicNativeListener, EnforcesAdvertisedDatagramLimit) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21");
+    ASSERT_TRUE(peer.valid());
+    std::vector<TransportEvent> events;
+    ASSERT_TRUE(pump_until_established(*result.listener, peer, events));
+
+    std::size_t maximum = 0;
+    for (const auto& event : events) {
+        if (const auto* ready =
+                std::get_if<ConnectionEstablishedEvent>(&event)) {
+            maximum = ready->max_datagram_payload;
+        }
+    }
+    ASSERT_GT(maximum, 0U);
+    const std::vector<std::byte> exact(maximum, std::byte{0x42});
+    const std::vector<std::byte> oversized(maximum + 1, std::byte{0x42});
+    const auto accepted = result.listener->send_datagram(exact);
+    const auto rejected = result.listener->send_datagram(oversized);
+    EXPECT_EQ(accepted.status, TransportStatus::Success);
+    EXPECT_EQ(accepted.accepted, maximum);
+    EXPECT_EQ(rejected.status, TransportStatus::DatagramTooLarge);
+    EXPECT_EQ(rejected.accepted, 0U);
+}
+
+TEST(PicoquicNativeListener, SendsFinWithServerStreamPayload) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18",
+                     "expect-stream");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+
+    const auto opened = result.listener->open_bidi();
+    ASSERT_EQ(opened.status, TransportStatus::Success);
+    const std::vector<std::byte> payload{std::byte{0x41}, std::byte{0x42}};
+    const auto written = result.listener->write(opened.stream_id, payload, true);
+    EXPECT_EQ(written.status, TransportStatus::Success);
+    EXPECT_EQ(written.accepted, payload.size());
+
+    bool delivered = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
+TEST(PicoquicNativeListener, DeliversDatagramToIndependentPeer) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "expect-datagram");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+
+    const std::vector<std::byte> payload(16, std::byte{0x42});
+    const auto sent = result.listener->send_datagram(payload);
+    ASSERT_EQ(sent.status, TransportStatus::Success);
+    ASSERT_EQ(sent.accepted, payload.size());
+
+    bool delivered = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
+TEST(PicoquicNativeListener, ResetsServerStreamWithApplicationCode) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18",
+                     "expect-reset");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+
+    const auto opened = result.listener->open_bidi();
+    ASSERT_EQ(opened.status, TransportStatus::Success);
+    const std::vector<std::byte> payload{std::byte{0x41}};
+    ASSERT_EQ(result.listener->write(opened.stream_id, payload, false).status,
+              TransportStatus::Success);
+    const auto reset = result.listener->reset(opened.stream_id, 0x33);
+    EXPECT_EQ(reset.status, TransportStatus::Success);
+
+    bool delivered = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
+TEST(PicoquicNativeListener, StopsPeerUnidirectionalStream) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "expect-stop");
+    ASSERT_TRUE(peer.valid());
+
+    bool saw_stream = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !saw_stream) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* data = std::get_if<StreamDataEvent>(&event)) {
+                saw_stream = data->stream_id == 2;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(saw_stream);
+    const auto stopped = result.listener->stop_sending(2, 0x44);
+    EXPECT_EQ(stopped.status, TransportStatus::Success);
+
+    bool delivered = false;
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
+TEST(PicoquicNativeListener, SendsApplicationCloseReason) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18",
+                     "expect-close");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+
+    const std::vector<std::byte> reason{
+        std::byte{'d'}, std::byte{'o'}, std::byte{'n'}, std::byte{'e'}};
+    const auto closed = result.listener->close(0x45, reason);
+    EXPECT_EQ(closed.status, TransportStatus::Success);
+    bool saw_local_close = false;
+    for (const auto& event : result.listener->poll(32)) {
+        if (const auto* local = std::get_if<LocalCloseEvent>(&event)) {
+            saw_local_close = local->error_code == 0x45 &&
+                              local->reason == reason;
+        }
+    }
+    EXPECT_TRUE(saw_local_close);
+
+    bool delivered = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+    EXPECT_EQ(result.listener->close(0x45, reason).status,
+              TransportStatus::ConnectionClosed);
+}
+
+TEST(PicoquicNativeListener, RecordsPeerApplicationCloseReason) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "send-close");
+    ASSERT_TRUE(peer.valid());
+
+    std::optional<PeerCloseEvent> observed;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !observed) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* closed = std::get_if<PeerCloseEvent>(&event)) {
+                observed = *closed;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(observed);
+    EXPECT_EQ(observed->error_space, CloseErrorSpace::Application);
+    EXPECT_EQ(observed->error_code, 0x66U);
+    EXPECT_EQ(observed->reason,
+              (std::vector<std::byte>{std::byte{'b'}, std::byte{'y'},
+                                      std::byte{'e'}}));
+}
+
+TEST(PicoquicNativeListener, RecordsPeerStopSendingCode) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18",
+                     "send-stop");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+    const auto opened = result.listener->open_bidi();
+    ASSERT_EQ(opened.status, TransportStatus::Success);
+    const std::vector<std::byte> payload{std::byte{0x41}};
+    ASSERT_EQ(result.listener->write(opened.stream_id, payload, false).status,
+              TransportStatus::Success);
+
+    std::optional<PeerStopSendingEvent> observed;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !observed) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* stopped =
+                    std::get_if<PeerStopSendingEvent>(&event)) {
+                observed = *stopped;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(observed);
+    EXPECT_EQ(observed->stream_id, opened.stream_id);
+    EXPECT_EQ(observed->application_error, 0x77U);
+}
+
+TEST(PicoquicNativeListener, ReceivesPeerDatagramPayload) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "send-datagram");
+    ASSERT_TRUE(peer.valid());
+
+    std::optional<DatagramEvent> observed;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !observed) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* datagram = std::get_if<DatagramEvent>(&event)) {
+                observed = *datagram;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(observed);
+    EXPECT_EQ(observed->data,
+              (std::vector<std::byte>{std::byte{0x31}, std::byte{0x32}}));
+}
+
+TEST(PicoquicNativeListener, RecordsPeerResetCode) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "send-reset");
+    ASSERT_TRUE(peer.valid());
+
+    std::optional<PeerResetEvent> observed;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !observed) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* reset = std::get_if<PeerResetEvent>(&event)) {
+                observed = *reset;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(observed);
+    EXPECT_EQ(observed->stream_id, 2U);
+    EXPECT_EQ(observed->application_error, 0x78U);
+}
+
+TEST(PicoquicNativeListener, WritesPeerInitiatedBidirectionalStream) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "expect-bidi-response");
+    ASSERT_TRUE(peer.valid());
+
+    bool received = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !received) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) {
+                received = stream->stream_id == 0 && stream->fin;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(received);
+    const std::array<std::byte, 1> response{std::byte{0x42}};
+    EXPECT_EQ(result.listener->write(0, response, true).status,
+              TransportStatus::Success);
+    bool delivered = false;
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
+TEST(PicoquicNativeListener, ReportsIdleTimeout) {
+    auto config = config_for("moqt-21");
+    config.idle_timeout = std::chrono::milliseconds{300};
+    auto result = NativeQuicListener::create(std::move(config));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "hold-idle");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+
+    bool closed = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !closed) {
+        for (const auto& event : result.listener->poll(1)) {
+            closed = std::holds_alternative<PeerCloseEvent>(event);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(closed);
 }
 
 }  // namespace

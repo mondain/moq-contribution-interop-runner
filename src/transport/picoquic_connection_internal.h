@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <span>
 #include <vector>
 
 namespace moq::interop::transport::detail {
@@ -23,7 +24,12 @@ public:
 
     std::vector<TransportEvent> drain(std::size_t max_events);
     picoquic_cnx_t* connection() const noexcept { return connection_; }
+    std::size_t max_datagram_payload() const noexcept {
+        return max_datagram_payload_;
+    }
     void fail();
+    void note_local_close(std::uint64_t application_error,
+                          std::span<const std::byte> reason);
 
 private:
     int on_event(picoquic_cnx_t* connection, std::uint64_t stream_id,
@@ -36,6 +42,8 @@ private:
     std::deque<TransportEvent> events_;
     bool overflowed_ = false;
     bool established_ = false;
+    bool local_close_ = false;
+    std::size_t max_datagram_payload_ = 0;
 };
 
 }  // namespace moq::interop::transport::detail
