@@ -100,6 +100,7 @@ add_library(moq-interop-wire
     src/wire/draft21/message_types.cpp
     src/wire/draft21/control.cpp
     src/wire/draft21/goaway.cpp
+    src/wire/draft21/key_values.cpp
     src/wire/draft21/request_frame.cpp
     src/wire/draft21/setup.cpp
 )
@@ -386,6 +387,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-request-frame
              COMMAND moq-interop-draft21-request-frame-tests)
+
+    add_executable(moq-interop-draft21-key-values-tests
+                   tests/golden/draft21_key_values_test.cpp)
+    target_link_libraries(moq-interop-draft21-key-values-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft21-key-values
+             COMMAND moq-interop-draft21-key-values-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
