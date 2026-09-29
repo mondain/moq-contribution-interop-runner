@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -22,6 +23,27 @@ using Json = nlohmann::json;
 constexpr std::size_t kDefaultPageSize = 50;
 constexpr std::size_t kMaximumPageSize = 100;
 constexpr std::int64_t kMaximumTimeoutMs = 3'600'000;
+
+std::optional<std::string> decode_hex(std::string_view encoded) {
+    if ((encoded.size() & 1u) != 0u || encoded.size() > 8192) {
+        return std::nullopt;
+    }
+    const auto nibble = [](char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+        if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+        return -1;
+    };
+    std::string bytes;
+    bytes.reserve(encoded.size() / 2);
+    for (std::size_t index = 0; index < encoded.size(); index += 2) {
+        const int high = nibble(encoded[index]);
+        const int low = nibble(encoded[index + 1]);
+        if (high < 0 || low < 0) return std::nullopt;
+        bytes.push_back(static_cast<char>((high << 4) | low));
+    }
+    return bytes;
+}
 
 void json_response(httplib::Response& response, const Json& body, int status = 200) {
     response.status = status;
@@ -107,11 +129,41 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
             throw ApiError{400, "invalid_run_config",
                            "timeout_ms must be between 1 and 3600000."};
         }
+        std::optional<app::TrackFixture> track_fixture;
+        if (body.contains("track")) {
+            const auto& track = body.at("track");
+            const auto namespace_hex =
+                track.at("namespace_hex").get<std::vector<std::string>>();
+            if (namespace_hex.size() > 32) {
+                throw ApiError{400, "invalid_run_config",
+                               "track namespace may have at most 32 fields."};
+            }
+            app::TrackFixture fixture;
+            std::size_t total_bytes = 0;
+            for (const auto& encoded : namespace_hex) {
+                auto field = decode_hex(encoded);
+                if (!field || field->empty() ||
+                    field->size() > 4096 - total_bytes) {
+                    throw ApiError{400, "invalid_run_config",
+                                   "track namespace field is invalid."};
+                }
+                total_bytes += field->size();
+                fixture.namespace_fields.push_back(std::move(*field));
+            }
+            auto name = decode_hex(track.at("name_hex").get<std::string>());
+            if (!name || name->size() > 4096 - total_bytes) {
+                throw ApiError{400, "invalid_run_config",
+                               "track name is invalid."};
+            }
+            fixture.track_name = std::move(*name);
+            track_fixture = std::move(fixture);
+        }
         return {draft == 18 ? app::DraftVersion::Draft18 : app::DraftVersion::Draft21,
                 transport == "native-quic" ? app::TransportKind::NativeQuic
                                              : app::TransportKind::WebTransport,
                 mode == "observed" ? app::RunMode::Observed : app::RunMode::Driven,
-                scenarios, std::chrono::milliseconds(timeout)};
+                scenarios, std::chrono::milliseconds(timeout),
+                std::move(track_fixture)};
     } catch (const ApiError&) {
         throw;
     } catch (const Json::exception&) {

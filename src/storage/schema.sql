@@ -1,7 +1,7 @@
 CREATE TABLE schema_meta (
-    version INTEGER NOT NULL CHECK (version = 1)
+    version INTEGER NOT NULL CHECK (version = 2)
 );
-INSERT INTO schema_meta(version) VALUES (1);
+INSERT INTO schema_meta(version) VALUES (2);
 
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
@@ -34,6 +34,18 @@ CREATE TABLE selected_scenarios (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     position INTEGER NOT NULL CHECK (position >= 0),
     scenario_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, position)
+);
+
+CREATE TABLE run_track_fixtures (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    track_name TEXT NOT NULL
+);
+
+CREATE TABLE run_track_namespace_fields (
+    run_id TEXT NOT NULL REFERENCES run_track_fixtures(run_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    value TEXT NOT NULL,
     PRIMARY KEY (run_id, position)
 );
 

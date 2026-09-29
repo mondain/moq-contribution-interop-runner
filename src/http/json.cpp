@@ -95,11 +95,30 @@ Json score_json(const requirements::ScoreSummary& score) {
 }
 
 Json config_json(const app::RunConfig& config) {
-    return {{"draft", static_cast<unsigned>(config.draft)},
+    Json result = {{"draft", static_cast<unsigned>(config.draft)},
             {"transport", name(config.transport)},
             {"mode", name(config.mode)},
             {"scenarios", config.scenario_ids},
             {"timeout_ms", config.timeout.count()}};
+    if (config.track_fixture) {
+        const auto encode_hex = [](std::string_view bytes) {
+            constexpr char digits[] = "0123456789abcdef";
+            std::string encoded;
+            encoded.reserve(bytes.size() * 2);
+            for (const unsigned char byte : bytes) {
+                encoded.push_back(digits[byte >> 4]);
+                encoded.push_back(digits[byte & 0x0f]);
+            }
+            return encoded;
+        };
+        Json fields = Json::array();
+        for (const auto& field : config.track_fixture->namespace_fields) {
+            fields.push_back(encode_hex(field));
+        }
+        result["track"] = {{"namespace_hex", std::move(fields)},
+                           {"name_hex", encode_hex(config.track_fixture->track_name)}};
+    }
+    return result;
 }
 
 }  // namespace

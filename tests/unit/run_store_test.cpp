@@ -52,6 +52,8 @@ app::RunConfig sample_config() {
         app::RunMode::Driven,
         {"session/setup", std::string{"publisher\0object", 16}, "x,y|z"},
         12'345ms,
+        app::TrackFixture{{"scope", std::string{"n\0s", 3}},
+                          std::string{"track\0name", 10}},
     };
 }
 
@@ -84,11 +86,11 @@ requirements::ScoreSummary sample_score() {
     };
 }
 
-TEST(RunStoreTest, CreatesVersionOneSchemaAndEnablesForeignKeys) {
+TEST(RunStoreTest, CreatesVersionTwoSchemaAndEnablesForeignKeys) {
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());
 
-    EXPECT_EQ(store.schema_version(), 1);
+    EXPECT_EQ(store.schema_version(), 2);
     EXPECT_TRUE(store.foreign_keys_enabled());
 }
 
@@ -146,6 +148,54 @@ TEST(RunStoreTest, RefusesUnknownNewerSchemaWithoutMutation) {
     ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
 }
 
+TEST(RunStoreTest, MigratesVersionOneMetadataAndPreservesExistingRuns) {
+    TemporaryDatabase database;
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(
+                  raw,
+                  "CREATE TABLE schema_meta(version INTEGER NOT NULL CHECK(version=1));"
+                  "INSERT INTO schema_meta VALUES(1);"
+                  "CREATE TABLE runs(id TEXT PRIMARY KEY,"
+                  "created_at_unix_ns INTEGER NOT NULL,"
+                  "finalized_at_unix_ns INTEGER);"
+                  "INSERT INTO runs VALUES('legacy-run',100,NULL);",
+                  nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+
+    SqliteRunStore store(database.path(), sample_build());
+    EXPECT_EQ(store.schema_version(), 2);
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    sqlite3_stmt* query = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(
+                  raw, "SELECT id FROM runs WHERE id='legacy-run'", -1,
+                  &query, nullptr), SQLITE_OK);
+    EXPECT_EQ(sqlite3_step(query), SQLITE_ROW);
+    sqlite3_finalize(query);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+}
+
+TEST(RunStoreTest, RejectsEmptyTrackNamespaceFieldAtomically) {
+    TemporaryDatabase database;
+    SqliteRunStore store(database.path(), sample_build());
+    auto config = sample_config();
+    config.track_fixture->namespace_fields = {""};
+    EXPECT_THROW(store.create_run(config), std::invalid_argument);
+    EXPECT_EQ(store.list({1, 0}).total, 0u);
+}
+
+TEST(RunStoreTest, PreservesRunsWithoutOptionalTrackFixture) {
+    TemporaryDatabase database;
+    SqliteRunStore store(database.path(), sample_build());
+    auto config = sample_config();
+    config.track_fixture.reset();
+    const auto id = store.create_run(config);
+    EXPECT_FALSE(store.load(id).config.track_fixture.has_value());
+    ASSERT_EQ(store.list({1, 0}).items.size(), 1u);
+    EXPECT_FALSE(store.list({1, 0}).items[0].config.track_fixture.has_value());
+}
+
 TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
     TemporaryDatabase database;
     const auto build = sample_build();
@@ -168,6 +218,16 @@ TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
     EXPECT_EQ(loaded.config.mode, config.mode);
     EXPECT_EQ(loaded.config.scenario_ids, config.scenario_ids);
     EXPECT_EQ(loaded.config.timeout, config.timeout);
+    ASSERT_TRUE(loaded.config.track_fixture.has_value());
+    EXPECT_EQ(loaded.config.track_fixture->namespace_fields,
+              config.track_fixture->namespace_fields);
+    EXPECT_EQ(loaded.config.track_fixture->track_name,
+              config.track_fixture->track_name);
+    const auto page = store.list({1, 0});
+    ASSERT_EQ(page.items.size(), 1u);
+    ASSERT_TRUE(page.items[0].config.track_fixture.has_value());
+    EXPECT_EQ(page.items[0].config.track_fixture->namespace_fields,
+              config.track_fixture->namespace_fields);
     EXPECT_EQ(loaded.build.version, build.version);
     EXPECT_EQ(loaded.build.source_revision, build.source_revision);
     EXPECT_EQ(loaded.build.dependencies, build.dependencies);

@@ -249,6 +249,22 @@ std::optional<std::size_t> next_offset(const RunQuery& query, std::size_t item_c
     return query.offset + item_count;
 }
 
+std::optional<app::TrackFixture> read_track_fixture(
+    sqlite3* database, const app::RunId& id) {
+    Statement fixture(database,
+                      "SELECT track_name FROM run_track_fixtures WHERE run_id=?");
+    fixture.bind(1, id);
+    if (!fixture.row()) return std::nullopt;
+    app::TrackFixture result;
+    result.track_name = text(fixture.get(), 0);
+    Statement fields(database,
+                     "SELECT value FROM run_track_namespace_fields "
+                     "WHERE run_id=? ORDER BY position");
+    fields.bind(1, id);
+    while (fields.row()) result.namespace_fields.push_back(text(fields.get(), 0));
+    return result;
+}
+
 }  // namespace
 
 class SqliteRunStore::Impl {
@@ -283,29 +299,49 @@ public:
     }
 
     void initialize_schema() {
-        Statement tables(database.get(),
-                         "SELECT COUNT(*) FROM sqlite_master "
-                         "WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-        if (!tables.row()) throw std::runtime_error("inspect SQLite schema: query returned no row");
-        const auto table_count = sqlite3_column_int64(tables.get(), 0);
+        std::int64_t table_count = 0;
+        bool has_metadata = false;
+        {
+            Statement tables(database.get(),
+                             "SELECT COUNT(*) FROM sqlite_master "
+                             "WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            if (!tables.row()) throw std::runtime_error("inspect SQLite schema: query returned no row");
+            table_count = sqlite3_column_int64(tables.get(), 0);
 
-        Statement metadata(database.get(),
-                           "SELECT COUNT(*) FROM sqlite_master "
-                           "WHERE type='table' AND name='schema_meta'");
-        if (!metadata.row()) throw std::runtime_error("inspect schema metadata: query returned no row");
-        const bool has_metadata = sqlite3_column_int(metadata.get(), 0) == 1;
+            Statement metadata(database.get(),
+                               "SELECT COUNT(*) FROM sqlite_master "
+                               "WHERE type='table' AND name='schema_meta'");
+            if (!metadata.row()) throw std::runtime_error("inspect schema metadata: query returned no row");
+            has_metadata = sqlite3_column_int(metadata.get(), 0) == 1;
+        }
 
         if (!has_metadata) {
             if (table_count != 0) {
                 throw std::runtime_error("open SQLite run store: non-empty database has no schema version");
             }
-            Transaction transaction(database.get(), "create SQLite schema version 1");
-            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 1");
+            Transaction transaction(database.get(), "create SQLite schema version 2");
+            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 2");
             transaction.commit();
         }
 
         const auto version = schema_version_unlocked();
-        if (version != 1) {
+        if (version == 1) {
+            Transaction transaction(database.get(), "migrate SQLite schema version 1 to 2");
+            execute(database.get(),
+                    "CREATE TABLE run_track_fixtures ("
+                    "run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,"
+                    "track_name TEXT NOT NULL);"
+                    "CREATE TABLE run_track_namespace_fields ("
+                    "run_id TEXT NOT NULL REFERENCES run_track_fixtures(run_id) ON DELETE CASCADE,"
+                    "position INTEGER NOT NULL CHECK (position >= 0),"
+                    "value TEXT NOT NULL, PRIMARY KEY (run_id, position));"
+                    "CREATE TABLE schema_meta_v2 (version INTEGER NOT NULL CHECK (version = 2));"
+                    "INSERT INTO schema_meta_v2(version) VALUES (2);"
+                    "DROP TABLE schema_meta;"
+                    "ALTER TABLE schema_meta_v2 RENAME TO schema_meta;",
+                    "migrate SQLite schema version 1 to 2");
+            transaction.commit();
+        } else if (version != 2) {
             throw std::runtime_error("open SQLite run store: unsupported schema version " +
                                      std::to_string(version));
         }
@@ -408,6 +444,31 @@ app::RunId SqliteRunStore::create_run(const app::RunConfig& config) {
         insert_scenario.bind(3, config.scenario_ids[position]);
         insert_scenario.done("create run selected scenario");
         insert_scenario.reset();
+    }
+
+    if (config.track_fixture) {
+        Statement insert_fixture(
+            impl_->database.get(),
+            "INSERT INTO run_track_fixtures(run_id,track_name) VALUES(?,?)");
+        insert_fixture.bind(1, id);
+        insert_fixture.bind(2, config.track_fixture->track_name);
+        insert_fixture.done("create run track fixture");
+        Statement insert_field(
+            impl_->database.get(),
+            "INSERT INTO run_track_namespace_fields(run_id,position,value) "
+            "VALUES(?,?,?)");
+        for (std::size_t position = 0;
+             position < config.track_fixture->namespace_fields.size(); ++position) {
+            const auto& field = config.track_fixture->namespace_fields[position];
+            if (field.empty()) {
+                throw std::invalid_argument("track namespace fields must be nonempty");
+            }
+            insert_field.bind(1, id);
+            insert_field.bind(2, static_cast<std::int64_t>(position));
+            insert_field.bind(3, field);
+            insert_field.done("create run track namespace field");
+            insert_field.reset();
+        }
     }
 
     transaction.commit();
@@ -550,6 +611,7 @@ RunRecord SqliteRunStore::load(const app::RunId& id) const {
         "SELECT scenario_id FROM selected_scenarios WHERE run_id=? ORDER BY position");
     scenarios.bind(1, id);
     while (scenarios.row()) record.config.scenario_ids.push_back(text(scenarios.get(), 0));
+    record.config.track_fixture = read_track_fixture(impl_->database.get(), id);
 
     Statement score(
         impl_->database.get(),
@@ -645,6 +707,7 @@ Page<RunSummary> SqliteRunStore::list(RunQuery query) const {
             "SELECT scenario_id FROM selected_scenarios WHERE run_id=? ORDER BY position");
         scenarios.bind(1, summary.id);
         while (scenarios.row()) summary.config.scenario_ids.push_back(text(scenarios.get(), 0));
+        summary.config.track_fixture = read_track_fixture(impl_->database.get(), summary.id);
         page.items.push_back(std::move(summary));
     }
     page.next_offset = next_offset(query, page.items.size(), total);

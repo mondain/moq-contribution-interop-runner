@@ -234,6 +234,56 @@ TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
     EXPECT_EQ(Json::parse(stop->body).at("error").at("code"), "not_implemented");
 }
 
+TEST_F(HttpApiTest, PreservesOpaqueTrackFixtureBytesInRunConfiguration) {
+    const Json request = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", Json::array({"subscribe-to-publisher-track"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", Json::array({"006e", "ff"})},
+                   {"name_hex", "7800"}}}};
+    const auto response = client_->Post(
+        "/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201) << response->body;
+    const auto created = Json::parse(response->body);
+    const auto id = created.at("run").at("id").get<std::string>();
+    EXPECT_EQ(created.at("run").at("config").at("track"),
+              request.at("track"));
+    EXPECT_EQ(get_json("/api/v1/runs/" + id).at("run").at("config")
+                  .at("track"), request.at("track"));
+    ASSERT_TRUE(store_->load(id).config.track_fixture.has_value());
+    EXPECT_EQ(store_->load(id).config.track_fixture->namespace_fields[0],
+              std::string("\0n", 2));
+}
+
+TEST_F(HttpApiTest, RejectsMalformedOrOversizedTrackFixtures) {
+    const Json base = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", Json::array({"subscribe-to-publisher-track"})},
+        {"timeout_ms", 1000}};
+    const std::vector<Json> fixtures{
+        Json{{"namespace_hex", Json::array({"0"})}, {"name_hex", "78"}},
+        Json{{"namespace_hex", Json::array({"zz"})}, {"name_hex", "78"}},
+        Json{{"namespace_hex", Json::array({""})}, {"name_hex", "78"}},
+        Json{{"namespace_hex", Json::array()},
+             {"name_hex", std::string(8194, 'a')}},
+        Json{{"namespace_hex", std::vector<std::string>(33, "61")},
+             {"name_hex", "78"}}};
+    for (const auto& fixture : fixtures) {
+        auto request = base;
+        request["track"] = fixture;
+        const auto response = client_->Post(
+            "/api/v1/runs", request.dump(), "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 400) << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
+                  "invalid_run_config");
+    }
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
 TEST_F(HttpApiTest, RendersEscapedAccessibleZeroScoreReport) {
     std::string special = "scenario<script>&\"'";
     special.push_back('\0');
