@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(moq_contribution_interop_runner VERSION 0.1.0 LANGUAGES CXX)
+project(moq_contribution_interop_runner VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
 include(cmake/Quiche.cmake)
+include(cmake/Picoquic.cmake)
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -87,6 +88,8 @@ target_compile_definitions(moq-interop-app INTERFACE
     MOQ_INTEROP_VERSION="${PROJECT_VERSION}"
     MOQ_INTEROP_SOURCE_REVISION="${MOQ_INTEROP_SOURCE_REVISION}"
     MOQ_INTEROP_QUICHE_REVISION="${MOQ_INTEROP_QUICHE_REVISION}"
+    MOQ_INTEROP_PICOQUIC_REVISION="${MOQ_INTEROP_PICOQUIC_REVISION}"
+    MOQ_INTEROP_PICOTLS_REVISION="${MOQ_INTEROP_PICOTLS_REVISION}"
     MOQ_INTEROP_NLOHMANN_JSON_REVISION="${MOQ_INTEROP_NLOHMANN_JSON_REVISION}"
     MOQ_INTEROP_CPP_HTTPLIB_REVISION="${MOQ_INTEROP_CPP_HTTPLIB_REVISION}"
     MOQ_INTEROP_GOOGLETEST_REVISION="${MOQ_INTEROP_GOOGLETEST_REVISION}"
@@ -217,6 +220,30 @@ install(DIRECTORY requirements/ DESTINATION share/moq-interop/requirements
 if(MOQ_INTEROP_BUILD_TESTS)
     enable_testing()
     FetchContent_MakeAvailable(googletest)
+
+    add_executable(moq-interop-picoquic-link-tests
+                   tests/integration/picoquic_link_test.cpp)
+    target_link_libraries(moq-interop-picoquic-link-tests PRIVATE
+                          moq-interop-picoquic)
+    add_test(NAME picoquic-link COMMAND moq-interop-picoquic-link-tests)
+    add_test(NAME picoquic-dependency-contract
+        COMMAND "${CMAKE_COMMAND}"
+            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+            "-DPICOQUIC_SOURCE_DIR=${picoquic_SOURCE_DIR}"
+            "-DPICOTLS_SOURCE_DIR=${picotls_SOURCE_DIR}"
+            "-DEXPECTED_PICOQUIC_REVISION=${MOQ_INTEROP_PICOQUIC_REVISION}"
+            "-DEXPECTED_PICOTLS_REVISION=${MOQ_INTEROP_PICOTLS_REVISION}"
+            -P "${PROJECT_SOURCE_DIR}/tests/integration/picoquic_dependency_contract.cmake")
+    add_test(NAME picoquic-dependency-rejects-mismatch
+        COMMAND "${CMAKE_COMMAND}"
+            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+            "-DPICOQUIC_SOURCE_DIR=${picoquic_SOURCE_DIR}"
+            "-DPICOTLS_SOURCE_DIR=${picotls_SOURCE_DIR}"
+            "-DEXPECTED_PICOQUIC_REVISION=0000000000000000000000000000000000000000"
+            "-DEXPECTED_PICOTLS_REVISION=${MOQ_INTEROP_PICOTLS_REVISION}"
+            -P "${PROJECT_SOURCE_DIR}/tests/integration/picoquic_dependency_contract.cmake")
+    set_tests_properties(picoquic-dependency-rejects-mismatch PROPERTIES
+                         WILL_FAIL TRUE)
 
     add_executable(moq-interop-quiche-link-tests
                    tests/integration/quiche_link_test.cpp)

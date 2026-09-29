@@ -17,6 +17,8 @@ inline BuildInfo build_info() {
         MOQ_INTEROP_SOURCE_REVISION,
         {
             {"quiche", MOQ_INTEROP_QUICHE_REVISION},
+            {"picoquic", MOQ_INTEROP_PICOQUIC_REVISION},
+            {"picotls", MOQ_INTEROP_PICOTLS_REVISION},
             {"nlohmann_json", MOQ_INTEROP_NLOHMANN_JSON_REVISION},
             {"cpp_httplib", MOQ_INTEROP_CPP_HTTPLIB_REVISION},
             {"googletest", MOQ_INTEROP_GOOGLETEST_REVISION},

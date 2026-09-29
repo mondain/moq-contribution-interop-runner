@@ -14,8 +14,14 @@ TEST(Version, ReportsBuildAndDependencyRevisions) {
     EXPECT_FALSE(info.source_revision.empty());
     EXPECT_EQ(info.dependencies.at("quiche"),
               "bbfe6205b8af2e6fadbb6d7818de463fbe123342");
+    EXPECT_EQ(info.dependencies.at("picoquic"),
+              "61fcd56ae0f069a1e98459e7a4965312a5190943");
+    EXPECT_EQ(info.dependencies.at("picotls"),
+              "bfa67875982afc4c24f21e146cef4747fa189c2f");
 
-    for (const char* dependency : {"quiche", "nlohmann_json", "cpp_httplib", "googletest", "sqlite3"}) {
+    for (const char* dependency : {"quiche", "picoquic", "picotls",
+                                   "nlohmann_json", "cpp_httplib",
+                                   "googletest", "sqlite3"}) {
         const auto it = info.dependencies.find(dependency);
         ASSERT_NE(it, info.dependencies.end()) << dependency;
         EXPECT_FALSE(it->second.empty()) << dependency;
