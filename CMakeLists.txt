@@ -153,6 +153,7 @@ target_compile_options(moq-interop-transport PRIVATE
 add_library(moq-interop-session
     src/session/publisher_session.cpp
     src/session/draft18_dispatch.cpp
+    src/session/draft21_request_ids.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -424,6 +425,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-publisher-request
              COMMAND moq-interop-draft21-publisher-request-tests)
+
+    add_executable(moq-interop-draft21-request-ids-tests
+                   tests/protocol/draft21_request_ids_test.cpp)
+    target_link_libraries(moq-interop-draft21-request-ids-tests PRIVATE
+                          moq-interop-session GTest::gtest_main)
+    add_test(NAME draft21-request-ids
+             COMMAND moq-interop-draft21-request-ids-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
