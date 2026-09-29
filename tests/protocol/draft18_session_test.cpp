@@ -2759,5 +2759,31 @@ TEST(Draft18SessionForward, PublishResumingForwardSavesJoiningLocation) {
               (Location{3, 7}));
 }
 
+TEST(Draft18SessionForward, UpdateOkSavesFreshJoiningLocation) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x10, Uint8ParameterValue{0}}}, {}}), false});
+    session.observe_local_message(
+        0, RequestOkMessage{{{0x10, Uint8ParameterValue{0}}}, {}}, false);
+    session.take_evidence(64);
+    session.observe_local_message(
+        0, RequestUpdateMessage{1, {{0x10, Uint8ParameterValue{1}}}}, false);
+    session.take_evidence(64);
+    session.on_event(StreamDataEvent{
+        0, encode(RequestOkMessage{{{0x09, Location{5, 2}}}, {}}), false});
+    const auto evidence = session.take_evidence(64);
+    const auto response = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::UpdateResponseObserved;
+        });
+    ASSERT_NE(response, evidence.end());
+    EXPECT_EQ(std::get<UpdateResponseEvidence>(response->data).joining_location,
+              (Location{5, 2}));
+}
+
 }  // namespace
 }  // namespace moq::interop::session

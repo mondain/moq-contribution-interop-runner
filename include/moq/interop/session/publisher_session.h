@@ -242,6 +242,7 @@ struct UpdateResponseEvidence {
     std::vector<std::uint64_t> candidate_update_ids;
     transport::StreamId stream_id{0};
     wire::draft18::Message message;
+    std::optional<wire::draft18::Location> joining_location;
 };
 
 struct ResponseViolationEvidence {

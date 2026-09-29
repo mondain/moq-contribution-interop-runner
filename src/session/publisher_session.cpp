@@ -516,6 +516,7 @@ public:
         struct PendingUpdate {
             std::uint64_t request_id{0};
             RequestInitiator initiator{RequestInitiator::Peer};
+            bool enables_forward{false};
         };
 
         struct SubscriptionState {
@@ -1188,14 +1189,17 @@ public:
 
     void change_forward_state(SessionTransition& transition,
                               RequestRecord& request,
-                              RequestInitiator actor, bool new_state) {
+                              RequestInitiator actor, bool new_state,
+                              bool joining_location_pending = false) {
         if (!request.subscription ||
             request.subscription->forward_state == new_state) return;
         const bool previous = request.subscription->forward_state;
         request.subscription->forward_state = new_state;
         if (!previous && new_state) {
             request.subscription->joining_location =
-                request.subscription->largest_object;
+                joining_location_pending
+                    ? std::nullopt
+                    : request.subscription->largest_object;
         }
         if (optional_subscription_evidence_available(1, 0)) {
             emit(transition, EvidenceKind::ForwardStateChanged,
@@ -1359,19 +1363,23 @@ public:
             transition, initiator, request.stream_id,
             update.parameters, false);
         if (terminal()) return false;
-        request.outstanding_updates.push_back(
-            RequestRecord::PendingUpdate{update.request_id, initiator});
-        if (!tokens_accepted) return true;
-        if (request.subscription &&
+        const bool subscriber_update = request.subscription &&
             ((request.subscription->local_role ==
                   LocalSubscriptionRole::Publisher &&
               initiator == RequestInitiator::Peer) ||
              (request.subscription->local_role ==
                   LocalSubscriptionRole::Subscriber &&
-              initiator == RequestInitiator::Local))) {
-            if (const auto forward = forward_parameter(update.parameters)) {
-                change_forward_state(transition, request, initiator, *forward);
-            }
+              initiator == RequestInitiator::Local));
+        const auto forward = forward_parameter(update.parameters);
+        const bool enables_forward = tokens_accepted && subscriber_update &&
+            forward && *forward && !request.subscription->forward_state;
+        request.outstanding_updates.push_back(
+            RequestRecord::PendingUpdate{update.request_id, initiator,
+                                         enables_forward});
+        if (!tokens_accepted) return true;
+        if (subscriber_update && forward) {
+            change_forward_state(transition, request, initiator, *forward,
+                                 enables_forward);
         }
         return emit(transition, EvidenceKind::UpdateObserved,
                     UpdateObservedEvidence{initiator, update.request_id,
@@ -1681,7 +1689,19 @@ public:
                       : std::optional<std::uint64_t>{pending->request_id},
             ambiguous ? std::move(candidates) : std::vector<std::uint64_t>{},
             request.stream_id,
-            message};
+            message,
+            std::nullopt};
+        if (!error && pending->enables_forward && request.subscription) {
+            const auto* ok =
+                std::get_if<wire::draft18::RequestOkMessage>(&message);
+            if (ok) {
+                const auto location =
+                    largest_object_parameter(ok->parameters);
+                request.subscription->largest_object = location;
+                request.subscription->joining_location = location;
+                observed.joining_location = location;
+            }
+        }
         const auto update_initiator = pending->initiator;
         if (error) {
             std::erase_if(request.outstanding_updates,
