@@ -154,6 +154,7 @@ add_library(moq-interop-session
     src/session/publisher_session.cpp
     src/session/draft18_dispatch.cpp
     src/session/draft21_request_ids.cpp
+    src/session/draft21_control_state.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -432,6 +433,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-session GTest::gtest_main)
     add_test(NAME draft21-request-ids
              COMMAND moq-interop-draft21-request-ids-tests)
+
+    add_executable(moq-interop-draft21-control-state-tests
+                   tests/protocol/draft21_control_state_test.cpp)
+    target_link_libraries(moq-interop-draft21-control-state-tests PRIVATE
+                          moq-interop-session GTest::gtest_main)
+    add_test(NAME draft21-control-state
+             COMMAND moq-interop-draft21-control-state-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
