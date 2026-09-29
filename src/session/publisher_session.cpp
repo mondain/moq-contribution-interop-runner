@@ -438,6 +438,19 @@ const wire::draft18::Parameters* message_parameters(
         message);
 }
 
+std::optional<bool> forward_parameter(
+    const wire::draft18::Parameters& parameters) {
+    for (const auto& parameter : parameters) {
+        if (parameter.type != 0x10) continue;
+        if (const auto* value =
+                std::get_if<wire::draft18::Uint8ParameterValue>(
+                    &parameter.value)) {
+            return value->value != 0;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::size_t> setup_auth_cache_size(
     const wire::draft18::SetupMessage& setup) {
     for (const auto& option : setup.options) {
@@ -500,6 +513,7 @@ public:
             SubscriptionPhase phase{SubscriptionPhase::Pending};
             std::size_t retained_key_bytes{0};
             std::optional<std::uint64_t> track_alias;
+            bool forward_state{true};
         };
 
         std::uint64_t request_id{0};
@@ -992,6 +1006,9 @@ public:
         const auto& [track, local_role] = *identity;
         const auto* publish =
             std::get_if<wire::draft18::PublishMessage>(&message);
+        const auto* parameters = message_parameters(message);
+        const bool initial_forward =
+            parameters ? forward_parameter(*parameters).value_or(true) : true;
         // The request record and the active-role index each own a TrackKey.
         const auto key_bytes = track_key_bytes(track);
         const auto retained_bytes =
@@ -1100,7 +1117,8 @@ public:
         request.subscription = RequestRecord::SubscriptionState{
             track, local_role, SubscriptionPhase::Pending, retained_bytes,
             publish ? std::optional<std::uint64_t>{publish->track_alias}
-                    : std::nullopt};
+                    : std::nullopt,
+            initial_forward};
         active_subscriptions.emplace(active_key, request.stream_id);
         ++subscription_history;
         subscription_key_bytes += retained_bytes;
@@ -1108,7 +1126,7 @@ public:
                   SubscriptionCreatedEvidence{
                       track, local_role, SubscriptionPhase::Pending,
                       request.initiator, request.request_id,
-                      request.stream_id})) {
+                      request.stream_id, initial_forward})) {
             return false;
         }
         if (emit_optional && opposite_subscription != active_subscriptions.end()) {
@@ -1149,6 +1167,20 @@ public:
         if (!request.subscription) return;
         request.subscription->track_alias = alias;
         established_aliases[{publisher, alias}] = request.stream_id;
+    }
+
+    void change_forward_state(SessionTransition& transition,
+                              RequestRecord& request,
+                              RequestInitiator actor, bool new_state) {
+        if (!request.subscription ||
+            request.subscription->forward_state == new_state) return;
+        const bool previous = request.subscription->forward_state;
+        request.subscription->forward_state = new_state;
+        if (optional_subscription_evidence_available(1, 0)) {
+            emit(transition, EvidenceKind::ForwardStateChanged,
+                 ForwardStateEvidence{request.request_id, request.stream_id,
+                                      actor, previous, new_state});
+        }
     }
 
     void transition_subscription(SessionTransition& transition,
@@ -1308,6 +1340,17 @@ public:
         request.outstanding_updates.push_back(
             RequestRecord::PendingUpdate{update.request_id, initiator});
         if (!tokens_accepted) return true;
+        if (request.subscription &&
+            ((request.subscription->local_role ==
+                  LocalSubscriptionRole::Publisher &&
+              initiator == RequestInitiator::Peer) ||
+             (request.subscription->local_role ==
+                  LocalSubscriptionRole::Subscriber &&
+              initiator == RequestInitiator::Local))) {
+            if (const auto forward = forward_parameter(update.parameters)) {
+                change_forward_state(transition, request, initiator, *forward);
+            }
+        }
         return emit(transition, EvidenceKind::UpdateObserved,
                     UpdateObservedEvidence{initiator, update.request_id,
                                            request.request_id,
@@ -1559,6 +1602,14 @@ public:
                 transition_subscription(transition, request,
                                         SubscriptionPhase::Established);
                 if (alias) establish_track_alias(request, publisher, *alias);
+                if (request.kind == RequestKind::Publish) {
+                    const auto* parameters = message_parameters(message);
+                    change_forward_state(
+                        transition, request, responder,
+                        parameters
+                            ? forward_parameter(*parameters).value_or(true)
+                            : true);
+                }
             }
             if (emitted && error) {
                 terminalize_request(transition, request,

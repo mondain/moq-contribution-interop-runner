@@ -111,6 +111,7 @@ enum class EvidenceKind {
     OppositeRoleCoexistence,
     PendingSubscriptionReplaced,
     ReservedNamespaceRejected,
+    ForwardStateChanged,
 };
 
 enum class HarnessLimitKind {
@@ -293,6 +294,15 @@ struct SubscriptionCreatedEvidence {
     RequestInitiator initiator{RequestInitiator::Peer};
     std::uint64_t request_id{0};
     transport::StreamId stream_id{0};
+    bool forward_state{true};
+};
+
+struct ForwardStateEvidence {
+    std::uint64_t request_id{0};
+    transport::StreamId stream_id{0};
+    RequestInitiator actor{RequestInitiator::Peer};
+    bool old_state{true};
+    bool new_state{true};
 };
 
 struct SubscriptionPhaseEvidence {
@@ -352,7 +362,7 @@ using EvidenceData =
                  DuplicateSubscriptionEvidence,
                  OppositeRoleCoexistenceEvidence,
                  PendingSubscriptionReplacementEvidence,
-                 ReservedNamespaceEvidence>;
+                 ReservedNamespaceEvidence, ForwardStateEvidence>;
 
 struct EvidenceEvent {
     std::uint64_t sequence{0};

@@ -2681,5 +2681,62 @@ TEST(Draft18SessionTokens, InvalidLocalSetupRegistrationDoesNotPartiallyCache) {
               evidence.end());
 }
 
+TEST(Draft18SessionForward, PublishForwardZeroChangesOnPublishOk) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x10, Uint8ParameterValue{0}}}, {}}), false});
+    session.observe_local_message(
+        0, RequestOkMessage{{{0x10, Uint8ParameterValue{1}}}, {}}, false);
+    const auto evidence = session.take_evidence(64);
+    const auto created = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::SubscriptionCreated;
+        });
+    ASSERT_NE(created, evidence.end());
+    EXPECT_FALSE(std::get<SubscriptionCreatedEvidence>(created->data)
+                     .forward_state);
+    const auto changed = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& value) {
+            return value.kind == EvidenceKind::ForwardStateChanged;
+        });
+    ASSERT_NE(changed, evidence.end());
+    EXPECT_TRUE(std::get<ForwardStateEvidence>(changed->data).new_state);
+}
+
+TEST(Draft18SessionForward, SubscribeUpdateChangesStateOnlyWhenSpecified) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, {{{std::byte{'n'}}}},
+                                   {{std::byte{'a'}}},
+                                   {{0x10, Uint8ParameterValue{0}}}}), false});
+    session.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    session.take_evidence(64);
+    session.on_event(StreamDataEvent{
+        0, encode(RequestUpdateMessage{2, {}}), false});
+    auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind == EvidenceKind::ForwardStateChanged;
+                            }), 0);
+    session.on_event(StreamDataEvent{
+        0, encode(RequestUpdateMessage{4, {{0x10, Uint8ParameterValue{1}}}}), false});
+    evidence = session.take_evidence(64);
+    const auto changed = std::find_if(evidence.begin(), evidence.end(),
+                                      [](const EvidenceEvent& event) {
+                                          return event.kind == EvidenceKind::ForwardStateChanged;
+                                      });
+    ASSERT_NE(changed, evidence.end());
+    const auto& state = std::get<ForwardStateEvidence>(changed->data);
+    EXPECT_FALSE(state.old_state);
+    EXPECT_TRUE(state.new_state);
+    EXPECT_EQ(state.actor, RequestInitiator::Peer);
+}
+
 }  // namespace
 }  // namespace moq::interop::session
