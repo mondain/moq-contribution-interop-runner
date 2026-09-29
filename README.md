@@ -57,6 +57,15 @@ observed. The track fixture names the request target; it does not assert that
 the publisher has already published an Object. This profile does not score
 the response code, range validity, or FETCH object delivery.
 
+For draft-18 discovery response checks, use
+`["subscribe-namespace-at-publisher"]` or
+`["subscribe-tracks-at-publisher"]`. The runner sends the corresponding
+request with the configured track namespace as its prefix and scores
+`D18-6-1-MUST-001` or `D18-6-1-MUST-003` when exactly one `REQUEST_OK` or
+`REQUEST_ERROR` is observed. The short post-response observation window
+detects duplicate replies; these profiles do not yet score the separate
+first-response ordering requirements or subsequent namespace/track updates.
+
 For draft 21, set `draft` to `21` and select exactly one of
 `d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or
 `d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`, or

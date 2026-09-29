@@ -141,7 +141,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 8);
+    ASSERT_EQ(health.at("executable_profiles").size(), 10);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
@@ -171,6 +171,12 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("executable_profiles").at(7).at("scenario"),
               "fetch-publisher-track-range");
     EXPECT_FALSE(health.at("executable_profiles").at(7).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(8).at("scenario"),
+              "subscribe-namespace-at-publisher");
+    EXPECT_FALSE(health.at("executable_profiles").at(8).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(9).at("scenario"),
+              "subscribe-tracks-at-publisher");
+    EXPECT_FALSE(health.at("executable_profiles").at(9).at("configured"));
 
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2);

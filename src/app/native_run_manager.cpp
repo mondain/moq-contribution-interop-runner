@@ -27,6 +27,10 @@ constexpr std::string_view kSubscribeScenario =
 constexpr std::string_view kDuplicateSubscribeScenario =
     "subscribe-again-to-established-publisher-track";
 constexpr std::string_view kFetchScenario = "fetch-publisher-track-range";
+constexpr std::string_view kSubscribeNamespaceScenario =
+    "subscribe-namespace-at-publisher";
+constexpr std::string_view kSubscribeTracksScenario =
+    "subscribe-tracks-at-publisher";
 constexpr std::string_view kDraft21AnnouncementScenario =
     "d21-publisher-request-stream-placement";
 constexpr std::string_view kDraft21UnknownOptionScenario =
@@ -306,6 +310,10 @@ public:
                 run_config.scenario_ids.front() == kDuplicateSubscribeScenario;
             const bool fetch =
                 run_config.scenario_ids.front() == kFetchScenario;
+            const bool subscribe_namespace =
+                run_config.scenario_ids.front() == kSubscribeNamespaceScenario;
+            const bool subscribe_tracks =
+                run_config.scenario_ids.front() == kSubscribeTracksScenario;
             scenarios::ScenarioDefinition definition;
             if (duplicate) {
                 definition =
@@ -318,6 +326,14 @@ public:
                     track_namespace(*run_config.track_fixture),
                     track_name(*run_config.track_fixture), 1,
                     {0, 0}, {0, 1}, run_config.timeout - quiet, quiet);
+            } else if (subscribe_namespace) {
+                definition = scenarios::subscribe_namespace_at_publisher(
+                    track_namespace(*run_config.track_fixture), 1,
+                    run_config.timeout - quiet, quiet);
+            } else if (subscribe_tracks) {
+                definition = scenarios::subscribe_tracks_at_publisher(
+                    track_namespace(*run_config.track_fixture), 1,
+                    run_config.timeout - quiet, quiet);
             } else {
                 definition = scenarios::subscribe_to_publisher_track(
                     track_namespace(*run_config.track_fixture),
@@ -426,7 +442,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         config.scenario_ids.size() == 1 &&
         (config.scenario_ids.front() == kSubscribeScenario ||
          config.scenario_ids.front() == kDuplicateSubscribeScenario ||
-         config.scenario_ids.front() == kFetchScenario);
+         config.scenario_ids.front() == kFetchScenario ||
+         config.scenario_ids.front() == kSubscribeNamespaceScenario ||
+         config.scenario_ids.front() == kSubscribeTracksScenario);
     const bool draft21_scenario =
         config.draft == DraftVersion::Draft21 && impl_->draft21 &&
         config.scenario_ids.size() == 1 &&

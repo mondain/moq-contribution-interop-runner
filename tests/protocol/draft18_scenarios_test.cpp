@@ -294,5 +294,53 @@ TEST(Draft18ScenarioEngine, FetchScenarioRejectsPeerParityRequestId) {
                      {0, 0}, {0, 1}, 100ms, 50ms), std::invalid_argument);
 }
 
+TEST(Draft18ScenarioEngine, DiscoveryScenariosSendDistinctRequestsAndDetectDuplicates) {
+    const auto start_time = Clock::time_point{};
+    for (const bool tracks : {false, true}) {
+        ScenarioEngine engine(tracks
+            ? subscribe_tracks_at_publisher({{{std::byte{'n'}}}}, 1, 100ms, 50ms)
+            : subscribe_namespace_at_publisher({{{std::byte{'n'}}}}, 1, 100ms, 50ms));
+        const auto started = engine.start(start_time);
+        ASSERT_EQ(started.actions.size(), 1u);
+        const auto* open = std::get_if<OpenRequestAction>(&started.actions[0]);
+        ASSERT_NE(open, nullptr);
+        if (tracks) {
+            const auto* request = std::get_if<wire::draft18::SubscribeTracksMessage>(&open->message);
+            ASSERT_NE(request, nullptr);
+            EXPECT_EQ(request->request_id, 1u);
+            EXPECT_EQ(request->track_namespace_prefix.fields,
+                      std::vector<std::vector<std::byte>>{{std::byte{'n'}}});
+        } else {
+            const auto* request = std::get_if<wire::draft18::SubscribeNamespaceMessage>(&open->message);
+            ASSERT_NE(request, nullptr);
+            EXPECT_EQ(request->request_id, 1u);
+            EXPECT_EQ(request->track_namespace_prefix.fields,
+                      std::vector<std::vector<std::byte>>{{std::byte{'n'}}});
+        }
+        const session::EvidenceEvent response{
+            1, session::EvidenceKind::InitialResponseObserved,
+            session::InitialResponseEvidence{
+                session::RequestInitiator::Peer, 1,
+                tracks ? session::RequestKind::SubscribeTracks
+                       : session::RequestKind::SubscribeNamespace,
+                1, wire::draft18::RequestOkMessage{{}, {}}}};
+        EXPECT_EQ(engine.observe(response, start_time + 10ms).step_index, 1u);
+        const session::EvidenceEvent duplicate{
+            2, session::EvidenceKind::ResponseViolation,
+            session::ResponseViolationEvidence{
+                session::RequestInitiator::Peer, 1, 1,
+                wire::draft18::RequestOkMessage{{}, {}}}};
+        EXPECT_EQ(engine.observe(duplicate, start_time + 20ms).status,
+                  ScenarioStatus::Failed);
+    }
+}
+
+TEST(Draft18ScenarioEngine, DiscoveryScenariosRejectInvalidRequestIds) {
+    EXPECT_THROW(subscribe_namespace_at_publisher({}, 0, 100ms, 50ms),
+                 std::invalid_argument);
+    EXPECT_THROW(subscribe_tracks_at_publisher({}, 2, 100ms, 50ms),
+                 std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

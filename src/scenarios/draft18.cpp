@@ -92,6 +92,35 @@ bool is_extra_fetch_response(const session::EvidenceEvent& event,
            violation->original_request_id == request_id;
 }
 
+bool is_discovery_response(const session::EvidenceEvent& event,
+                           std::uint64_t request_id,
+                           session::RequestKind kind) {
+    if (event.kind != session::EvidenceKind::InitialResponseObserved) {
+        return false;
+    }
+    const auto* response =
+        std::get_if<session::InitialResponseEvidence>(&event.data);
+    return response && response->responder == session::RequestInitiator::Peer &&
+           response->original_request_id == request_id &&
+           response->request_kind == kind &&
+           (std::holds_alternative<wire::draft18::RequestOkMessage>(
+                response->message) ||
+            std::holds_alternative<wire::draft18::RequestErrorMessage>(
+                response->message));
+}
+
+bool is_extra_discovery_response(const session::EvidenceEvent& event,
+                                 std::uint64_t request_id,
+                                 session::RequestKind kind) {
+    if (is_discovery_response(event, request_id, kind)) return true;
+    if (event.kind != session::EvidenceKind::ResponseViolation) return false;
+    const auto* violation =
+        std::get_if<session::ResponseViolationEvidence>(&event.data);
+    return violation && violation->responder ==
+                            session::RequestInitiator::Peer &&
+           violation->original_request_id == request_id;
+}
+
 }  // namespace
 
 ScenarioDefinition subscribe_to_publisher_track(
@@ -188,6 +217,58 @@ ScenarioDefinition fetch_publisher_track_range(
         "reject-extra-fetch-response", duplicate_window,
         [request_id](const session::EvidenceEvent& event) {
             return is_extra_fetch_response(event, request_id);
+        }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
+    return definition;
+}
+
+ScenarioDefinition subscribe_namespace_at_publisher(
+    wire::draft18::TrackNamespace prefix, std::uint64_t request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window) {
+    if ((request_id & 1u) == 0u) {
+        throw std::invalid_argument("local draft-18 Request ID must be odd");
+    }
+    ScenarioDefinition definition;
+    definition.id = "subscribe-namespace-at-publisher";
+    definition.steps.push_back(ScenarioStep{
+        "await-namespace-subscription-response", response_deadline,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_discovery_response(
+                event, request_id, session::RequestKind::SubscribeNamespace);
+        }, {},
+        {OpenRequestAction{wire::draft18::SubscribeNamespaceMessage{
+            request_id, std::move(prefix), {}}}}});
+    definition.steps.push_back(ScenarioStep{
+        "reject-extra-namespace-subscription-response", duplicate_window,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_extra_discovery_response(
+                event, request_id, session::RequestKind::SubscribeNamespace);
+        }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
+    return definition;
+}
+
+ScenarioDefinition subscribe_tracks_at_publisher(
+    wire::draft18::TrackNamespace prefix, std::uint64_t request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window) {
+    if ((request_id & 1u) == 0u) {
+        throw std::invalid_argument("local draft-18 Request ID must be odd");
+    }
+    ScenarioDefinition definition;
+    definition.id = "subscribe-tracks-at-publisher";
+    definition.steps.push_back(ScenarioStep{
+        "await-track-subscription-response", response_deadline,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_discovery_response(
+                event, request_id, session::RequestKind::SubscribeTracks);
+        }, {},
+        {OpenRequestAction{wire::draft18::SubscribeTracksMessage{
+            request_id, std::move(prefix), {}}}}});
+    definition.steps.push_back(ScenarioStep{
+        "reject-extra-track-subscription-response", duplicate_window,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_extra_discovery_response(
+                event, request_id, session::RequestKind::SubscribeTracks);
         }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
     return definition;
 }

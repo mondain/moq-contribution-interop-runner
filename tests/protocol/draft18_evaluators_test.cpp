@@ -35,7 +35,21 @@ RequirementCatalog catalog() {
         Applicability::Applicable, Testability::Testable,
         {"fetch-publisher-track-range"},
         {"exactly-one-fetch-ok-or-request-error"}, ""};
-    return {18, "fixture-digest", true, {required, duplicate, fetch, other}};
+    Requirement namespace_response{
+        "D18-6-1-MUST-001", Strength::Must,
+        {"6.1", 2223, 2225, 1, 1}, "publisher", "Namespace response",
+        Applicability::Applicable, Testability::Testable,
+        {"subscribe-namespace-at-publisher"},
+        {"exactly-one-namespace-subscription-response"}, ""};
+    Requirement tracks_response{
+        "D18-6-1-MUST-003", Strength::Must,
+        {"6.1", 2223, 2225, 1, 3}, "publisher", "Track response",
+        Applicability::Applicable, Testability::Testable,
+        {"subscribe-tracks-at-publisher"},
+        {"exactly-one-track-subscription-response"}, ""};
+    return {18, "fixture-digest", true,
+            {required, duplicate, fetch, namespace_response,
+             tracks_response, other}};
 }
 
 session::EvidenceEvent subscribe_request() {
@@ -254,6 +268,60 @@ TEST(Draft18Evaluators, MissingOrDuplicateFetchResponseFails) {
         evaluate_draft18(catalog(), {&undelivered, 1});
     EXPECT_EQ(outcome_for(undelivered_outcomes, "D18-5-2-MUST-001").state,
               OutcomeState::NotRun);
+}
+
+TEST(Draft18Evaluators, DiscoveryResponsesMustBeUniqueAndCorrelated) {
+    for (const bool tracks : {false, true}) {
+        const auto kind = tracks ? session::RequestKind::SubscribeTracks
+                                 : session::RequestKind::SubscribeNamespace;
+        const auto id = tracks ? "D18-6-1-MUST-003" : "D18-6-1-MUST-001";
+        const auto scenario = tracks ? "subscribe-tracks-at-publisher"
+                                     : "subscribe-namespace-at-publisher";
+        const wire::draft18::Message request_message = tracks
+            ? wire::draft18::Message{wire::draft18::SubscribeTracksMessage{1, {}, {}}}
+            : wire::draft18::Message{wire::draft18::SubscribeNamespaceMessage{1, {}, {}}};
+        const session::EvidenceEvent request{
+            0, session::EvidenceKind::RequestObserved,
+            session::RequestObservedEvidence{
+                session::RequestInitiator::Local, 1, kind, 1,
+                request_message}};
+        const session::EvidenceEvent ok{
+            1, session::EvidenceKind::InitialResponseObserved,
+            session::InitialResponseEvidence{
+                session::RequestInitiator::Peer, 1, kind, 1,
+                wire::draft18::RequestOkMessage{{}, {}}}};
+        ScenarioContext context{scenario, true, true, {request, ok}};
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&context, 1}), id).state,
+                  OutcomeState::Pass);
+        auto wrong_stream = context;
+        std::get<session::InitialResponseEvidence>(wrong_stream.evidence[1].data)
+            .stream_id = 5;
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&wrong_stream, 1}), id).state,
+                  OutcomeState::Fail);
+        auto wrong_kind = context;
+        std::get<session::InitialResponseEvidence>(wrong_kind.evidence[1].data)
+            .request_kind = session::RequestKind::Publish;
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&wrong_kind, 1}), id).state,
+                  OutcomeState::Fail);
+        std::get<session::InitialResponseEvidence>(context.evidence[1].data)
+            .message = wire::draft18::RequestErrorMessage{0x11, 0, {}, std::nullopt};
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&context, 1}), id).state,
+                  OutcomeState::Pass);
+        context.evidence.push_back({
+            2, session::EvidenceKind::ResponseViolation,
+            session::ResponseViolationEvidence{
+                session::RequestInitiator::Peer, 1, 1,
+                wire::draft18::RequestOkMessage{{}, {}}}});
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&context, 1}), id).state,
+                  OutcomeState::Fail);
+        context.evidence.pop_back();
+        context.evidence.pop_back();
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&context, 1}), id).state,
+                  OutcomeState::Fail);
+        context.stimulus_delivered = false;
+        EXPECT_EQ(outcome_for(evaluate_draft18(catalog(), {&context, 1}), id).state,
+                  OutcomeState::NotRun);
+    }
 }
 
 }  // namespace

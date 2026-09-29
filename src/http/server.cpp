@@ -265,6 +265,16 @@ public:
                                               {"mode", "observed"},
                                               {"scenario", "fetch-publisher-track-range"},
                                               {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft18)}},
+                                             {{"draft", 18}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "subscribe-namespace-at-publisher"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft18)}},
+                                             {{"draft", 18}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "subscribe-tracks-at-publisher"},
+                                              {"configured", runs && runs->supports(
                                                   app::DraftVersion::Draft18)}}})},
                                          {"validator", detail::build_json(build)}});
             });
@@ -312,7 +322,11 @@ public:
                      requested.scenario_ids.front() ==
                          "subscribe-again-to-established-publisher-track" ||
                      requested.scenario_ids.front() ==
-                         "fetch-publisher-track-range");
+                         "fetch-publisher-track-range" ||
+                     requested.scenario_ids.front() ==
+                         "subscribe-namespace-at-publisher" ||
+                     requested.scenario_ids.front() ==
+                         "subscribe-tracks-at-publisher");
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21 &&
                     requested.scenario_ids.size() == 1 &&

@@ -31,4 +31,16 @@ ScenarioDefinition fetch_publisher_track_range(
     std::chrono::milliseconds response_deadline,
     std::chrono::milliseconds duplicate_window);
 
+ScenarioDefinition subscribe_namespace_at_publisher(
+    wire::draft18::TrackNamespace prefix,
+    std::uint64_t request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window);
+
+ScenarioDefinition subscribe_tracks_at_publisher(
+    wire::draft18::TrackNamespace prefix,
+    std::uint64_t request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window);
+
 }  // namespace moq::interop::scenarios

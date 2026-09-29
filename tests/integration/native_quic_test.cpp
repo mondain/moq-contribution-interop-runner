@@ -1125,6 +1125,69 @@ TEST(NativeQuicLive, RunManagerScoresPublisherFetchResponse) {
     EXPECT_EQ(completed.score->verdict, requirements::RunVerdict::Pass);
 }
 
+TEST(NativeQuicLive, RunManagerScoresNamespaceAndTrackDiscoveryResponses) {
+    TestPemFiles pem;
+    for (const bool tracks : {false, true}) {
+        const std::string scenario = tracks
+            ? "subscribe-tracks-at-publisher"
+            : "subscribe-namespace-at-publisher";
+        requirements::Requirement requirement{
+            tracks ? "D18-6-1-MUST-003" : "D18-6-1-MUST-001",
+            requirements::Strength::Must,
+            {"6.1", 2223, 2225, 1, tracks ? 3u : 1u}, "publisher",
+            "single discovery response",
+            requirements::Applicability::Applicable,
+            requirements::Testability::Testable,
+            {scenario},
+            {tracks ? "exactly-one-track-subscription-response"
+                    : "exactly-one-namespace-subscription-response"}, ""};
+        auto catalog = std::make_shared<const requirements::RequirementCatalog>(
+            requirements::RequirementCatalog{
+                18, "test", true, {std::move(requirement)}});
+        auto store = std::make_shared<storage::SqliteRunStore>(
+            ":memory:", app::BuildInfo{"test", "test", {}});
+        app::NativeRunManager manager(
+            catalog, store,
+            {.bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+             .port_start = 0, .port_end = 0,
+             .maximum_active_runs = 1, .certificate_path = pem.certificate(),
+             .private_key_path = pem.key()});
+        const app::RunConfig config{
+            app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+            app::RunMode::Observed, {scenario},
+            std::chrono::milliseconds(1000), app::TrackFixture{{"n"}, "x"}};
+        const auto started = manager.start(config);
+        ASSERT_EQ(started.status, app::RunStartStatus::Started);
+        auto client = test::QuicheTestClient::create(
+            {.port = started.endpoint.port, .alpn = expected_alpn()});
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto setup = client->stream(3);
+            return setup && setup->data.size() == 4;
+        }));
+        ASSERT_TRUE(client->send_stream(
+            2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto request = client->stream(1);
+            return request && request->data.size() == 8;
+        }));
+        EXPECT_EQ(client->stream(1)->data,
+                  bytes({tracks ? 0x51u : 0x50u, 0x00, 0x05,
+                         0x01, 0x01, 0x01, 'n', 0x00}));
+        ASSERT_TRUE(client->send_stream(
+            1, bytes({0x05, 0x00, 0x03, 0x11, 0x00, 0x00}), false));
+        ASSERT_TRUE(pump_until(*client, [&] {
+            return store->load(started.id).state == storage::RunState::Finalized;
+        }));
+        const auto completed = store->load(started.id);
+        ASSERT_EQ(completed.outcomes.size(), 1u);
+        EXPECT_EQ(completed.outcomes[0].state,
+                  requirements::OutcomeState::Pass);
+        ASSERT_TRUE(completed.score.has_value());
+        EXPECT_EQ(completed.score->verdict, requirements::RunVerdict::Pass);
+    }
+}
+
 TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
     TestPemFiles pem;
     auto store = std::make_shared<storage::SqliteRunStore>(
