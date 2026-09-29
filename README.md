@@ -87,6 +87,14 @@ bash tests/e2e/draft18-native-moqxr.sh \
   "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
 ```
 
+Pass `21` as a fourth argument to exercise the draft-21 PUBLISH-announcement
+profile with `moqxr --preannounce-tracks`; omitting it selects draft 18. The
+script checks the returned ALPN and prints publisher and runner logs on failure.
+In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, the picoquic client
+did not negotiate QUIC DATAGRAM, so the draft-21 attempt ended at the
+transport gate before any PUBLISH could be scored. This is an interop
+observation, not a validator pass or a reason to bypass that draft requirement.
+
 The script starts a loopback runner with temporary TLS material, asks the
 publisher to connect, prints the run verdict and any scored requirements, and
 removes its temporary files. It requires `openssl`, `curl`, and `jq`; it is not

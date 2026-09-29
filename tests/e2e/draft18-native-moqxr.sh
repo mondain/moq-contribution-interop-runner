@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-    printf 'Usage: %s RUNNER_BIN MOQXR_BIN MP4_FIXTURE\n' "$0" >&2
+if [[ $# -ne 3 && $# -ne 4 ]]; then
+    printf 'Usage: %s RUNNER_BIN MOQXR_BIN MP4_FIXTURE [18|21]\n' "$0" >&2
     exit 2
 fi
 
 runner_bin=$1
 publisher_bin=$2
 media_file=$3
+draft=${4:-18}
+if [[ "$draft" != 18 && "$draft" != 21 ]]; then
+    printf 'draft must be 18 or 21\n' >&2
+    exit 2
+fi
+if [[ "$draft" == 21 ]]; then
+    scenario=d21-publisher-request-stream-placement
+    publisher_extra=(--preannounce-tracks)
+else
+    scenario=subscribe-to-publisher-track
+    publisher_extra=()
+fi
 http_port=${MOQ_INTEROP_TEST_HTTP_PORT:-19181}
 udp_port=${MOQ_INTEROP_TEST_UDP_PORT:-19182}
 test_dir=$(mktemp -d /tmp/moq-interop-e2e.XXXXXX)
@@ -63,10 +75,12 @@ done
 run_json=$(curl --fail --silent --show-error -X POST \
     "http://127.0.0.1:$http_port/api/v1/runs" \
     -H 'Content-Type: application/json' \
-    -d '{"draft":18,"transport":"native-quic","mode":"observed","scenarios":["subscribe-to-publisher-track"],"timeout_ms":20000,"track":{"namespace_hex":["6d65646961"],"name_hex":"766964655f31"}}')
+    -d "{\"draft\":$draft,\"transport\":\"native-quic\",\"mode\":\"observed\",\"scenarios\":[\"$scenario\"],\"timeout_ms\":20000,\"track\":{\"namespace_hex\":[\"6d65646961\"],\"name_hex\":\"766964655f31\"}}")
 run_id=$(jq -r '.run.id' <<<"$run_json")
 endpoint_port=$(jq -r '.publisher_endpoint.port' <<<"$run_json")
-if [[ "$run_id" == null || "$endpoint_port" != "$udp_port" ]]; then
+endpoint_alpn=$(jq -r '.publisher_endpoint.alpn' <<<"$run_json")
+if [[ "$run_id" == null || "$endpoint_port" != "$udp_port" ||
+      "$endpoint_alpn" != "moqt-$draft" ]]; then
     printf 'invalid run creation response: %s\n' "$run_json" >&2
     exit 1
 fi
@@ -74,19 +88,25 @@ fi
 set +e
 OPENMOQ_PICOQUIC_TRACE=1 "$publisher_bin" \
     --input "$media_file" --endpoint "moqt://127.0.0.1:$udp_port/moq" \
-    --namespace media --draft 18 --forward 0 --timeout 10 --insecure \
+    --namespace media --draft "$draft" --forward 0 --timeout 10 --insecure \
+    "${publisher_extra[@]}" \
     >"$test_dir/publisher.log" 2>&1
 publisher_exit=$?
 set -e
 
 if [[ "$publisher_exit" -ne 0 ]]; then
-    stop_status=$(curl --silent --show-error -X POST \
-        "http://127.0.0.1:$http_port/api/v1/runs/$run_id/stop" \
-        -H 'Content-Type: application/json' -d '' \
-        --output "$test_dir/stop.json" --write-out '%{http_code}')
-    if [[ "$stop_status" != 200 ]]; then
-        printf 'stop returned HTTP %s: ' "$stop_status" >&2
-        sed -n '1p' "$test_dir/stop.json" >&2
+    current_state=$(curl --fail --silent --show-error \
+        "http://127.0.0.1:$http_port/api/v1/runs/$run_id" |
+        jq -r '.run.state')
+    if [[ "$current_state" != finalized ]]; then
+        stop_status=$(curl --silent --show-error -X POST \
+            "http://127.0.0.1:$http_port/api/v1/runs/$run_id/stop" \
+            -H 'Content-Type: application/json' -d '' \
+            --output "$test_dir/stop.json" --write-out '%{http_code}')
+        if [[ "$stop_status" != 200 && "$stop_status" != 409 ]]; then
+            printf 'stop returned HTTP %s: ' "$stop_status" >&2
+            sed -n '1p' "$test_dir/stop.json" >&2
+        fi
     fi
 fi
 
