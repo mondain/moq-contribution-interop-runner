@@ -191,5 +191,55 @@ TEST(Draft21Announcement, WrongTrackDoesNotPass) {
     EXPECT_FALSE(controller.context().complete);
 }
 
+TEST(Draft21Announcement, KnownNonControlStreamsAreNotUnknownTypes) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(),
+                         transport::StreamDataEvent{6, bytes({0x05}), false},
+                         transport::StreamDataEvent{10, bytes({0x10}), false},
+                         transport::StreamDataEvent{
+                             14, bytes({0xf0, 0x13, 0x2b, 0x3e, 0x28}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Running);
+    EXPECT_FALSE(transport.close_error);
+}
+
+TEST(Draft21Announcement, WaitsForCompleteFragmentedUnidirectionalType) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(),
+                         transport::StreamDataEvent{6, bytes({0x80}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Running);
+    EXPECT_FALSE(transport.close_error);
+    transport.inbound = {transport::StreamDataEvent{6, bytes({0x09}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{} +
+                              std::chrono::milliseconds(1)).status,
+              Draft21AnnouncementStatus::Failed);
+    EXPECT_EQ(transport.close_error, 0x3u);
+}
+
+TEST(Draft21Announcement, UnknownUnidirectionalTypeClosesSession) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(),
+                         transport::StreamDataEvent{6, bytes({0x09}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Failed);
+    EXPECT_EQ(transport.close_error, 0x3u);
+    EXPECT_FALSE(controller.context().complete);
+}
+
+TEST(Draft21Announcement, SecondPeerControlStreamClosesSession) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(), setup(),
+                         transport::StreamDataEvent{6, setup().data, false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Failed);
+    EXPECT_EQ(transport.close_error, 0x3u);
+    EXPECT_FALSE(controller.context().complete);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

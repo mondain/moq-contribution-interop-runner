@@ -15,6 +15,12 @@ constexpr std::size_t kMaximumUniProbes = 64;
 constexpr std::size_t kMaximumUniProbeBytes = 9;
 constexpr std::size_t kMaximumIgnoredUniStreams = 64;
 
+bool known_non_control_uni_type(std::uint64_t type) {
+    // draft-ietf-moq-transport-21 section 6.4.1, Table 2.
+    return type == 0x05 || type == 0x132b3e28 ||
+           (type <= 0x3f && (type & 0x10) != 0);
+}
+
 }  // namespace
 
 Draft21AnnouncementController::Draft21AnnouncementController(
@@ -116,7 +122,13 @@ void Draft21AnnouncementController::handle_uni(
             handle_control(event.stream_id, first, event.fin);
             return;
         }
-        ignore_stream();
+        if (const auto* value = std::get_if<std::uint64_t>(&type);
+            value && known_non_control_uni_type(*value)) {
+            ignore_stream();
+        } else {
+            uni_probes_.erase(found);
+            close_protocol(0x3, event.stream_id);
+        }
         return;
     }
     probe.insert(probe.end(), event.data.begin(), event.data.end());
@@ -131,7 +143,13 @@ void Draft21AnnouncementController::handle_uni(
         handle_control(event.stream_id, first, event.fin);
         return;
     }
-    ignore_stream();
+    if (const auto* value = std::get_if<std::uint64_t>(&type);
+        value && known_non_control_uni_type(*value)) {
+        ignore_stream();
+    } else {
+        uni_probes_.erase(found);
+        close_protocol(0x3, event.stream_id);
+    }
 }
 
 void Draft21AnnouncementController::handle_request(
