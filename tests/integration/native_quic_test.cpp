@@ -1,4 +1,5 @@
 #include "moq/interop/transport/native_quic_listener.h"
+#include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/scenarios/run_controller.h"
 #include "transport/quiche_native_listener_internal.h"
@@ -914,6 +915,66 @@ TEST(NativeQuicLive, Draft18ControllerCompletesSubscribeResponseOverQuic) {
         return state.status == scenarios::ScenarioStatus::Passed;
     }));
     EXPECT_TRUE(controller.context().complete);
+}
+
+TEST(NativeQuicLive, RunManagerScoresAnIsolatedPublisherSession) {
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    requirements::Requirement response_requirement{
+        "D18-5.1-MUST-003", requirements::Strength::Must,
+        {"5.1", 1936, 1937, 1, 1}, "publisher",
+        "exactly one SUBSCRIBE response",
+        requirements::Applicability::Applicable,
+        requirements::Testability::Testable,
+        {"subscribe-to-publisher-track"},
+        {"exactly-one-subscribe-ok-or-request-error"}, ""};
+    auto catalog = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            18, "test", true, {std::move(response_requirement)}});
+    app::NativeRunManager manager(
+        catalog, store,
+        {.bind_address = "127.0.0.1", .port_start = 0, .port_end = 0,
+         .maximum_active_runs = 1, .certificate_path = pem.certificate(),
+         .private_key_path = pem.key()});
+    const app::RunConfig config{
+        app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"subscribe-to-publisher-track"},
+        std::chrono::milliseconds(1000), app::TrackFixture{{"n"}, "x"}};
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    ASSERT_GT(started.endpoint.port, 0u);
+    EXPECT_EQ(manager.start(config).status,
+              app::RunStartStatus::PortExhausted);
+
+    auto client = test::QuicheTestClient::create(
+        {.port = started.endpoint.port, .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto setup = client->stream(3);
+        return setup && setup->data.size() == 4;
+    }));
+    ASSERT_TRUE(client->send_stream(
+        2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto request = client->stream(1);
+        return request && request->data.size() == 10;
+    }));
+    EXPECT_EQ(client->stream(1)->data,
+              bytes({0x03, 0x00, 0x07, 0x01, 0x01, 0x01,
+                     'n', 0x01, 'x', 0x00}));
+    ASSERT_TRUE(client->send_stream(
+        1, bytes({0x04, 0x00, 0x04, 0x05, 0x00, 0x02, 0x09}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        return store->load(started.id).state == storage::RunState::Finalized;
+    }));
+    const auto completed = store->load(started.id);
+    ASSERT_EQ(completed.outcomes.size(), 1u);
+    EXPECT_EQ(completed.outcomes[0].state,
+              requirements::OutcomeState::Pass);
+    ASSERT_TRUE(completed.score.has_value());
+    EXPECT_EQ(completed.score->verdict, requirements::RunVerdict::Pass);
+    EXPECT_FALSE(completed.events.empty());
 }
 
 TEST(NativeQuicLive, DifferentAlpnNeverEstablishes) {

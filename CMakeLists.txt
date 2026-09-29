@@ -170,6 +170,13 @@ target_compile_options(moq-interop-draft18-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(moq-interop-runs src/app/native_run_manager.cpp)
+target_link_libraries(moq-interop-runs PUBLIC
+    moq-interop-transport moq-interop-scenarios
+    moq-interop-draft18-evaluators moq-interop-storage)
+target_compile_options(moq-interop-runs PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+
 add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -241,7 +248,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
                                "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-native-quic-tests PRIVATE
                           moq-interop-transport moq-interop-quiche
-                          moq-interop-scenarios
+                          moq-interop-scenarios moq-interop-runs
                           GTest::gtest_main)
     target_compile_options(moq-interop-native-quic-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
