@@ -2810,6 +2810,42 @@ TEST(Draft18SessionObjects, DatagramAssociatesAliasAndForwardState) {
     EXPECT_EQ(object.forward_state, false);
     EXPECT_EQ(object.object.group_id, 2u);
     EXPECT_EQ(object.object.object_id, 3u);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& event) {
+                               return event.kind ==
+                                      EvidenceKind::ForwardStateViolation;
+                           }), evidence.end());
+}
+
+TEST(Draft18SessionObjects, DatagramAfterForwardEnableDoesNotViolate) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x10, Uint8ParameterValue{0}}}, {}}), false});
+    session.observe_local_message(
+        0, RequestOkMessage{{{0x10, Uint8ParameterValue{0}}}, {}}, false);
+    session.observe_local_message(
+        0, RequestUpdateMessage{1, {{0x10, Uint8ParameterValue{1}}}}, false);
+    session.take_evidence(64);
+    session.on_event(transport::DatagramEvent{
+        {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
+         std::byte{0x03}, std::byte{0x04}, std::byte{0xaa}}});
+    const auto evidence = session.take_evidence(64);
+    const auto observed = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::ObjectObserved;
+        });
+    ASSERT_NE(observed, evidence.end());
+    EXPECT_EQ(std::get<ObjectObservedEvidence>(observed->data).forward_state,
+              true);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& event) {
+                                return event.kind ==
+                                       EvidenceKind::ForwardStateViolation;
+                            }), 0);
 }
 
 }  // namespace

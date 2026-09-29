@@ -2219,10 +2219,23 @@ public:
                                 }
                             }
                         }
+                        const bool forwarding_violation =
+                            request_id && forward_state && !*forward_state &&
+                            object->track_alias;
+                        const auto group_id = object->group_id;
+                        const auto object_id = object->object_id;
+                        const auto track_alias = object->track_alias;
                         emit(transition, EvidenceKind::ObjectObserved,
                              ObjectObservedEvidence{request_id,
                                                     forward_state,
                                                     std::move(*object)});
+                        if (forwarding_violation && !terminal()) {
+                            emit(transition,
+                                 EvidenceKind::ForwardStateViolation,
+                                 ForwardStateViolationEvidence{
+                                     *request_id, *track_alias,
+                                     group_id, object_id});
+                        }
                     } else {
                         emit(transition, EvidenceKind::DeferredStreamBytes,
                              DeferredBytesEvidence{

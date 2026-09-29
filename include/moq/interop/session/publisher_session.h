@@ -114,6 +114,7 @@ enum class EvidenceKind {
     ReservedNamespaceRejected,
     ForwardStateChanged,
     ObjectObserved,
+    ForwardStateViolation,
 };
 
 enum class HarnessLimitKind {
@@ -315,6 +316,13 @@ struct ObjectObservedEvidence {
     wire::draft18::ObjectEvent object;
 };
 
+struct ForwardStateViolationEvidence {
+    std::uint64_t request_id{0};
+    std::uint64_t track_alias{0};
+    std::uint64_t group_id{0};
+    std::uint64_t object_id{0};
+};
+
 struct SubscriptionPhaseEvidence {
     TrackKey track;
     LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
@@ -373,7 +381,7 @@ using EvidenceData =
                  OppositeRoleCoexistenceEvidence,
                  PendingSubscriptionReplacementEvidence,
                  ReservedNamespaceEvidence, ForwardStateEvidence,
-                 ObjectObservedEvidence>;
+                 ObjectObservedEvidence, ForwardStateViolationEvidence>;
 
 struct EvidenceEvent {
     std::uint64_t sequence{0};
