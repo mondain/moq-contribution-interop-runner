@@ -275,6 +275,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             std::move(listener_config));
         if (created.listener) {
             endpoint = created.listener->bound_endpoint();
+            if (!impl_->config.advertised_address.empty()) {
+                endpoint.address = impl_->config.advertised_address;
+            }
             listener = std::move(created.listener);
             break;
         }

@@ -1,4 +1,5 @@
 #include "moq/interop/app/version.h"
+#include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/http/server.h"
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/storage/run_store.h"
@@ -22,6 +23,7 @@ void request_stop(int) { keep_running = 0; }
 
 struct Options {
     moq::interop::http::ServerConfig server;
+    moq::interop::app::NativeRunManagerConfig native;
     std::filesystem::path database = "interop-runs.sqlite3";
     std::filesystem::path docs = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "docs";
     std::filesystem::path requirements =
@@ -35,6 +37,12 @@ void usage(std::ostream& output) {
               "  --database PATH         SQLite database path\n"
               "  --docs PATH             checked-in draft text directory\n"
               "  --requirements PATH     requirement catalog directory\n"
+              "  --publisher-bind ADDRESS  native QUIC bind address\n"
+              "  --publisher-advertise ADDRESS  host/address returned to publishers\n"
+              "  --publisher-port-start PORT  first UDP publisher port (default 4443)\n"
+              "  --publisher-port-end PORT    last UDP publisher port (default 4452)\n"
+              "  --tls-cert PATH         PEM certificate for native QUIC\n"
+              "  --tls-key PATH          PEM private key for native QUIC\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -50,6 +58,10 @@ std::uint16_t parse_port(std::string_view value) {
 
 Options parse_options(int argc, char* argv[]) {
     Options options;
+    options.native.bind_address = "127.0.0.1";
+    options.native.port_start = 4443;
+    options.native.port_end = 4452;
+    options.native.maximum_active_runs = 10;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument(argv[index]);
         auto value = [&](std::string_view option) -> std::string_view {
@@ -61,8 +73,22 @@ Options parse_options(int argc, char* argv[]) {
         else if (argument == "--database") options.database = value(argument);
         else if (argument == "--docs") options.docs = value(argument);
         else if (argument == "--requirements") options.requirements = value(argument);
+        else if (argument == "--publisher-bind") options.native.bind_address = value(argument);
+        else if (argument == "--publisher-advertise") options.native.advertised_address = value(argument);
+        else if (argument == "--publisher-port-start") options.native.port_start = parse_port(value(argument));
+        else if (argument == "--publisher-port-end") options.native.port_end = parse_port(value(argument));
+        else if (argument == "--tls-cert") options.native.certificate_path = value(argument);
+        else if (argument == "--tls-key") options.native.private_key_path = value(argument);
         else throw std::invalid_argument("unknown option: " + std::string(argument));
     }
+    if (options.native.certificate_path.empty() != options.native.private_key_path.empty()) {
+        throw std::invalid_argument("--tls-cert and --tls-key must be supplied together");
+    }
+    if (options.native.port_start > options.native.port_end) {
+        throw std::invalid_argument("publisher port start must not exceed port end");
+    }
+    options.native.maximum_active_runs = static_cast<std::size_t>(
+        options.native.port_end - options.native.port_start + 1);
     return options;
 }
 
@@ -96,7 +122,12 @@ int main(int argc, char* argv[]) {
             moq::interop::requirements::RequirementCatalog::load(
                 source21, options.requirements / "draft21.json"));
         auto store = std::make_shared<moq::interop::storage::SqliteRunStore>(options.database, build);
-        moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server);
+        std::shared_ptr<moq::interop::app::NativeRunManager> runs;
+        if (!options.native.certificate_path.empty()) {
+            runs = std::make_shared<moq::interop::app::NativeRunManager>(
+                draft18, store, options.native);
+        }
+        moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server, runs);
         if (!server.start()) throw std::runtime_error("could not bind the HTTP listener");
 
         std::signal(SIGINT, request_stop);

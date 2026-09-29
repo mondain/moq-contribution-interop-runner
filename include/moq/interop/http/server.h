@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/app/version.h"
+#include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/requirements/catalog.h"
 #include "moq/interop/storage/run_store.h"
 
@@ -26,7 +27,8 @@ public:
     HttpServer(std::shared_ptr<const requirements::RequirementCatalog> draft18,
                std::shared_ptr<const requirements::RequirementCatalog> draft21,
                std::shared_ptr<storage::RunStore> store, app::BuildInfo build,
-               ServerConfig config = {});
+               ServerConfig config = {},
+               std::shared_ptr<app::NativeRunManager> runs = nullptr);
     ~HttpServer();
 
     HttpServer(const HttpServer&) = delete;

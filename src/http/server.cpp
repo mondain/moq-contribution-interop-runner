@@ -195,10 +195,11 @@ public:
     Impl(std::shared_ptr<const requirements::RequirementCatalog> supplied_draft18,
          std::shared_ptr<const requirements::RequirementCatalog> supplied_draft21,
          std::shared_ptr<storage::RunStore> supplied_store, app::BuildInfo supplied_build,
-         ServerConfig supplied_config)
+         ServerConfig supplied_config,
+         std::shared_ptr<app::NativeRunManager> supplied_runs)
         : draft18(std::move(supplied_draft18)), draft21(std::move(supplied_draft21)),
           store(std::move(supplied_store)), build(std::move(supplied_build)),
-          config(std::move(supplied_config)) {
+          config(std::move(supplied_config)), runs(std::move(supplied_runs)) {
         if (!draft18 || !draft21 || !store) {
             throw std::invalid_argument("HTTP server dependencies must not be null");
         }
@@ -261,8 +262,41 @@ public:
         server.Post("/api/v1/runs", [this](const httplib::Request& request,
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
-                const auto id = store->create_run(parse_run_config(request));
-                json_response(response, {{"schema_version", 1}, {"run", detail::run_json(store->load(id))}}, 201);
+                const auto requested = parse_run_config(request);
+                if (requested.draft != app::DraftVersion::Draft18 ||
+                    requested.transport != app::TransportKind::NativeQuic ||
+                    requested.mode != app::RunMode::Observed ||
+                    requested.scenario_ids !=
+                        std::vector<std::string>{"subscribe-to-publisher-track"}) {
+                    throw ApiError{422, "unsupported_run_config",
+                                   "Only the draft-18 native-QUIC observed subscribe-to-publisher-track scenario is executable."};
+                }
+                if (!requested.track_fixture || requested.timeout < std::chrono::milliseconds(2)) {
+                    throw ApiError{400, "invalid_run_config",
+                                   "This scenario requires track and timeout_ms of at least 2."};
+                }
+                if (!runs) {
+                    throw ApiError{503, "publisher_listener_unavailable",
+                                   "The native publisher listener is not configured."};
+                }
+                const auto started = runs->start(requested);
+                switch (started.status) {
+                case app::RunStartStatus::Started:
+                    json_response(response, {{"schema_version", 1},
+                        {"run", detail::run_json(store->load(started.id))},
+                        {"publisher_endpoint", {{"address", started.endpoint.address},
+                                                {"port", started.endpoint.port},
+                                                {"alpn", "moqt-18"}}}}, 201);
+                    return;
+                case app::RunStartStatus::Unsupported:
+                    throw ApiError{422, "unsupported_run_config", "This run configuration is not executable."};
+                case app::RunStartStatus::InvalidConfig:
+                    throw ApiError{400, "invalid_run_config", "Run configuration is invalid."};
+                case app::RunStartStatus::PortExhausted:
+                    throw ApiError{503, "publisher_ports_exhausted", "No publisher listener port is available."};
+                case app::RunStartStatus::ListenerError:
+                    throw ApiError{503, "publisher_listener_unavailable", "The native publisher listener could not start."};
+                }
             });
         });
         server.Get("/api/v1/runs", [this](const httplib::Request& request,
@@ -327,6 +361,7 @@ public:
     std::shared_ptr<storage::RunStore> store;
     app::BuildInfo build;
     ServerConfig config;
+    std::shared_ptr<app::NativeRunManager> runs;
     httplib::Server server;
     std::thread thread;
     std::atomic<bool> active{false};
@@ -337,9 +372,10 @@ public:
 HttpServer::HttpServer(std::shared_ptr<const requirements::RequirementCatalog> draft18,
                        std::shared_ptr<const requirements::RequirementCatalog> draft21,
                        std::shared_ptr<storage::RunStore> store, app::BuildInfo build,
-                       ServerConfig config)
+                       ServerConfig config,
+                       std::shared_ptr<app::NativeRunManager> runs)
     : impl_(std::make_unique<Impl>(std::move(draft18), std::move(draft21), std::move(store),
-                                   std::move(build), std::move(config))) {}
+                                   std::move(build), std::move(config), std::move(runs))) {}
 
 HttpServer::~HttpServer() { stop(); }
 

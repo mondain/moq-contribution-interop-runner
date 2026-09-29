@@ -122,7 +122,7 @@ add_library(moq-interop-http
     src/http/json.cpp
     src/http/report.cpp
 )
-target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements
+target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
                       moq-interop-storage)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 
@@ -249,6 +249,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-native-quic-tests PRIVATE
                           moq-interop-transport moq-interop-quiche
                           moq-interop-scenarios moq-interop-runs
+                          moq-interop-http httplib::httplib nlohmann_json::nlohmann_json
                           GTest::gtest_main)
     target_compile_options(moq-interop-native-quic-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>

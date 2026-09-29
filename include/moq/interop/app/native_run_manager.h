@@ -15,6 +15,7 @@ namespace moq::interop::app {
 
 struct NativeRunManagerConfig {
     std::string bind_address{"127.0.0.1"};
+    std::string advertised_address;
     std::uint16_t port_start{0};
     std::uint16_t port_end{0};
     std::size_t maximum_active_runs{1};

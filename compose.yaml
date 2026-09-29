@@ -14,10 +14,33 @@ services:
       - no-new-privileges:true
     ports:
       - "${MOQ_INTEROP_HTTP_BIND:-127.0.0.1}:${MOQ_INTEROP_HTTP_PORT:-8080}:8080/tcp"
-      # Reserved for the later publisher listener; the foundation service does not bind UDP.
       - "${MOQ_INTEROP_UDP_BIND:-127.0.0.1}:${MOQ_INTEROP_UDP_START:-4443}-${MOQ_INTEROP_UDP_END:-4452}:${MOQ_INTEROP_UDP_START:-4443}-${MOQ_INTEROP_UDP_END:-4452}/udp"
     volumes:
       - validator-results:/var/lib/moq-interop
+      - "${MOQ_INTEROP_TLS_DIR:-./tls}:/run/moq-interop-tls:ro"
+    command:
+      - --bind
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --database
+      - /var/lib/moq-interop/runs.sqlite3
+      - --docs
+      - /usr/share/moq-interop/docs
+      - --requirements
+      - /usr/share/moq-interop/requirements
+      - --publisher-bind
+      - 0.0.0.0
+      - --publisher-advertise
+      - "${MOQ_INTEROP_PUBLISHER_HOST:-127.0.0.1}"
+      - --publisher-port-start
+      - "${MOQ_INTEROP_UDP_START:-4443}"
+      - --publisher-port-end
+      - "${MOQ_INTEROP_UDP_END:-4452}"
+      - --tls-cert
+      - /run/moq-interop-tls/cert.pem
+      - --tls-key
+      - /run/moq-interop-tls/key.pem
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "1", "http://127.0.0.1:8080/healthz"]
       interval: 2s

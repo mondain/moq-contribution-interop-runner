@@ -1,11 +1,14 @@
 #include "moq/interop/transport/native_quic_listener.h"
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/http/server.h"
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/scenarios/run_controller.h"
 #include "transport/quiche_native_listener_internal.h"
 #include "support/quiche_client.h"
 
 #include <gtest/gtest.h>
+#include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -934,7 +937,8 @@ TEST(NativeQuicLive, RunManagerScoresAnIsolatedPublisherSession) {
             18, "test", true, {std::move(response_requirement)}});
     app::NativeRunManager manager(
         catalog, store,
-        {.bind_address = "127.0.0.1", .port_start = 0, .port_end = 0,
+        {.bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+         .port_start = 0, .port_end = 0,
          .maximum_active_runs = 1, .certificate_path = pem.certificate(),
          .private_key_path = pem.key()});
     const app::RunConfig config{
@@ -975,6 +979,82 @@ TEST(NativeQuicLive, RunManagerScoresAnIsolatedPublisherSession) {
     ASSERT_TRUE(completed.score.has_value());
     EXPECT_EQ(completed.score->verdict, requirements::RunVerdict::Pass);
     EXPECT_FALSE(completed.events.empty());
+}
+
+TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    requirements::Requirement response_requirement{
+        "D18-5.1-MUST-003", requirements::Strength::Must,
+        {"5.1", 1936, 1937, 1, 1}, "publisher",
+        "exactly one SUBSCRIBE response",
+        requirements::Applicability::Applicable,
+        requirements::Testability::Testable,
+        {"subscribe-to-publisher-track"},
+        {"exactly-one-subscribe-ok-or-request-error"}, ""};
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            18, "test", true, {std::move(response_requirement)}});
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{21, "test", true, {}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 1, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const nlohmann::json request = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", nlohmann::json::array({"subscribe-to-publisher-track"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", nlohmann::json::array({"006e", "ff"})},
+                   {"name_hex", "7800"}}}};
+    const auto response = api.Post("/api/v1/runs", request.dump(),
+                                   "application/json");
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201) << response->body;
+    const auto created = nlohmann::json::parse(response->body);
+    EXPECT_EQ(created.at("publisher_endpoint").at("alpn"), "moqt-18");
+    const auto port = created.at("publisher_endpoint").at("port").get<std::uint16_t>();
+    const auto id = created.at("run").at("id").get<std::string>();
+    ASSERT_TRUE(store->load(id).config.track_fixture.has_value());
+    EXPECT_EQ(store->load(id).config.track_fixture->namespace_fields[0],
+              std::string("\0n", 2));
+    EXPECT_EQ(created.at("run").at("config").at("track"), request.at("track"));
+    auto client = test::QuicheTestClient::create(
+        {.port = port, .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto setup = client->stream(3);
+        return setup && setup->data.size() == 4;
+    }));
+    ASSERT_TRUE(client->send_stream(
+        2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+    const bool subscribe_received = pump_until(*client, [&] {
+        const auto subscribe = client->stream(1);
+        return subscribe && subscribe->data.size() == 14;
+    });
+    ASSERT_TRUE(subscribe_received)
+        << "received stream bytes: "
+        << (client->stream(1) ? client->stream(1)->data.size() : 0);
+    ASSERT_TRUE(client->send_stream(
+        1, bytes({0x04, 0x00, 0x04, 0x05, 0x00, 0x02, 0x09}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        return store->load(id).state == storage::RunState::Finalized;
+    }));
+    const auto result = api.Get("/api/v1/runs/" + id);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(result->body)
+                  .at("run").at("score").at("verdict"), "pass");
 }
 
 TEST(NativeQuicLive, DifferentAlpnNeverEstablishes) {

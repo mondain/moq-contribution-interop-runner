@@ -193,13 +193,15 @@ TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
                           {"mode", "driven"},
                           {"scenarios", Json::array({"session/setup", "publisher/object"})},
                           {"timeout_ms", 12345}};
-    const auto created = client_->Post("/api/v1/runs", request.dump(), "application/json");
-    ASSERT_TRUE(created);
-    ASSERT_EQ(created->status, 201) << created->body;
-    const auto created_json = Json::parse(created->body);
-    EXPECT_EQ(created_json.at("schema_version"), 1);
-    EXPECT_EQ(created_json.at("run").at("state"), "active");
-    const auto id = created_json.at("run").at("id").get<std::string>();
+    const auto unsupported = client_->Post("/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(unsupported);
+    EXPECT_EQ(unsupported->status, 422);
+    EXPECT_EQ(Json::parse(unsupported->body).at("error").at("code"), "unsupported_run_config");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+    const app::RunConfig stored_config{
+        app::DraftVersion::Draft21, app::TransportKind::WebTransport,
+        app::RunMode::Driven, {"session/setup", "publisher/object"}, 12345ms};
+    const auto id = store_->create_run(stored_config);
 
     storage::EvidenceEvent event;
     event.monotonic_time_ns = 11;
@@ -209,10 +211,7 @@ TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
     event.scenario_id = "session/setup";
     store_->append_events(id, std::vector{event});
 
-    const auto second = client_->Post("/api/v1/runs", request.dump(), "application/json");
-    ASSERT_TRUE(second);
-    ASSERT_EQ(second->status, 201);
-    const auto second_id = Json::parse(second->body).at("run").at("id").get<std::string>();
+    const auto second_id = store_->create_run(stored_config);
 
     const auto list = get_json("/api/v1/runs?limit=1&offset=0");
     EXPECT_EQ(list.at("pagination").at("total"), 2);
@@ -234,7 +233,7 @@ TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
     EXPECT_EQ(Json::parse(stop->body).at("error").at("code"), "not_implemented");
 }
 
-TEST_F(HttpApiTest, PreservesOpaqueTrackFixtureBytesInRunConfiguration) {
+TEST_F(HttpApiTest, RejectsExecutableRunWhenListenerIsUnconfigured) {
     const Json request = {
         {"draft", 18}, {"transport", "native-quic"},
         {"mode", "observed"},
@@ -245,16 +244,10 @@ TEST_F(HttpApiTest, PreservesOpaqueTrackFixtureBytesInRunConfiguration) {
     const auto response = client_->Post(
         "/api/v1/runs", request.dump(), "application/json");
     ASSERT_TRUE(response);
-    ASSERT_EQ(response->status, 201) << response->body;
-    const auto created = Json::parse(response->body);
-    const auto id = created.at("run").at("id").get<std::string>();
-    EXPECT_EQ(created.at("run").at("config").at("track"),
-              request.at("track"));
-    EXPECT_EQ(get_json("/api/v1/runs/" + id).at("run").at("config")
-                  .at("track"), request.at("track"));
-    ASSERT_TRUE(store_->load(id).config.track_fixture.has_value());
-    EXPECT_EQ(store_->load(id).config.track_fixture->namespace_fields[0],
-              std::string("\0n", 2));
+    EXPECT_EQ(response->status, 503) << response->body;
+    EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
+              "publisher_listener_unavailable");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
 }
 
 TEST_F(HttpApiTest, RejectsMalformedOrOversizedTrackFixtures) {
