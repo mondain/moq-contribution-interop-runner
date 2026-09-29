@@ -335,6 +335,7 @@ OperationResult NativeQuicListener::write(StreamId stream_id,
         return {TransportStatus::InternalError, 0, std::nullopt};
     }
     if (fin) impl_->finished_streams.insert(stream_id);
+    impl_->pump_send();
     return {TransportStatus::Success, data.size(), std::nullopt};
 }
 OperationResult NativeQuicListener::reset(StreamId stream_id,

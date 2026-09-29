@@ -16,6 +16,10 @@ int main(int argc, char** argv) {
 
     moq::interop::transport::test::QuicheTestClient::Config config;
     config.port = static_cast<std::uint16_t>(port);
+    const std::string_view action{argv[3]};
+    if (action == "expect-missing-datagram-close") {
+        config.enable_datagrams = false;
+    }
     for (const char character : std::string_view{argv[2]}) {
         config.alpn.push_back(static_cast<std::byte>(character));
     }
@@ -27,7 +31,96 @@ int main(int argc, char** argv) {
     while (std::chrono::steady_clock::now() < deadline) {
         if (!client->pump()) return 4;
         if (client->established()) {
-            const std::string_view action{argv[3]};
+            if (action == "expect-missing-datagram-close") {
+                while (std::chrono::steady_clock::now() < deadline) {
+                    if (!client->pump()) return 35;
+                    const auto observed = client->peer_close();
+                    if (observed) {
+                        return observed->application &&
+                                       observed->error_code == 3 &&
+                                       observed->reason ==
+                                           std::vector<std::byte>{
+                                               std::byte{'Q'}, std::byte{'U'},
+                                               std::byte{'I'}, std::byte{'C'},
+                                               std::byte{' '}, std::byte{'D'},
+                                               std::byte{'A'}, std::byte{'T'},
+                                               std::byte{'A'}, std::byte{'G'},
+                                               std::byte{'R'}, std::byte{'A'},
+                                               std::byte{'M'}, std::byte{' '},
+                                               std::byte{'n'}, std::byte{'o'},
+                                               std::byte{'t'}, std::byte{' '},
+                                               std::byte{'n'}, std::byte{'e'},
+                                               std::byte{'g'}, std::byte{'o'},
+                                               std::byte{'t'}, std::byte{'i'},
+                                               std::byte{'a'}, std::byte{'t'},
+                                               std::byte{'e'}, std::byte{'d'}}
+                                   ? 0
+                                   : 36;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+                return 37;
+            }
+            if (action == "draft21-publish") {
+                const std::array<std::byte, 4> setup{
+                    std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+                    std::byte{0x00}};
+                const std::array<std::byte, 18> publish{
+                    std::byte{0x1d}, std::byte{0x00}, std::byte{0x0f},
+                    std::byte{0x00}, std::byte{0x01}, std::byte{0x05},
+                    std::byte{'m'}, std::byte{'e'}, std::byte{'d'},
+                    std::byte{'i'}, std::byte{'a'}, std::byte{0x04},
+                    std::byte{'t'}, std::byte{'e'}, std::byte{'s'},
+                    std::byte{'t'}, std::byte{0x02}, std::byte{0x00}};
+                if (!client->send_stream(2, setup, false) ||
+                    !client->send_stream(0, publish, false)) {
+                    return 38;
+                }
+                while (std::chrono::steady_clock::now() < deadline) {
+                    if (!client->pump()) return 39;
+                    const auto response = client->stream(0);
+                    if (response && response->data.size() >= 4) {
+                        return response->data ==
+                                       std::vector<std::byte>{
+                                           std::byte{0x07}, std::byte{0x00},
+                                           std::byte{0x01}, std::byte{0x00}}
+                                   ? 0
+                                   : 40;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+                return 41;
+            }
+            if (action == "draft18-subscribe-ok") {
+                const std::array<std::byte, 4> setup{
+                    std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+                    std::byte{0x00}};
+                if (!client->send_stream(2, setup, false)) return 42;
+                while (std::chrono::steady_clock::now() < deadline) {
+                    if (!client->pump()) return 43;
+                    const auto request = client->stream(1);
+                    if (request && !request->data.empty()) {
+                        const std::array<std::byte, 7> response{
+                            std::byte{0x04}, std::byte{0x00},
+                            std::byte{0x04}, std::byte{0x05},
+                            std::byte{0x00}, std::byte{0x02},
+                            std::byte{0x09}};
+                        if (!client->send_stream(1, response, false)) return 44;
+                        const auto flush_deadline =
+                            std::chrono::steady_clock::now() +
+                            std::chrono::milliseconds{100};
+                        while (std::chrono::steady_clock::now() <
+                               flush_deadline) {
+                            if (!client->pump()) return 45;
+                            std::this_thread::sleep_for(
+                                std::chrono::milliseconds{1});
+                        }
+                        return 0;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+                return 46;
+            }
             if (action == "expect-datagram") {
                 while (std::chrono::steady_clock::now() < deadline) {
                     if (!client->pump()) return 11;

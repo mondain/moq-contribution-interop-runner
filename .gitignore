@@ -29,3 +29,4 @@ graphify-work/*
 !graphify-out/GRAPH_REPORT.md
 
 /build/
+/build-picoquic-prod/

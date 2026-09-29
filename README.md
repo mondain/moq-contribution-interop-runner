@@ -11,8 +11,18 @@ the remaining publisher requirements are cataloged but not executable yet.
 Requests for unsupported scenarios return HTTP 422; they are never silently
 scored as conformant.
 
-Build and test on Linux with `cmake -S . -B build`,
-`cmake --build build -j4`, and `ctest --test-dir build --output-on-failure`.
+Build on Linux with `cmake -S . -B build`, then
+`cmake --build build -j4`. The production runner uses pinned picoquic and
+picotls; it does not link quiche, BoringSSL, or Rust. To include the independent
+quiche test peer and both native process-level publisher tests, configure with
+`-DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=ON`, then run
+`ctest --test-dir build --output-on-failure`. The option is off by default and
+off in the production Docker image. The pinned picoquic revision accepts Retry
+tokens for 120 seconds; the native listener rejects other configured lifetimes
+rather than silently using a different value.
+The optional suite also retains the legacy quiche integration tests in a
+separate executable and compares draft-18/21 native evidence classes,
+requirement outcomes, and scores across both backends (`native-parity`).
 Runtime options are listed by `build/moq-interop-runner --help`.
 
 To run the executable scenario, provide a PEM certificate and private key:
@@ -133,10 +143,14 @@ bash tests/e2e/draft18-native-moqxr.sh \
 Pass `21` as a fourth argument to exercise the draft-21 PUBLISH-announcement
 profile with `moqxr --preannounce-tracks`; omitting it selects draft 18. The
 script checks the returned ALPN and prints publisher and runner logs on failure.
-In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, the picoquic client
-did not negotiate QUIC DATAGRAM, so the draft-21 attempt ended at the
-transport gate before any PUBLISH could be scored. This is an interop
+In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, its picoquic client
+did not negotiate QUIC DATAGRAM for either draft, so both attempts ended at the
+transport gate before publisher behavior could be scored. This is an interop
 observation, not a validator pass or a reason to bypass that draft requirement.
+
+The optional test peer exercises the actual HTTP-created run and production
+native listener for both drafts without depending on a particular publisher:
+`ctest --test-dir build -R 'draft(18|21)-native' --output-on-failure`.
 
 The script starts a loopback runner with temporary TLS material, asks the
 publisher to connect, prints the run verdict and any scored requirements, and

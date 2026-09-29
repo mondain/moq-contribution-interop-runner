@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -142,6 +143,45 @@ TEST(PicoquicNativeListener, RejectsWrongDraftAlpn) {
     }
 }
 
+TEST(PicoquicNativeListener, RejectsMissingDatagramAsLocalProtocolClose) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "expect-missing-datagram-close");
+    ASSERT_TRUE(peer.valid());
+
+    std::optional<LocalCloseEvent> observed;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline && !observed) {
+        for (const auto& event : result.listener->poll(32)) {
+            if (const auto* closed = std::get_if<LocalCloseEvent>(&event)) {
+                observed = *closed;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    ASSERT_TRUE(observed);
+    EXPECT_EQ(observed->error_space, CloseErrorSpace::Application);
+    EXPECT_EQ(observed->error_code, 3U);
+    EXPECT_EQ(observed->reason,
+              (std::vector<std::byte>{
+                  std::byte{'Q'}, std::byte{'U'}, std::byte{'I'}, std::byte{'C'},
+                  std::byte{' '}, std::byte{'D'}, std::byte{'A'}, std::byte{'T'},
+                  std::byte{'A'}, std::byte{'G'}, std::byte{'R'}, std::byte{'A'},
+                  std::byte{'M'}, std::byte{' '}, std::byte{'n'}, std::byte{'o'},
+                  std::byte{'t'}, std::byte{' '}, std::byte{'n'}, std::byte{'e'},
+                  std::byte{'g'}, std::byte{'o'}, std::byte{'t'}, std::byte{'i'},
+                  std::byte{'a'}, std::byte{'t'}, std::byte{'e'}, std::byte{'d'}}));
+    bool delivered = false;
+    while (std::chrono::steady_clock::now() < deadline && !delivered) {
+        result.listener->poll(32);
+        delivered = peer.exited_successfully();
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_TRUE(delivered);
+}
+
 TEST(PicoquicNativeListener, ReleasesBoundPortOnDestruction) {
     auto config = config_for("moqt-18");
     auto first = NativeQuicListener::create(config);
@@ -199,6 +239,30 @@ TEST(PicoquicNativeListener, BoundsQueuedPeerEvents) {
     const auto events = result.listener->poll(8);
     ASSERT_EQ(events.size(), 1U);
     EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[0]));
+}
+
+TEST(PicoquicNativeListener, RepeatedPollOnePreservesAllStreamEvents) {
+    auto result = NativeQuicListener::create(config_for("moqt-18"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-18",
+                     "burst");
+    ASSERT_TRUE(peer.valid());
+
+    std::set<StreamId> received;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{3};
+    while (std::chrono::steady_clock::now() < deadline &&
+           received.size() < 4) {
+        const auto events = result.listener->poll(1);
+        ASSERT_LE(events.size(), 1U);
+        for (const auto& event : events) {
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) {
+                if (stream->fin) received.insert(stream->stream_id);
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    EXPECT_EQ(received, (std::set<StreamId>{2, 6, 10, 14}));
 }
 
 TEST(PicoquicNativeListener, ReservesServerStreamIdsAfterHandshake) {

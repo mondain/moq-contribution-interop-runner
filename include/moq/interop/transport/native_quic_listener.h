@@ -20,7 +20,7 @@ struct NativeQuicListenerConfig {
     std::filesystem::path private_key_path;
     std::vector<std::byte> expected_alpn;
     std::chrono::milliseconds idle_timeout{30'000};
-    std::chrono::seconds retry_token_lifetime{10};
+    std::chrono::seconds retry_token_lifetime{120};
     std::size_t max_udp_payload = 1350;
     std::size_t max_datagrams_per_poll = 32;
     std::size_t max_egress_datagrams_per_call = 32;

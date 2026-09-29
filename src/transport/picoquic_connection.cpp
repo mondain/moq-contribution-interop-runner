@@ -47,9 +47,18 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
         const auto* remote = picoquic_get_transport_parameters(connection, 0);
         if (negotiated == nullptr || std::string_view{negotiated} != expected ||
             remote == nullptr || remote->max_datagram_frame_size == 0) {
-            enqueue(TransportErrorEvent{TransportError::ProtocolFailure});
-            return picoquic_close(connection,
-                                  config_.missing_datagram_application_error);
+            static constexpr std::string_view reason =
+                "QUIC DATAGRAM not negotiated";
+            const auto result = picoquic_close_ex(
+                connection, config_.missing_datagram_application_error,
+                reason.data());
+            if (result == 0) {
+                note_local_close(
+                    config_.missing_datagram_application_error,
+                    std::span{reinterpret_cast<const std::byte*>(reason.data()),
+                              reason.size()});
+            }
+            return result;
         }
         established_ = true;
         ConnectionEstablishedEvent ready;

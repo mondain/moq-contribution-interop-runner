@@ -1,9 +1,6 @@
 ARG DEBIAN_BASE=debian@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
-ARG RUST_IMAGE=docker.io/library/rust:1.85.1-bookworm@sha256:bf7d87666c4da6eace19e06d21bc4859c6e2a5c97a21ac273b0e082112753cf0
 ARG DEBIAN_SNAPSHOT=20260927T000000Z
 ARG SOURCE_DATE_EPOCH=1790467200
-
-FROM ${RUST_IMAGE} AS rust-toolchain
 
 FROM ${DEBIAN_BASE} AS apt-base
 
@@ -22,13 +19,6 @@ RUN if ! printf '%s\n' "${SOURCE_REVISION}" | grep -Eq '^[0-9a-f]{40}$'; then \
         echo 'SOURCE_REVISION must be a full lowercase Git object ID' >&2; exit 2; fi
 
 ENV SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}"
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:${PATH}
-
-COPY --from=rust-toolchain /usr/local/cargo/ /usr/local/cargo/
-COPY --from=rust-toolchain /usr/local/rustup/ /usr/local/rustup/
-
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
@@ -39,12 +29,12 @@ RUN apt-get update \
         libssl-dev \
         make \
         perl \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY CMakeLists.txt ./
 COPY cmake/ cmake/
-COPY dependencies/ dependencies/
 COPY include/ include/
 COPY src/ src/
 COPY docs/*.txt docs/
@@ -55,6 +45,7 @@ RUN cmake -S . -B /build \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=none \
         -DCMAKE_INSTALL_PREFIX=/opt/moq-interop \
         -DMOQ_INTEROP_BUILD_TESTS=OFF \
+        -DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=OFF \
         -DMOQ_INTEROP_SOURCE_REVISION=${SOURCE_REVISION} \
     && cmake --build /build --parallel 2 \
     && cmake --install /build --strip

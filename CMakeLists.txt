@@ -7,13 +7,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MOQ_INTEROP_BUILD_TESTS "Build unit tests" ON)
 option(MOQ_INTEROP_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
+option(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER "Build independent quiche peer and legacy parity tests" OFF)
 
 include(cmake/Dependencies.cmake)
 
 find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
-include(cmake/Quiche.cmake)
+if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
+    include(cmake/Quiche.cmake)
+endif()
 include(cmake/Picoquic.cmake)
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -87,7 +90,6 @@ target_include_directories(moq-interop-app INTERFACE "${PROJECT_SOURCE_DIR}/incl
 target_compile_definitions(moq-interop-app INTERFACE
     MOQ_INTEROP_VERSION="${PROJECT_VERSION}"
     MOQ_INTEROP_SOURCE_REVISION="${MOQ_INTEROP_SOURCE_REVISION}"
-    MOQ_INTEROP_QUICHE_REVISION="${MOQ_INTEROP_QUICHE_REVISION}"
     MOQ_INTEROP_PICOQUIC_REVISION="${MOQ_INTEROP_PICOQUIC_REVISION}"
     MOQ_INTEROP_PICOTLS_REVISION="${MOQ_INTEROP_PICOTLS_REVISION}"
     MOQ_INTEROP_NLOHMANN_JSON_REVISION="${MOQ_INTEROP_NLOHMANN_JSON_REVISION}"
@@ -142,24 +144,13 @@ target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requir
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 
 add_library(moq-interop-transport
-    src/transport/quiche_connection.cpp
-    src/transport/quiche_native_listener.cpp
-)
-add_library(moq-interop-picoquic-native
     src/transport/picoquic_connection.cpp
-    src/transport/picoquic_native_listener.cpp)
-target_include_directories(moq-interop-picoquic-native PRIVATE
-    "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(moq-interop-picoquic-native PUBLIC
-    moq-interop-app moq-interop-picoquic)
-target_compile_options(moq-interop-picoquic-native PRIVATE
-    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
-target_link_libraries(moq-interop-transport PUBLIC moq-interop-app)
-target_link_libraries(moq-interop-transport PRIVATE moq-interop-quiche)
+    src/transport/picoquic_native_listener.cpp
+)
 target_include_directories(moq-interop-transport PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
-target_include_directories(moq-interop-transport SYSTEM PRIVATE
-    "${MOQ_INTEROP_BORINGSSL_INCLUDE_DIR}")
+target_link_libraries(moq-interop-transport PUBLIC
+    moq-interop-app moq-interop-picoquic)
 target_compile_options(moq-interop-transport PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -219,7 +210,7 @@ target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
 target_link_libraries(moq-interop-runner PRIVATE moq-interop-http
-                      moq-interop-quiche)
+                      moq-interop-transport)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
 install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
         FILES_MATCHING PATTERN "*.txt")
@@ -235,6 +226,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-picoquic-link-tests PRIVATE
                           moq-interop-picoquic)
     add_test(NAME picoquic-link COMMAND moq-interop-picoquic-link-tests)
+    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
+    add_library(moq-interop-quiche-legacy-tests
+                src/transport/quiche_connection.cpp
+                src/transport/quiche_native_listener.cpp)
+    target_include_directories(moq-interop-quiche-legacy-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src")
+    target_include_directories(moq-interop-quiche-legacy-tests SYSTEM PRIVATE
+        "${MOQ_INTEROP_BORINGSSL_INCLUDE_DIR}")
+    target_link_libraries(moq-interop-quiche-legacy-tests PUBLIC
+        moq-interop-app moq-interop-quiche)
     add_executable(moq-interop-picoquic-native-tests
                    tests/transport/picoquic_native_listener_test.cpp)
     add_executable(moq-interop-quiche-peer
@@ -248,13 +249,25 @@ if(MOQ_INTEROP_BUILD_TESTS)
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
         QUICHE_TEST_PEER_PATH="$<TARGET_FILE:moq-interop-quiche-peer>")
     target_link_libraries(moq-interop-picoquic-native-tests PRIVATE
-        moq-interop-app moq-interop-picoquic-native
+        moq-interop-app moq-interop-transport
         GTest::gtest_main)
     target_link_libraries(moq-interop-quiche-peer PRIVATE
                           moq-interop-quiche)
     add_dependencies(moq-interop-picoquic-native-tests moq-interop-quiche-peer)
     add_test(NAME picoquic-native-listener
              COMMAND moq-interop-picoquic-native-tests)
+    add_test(NAME draft18-native
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-peer.sh"
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-quiche-peer>" 18)
+    add_test(NAME draft21-native
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-peer.sh"
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-quiche-peer>" 21)
+    endif()
+    add_test(NAME production-link
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/integration/production-link.sh"
+                     "$<TARGET_FILE:moq-interop-runner>")
     add_test(NAME picoquic-dependency-contract
         COMMAND "${CMAKE_COMMAND}"
             "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
@@ -274,6 +287,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     set_tests_properties(picoquic-dependency-rejects-mismatch PROPERTIES
                          WILL_FAIL TRUE)
 
+    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
     add_executable(moq-interop-quiche-link-tests
                    tests/integration/quiche_link_test.cpp)
     target_link_libraries(moq-interop-quiche-link-tests PRIVATE
@@ -298,6 +312,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
             "-DFIXTURE_ROOT=${PROJECT_BINARY_DIR}/quiche-contract-fixtures"
             -P "${PROJECT_SOURCE_DIR}/tests/integration/quiche_dependency_contract.cmake"
     )
+    endif()
 
     add_executable(moq-interop-session-transport-header-tests
                    tests/transport/session_transport_header_test.cpp)
@@ -309,33 +324,61 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME session-transport-header
              COMMAND moq-interop-session-transport-header-tests)
 
+    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
     add_executable(moq-interop-quiche-connection-tests
                    tests/transport/quiche_connection_test.cpp)
     target_include_directories(moq-interop-quiche-connection-tests PRIVATE
                                "${PROJECT_SOURCE_DIR}/src")
     target_link_libraries(moq-interop-quiche-connection-tests PRIVATE
-                          moq-interop-transport moq-interop-quiche
+                          moq-interop-quiche-legacy-tests moq-interop-quiche
                           GTest::gtest_main)
     target_compile_options(moq-interop-quiche-connection-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     )
     add_test(NAME quiche-connection COMMAND moq-interop-quiche-connection-tests)
 
-    add_executable(moq-interop-native-quic-tests
+    add_library(moq-interop-quiche-legacy-runs-tests
+                src/app/native_run_manager.cpp)
+    target_link_libraries(moq-interop-quiche-legacy-runs-tests PUBLIC
+        moq-interop-quiche-legacy-tests moq-interop-scenarios
+        moq-interop-draft18-evaluators moq-interop-draft21-evaluators
+        moq-interop-storage)
+    add_library(moq-interop-quiche-legacy-http-tests
+                src/http/server.cpp src/http/json.cpp src/http/report.cpp)
+    target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
+        moq-interop-app moq-interop-requirements
+        moq-interop-quiche-legacy-runs-tests moq-interop-storage)
+    target_link_libraries(moq-interop-quiche-legacy-http-tests PRIVATE
+        httplib::httplib nlohmann_json::nlohmann_json)
+    add_executable(moq-interop-runner-legacy-tests src/app/main.cpp)
+    target_compile_definitions(moq-interop-runner-legacy-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-runner-legacy-tests PRIVATE
+        moq-interop-quiche-legacy-http-tests
+        moq-interop-quiche-legacy-tests)
+    add_test(NAME native-parity
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-parity.sh"
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-runner-legacy-tests>"
+                     "$<TARGET_FILE:moq-interop-quiche-peer>")
+    set_tests_properties(draft18-native draft21-native native-parity
+                         PROPERTIES RESOURCE_LOCK "native-test-ports")
+    add_executable(moq-interop-native-quic-legacy-tests
                    tests/integration/native_quic_test.cpp
                    tests/support/quiche_client.cpp)
-    target_include_directories(moq-interop-native-quic-tests PRIVATE
+    target_include_directories(moq-interop-native-quic-legacy-tests PRIVATE
                                "${PROJECT_SOURCE_DIR}/src"
                                "${PROJECT_SOURCE_DIR}/tests")
-    target_link_libraries(moq-interop-native-quic-tests PRIVATE
-                          moq-interop-transport moq-interop-quiche
-                          moq-interop-scenarios moq-interop-runs
-                          moq-interop-http httplib::httplib nlohmann_json::nlohmann_json
-                          GTest::gtest_main)
-    target_compile_options(moq-interop-native-quic-tests PRIVATE
-        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
-    )
-    add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
+    target_link_libraries(moq-interop-native-quic-legacy-tests PRIVATE
+        moq-interop-quiche-legacy-tests
+        moq-interop-quiche-legacy-runs-tests
+        moq-interop-quiche-legacy-http-tests
+        httplib::httplib nlohmann_json::nlohmann_json
+        GTest::gtest_main)
+    target_compile_options(moq-interop-native-quic-legacy-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME native-quic-legacy COMMAND moq-interop-native-quic-legacy-tests)
+    endif()
 
     add_executable(moq-interop-draft18-session-tests
                    tests/protocol/draft18_session_test.cpp)
