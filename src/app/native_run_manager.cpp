@@ -24,6 +24,8 @@ using namespace std::chrono_literals;
 
 constexpr std::string_view kSubscribeScenario =
     "subscribe-to-publisher-track";
+constexpr std::string_view kDuplicateSubscribeScenario =
+    "subscribe-again-to-established-publisher-track";
 constexpr std::string_view kDraft21AnnouncementScenario =
     "d21-publisher-request-stream-placement";
 constexpr std::string_view kDraft21UnknownOptionScenario =
@@ -298,13 +300,20 @@ public:
                      const RunConfig& run_config) {
             const auto started = scenarios::Clock::now();
             const auto deadline = started + run_config.timeout;
-            const auto quiet = std::min(50ms, run_config.timeout / 4);
+            const auto quiet = std::clamp(run_config.timeout / 4, 1ms, 50ms);
+            const bool duplicate =
+                run_config.scenario_ids.front() == kDuplicateSubscribeScenario;
+            auto definition = duplicate
+                ? scenarios::subscribe_again_to_established_publisher_track(
+                      track_namespace(*run_config.track_fixture),
+                      track_name(*run_config.track_fixture), 1, 3,
+                      (run_config.timeout - quiet) / 2, quiet)
+                : scenarios::subscribe_to_publisher_track(
+                      track_namespace(*run_config.track_fixture),
+                      track_name(*run_config.track_fixture), 1,
+                      run_config.timeout - quiet, quiet);
             scenarios::Draft18RunController controller(
-                listener,
-                scenarios::subscribe_to_publisher_track(
-                    track_namespace(*run_config.track_fixture),
-                    track_name(*run_config.track_fixture), 1,
-                    run_config.timeout - quiet, quiet));
+                listener, std::move(definition));
             std::size_t recorded = 0;
             while (!worker->stop_requested) {
                 const auto now = scenarios::Clock::now();
@@ -402,8 +411,9 @@ NativeRunManager::~NativeRunManager() = default;
 RunStartResult NativeRunManager::start(const RunConfig& config) {
     const bool draft18_scenario =
         config.draft == DraftVersion::Draft18 &&
-        config.scenario_ids ==
-            std::vector<std::string>{std::string(kSubscribeScenario)};
+        config.scenario_ids.size() == 1 &&
+        (config.scenario_ids.front() == kSubscribeScenario ||
+         config.scenario_ids.front() == kDuplicateSubscribeScenario);
     const bool draft21_scenario =
         config.draft == DraftVersion::Draft21 && impl_->draft21 &&
         config.scenario_ids.size() == 1 &&
@@ -415,7 +425,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::Unsupported, {}, {}};
     }
     if (!config.track_fixture || !valid_fixture(*config.track_fixture) ||
-        config.timeout < 2ms) {
+        config.timeout < 2ms ||
+        (config.draft == DraftVersion::Draft18 &&
+         config.scenario_ids.size() == 1 &&
+         config.scenario_ids.front() == kDuplicateSubscribeScenario &&
+         config.timeout < 3ms)) {
         return {RunStartStatus::InvalidConfig, {}, {}};
     }
     std::lock_guard lock(impl_->mutex);

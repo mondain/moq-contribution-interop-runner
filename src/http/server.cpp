@@ -231,6 +231,11 @@ public:
                                               {"scenario", "subscribe-to-publisher-track"},
                                               {"configured", runs && runs->supports(
                                                   app::DraftVersion::Draft18)}},
+                                             {{"draft", 18}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "subscribe-again-to-established-publisher-track"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft18)}},
                                              {{"draft", 21}, {"transport", "native-quic"},
                                               {"mode", "observed"},
                                               {"scenario", "d21-publisher-request-stream-placement"},
@@ -296,8 +301,11 @@ public:
                 const auto requested = parse_run_config(request);
                 const bool draft18_scenario =
                     requested.draft == app::DraftVersion::Draft18 &&
-                    requested.scenario_ids ==
-                        std::vector<std::string>{"subscribe-to-publisher-track"};
+                    requested.scenario_ids.size() == 1 &&
+                    (requested.scenario_ids.front() ==
+                         "subscribe-to-publisher-track" ||
+                     requested.scenario_ids.front() ==
+                         "subscribe-again-to-established-publisher-track");
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21 &&
                     requested.scenario_ids.size() == 1 &&

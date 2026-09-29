@@ -139,5 +139,104 @@ TEST(Draft18ScenarioEngine, SubscribeScenarioRejectsPeerParityRequestId) {
                      0, 100ms, 50ms), std::invalid_argument);
 }
 
+TEST(Draft18ScenarioEngine, DuplicateSubscriptionUsesSameTrackAndSecondRequest) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(subscribe_again_to_established_publisher_track(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 3, 100ms, 50ms));
+    const auto started = engine.start(start_time);
+    ASSERT_EQ(started.actions.size(), 1u);
+    const auto* first = std::get_if<OpenRequestAction>(&started.actions[0]);
+    ASSERT_NE(first, nullptr);
+    const auto* first_subscribe =
+        std::get_if<wire::draft18::SubscribeMessage>(&first->message);
+    ASSERT_NE(first_subscribe, nullptr);
+    EXPECT_EQ(first_subscribe->request_id, 1u);
+
+    const session::EvidenceEvent accepted{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Subscribe, 1,
+            wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+    const auto next = engine.observe(accepted, start_time + 10ms);
+    ASSERT_EQ(next.actions.size(), 1u);
+    const auto* second = std::get_if<OpenRequestAction>(&next.actions[0]);
+    ASSERT_NE(second, nullptr);
+    const auto* second_subscribe =
+        std::get_if<wire::draft18::SubscribeMessage>(&second->message);
+    ASSERT_NE(second_subscribe, nullptr);
+    EXPECT_EQ(second_subscribe->request_id, 3u);
+    EXPECT_EQ(second_subscribe->track_namespace.fields,
+              first_subscribe->track_namespace.fields);
+    EXPECT_EQ(second_subscribe->track_name.bytes,
+              first_subscribe->track_name.bytes);
+
+    const session::EvidenceEvent rejected{
+        2, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 3,
+            session::RequestKind::Subscribe, 3,
+            wire::draft18::RequestErrorMessage{0x19, 0, {}, std::nullopt}}};
+    EXPECT_EQ(engine.observe(rejected, start_time + 20ms).step_index, 2u);
+    EXPECT_EQ(engine.observe(rejected, start_time + 30ms).status,
+              ScenarioStatus::Failed);
+}
+
+TEST(Draft18ScenarioEngine, DuplicateSubscriptionWrongErrorFailsImmediately) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(subscribe_again_to_established_publisher_track(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 3, 100ms, 50ms));
+    engine.start(start_time);
+    const session::EvidenceEvent accepted{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Subscribe, 1,
+            wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+    engine.observe(accepted, start_time + 10ms);
+    const session::EvidenceEvent wrong_error{
+        2, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 3,
+            session::RequestKind::Subscribe, 3,
+            wire::draft18::RequestErrorMessage{0x11, 0, {}, std::nullopt}}};
+    EXPECT_EQ(engine.observe(wrong_error, start_time + 20ms).status,
+              ScenarioStatus::Failed);
+}
+
+TEST(Draft18ScenarioEngine, DuplicateSubscriptionPassesAfterQuietWindow) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(subscribe_again_to_established_publisher_track(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 3, 100ms, 50ms));
+    engine.start(start_time);
+    const session::EvidenceEvent accepted{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Subscribe, 1,
+            wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+    engine.observe(accepted, start_time + 10ms);
+    const session::EvidenceEvent rejected{
+        2, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 3,
+            session::RequestKind::Subscribe, 3,
+            wire::draft18::RequestErrorMessage{0x19, 0, {}, std::nullopt}}};
+    engine.observe(rejected, start_time + 20ms);
+    EXPECT_EQ(engine.advance(start_time + 70ms).status,
+              ScenarioStatus::Passed);
+}
+
+TEST(Draft18ScenarioEngine, DuplicateSubscriptionRejectsInvalidRequestIds) {
+    EXPECT_THROW(subscribe_again_to_established_publisher_track(
+                     {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 1, 100ms,
+                     50ms),
+                 std::invalid_argument);
+    EXPECT_THROW(subscribe_again_to_established_publisher_track(
+                     {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 2, 100ms,
+                     50ms),
+                 std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

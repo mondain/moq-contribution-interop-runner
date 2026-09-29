@@ -141,29 +141,33 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 6);
+    ASSERT_EQ(health.at("executable_profiles").size(), 7);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
               "subscribe-to-publisher-track");
     EXPECT_FALSE(health.at("executable_profiles").at(0).at("configured"));
-    EXPECT_EQ(health.at("executable_profiles").at(1).at("draft"), 21);
-    EXPECT_EQ(health.at("executable_profiles").at(1).at("transport"), "native-quic");
+    EXPECT_EQ(health.at("executable_profiles").at(1).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(1).at("scenario"),
-              "d21-publisher-request-stream-placement");
+              "subscribe-again-to-established-publisher-track");
     EXPECT_FALSE(health.at("executable_profiles").at(1).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(2).at("draft"), 21);
+    EXPECT_EQ(health.at("executable_profiles").at(2).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(2).at("scenario"),
-              "d21-setup-unknown-options");
+              "d21-publisher-request-stream-placement");
     EXPECT_FALSE(health.at("executable_profiles").at(2).at("configured"));
     EXPECT_EQ(health.at("executable_profiles").at(3).at("scenario"),
-              "d21-setup-duplicate-unknown-options");
+              "d21-setup-unknown-options");
     EXPECT_FALSE(health.at("executable_profiles").at(3).at("configured"));
     EXPECT_EQ(health.at("executable_profiles").at(4).at("scenario"),
-              "d21-server-sends-authority");
+              "d21-setup-duplicate-unknown-options");
     EXPECT_FALSE(health.at("executable_profiles").at(4).at("configured"));
     EXPECT_EQ(health.at("executable_profiles").at(5).at("scenario"),
-              "d21-server-sends-path");
+              "d21-server-sends-authority");
     EXPECT_FALSE(health.at("executable_profiles").at(5).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(6).at("scenario"),
+              "d21-server-sends-path");
+    EXPECT_FALSE(health.at("executable_profiles").at(6).at("configured"));
 
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2);
@@ -272,6 +276,34 @@ TEST_F(HttpApiTest, RejectsExecutableRunWhenListenerIsUnconfigured) {
     EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
               "publisher_listener_unavailable");
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+TEST_F(HttpApiTest, ExposesDuplicateSubscriptionScenarioAsExecutable) {
+    const auto health = get_json("/healthz");
+    bool listed = false;
+    for (const auto& profile : health.at("executable_profiles")) {
+        if (profile.at("draft") == 18 &&
+            profile.at("scenario") ==
+                "subscribe-again-to-established-publisher-track") {
+            listed = true;
+            EXPECT_FALSE(profile.at("configured").get<bool>());
+        }
+    }
+    EXPECT_TRUE(listed);
+    const Json request = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", Json::array(
+            {"subscribe-again-to-established-publisher-track"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", Json::array({"6e"})},
+                   {"name_hex", "78"}}}};
+    const auto response = client_->Post(
+        "/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 503) << response->body;
+    EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
+              "publisher_listener_unavailable");
 }
 
 TEST_F(HttpApiTest, RejectsMalformedOrOversizedTrackFixtures) {

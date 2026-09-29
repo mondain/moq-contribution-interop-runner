@@ -34,6 +34,37 @@ bool is_duplicate_response(const session::EvidenceEvent& event,
            violation->original_request_id == request_id;
 }
 
+bool is_subscribe_ok(const session::EvidenceEvent& event,
+                     std::uint64_t request_id) {
+    if (event.kind != session::EvidenceKind::InitialResponseObserved) {
+        return false;
+    }
+    const auto* response =
+        std::get_if<session::InitialResponseEvidence>(&event.data);
+    return response && response->responder == session::RequestInitiator::Peer &&
+           response->original_request_id == request_id &&
+           response->request_kind == session::RequestKind::Subscribe &&
+           std::holds_alternative<wire::draft18::SubscribeOkMessage>(
+               response->message);
+}
+
+bool is_duplicate_subscription_error(const session::EvidenceEvent& event,
+                                     std::uint64_t request_id) {
+    if (event.kind != session::EvidenceKind::InitialResponseObserved) {
+        return false;
+    }
+    const auto* response =
+        std::get_if<session::InitialResponseEvidence>(&event.data);
+    if (!response || response->responder != session::RequestInitiator::Peer ||
+        response->original_request_id != request_id ||
+        response->request_kind != session::RequestKind::Subscribe) {
+        return false;
+    }
+    const auto* error =
+        std::get_if<wire::draft18::RequestErrorMessage>(&response->message);
+    return error && error->error_code == 0x19;
+}
+
 }  // namespace
 
 ScenarioDefinition subscribe_to_publisher_track(
@@ -59,6 +90,46 @@ ScenarioDefinition subscribe_to_publisher_track(
         "reject-duplicate-response", duplicate_window,
         [request_id](const session::EvidenceEvent& event) {
             return is_duplicate_response(event, request_id);
+        }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
+    return definition;
+}
+
+ScenarioDefinition subscribe_again_to_established_publisher_track(
+    wire::draft18::TrackNamespace track_namespace,
+    wire::draft18::TrackName track_name,
+    std::uint64_t first_request_id, std::uint64_t second_request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window) {
+    if ((first_request_id & 1u) == 0u ||
+        (second_request_id & 1u) == 0u ||
+        second_request_id <= first_request_id) {
+        throw std::invalid_argument("draft-18 request IDs must be increasing odd values");
+    }
+    ScenarioDefinition definition;
+    definition.id = "subscribe-again-to-established-publisher-track";
+    definition.steps.push_back(ScenarioStep{
+        "await-first-subscribe-ok", response_deadline,
+        [first_request_id](const session::EvidenceEvent& event) {
+            return is_subscribe_ok(event, first_request_id);
+        }, {},
+        {OpenRequestAction{wire::draft18::SubscribeMessage{
+            first_request_id, track_namespace, track_name, {}}}}});
+    definition.steps.push_back(ScenarioStep{
+        "await-duplicate-subscription-error", response_deadline,
+        [second_request_id](const session::EvidenceEvent& event) {
+            return is_duplicate_subscription_error(event, second_request_id);
+        },
+        [second_request_id](const session::EvidenceEvent& event) {
+            return is_duplicate_response(event, second_request_id) &&
+                   !is_duplicate_subscription_error(event, second_request_id);
+        },
+        {OpenRequestAction{wire::draft18::SubscribeMessage{
+            second_request_id, std::move(track_namespace),
+            std::move(track_name), {}}}}});
+    definition.steps.push_back(ScenarioStep{
+        "reject-extra-duplicate-response", duplicate_window,
+        [second_request_id](const session::EvidenceEvent& event) {
+            return is_duplicate_response(event, second_request_id);
         }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
     return definition;
 }

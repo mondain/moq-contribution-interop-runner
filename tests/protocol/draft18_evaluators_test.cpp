@@ -21,7 +21,14 @@ RequirementCatalog catalog() {
         {"5.1", 1940, 1941, 1, 1}, "publisher", "Other obligation",
         Applicability::Applicable, Testability::Testable,
         {"another-scenario"}, {"another-evaluator"}, ""};
-    return {18, "fixture-digest", true, {required, other}};
+    Requirement duplicate{
+        "D18-5-1-MUST-004", Strength::Must,
+        {"5.1", 1981, 1982, 1, 1}, "endpoint",
+        "Fail a second same-role subscription with DUPLICATE_SUBSCRIPTION.",
+        Applicability::Applicable, Testability::Testable,
+        {"subscribe-again-to-established-publisher-track"},
+        {"duplicate-subscription-rejected"}, ""};
+    return {18, "fixture-digest", true, {required, duplicate, other}};
 }
 
 session::EvidenceEvent subscribe_request() {
@@ -106,6 +113,77 @@ TEST(Draft18Evaluators, CheckedInCatalogRetainsUnimplementedRowsAsNotRun) {
     EXPECT_EQ(outcome_for(outcomes, "D18-5-1-MUST-001").state,
               OutcomeState::Pass);
     EXPECT_EQ(score(actual, outcomes).verdict, RunVerdict::Incomplete);
+}
+
+TEST(Draft18Evaluators, ScoresDuplicateSubscriptionOnlyForSameTrackAndCode) {
+    const auto first = subscribe_request();
+    auto second = subscribe_request();
+    second.sequence = 2;
+    auto& request = std::get<session::RequestObservedEvidence>(second.data);
+    request.request_id = 3;
+    request.stream_id = 3;
+    auto& message = std::get<wire::draft18::SubscribeMessage>(request.message);
+    message.request_id = 3;
+    const session::EvidenceEvent rejected{
+        3, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 3,
+            session::RequestKind::Subscribe, 3,
+            wire::draft18::RequestErrorMessage{0x19, 0, {}, std::nullopt}}};
+    const ScenarioContext valid{
+        "subscribe-again-to-established-publisher-track", true, true,
+        {first, subscribe_ok(), second, rejected}};
+    const auto valid_outcomes = evaluate_draft18(catalog(), {&valid, 1});
+    EXPECT_EQ(outcome_for(valid_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::Pass);
+
+    auto wrong_code = valid;
+    auto& error = std::get<wire::draft18::RequestErrorMessage>(
+        std::get<session::InitialResponseEvidence>(
+            wrong_code.evidence.back().data).message);
+    error.error_code = 0x11;
+    const auto wrong_code_outcomes =
+        evaluate_draft18(catalog(), {&wrong_code, 1});
+    EXPECT_EQ(outcome_for(wrong_code_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::Fail);
+
+    auto missing_response = valid;
+    missing_response.evidence.pop_back();
+    const auto missing_outcomes =
+        evaluate_draft18(catalog(), {&missing_response, 1});
+    EXPECT_EQ(outcome_for(missing_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::Fail);
+
+    auto first_rejected = valid;
+    std::get<session::InitialResponseEvidence>(
+        first_rejected.evidence[1].data).message =
+            wire::draft18::RequestErrorMessage{0x19, 0, {}, std::nullopt};
+    const auto first_rejected_outcomes =
+        evaluate_draft18(catalog(), {&first_rejected, 1});
+    EXPECT_EQ(outcome_for(first_rejected_outcomes,
+                          "D18-5-1-MUST-004").state,
+              OutcomeState::NotRun);
+
+    auto duplicate_response = valid;
+    duplicate_response.evidence.push_back({
+        4, session::EvidenceKind::ResponseViolation,
+        session::ResponseViolationEvidence{
+            session::RequestInitiator::Peer, 3, 3,
+            wire::draft18::RequestErrorMessage{0x19, 0, {}, std::nullopt}}});
+    const auto duplicate_outcomes =
+        evaluate_draft18(catalog(), {&duplicate_response, 1});
+    EXPECT_EQ(outcome_for(duplicate_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::Fail);
+
+    auto different_track = valid;
+    std::get<wire::draft18::SubscribeMessage>(
+        std::get<session::RequestObservedEvidence>(
+            different_track.evidence[2].data).message).track_name.bytes =
+                {std::byte{'y'}};
+    const auto different_track_outcomes =
+        evaluate_draft18(catalog(), {&different_track, 1});
+    EXPECT_EQ(outcome_for(different_track_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::NotRun);
 }
 
 }  // namespace

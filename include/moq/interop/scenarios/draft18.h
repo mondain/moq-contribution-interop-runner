@@ -14,4 +14,12 @@ ScenarioDefinition subscribe_to_publisher_track(
     std::chrono::milliseconds response_deadline,
     std::chrono::milliseconds duplicate_window);
 
+ScenarioDefinition subscribe_again_to_established_publisher_track(
+    wire::draft18::TrackNamespace track_namespace,
+    wire::draft18::TrackName track_name,
+    std::uint64_t first_request_id,
+    std::uint64_t second_request_id,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window);
+
 }  // namespace moq::interop::scenarios
