@@ -158,6 +158,14 @@ target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(moq-interop-draft18-evaluators
+    src/requirements/draft18_evaluators.cpp)
+target_link_libraries(moq-interop-draft18-evaluators PUBLIC
+    moq-interop-requirements moq-interop-session)
+target_compile_options(moq-interop-draft18-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -249,6 +257,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft18-scenarios-tests PRIVATE
                           moq-interop-scenarios GTest::gtest_main)
     add_test(NAME draft18-scenarios COMMAND moq-interop-draft18-scenarios-tests)
+
+    add_executable(moq-interop-draft18-evaluators-tests
+                   tests/protocol/draft18_evaluators_test.cpp)
+    target_compile_definitions(moq-interop-draft18-evaluators-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    target_link_libraries(moq-interop-draft18-evaluators-tests PRIVATE
+                          moq-interop-draft18-evaluators GTest::gtest_main)
+    add_test(NAME draft18-evaluators COMMAND moq-interop-draft18-evaluators-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
