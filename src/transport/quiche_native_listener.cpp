@@ -31,13 +31,17 @@ namespace {
 constexpr std::array<std::byte, 7> kDraft18Alpn{
     std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
     std::byte{'-'}, std::byte{'1'}, std::byte{'8'}};
+constexpr std::array<std::byte, 7> kDraft21Alpn{
+    std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+    std::byte{'-'}, std::byte{'2'}, std::byte{'1'}};
 
 OperationResult unavailable() {
     return {TransportStatus::InvalidState, 0, std::nullopt};
 }
 
-bool exact_draft18_alpn(std::span<const std::byte> alpn) {
-    return std::ranges::equal(alpn, kDraft18Alpn);
+bool supported_alpn(std::span<const std::byte> alpn) {
+    return std::ranges::equal(alpn, kDraft18Alpn) ||
+           std::ranges::equal(alpn, kDraft21Alpn);
 }
 
 bool regular_file(const std::filesystem::path& path) {
@@ -341,8 +345,8 @@ struct NativeQuicListener::Impl {
             connection->native_handle(), &parameters);
         const auto maximum = quiche_conn_dgram_max_writable_len(
             connection->native_handle());
-        if (alpn_size != kDraft18Alpn.size() ||
-            std::memcmp(alpn, kDraft18Alpn.data(), alpn_size) != 0 ||
+        if (alpn_size != config.expected_alpn.size() ||
+            std::memcmp(alpn, config.expected_alpn.data(), alpn_size) != 0 ||
             !has_parameters || parameters.peer_max_datagram_frame_size < 0 ||
             maximum < 0) {
             std::cerr << "native QUIC establishment rejected: alpn_size="
@@ -846,7 +850,7 @@ NativeQuicListenerError validate_config(
         return NativeQuicListenerError::UnsupportedBindAddress;
     }
     if (config.bind_address.empty() ||
-        !exact_draft18_alpn(config.expected_alpn) ||
+        !supported_alpn(config.expected_alpn) ||
         config.idle_timeout.count() <= 0 ||
         config.retry_token_lifetime.count() <= 0 ||
         config.max_udp_payload < QUICHE_MIN_CLIENT_INITIAL_LEN ||
@@ -1046,8 +1050,9 @@ NativeQuicListenerCreateResult create_native_quic_listener(
     }
 
     std::array<std::byte, 8> wire_alpn{};
-    wire_alpn[0] = std::byte{7};
-    std::copy(kDraft18Alpn.begin(), kDraft18Alpn.end(),
+    wire_alpn[0] = static_cast<std::byte>(impl->config.expected_alpn.size());
+    std::copy(impl->config.expected_alpn.begin(),
+              impl->config.expected_alpn.end(),
               wire_alpn.begin() + 1);
     if (quiche_config_set_application_protos(
             impl->quiche_configuration,

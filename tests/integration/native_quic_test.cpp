@@ -1156,6 +1156,32 @@ TEST(NativeQuicLive, DifferentAlpnNeverEstablishes) {
     EXPECT_FALSE(server_established);
 }
 
+TEST(NativeQuicLive, Draft21ListenerNegotiatesOnlyDraft21) {
+    // draft-ietf-moq-transport-21 section 6.2: the draft ALPN is moqt-21.
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.expected_alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'});
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = config.expected_alpn});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    std::vector<std::byte> negotiated;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            if (const auto* connection =
+                    std::get_if<ConnectionEstablishedEvent>(&event)) {
+                established = true;
+                negotiated = connection->alpn;
+            }
+        }
+        return established;
+    }));
+    EXPECT_EQ(negotiated, config.expected_alpn);
+}
+
 TEST(NativeQuicLive, MissingDatagramProducesOnlyConfiguredLocalClose) {
     TestPemFiles pem;
     auto config = live_config(pem);
