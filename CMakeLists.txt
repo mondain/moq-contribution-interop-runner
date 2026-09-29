@@ -106,6 +106,7 @@ add_library(moq-interop-wire
     src/wire/draft21/publisher_request.cpp
     src/wire/draft21/request_frame.cpp
     src/wire/draft21/request_error.cpp
+    src/wire/draft21/request_ok.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
 )
@@ -170,7 +171,8 @@ add_library(moq-interop-scenarios
     src/scenarios/engine.cpp
     src/scenarios/draft18.cpp
     src/scenarios/action_dispatcher.cpp
-    src/scenarios/run_controller.cpp)
+    src/scenarios/run_controller.cpp
+    src/scenarios/draft21_announcement.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -184,10 +186,19 @@ target_compile_options(moq-interop-draft18-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(moq-interop-draft21-evaluators
+    src/requirements/draft21_evaluators.cpp)
+target_link_libraries(moq-interop-draft21-evaluators PUBLIC
+    moq-interop-requirements moq-interop-scenarios)
+target_compile_options(moq-interop-draft21-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(moq-interop-runs src/app/native_run_manager.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios
-    moq-interop-draft18-evaluators moq-interop-storage)
+    moq-interop-draft18-evaluators moq-interop-draft21-evaluators
+    moq-interop-storage)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
 
@@ -299,6 +310,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME draft18-run-controller
              COMMAND moq-interop-draft18-run-controller-tests)
 
+    add_executable(moq-interop-draft21-announcement-tests
+                   tests/protocol/draft21_announcement_test.cpp)
+    target_link_libraries(moq-interop-draft21-announcement-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-announcement
+             COMMAND moq-interop-draft21-announcement-tests)
+
     add_executable(moq-interop-draft18-evaluators-tests
                    tests/protocol/draft18_evaluators_test.cpp)
     target_compile_definitions(moq-interop-draft18-evaluators-tests PRIVATE
@@ -307,6 +325,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft18-evaluators-tests PRIVATE
                           moq-interop-draft18-evaluators GTest::gtest_main)
     add_test(NAME draft18-evaluators COMMAND moq-interop-draft18-evaluators-tests)
+
+    add_executable(moq-interop-draft21-evaluators-tests
+                   tests/protocol/draft21_evaluators_test.cpp)
+    target_compile_definitions(moq-interop-draft21-evaluators-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-evaluators-tests PRIVATE
+        moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME draft21-evaluators
+             COMMAND moq-interop-draft21-evaluators-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
@@ -428,6 +455,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-request-error
              COMMAND moq-interop-draft21-request-error-tests)
+
+    add_executable(moq-interop-draft21-request-ok-tests
+                   tests/golden/draft21_request_ok_test.cpp)
+    target_link_libraries(moq-interop-draft21-request-ok-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft21-request-ok
+             COMMAND moq-interop-draft21-request-ok-tests)
 
     add_executable(moq-interop-draft21-publisher-request-tests
                    tests/golden/draft21_publisher_request_test.cpp)

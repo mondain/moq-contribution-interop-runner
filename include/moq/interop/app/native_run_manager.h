@@ -43,6 +43,11 @@ public:
         std::shared_ptr<const requirements::RequirementCatalog> catalog,
         std::shared_ptr<storage::RunStore> store,
         NativeRunManagerConfig config);
+    NativeRunManager(
+        std::shared_ptr<const requirements::RequirementCatalog> draft18,
+        std::shared_ptr<const requirements::RequirementCatalog> draft21,
+        std::shared_ptr<storage::RunStore> store,
+        NativeRunManagerConfig config);
     ~NativeRunManager();
 
     NativeRunManager(const NativeRunManager&) = delete;
@@ -50,6 +55,7 @@ public:
 
     RunStartResult start(const RunConfig& config);
     bool stop(const RunId& id);
+    [[nodiscard]] bool supports(DraftVersion draft) const noexcept;
 
 private:
     class Impl;

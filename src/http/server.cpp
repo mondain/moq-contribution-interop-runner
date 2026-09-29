@@ -229,7 +229,13 @@ public:
                                              {{"draft", 18}, {"transport", "native-quic"},
                                               {"mode", "observed"},
                                               {"scenario", "subscribe-to-publisher-track"},
-                                              {"configured", static_cast<bool>(runs)}}})},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft18)}},
+                                             {{"draft", 21}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "d21-publisher-request-stream-placement"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft21)}}})},
                                          {"validator", detail::build_json(build)}});
             });
         });
@@ -268,13 +274,20 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request);
-                if (requested.draft != app::DraftVersion::Draft18 ||
+                const bool draft18_scenario =
+                    requested.draft == app::DraftVersion::Draft18 &&
+                    requested.scenario_ids ==
+                        std::vector<std::string>{"subscribe-to-publisher-track"};
+                const bool draft21_scenario =
+                    requested.draft == app::DraftVersion::Draft21 &&
+                    requested.scenario_ids ==
+                        std::vector<std::string>{"d21-publisher-request-stream-placement"};
+                if ((!draft18_scenario && !draft21_scenario) ||
                     requested.transport != app::TransportKind::NativeQuic ||
                     requested.mode != app::RunMode::Observed ||
-                    requested.scenario_ids !=
-                        std::vector<std::string>{"subscribe-to-publisher-track"}) {
+                    (runs && !runs->supports(requested.draft))) {
                     throw ApiError{422, "unsupported_run_config",
-                                   "Only the draft-18 native-QUIC observed subscribe-to-publisher-track scenario is executable."};
+                                   "The requested native-QUIC observed scenario is not executable."};
                 }
                 if (!requested.track_fixture || requested.timeout < std::chrono::milliseconds(2)) {
                     throw ApiError{400, "invalid_run_config",
@@ -291,7 +304,7 @@ public:
                         {"run", detail::run_json(store->load(started.id))},
                         {"publisher_endpoint", {{"address", started.endpoint.address},
                                                 {"port", started.endpoint.port},
-                                                {"alpn", "moqt-18"}}}}, 201);
+                                                {"alpn", draft21_scenario ? "moqt-21" : "moqt-18"}}}}, 201);
                     return;
                 case app::RunStartStatus::Unsupported:
                     throw ApiError{422, "unsupported_run_config", "This run configuration is not executable."};

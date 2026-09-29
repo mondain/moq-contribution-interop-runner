@@ -4,9 +4,11 @@ Publisher-focused MoQT interoperability runner. The checked-in draft text in
 `docs/` is the protocol authority. The requirement inventories cover drafts 18
 and 21. The executable scenario currently covers one draft-18 native-QUIC
 publisher interaction: subscribe to a configured track and evaluate its initial
-response. Draft 21, WebTransport, and the remaining publisher requirements are
-cataloged but not executable yet. Requests for them return HTTP 422; they are
-never silently scored as conformant.
+response. A second, narrow draft-21 native-QUIC scenario accepts a publisher's
+PUBLISH for a configured track and sends an empty REQUEST_OK. WebTransport and
+the remaining publisher requirements are cataloged but not executable yet.
+Requests for unsupported scenarios return HTTP 422; they are never silently
+scored as conformant.
 
 Build and test on Linux with `cmake -S . -B build`,
 `cmake --build build -j4`, and `ctest --test-dir build --output-on-failure`.
@@ -39,6 +41,14 @@ The HTTP run configuration accepts an optional opaque-byte track fixture:
 }
 ```
 
+For draft 21, set `draft` to `21` and `scenarios` to
+`["d21-publisher-request-stream-placement"]`; the endpoint advertises ALPN
+`moqt-21`. The draft-21 runner waits for both SETUP messages, including when
+PUBLISH arrives before SETUP completes, and records the observed PUBLISH and
+REQUEST_OK. This is a publisher-announcement test, not a subscriber-serving
+relay or a full draft-21 conformance test. Unexercised catalog lines remain
+`NOT_RUN`, so the overall result remains incomplete.
+
 `namespace_hex` is an ordered array of 0–32 nonempty hex-encoded namespace
 fields; `name_hex` is the possibly empty hex-encoded Track Name. The decoded
 full name is limited to 4,096 bytes. Hex encoding preserves arbitrary bytes,
@@ -47,12 +57,12 @@ including NUL, without imposing a text canonicalization on publishers.
 Create a run with `curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
   -H 'Content-Type: application/json' -d @run.json`, where `run.json` contains
 the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
-`address`, `port`, and ALPN `moqt-18`. Configure the publisher to connect to
+`address`, `port`, and the selected draft's ALPN. Configure the publisher to connect to
 that endpoint, then retrieve `GET /api/v1/runs/{id}` or
 `GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
-`GET /healthz` distinguishes the two inventoried drafts from the currently
-executable profile and whether its listener is configured.
+`GET /healthz` distinguishes the two inventoried drafts from the narrow
+executable profiles and whether their listeners are configured.
 `POST /api/v1/runs/{id}/stop` ends an active run and finalizes it as incomplete;
 it does not count the interrupted interaction as a publisher failure.
 Scoring distinguishes required MUST/MUST NOT, weighted recommendations, and

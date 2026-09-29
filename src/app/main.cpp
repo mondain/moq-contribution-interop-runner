@@ -125,7 +125,7 @@ int main(int argc, char* argv[]) {
         std::shared_ptr<moq::interop::app::NativeRunManager> runs;
         if (!options.native.certificate_path.empty()) {
             runs = std::make_shared<moq::interop::app::NativeRunManager>(
-                draft18, store, options.native);
+                draft18, draft21, store, options.native);
         }
         moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server, runs);
         if (!server.start()) throw std::runtime_error("could not bind the HTTP listener");

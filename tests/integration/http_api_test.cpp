@@ -141,10 +141,17 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 1);
+    ASSERT_EQ(health.at("executable_profiles").size(), 2);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
+    EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
+              "subscribe-to-publisher-track");
     EXPECT_FALSE(health.at("executable_profiles").at(0).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(1).at("draft"), 21);
+    EXPECT_EQ(health.at("executable_profiles").at(1).at("transport"), "native-quic");
+    EXPECT_EQ(health.at("executable_profiles").at(1).at("scenario"),
+              "d21-publisher-request-stream-placement");
+    EXPECT_FALSE(health.at("executable_profiles").at(1).at("configured"));
 
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2);

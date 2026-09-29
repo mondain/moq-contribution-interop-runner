@@ -1,8 +1,10 @@
 #include "moq/interop/app/native_run_manager.h"
 
 #include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft18.h"
+#include "moq/interop/scenarios/draft21_announcement.h"
 #include "moq/interop/scenarios/run_controller.h"
 
 #include <algorithm>
@@ -22,6 +24,18 @@ using namespace std::chrono_literals;
 
 constexpr std::string_view kSubscribeScenario =
     "subscribe-to-publisher-track";
+constexpr std::string_view kDraft21AnnouncementScenario =
+    "d21-publisher-request-stream-placement";
+
+std::vector<std::byte> bytes_of(const std::string& value) {
+    std::vector<std::byte> result;
+    result.reserve(value.size());
+    for (const char byte : value) {
+        result.push_back(static_cast<std::byte>(
+            static_cast<unsigned char>(byte)));
+    }
+    return result;
+}
 
 bool valid_fixture(const TrackFixture& fixture) {
     if (fixture.namespace_fields.size() > 32) return false;
@@ -121,6 +135,47 @@ bool terminal(scenarios::ScenarioStatus status) {
            status == scenarios::ScenarioStatus::Stopped;
 }
 
+storage::EvidenceEvent stored_draft21_evidence(
+    const scenarios::Draft21AnnouncementEvent& source,
+    scenarios::Draft21Clock::time_point started) {
+    storage::EvidenceEvent result;
+    result.monotonic_time_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            scenarios::Draft21Clock::now() - started).count();
+    result.wall_time_unix_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    switch (source.kind) {
+    case scenarios::Draft21AnnouncementEventKind::TransportEstablished:
+        result.kind = "transport_established"; break;
+    case scenarios::Draft21AnnouncementEventKind::LocalSetupSent:
+        result.kind = "local_setup_sent"; break;
+    case scenarios::Draft21AnnouncementEventKind::PeerSetupReceived:
+        result.kind = "peer_setup_received"; break;
+    case scenarios::Draft21AnnouncementEventKind::PublishObserved:
+        result.kind = "publish_observed"; break;
+    case scenarios::Draft21AnnouncementEventKind::ResponseDelivered:
+        result.kind = "response_delivered"; break;
+    case scenarios::Draft21AnnouncementEventKind::UnsupportedStream:
+        result.kind = "unsupported_stream"; break;
+    case scenarios::Draft21AnnouncementEventKind::ProtocolViolation:
+        result.kind = "protocol_violation"; break;
+    case scenarios::Draft21AnnouncementEventKind::PeerClosed:
+        result.kind = "peer_closed"; break;
+    case scenarios::Draft21AnnouncementEventKind::HarnessLimit:
+        result.kind = "harness_limit"; break;
+    }
+    result.detail = "draft-21 announcement evidence";
+    result.scenario_id = std::string(kDraft21AnnouncementScenario);
+    if (source.stream_id) {
+        result.stream_id = std::to_string(*source.stream_id);
+    }
+    if (source.request_id) {
+        result.request_id = std::to_string(*source.request_id);
+    }
+    return result;
+}
+
 }  // namespace
 
 class NativeRunManager::Impl {
@@ -133,12 +188,16 @@ public:
         std::thread thread;
     };
 
-    Impl(std::shared_ptr<const requirements::RequirementCatalog> supplied_catalog,
+    Impl(std::shared_ptr<const requirements::RequirementCatalog> supplied_draft18,
+         std::shared_ptr<const requirements::RequirementCatalog> supplied_draft21,
          std::shared_ptr<storage::RunStore> supplied_store,
          NativeRunManagerConfig supplied_config)
-        : catalog(std::move(supplied_catalog)), store(std::move(supplied_store)),
+        : draft18(std::move(supplied_draft18)),
+          draft21(std::move(supplied_draft21)),
+          store(std::move(supplied_store)),
           config(std::move(supplied_config)) {
-        if (!catalog || !store || catalog->draft != 18 || !catalog->complete ||
+        if (!draft18 || !store || draft18->draft != 18 || !draft18->complete ||
+            (draft21 && (draft21->draft != 21 || !draft21->complete)) ||
             config.maximum_active_runs == 0 ||
             config.port_start > config.port_end ||
             (config.port_start == 0) != (config.port_end == 0)) {
@@ -174,11 +233,36 @@ public:
              std::unique_ptr<transport::NativeQuicListener> listener,
              RunConfig run_config) {
         try {
+            if (run_config.draft == DraftVersion::Draft21) {
+                run_draft21(worker, *listener, run_config);
+            } else {
+                run_draft18(worker, *listener, run_config);
+            }
+        } catch (const std::exception& error) {
+            std::cerr << "native run " << worker->id << " failed: "
+                      << error.what() << '\n';
+            try {
+                const requirements::ScoreSummary failure{
+                    requirements::RunVerdict::Error,
+                    {0, 0}, {0, 0}, {0, 0}};
+                store->finalize(worker->id, failure, {});
+            } catch (const std::exception& finalization_error) {
+                std::cerr << "native run " << worker->id
+                          << " finalization failed: "
+                          << finalization_error.what() << '\n';
+            }
+        }
+        worker->finished = true;
+    }
+
+    void run_draft18(Worker* worker,
+                     transport::NativeQuicListener& listener,
+                     const RunConfig& run_config) {
             const auto started = scenarios::Clock::now();
             const auto deadline = started + run_config.timeout;
             const auto quiet = std::min(50ms, run_config.timeout / 4);
             scenarios::Draft18RunController controller(
-                *listener,
+                listener,
                 scenarios::subscribe_to_publisher_track(
                     track_namespace(*run_config.track_fixture),
                     track_name(*run_config.track_fixture), 1,
@@ -205,28 +289,53 @@ public:
             auto context = controller.context();
             if (worker->stop_requested) context.complete = false;
             const auto outcomes = requirements::evaluate_draft18(
-                *catalog, std::span<const requirements::ScenarioContext>(
+                *draft18, std::span<const requirements::ScenarioContext>(
                               &context, 1));
-            auto score = requirements::score(*catalog, outcomes);
+            auto score = requirements::score(*draft18, outcomes);
             store->finalize(worker->id, score, outcomes);
-        } catch (const std::exception& error) {
-            std::cerr << "native run " << worker->id << " failed: "
-                      << error.what() << '\n';
-            try {
-                const requirements::ScoreSummary failure{
-                    requirements::RunVerdict::Error,
-                    {0, 0}, {0, 0}, {0, 0}};
-                store->finalize(worker->id, failure, {});
-            } catch (const std::exception& finalization_error) {
-                std::cerr << "native run " << worker->id
-                          << " finalization failed: "
-                          << finalization_error.what() << '\n';
-            }
-        }
-        worker->finished = true;
     }
 
-    std::shared_ptr<const requirements::RequirementCatalog> catalog;
+    void run_draft21(Worker* worker,
+                     transport::NativeQuicListener& listener,
+                     const RunConfig& run_config) {
+        const auto started = scenarios::Draft21Clock::now();
+        const auto deadline = started + run_config.timeout;
+        std::vector<std::vector<std::byte>> name_space;
+        for (const auto& field : run_config.track_fixture->namespace_fields) {
+            name_space.push_back(bytes_of(field));
+        }
+        scenarios::Draft21AnnouncementController controller(
+            listener, std::move(name_space),
+            bytes_of(run_config.track_fixture->track_name),
+            run_config.timeout);
+        std::size_t recorded = 0;
+        while (!worker->stop_requested) {
+            const auto now = scenarios::Draft21Clock::now();
+            const auto snapshot = controller.poll(now);
+            const auto& evidence = controller.context().evidence;
+            if (recorded < evidence.size()) {
+                std::vector<storage::EvidenceEvent> batch;
+                batch.reserve(evidence.size() - recorded);
+                for (; recorded < evidence.size(); ++recorded) {
+                    batch.push_back(stored_draft21_evidence(
+                        evidence[recorded], started));
+                }
+                store->append_events(worker->id, batch);
+            }
+            if (snapshot.status != scenarios::Draft21AnnouncementStatus::Running ||
+                snapshot.harness_failed || now >= deadline) break;
+            std::this_thread::sleep_for(1ms);
+        }
+        auto context = controller.context();
+        if (worker->stop_requested) context.complete = false;
+        const auto outcomes = requirements::evaluate_draft21_announcement(
+            *draft21, context);
+        const auto summary = requirements::score(*draft21, outcomes);
+        store->finalize(worker->id, summary, outcomes);
+    }
+
+    std::shared_ptr<const requirements::RequirementCatalog> draft18;
+    std::shared_ptr<const requirements::RequirementCatalog> draft21;
     std::shared_ptr<storage::RunStore> store;
     NativeRunManagerConfig config;
     std::mutex mutex;
@@ -237,17 +346,32 @@ NativeRunManager::NativeRunManager(
     std::shared_ptr<const requirements::RequirementCatalog> catalog,
     std::shared_ptr<storage::RunStore> store,
     NativeRunManagerConfig config)
-    : impl_(std::make_unique<Impl>(std::move(catalog), std::move(store),
-                                    std::move(config))) {}
+    : NativeRunManager(std::move(catalog), nullptr, std::move(store),
+                       std::move(config)) {}
+
+NativeRunManager::NativeRunManager(
+    std::shared_ptr<const requirements::RequirementCatalog> draft18,
+    std::shared_ptr<const requirements::RequirementCatalog> draft21,
+    std::shared_ptr<storage::RunStore> store,
+    NativeRunManagerConfig config)
+    : impl_(std::make_unique<Impl>(std::move(draft18), std::move(draft21),
+                                    std::move(store), std::move(config))) {}
 
 NativeRunManager::~NativeRunManager() = default;
 
 RunStartResult NativeRunManager::start(const RunConfig& config) {
-    if (config.draft != DraftVersion::Draft18 ||
+    const bool draft18_scenario =
+        config.draft == DraftVersion::Draft18 &&
+        config.scenario_ids ==
+            std::vector<std::string>{std::string(kSubscribeScenario)};
+    const bool draft21_scenario =
+        config.draft == DraftVersion::Draft21 && impl_->draft21 &&
+        config.scenario_ids ==
+            std::vector<std::string>{std::string(kDraft21AnnouncementScenario)};
+    if ((!draft18_scenario && !draft21_scenario) ||
         config.transport != TransportKind::NativeQuic ||
         config.mode != RunMode::Observed ||
-        config.scenario_ids !=
-            std::vector<std::string>{std::string(kSubscribeScenario)}) {
+        !supports(config.draft)) {
         return {RunStartStatus::Unsupported, {}, {}};
     }
     if (!config.track_fixture || !valid_fixture(*config.track_fixture) ||
@@ -268,9 +392,16 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         listener_config.bind_port = static_cast<std::uint16_t>(port);
         listener_config.certificate_path = impl_->config.certificate_path;
         listener_config.private_key_path = impl_->config.private_key_path;
-        listener_config.expected_alpn = {
-            std::byte{'m'}, std::byte{'o'}, std::byte{'q'},
-            std::byte{'t'}, std::byte{'-'}, std::byte{'1'}, std::byte{'8'}};
+        listener_config.expected_alpn =
+            draft21_scenario
+                ? std::vector<std::byte>{
+                      std::byte{'m'}, std::byte{'o'}, std::byte{'q'},
+                      std::byte{'t'}, std::byte{'-'}, std::byte{'2'},
+                      std::byte{'1'}}
+                : std::vector<std::byte>{
+                      std::byte{'m'}, std::byte{'o'}, std::byte{'q'},
+                      std::byte{'t'}, std::byte{'-'}, std::byte{'1'},
+                      std::byte{'8'}};
         auto created = transport::NativeQuicListener::create(
             std::move(listener_config));
         if (created.listener) {
@@ -306,6 +437,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::ListenerError, {}, {}};
     }
     return {RunStartStatus::Started, id, endpoint};
+}
+
+bool NativeRunManager::supports(DraftVersion draft) const noexcept {
+    return draft == DraftVersion::Draft18 ||
+           (draft == DraftVersion::Draft21 && impl_->draft21 != nullptr);
 }
 
 bool NativeRunManager::stop(const RunId& id) {

@@ -1082,6 +1082,83 @@ TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
                   .at("run").at("score").at("verdict"), "pass");
 }
 
+TEST(NativeQuicLive, HttpDraft21AnnouncementPersistsScoredPublisherRun) {
+    // draft-ietf-moq-transport-21 sections 6.2, 6.3, 9.3 and 9.8.
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{18, "test", true, {}});
+    requirements::Requirement opening{
+        "D21-9-MUST-282", requirements::Strength::Must,
+        {"9", 3368, 3369, 1, 1}, "publisher",
+        "PUBLISH begins its request stream.",
+        requirements::Applicability::Applicable,
+        requirements::Testability::Testable,
+        {"d21-publisher-request-stream-placement"},
+        {"d21-publisher-first-message-placement"}, ""};
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            21, "test", true, {std::move(opening)}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 1, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const nlohmann::json request = {
+        {"draft", 21}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", nlohmann::json::array(
+            {"d21-publisher-request-stream-placement"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", nlohmann::json::array({"6d65646961"})},
+                   {"name_hex", "74657374"}}}};
+    const auto created = api.Post("/api/v1/runs", request.dump(),
+                                  "application/json");
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->status, 201) << created->body;
+    const auto body = nlohmann::json::parse(created->body);
+    EXPECT_EQ(body.at("publisher_endpoint").at("alpn"), "moqt-21");
+    const auto port = body.at("publisher_endpoint").at("port")
+                          .get<std::uint16_t>();
+    const auto id = body.at("run").at("id").get<std::string>();
+    auto client = test::QuicheTestClient::create(
+        {.port = port,
+         .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto setup = client->stream(3);
+        return setup && setup->data == bytes({0xaf, 0x00, 0x00, 0x00});
+    }));
+    ASSERT_TRUE(client->send_stream(
+        2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+    ASSERT_TRUE(client->send_stream(
+        0, bytes({0x1d, 0x00, 0x0f,
+                  0x00, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a',
+                  0x04, 't', 'e', 's', 't', 0x02, 0x00}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto response = client->stream(0);
+        return response && response->data == bytes({0x07, 0x00, 0x01, 0x00}) &&
+               store->load(id).state == storage::RunState::Finalized;
+    }));
+    const auto result = api.Get("/api/v1/runs/" + id);
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const auto run = nlohmann::json::parse(result->body).at("run");
+    EXPECT_EQ(run.at("config").at("draft"), 21);
+    EXPECT_EQ(run.at("score").at("verdict"), "pass");
+    ASSERT_EQ(run.at("outcomes").size(), 1u);
+    EXPECT_EQ(run.at("outcomes").at(0).at("state"), "pass");
+    EXPECT_FALSE(store->load(id).events.empty());
+}
+
 TEST(NativeQuicLive, HttpStopFinalizesAnActiveRunWithoutPublisherFailure) {
     TestPemFiles pem;
     auto store = std::make_shared<storage::SqliteRunStore>(
