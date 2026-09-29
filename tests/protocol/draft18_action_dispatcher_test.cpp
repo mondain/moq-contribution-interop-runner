@@ -28,10 +28,10 @@ public:
     transport::OperationResult write(transport::StreamId stream_id,
                                      std::span<const std::byte> data,
                                      bool fin) override {
-        if ((stream_id & 3u) != 1u && stream_id != 3) {
+        if ((stream_id & 3u) != 1u && stream_id != 3 && stream_id != 0) {
             return {transport::TransportStatus::InvalidState, 0, {}};
         }
-        if (fin) return {transport::TransportStatus::InvalidState, 0, {}};
+        if (fin) ++fin_count;
         const auto result = next_write < scripted_writes.size()
             ? scripted_writes[next_write++]
             : transport::OperationResult{transport::TransportStatus::Success,
@@ -61,6 +61,7 @@ public:
     std::size_t next_write{0};
     std::size_t open_count{0};
     std::size_t open_uni_count{0};
+    std::size_t fin_count{0};
     std::vector<transport::OpenResult> scripted_opens;
     std::size_t next_open{0};
 };
@@ -354,6 +355,43 @@ TEST(Draft18ActionDispatcher, RequestIdsAdvanceByTwoWithoutGaps) {
     EXPECT_TRUE(next.stimulus_delivered);
     EXPECT_EQ(next.stream_id, 5u);
     EXPECT_EQ(transport.open_count, 2u);
+}
+
+TEST(Draft18ActionDispatcher, RespondsOnExistingPeerRequestStream) {
+    RecordingTransport transport;
+    session::PublisherSession session;
+    activate(session);
+    wire::ByteWriter request_wire(256);
+    ASSERT_TRUE(wire::draft18::encode_message(
+        wire::draft18::PublishMessage{
+            0, {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 7, {}, {}},
+        request_wire).has_value());
+    session.on_event(transport::StreamDataEvent{
+        0, {request_wire.bytes().begin(), request_wire.bytes().end()}, false});
+    session.take_evidence(64);
+
+    ActionDispatcher dispatcher(transport, session);
+    const auto result = dispatcher.submit(session::SendMessageAction{
+        0, wire::draft18::RequestErrorMessage{1, 0, {}, std::nullopt},
+        true});
+    EXPECT_EQ(result.state, DispatchState::Complete);
+    EXPECT_TRUE(result.stimulus_delivered);
+    EXPECT_EQ(result.stream_id, 0u);
+    EXPECT_EQ(transport.open_count, 0u);
+    EXPECT_EQ(transport.open_uni_count, 0u);
+    EXPECT_EQ(transport.fin_count, 1u);
+    wire::Cursor cursor(transport.written);
+    const auto decoded = wire::draft18::decode_message(
+        wire::draft18::StreamRole::Request, cursor, {});
+    ASSERT_TRUE(std::holds_alternative<wire::draft18::Message>(decoded));
+    EXPECT_NE(std::get_if<wire::draft18::RequestErrorMessage>(
+                  &std::get<wire::draft18::Message>(decoded)), nullptr);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const session::EvidenceEvent& event) {
+                               return event.kind ==
+                                      session::EvidenceKind::InitialResponseObserved;
+                           }), evidence.end());
 }
 
 }  // namespace

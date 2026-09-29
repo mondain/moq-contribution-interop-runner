@@ -52,6 +52,7 @@ public:
     explicit ScenarioEngine(ScenarioDefinition definition);
 
     ScenarioTransition start(Clock::time_point now);
+    ScenarioTransition actions_delivered(Clock::time_point now);
     ScenarioTransition observe(const session::EvidenceEvent& event,
                                Clock::time_point now);
     ScenarioTransition advance(Clock::time_point now);

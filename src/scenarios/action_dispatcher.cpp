@@ -83,6 +83,26 @@ DispatchResult ActionDispatcher::submit_setup() {
     return flush();
 }
 
+DispatchResult ActionDispatcher::submit(
+    const session::SendMessageAction& action) {
+    if (pending_ || session_.phase() == session::SessionPhase::Closing ||
+        session_.phase() == session::SessionPhase::Closed) {
+        return {DispatchState::Failed, false, action.stream_id,
+                transport::TransportStatus::InvalidState};
+    }
+    wire::ByteWriter writer(kMaximumDraft18MessageFrame);
+    if (!wire::draft18::encode_message(action.message, writer).has_value()) {
+        return {DispatchState::Failed, false, action.stream_id,
+                transport::TransportStatus::InvalidState};
+    }
+    pending_ = PendingMessage{action.message,
+                              session::LocalStreamPurpose::Request,
+                              action.fin,
+                              {writer.bytes().begin(), writer.bytes().end()},
+                              action.stream_id, 0, false};
+    return flush();
+}
+
 DispatchResult ActionDispatcher::flush() {
     if (!pending_) {
         return {DispatchState::Complete, false, std::nullopt, std::nullopt};

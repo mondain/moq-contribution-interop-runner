@@ -28,6 +28,13 @@ ScenarioTransition ScenarioEngine::start(Clock::time_point now) {
     return {status_, step_index_, definition_.steps[0].actions};
 }
 
+ScenarioTransition ScenarioEngine::actions_delivered(Clock::time_point now) {
+    if (status_ == ScenarioStatus::Running) {
+        deadline_ = now + definition_.steps[step_index_].deadline;
+    }
+    return snapshot();
+}
+
 ScenarioTransition ScenarioEngine::complete_step(Clock::time_point now) {
     ++step_index_;
     if (step_index_ == definition_.steps.size()) {

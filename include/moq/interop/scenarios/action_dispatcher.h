@@ -25,6 +25,7 @@ public:
                      session::PublisherSession& session);
 
     DispatchResult submit(const OpenRequestAction& action);
+    DispatchResult submit(const session::SendMessageAction& action);
     DispatchResult submit_setup();
     DispatchResult flush();
     [[nodiscard]] bool has_pending() const noexcept;
