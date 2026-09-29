@@ -246,6 +246,13 @@ std::size_t evidence_owned_bytes(const EvidenceData& data) {
             [](const ReservedNamespaceEvidence& value) {
                 return track_key_bytes(value.track);
             },
+            [](const ObjectObservedEvidence& value) {
+                std::size_t result = value.object.retained_payload.size();
+                for (const auto& property : value.object.properties) {
+                    result += key_value_bytes(property);
+                }
+                return result;
+            },
             [](const auto&) -> std::size_t { return 0; }},
         data);
 }
@@ -2183,9 +2190,45 @@ public:
                     }
                 },
                 [&](const transport::DatagramEvent& value) {
-                    emit(transition, EvidenceKind::DeferredStreamBytes,
-                         DeferredBytesEvidence{0, PeerStreamKind::Subgroup,
-                                               value.data, false});
+                    if (phase != SessionPhase::Active) {
+                        emit(transition, EvidenceKind::DeferredStreamBytes,
+                             DeferredBytesEvidence{
+                                 0, PeerStreamKind::Subgroup, value.data,
+                                 false});
+                        return;
+                    }
+                    auto decoded = wire::draft18::decode_datagram(
+                        value.data, config.wire_limits);
+                    if (auto* object =
+                            std::get_if<wire::draft18::ObjectEvent>(&decoded)) {
+                        std::optional<std::uint64_t> request_id;
+                        std::optional<bool> forward_state;
+                        if (object->track_alias) {
+                            const auto alias = established_aliases.find(
+                                {RequestInitiator::Peer,
+                                 *object->track_alias});
+                            if (alias != established_aliases.end()) {
+                                const auto request =
+                                    requests.find(alias->second);
+                                if (request != requests.end() &&
+                                    request->second.subscription) {
+                                    request_id = request->second.request_id;
+                                    forward_state = request->second
+                                                        .subscription
+                                                        ->forward_state;
+                                }
+                            }
+                        }
+                        emit(transition, EvidenceKind::ObjectObserved,
+                             ObjectObservedEvidence{request_id,
+                                                    forward_state,
+                                                    std::move(*object)});
+                    } else {
+                        emit(transition, EvidenceKind::DeferredStreamBytes,
+                             DeferredBytesEvidence{
+                                 0, PeerStreamKind::Subgroup, value.data,
+                                 false});
+                    }
                 },
                 [&](const transport::PeerCloseEvent& value) {
                     terminalize_all(transition);

@@ -2,6 +2,7 @@
 
 #include "moq/interop/transport/session_transport.h"
 #include "moq/interop/wire/draft18/messages.h"
+#include "moq/interop/wire/draft18/objects.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -112,6 +113,7 @@ enum class EvidenceKind {
     PendingSubscriptionReplaced,
     ReservedNamespaceRejected,
     ForwardStateChanged,
+    ObjectObserved,
 };
 
 enum class HarnessLimitKind {
@@ -307,6 +309,12 @@ struct ForwardStateEvidence {
     std::optional<wire::draft18::Location> joining_location;
 };
 
+struct ObjectObservedEvidence {
+    std::optional<std::uint64_t> request_id;
+    std::optional<bool> forward_state;
+    wire::draft18::ObjectEvent object;
+};
+
 struct SubscriptionPhaseEvidence {
     TrackKey track;
     LocalSubscriptionRole local_role{LocalSubscriptionRole::Publisher};
@@ -364,7 +372,8 @@ using EvidenceData =
                  DuplicateSubscriptionEvidence,
                  OppositeRoleCoexistenceEvidence,
                  PendingSubscriptionReplacementEvidence,
-                 ReservedNamespaceEvidence, ForwardStateEvidence>;
+                 ReservedNamespaceEvidence, ForwardStateEvidence,
+                 ObjectObservedEvidence>;
 
 struct EvidenceEvent {
     std::uint64_t sequence{0};
