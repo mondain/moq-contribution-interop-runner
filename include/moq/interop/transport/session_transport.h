@@ -50,12 +50,12 @@ struct StreamDataEvent {
 
 struct PeerResetEvent {
     StreamId stream_id = 0;
-    std::uint64_t application_error = 0;
+    std::optional<std::uint64_t> application_error;
 };
 
 struct PeerStopSendingEvent {
     StreamId stream_id = 0;
-    std::uint64_t application_error = 0;
+    std::optional<std::uint64_t> application_error;
 };
 
 struct DatagramEvent {

@@ -18,7 +18,7 @@ RunEndpoint endpoint(int draft) {
 }
 
 PeerCapabilities capabilities() {
-    return {true, true, true, true, true, true};
+    return {true, 1, true, true, true};
 }
 
 WebTransportProfile profile(int draft) {
@@ -94,7 +94,6 @@ TEST(WebTransportConnect, RequiresDraftCapabilityAndDatagrams) {
         caps.settings_received = false; reject(); caps = capabilities();
         caps.wt_enabled_value = 0; reject(); caps = capabilities();
         caps.wt_enabled_value = 2; reject(); caps = capabilities();
-        caps.connect_protocol_enabled = false; reject(); caps = capabilities();
         caps.h3_datagram = false; reject(); caps = capabilities();
         caps.quic_datagram = false; reject(); caps = capabilities();
         caps.reset_stream_at = false; reject();
@@ -109,6 +108,17 @@ TEST(WebTransportConnect, NeverReflectsUnsafeInputInEvidence) {
     EXPECT_LE(result.evidence.size(), 160u);
     EXPECT_EQ(result.evidence.find('\n'), std::string::npos);
     EXPECT_EQ(result.evidence.find("X-Injected"), std::string::npos);
+}
+
+TEST(WebTransportConnect, OriginIsOptionalForNonBrowserClientButCheckedIfPresent) {
+    auto req = request(21);
+    req.headers.erase(req.headers.begin());
+    EXPECT_TRUE(validate_connect(req, capabilities(), endpoint(21),
+                                 profile(21)).accepted());
+    auto policy = endpoint(21);
+    policy.require_origin = true;
+    EXPECT_FALSE(validate_connect(req, capabilities(), policy,
+                                  profile(21)).accepted());
 }
 
 }  // namespace

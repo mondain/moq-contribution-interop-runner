@@ -23,7 +23,6 @@ struct H3Request {
 struct PeerCapabilities {
     bool settings_received = false;
     uint64_t wt_enabled_value = 0;
-    bool connect_protocol_enabled = false;
     bool h3_datagram = false;
     bool quic_datagram = false;
     bool reset_stream_at = false;
@@ -34,6 +33,7 @@ struct RunEndpoint {
     std::string path;
     std::vector<std::string> allowed_origins;
     std::string moqt_protocol;
+    bool require_origin = false;
 };
 
 struct ConnectDecision {

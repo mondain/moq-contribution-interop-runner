@@ -136,7 +136,7 @@ ConnectDecision validate_connect(const H3Request& request,
         profile == WebTransportProfile::Draft18Wt15 ? "moqt-18" : "moqt-21";
     if (endpoint.moqt_protocol != required_protocol)
         return reject(500, "run endpoint draft mismatch");
-    if (!caps.settings_received || caps.wt_enabled_value != 1 || !caps.connect_protocol_enabled ||
+    if (!caps.settings_received || caps.wt_enabled_value != 1 ||
         !caps.h3_datagram || !caps.quic_datagram || !caps.reset_stream_at)
         return reject(400, "required WebTransport capability missing");
     if (request.method != "CONNECT" || request.protocol != "webtransport-h3" ||
@@ -163,8 +163,10 @@ ConnectDecision validate_connect(const H3Request& request,
             return reject(400, "WT-Protocol is a response-only header");
         }
     }
-    if (!seen_origin || std::find(endpoint.allowed_origins.begin(), endpoint.allowed_origins.end(),
-                                  origin) == endpoint.allowed_origins.end())
+    if ((seen_origin &&
+         std::find(endpoint.allowed_origins.begin(), endpoint.allowed_origins.end(),
+                   origin) == endpoint.allowed_origins.end()) ||
+        (!seen_origin && endpoint.require_origin))
         return reject(403, "Origin not allowed");
     if (!seen_offered) return reject(400, "WT-Available-Protocols missing");
     std::vector<std::string> values;

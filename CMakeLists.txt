@@ -147,6 +147,8 @@ add_library(moq-interop-transport
     src/transport/picoquic_connection.cpp
     src/transport/picoquic_native_listener.cpp
     src/transport/webtransport_connect.cpp
+    src/transport/webtransport_session.cpp
+    src/transport/webtransport_listener.cpp
 )
 target_include_directories(moq-interop-transport PRIVATE
     "${PROJECT_SOURCE_DIR}/src")
@@ -240,6 +242,20 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-webtransport-scheme-tests PRIVATE
                           moq-interop-picoquic GTest::gtest_main)
     add_test(NAME webtransport-scheme COMMAND moq-interop-webtransport-scheme-tests)
+    add_executable(moq-interop-webtransport-session-tests
+                   tests/transport/webtransport_session_test.cpp)
+    target_include_directories(moq-interop-webtransport-session-tests PRIVATE
+                               "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(moq-interop-webtransport-session-tests PRIVATE
+                          moq-interop-transport GTest::gtest_main)
+    add_test(NAME webtransport-session COMMAND moq-interop-webtransport-session-tests)
+    add_executable(moq-interop-webtransport-listener-tests
+                   tests/transport/webtransport_listener_test.cpp)
+    target_compile_definitions(moq-interop-webtransport-listener-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_link_libraries(moq-interop-webtransport-listener-tests PRIVATE
+                          moq-interop-transport GTest::gtest_main)
+    add_test(NAME webtransport-listener COMMAND moq-interop-webtransport-listener-tests)
 
     add_executable(moq-interop-picoquic-link-tests
                    tests/integration/picoquic_link_test.cpp)
@@ -783,6 +799,20 @@ if(MOQ_INTEROP_BUILD_FUZZERS)
         -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
     )
     target_link_options(moq-interop-draft18-object-fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
+
+    add_executable(moq-interop-webtransport-stream-fuzz
+        tests/fuzz/webtransport_stream_fuzz.cpp
+    )
+    target_include_directories(moq-interop-webtransport-stream-fuzz PRIVATE src)
+    target_link_libraries(moq-interop-webtransport-stream-fuzz PRIVATE
+        moq-interop-transport)
+    target_compile_options(moq-interop-webtransport-stream-fuzz PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(moq-interop-webtransport-stream-fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
     )
 endif()
