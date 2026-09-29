@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <functional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -16,12 +17,22 @@ using EventMatcher = std::function<bool(const session::EvidenceEvent&)>;
 enum class CompletionRule { ExpectedEvent, NoMatchingEventUntilDeadline };
 enum class ScenarioStatus { Pending, Running, Passed, Failed, TimedOut, Stopped };
 
+struct OpenRequestAction {
+    wire::draft18::Message message;
+    bool fin{false};
+};
+
+using RelayAction =
+    std::variant<OpenRequestAction, session::SendMessageAction,
+                 session::ResetStreamAction, session::StopSendingAction,
+                 session::CloseSessionAction>;
+
 struct ScenarioStep {
     std::string id;
     std::chrono::milliseconds deadline;
     EventMatcher expected;
     EventMatcher contradictory;
-    std::vector<session::SessionAction> actions;
+    std::vector<RelayAction> actions;
     CompletionRule completion{CompletionRule::ExpectedEvent};
 };
 
@@ -33,7 +44,7 @@ struct ScenarioDefinition {
 struct ScenarioTransition {
     ScenarioStatus status{ScenarioStatus::Pending};
     std::size_t step_index{0};
-    std::vector<session::SessionAction> actions;
+    std::vector<RelayAction> actions;
 };
 
 class ScenarioEngine {

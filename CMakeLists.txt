@@ -152,7 +152,9 @@ target_compile_options(moq-interop-session PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(moq-interop-scenarios src/scenarios/engine.cpp)
+add_library(moq-interop-scenarios
+    src/scenarios/engine.cpp
+    src/scenarios/draft18.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>

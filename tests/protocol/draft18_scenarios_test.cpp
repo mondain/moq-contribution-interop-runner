@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/engine.h"
+#include "moq/interop/scenarios/draft18.h"
 
 #include <gtest/gtest.h>
 
@@ -98,6 +99,44 @@ TEST(Draft18ScenarioEngine, OperatorStopIsTerminal) {
     EXPECT_EQ(engine.stop().status, ScenarioStatus::Stopped);
     EXPECT_EQ(engine.advance(start_time + 100ms).status,
               ScenarioStatus::Stopped);
+}
+
+TEST(Draft18ScenarioEngine, SubscribeScenarioOpensRequestAndWaitsForDuplicateWindow) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(subscribe_to_publisher_track(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1, 100ms, 50ms));
+    const auto started = engine.start(start_time);
+    ASSERT_EQ(started.actions.size(), 1u);
+    const auto* open = std::get_if<OpenRequestAction>(&started.actions[0]);
+    ASSERT_NE(open, nullptr);
+    const auto* subscribe =
+        std::get_if<wire::draft18::SubscribeMessage>(&open->message);
+    ASSERT_NE(subscribe, nullptr);
+    EXPECT_EQ(subscribe->request_id, 1u);
+
+    const session::EvidenceEvent wrong{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 3,
+            session::RequestKind::Subscribe, 1,
+            wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+    EXPECT_EQ(engine.observe(wrong, start_time + 10ms).step_index, 0u);
+
+    const session::EvidenceEvent response{
+        2, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Subscribe, 1,
+            wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+    EXPECT_EQ(engine.observe(response, start_time + 20ms).step_index, 1u);
+    EXPECT_EQ(engine.advance(start_time + 70ms).status,
+              ScenarioStatus::Passed);
+}
+
+TEST(Draft18ScenarioEngine, SubscribeScenarioRejectsPeerParityRequestId) {
+    EXPECT_THROW(subscribe_to_publisher_track(
+                     {{{std::byte{'n'}}}}, {{std::byte{'x'}}},
+                     0, 100ms, 50ms), std::invalid_argument);
 }
 
 }  // namespace
