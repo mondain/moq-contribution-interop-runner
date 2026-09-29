@@ -1,0 +1,39 @@
+diff --git a/picohttp/h3zero.h b/picohttp/h3zero.h
+--- a/picohttp/h3zero.h
++++ b/picohttp/h3zero.h
+@@ -199,1 +199,3 @@ typedef struct st_h3zero_header_parts_t {
+     h3zero_method_enum method;
++    unsigned int scheme_present : 1;
++    unsigned int scheme_https : 1;
+diff --git a/picohttp/h3zero.c b/picohttp/h3zero.c
+--- a/picohttp/h3zero.c
++++ b/picohttp/h3zero.c
+@@ -460,1 +460,11 @@ static uint8_t* h3zero_parse_qpack_header_value(
+                     break;
++                case http_pseudo_header_scheme:
++                    if (parts->scheme_present) {
++                        bytes = NULL;
++                    }
++                    else {
++                        parts->scheme_present = 1;
++                        parts->scheme_https = decoded_length == 5 &&
++                            memcmp(decoded, "https", 5) == 0;
++                    }
++                    break;
+@@ -580,1 +589,1 @@ int h3zero_get_interesting_header_type(uint8_t * name, size_t name_length, int is_huffman)
+-     H3ZERO_WT_AVAILABLE_PROTOCOLS, H3ZERO_WT_PROTOCOL,
++     H3ZERO_WT_AVAILABLE_PROTOCOLS, H3ZERO_WT_PROTOCOL, ":scheme",
+@@ -587,1 +596,1 @@ int h3zero_get_interesting_header_type(uint8_t * name, size_t name_length, int is_huffman)
+-        http_header_range, http_header_wt_available_protocols, http_header_wt_protocol
++        http_header_range, http_header_wt_available_protocols, http_header_wt_protocol, http_pseudo_header_scheme
+@@ -652,1 +661,10 @@ uint8_t * h3zero_parse_qpack_header_frame(uint8_t * bytes, uint8_t * bytes_max,
+                     break;
++                case http_pseudo_header_scheme:
++                    if (parts->scheme_present) {
++                        bytes = NULL;
++                    }
++                    else {
++                        parts->scheme_present = 1;
++                        parts->scheme_https = strcmp(qpack_static[s_index].content, "https") == 0;
++                    }
++                    break;

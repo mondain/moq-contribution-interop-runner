@@ -13,26 +13,29 @@ FetchContent_GetProperties(picoquic)
 if(NOT picoquic_POPULATED)
     FetchContent_Populate(picoquic)
 endif()
-set(MOQ_INTEROP_PICOQUIC_WT_PATCH
-    "${PROJECT_SOURCE_DIR}/cmake/patches/picoquic-webtransport-strict.patch")
-execute_process(
-    COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero --reverse --check
-            "${MOQ_INTEROP_PICOQUIC_WT_PATCH}"
-    WORKING_DIRECTORY "${picoquic_SOURCE_DIR}"
-    RESULT_VARIABLE wt_patch_already_applied
-    OUTPUT_QUIET ERROR_QUIET)
-if(NOT wt_patch_already_applied EQUAL 0)
+set(MOQ_INTEROP_PICOQUIC_WT_PATCHES
+    "${PROJECT_SOURCE_DIR}/cmake/patches/picoquic-webtransport-strict.patch"
+    "${PROJECT_SOURCE_DIR}/cmake/patches/picoquic-webtransport-scheme.patch")
+foreach(wt_patch IN LISTS MOQ_INTEROP_PICOQUIC_WT_PATCHES)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero --check
-                "${MOQ_INTEROP_PICOQUIC_WT_PATCH}"
+        COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero --reverse --check
+                "${wt_patch}"
         WORKING_DIRECTORY "${picoquic_SOURCE_DIR}"
-        COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero
-                "${MOQ_INTEROP_PICOQUIC_WT_PATCH}"
-        WORKING_DIRECTORY "${picoquic_SOURCE_DIR}"
-        COMMAND_ERROR_IS_FATAL ANY)
-endif()
+        RESULT_VARIABLE wt_patch_already_applied
+        OUTPUT_QUIET ERROR_QUIET)
+    if(NOT wt_patch_already_applied EQUAL 0)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero --check
+                    "${wt_patch}"
+            WORKING_DIRECTORY "${picoquic_SOURCE_DIR}"
+            COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero
+                    "${wt_patch}"
+            WORKING_DIRECTORY "${picoquic_SOURCE_DIR}"
+            COMMAND_ERROR_IS_FATAL ANY)
+    endif()
+endforeach()
 add_subdirectory("${picoquic_SOURCE_DIR}" "${picoquic_BINARY_DIR}")
 FetchContent_GetProperties(picotls)
 
