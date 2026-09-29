@@ -26,6 +26,7 @@ struct NativeQuicListenerConfig {
     std::size_t max_egress_datagrams_per_call = 32;
     std::size_t max_events = 256;
     std::size_t max_event_payload_bytes = 1u << 20;
+    std::size_t max_queued_send_bytes = 1u << 20;
     std::uint64_t initial_max_data = 1u << 20;
     std::uint64_t initial_max_stream_data_bidi_local = 1u << 18;
     std::uint64_t initial_max_stream_data_bidi_remote = 1u << 18;

@@ -2,6 +2,8 @@
 
 #include "picoquic_connection_internal.h"
 
+#include <picoquic_internal.h>
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -71,6 +73,30 @@ struct NativeQuicListener::Impl {
     std::unordered_set<StreamId> finished_streams;
     std::string close_reason;
     bool closing = false;
+
+    std::size_t queued_stream_bytes() const {
+        auto* active = connection.connection();
+        if (active == nullptr) return 0;
+        std::size_t total = 0;
+        const auto count = [&](const auto& streams) {
+            for (const auto stream_id : streams) {
+                const auto* stream = picoquic_find_stream(active, stream_id);
+                if (stream == nullptr) continue;
+                for (auto* node = stream->send_queue; node != nullptr;
+                     node = node->next_stream_data) {
+                    if (node->length > config.max_queued_send_bytes - total) {
+                        return false;
+                    }
+                    total += node->length;
+                }
+            }
+            return true;
+        };
+        if (!count(reserved_streams) || !count(peer_bidi_streams)) {
+            return config.max_queued_send_bytes;
+        }
+        return total;
+    }
 
     OpenResult open_stream(bool unidirectional) {
         auto* active = connection.connection();
@@ -163,8 +189,9 @@ NativeQuicListenerCreateResult NativeQuicListener::create(
         config.max_datagrams_per_poll == 0 ||
         config.max_egress_datagrams_per_call == 0 || config.max_events == 0 ||
         config.max_event_payload_bytes == 0 ||
+        config.max_queued_send_bytes == 0 ||
         config.idle_timeout <= std::chrono::milliseconds{0} ||
-        config.retry_token_lifetime <= std::chrono::seconds{0}) {
+        config.retry_token_lifetime != std::chrono::seconds{120}) {
         return {nullptr, NativeQuicListenerError::InvalidConfiguration};
     }
     if (!regular_file(config.certificate_path)) {
@@ -288,6 +315,10 @@ OperationResult NativeQuicListener::write(StreamId stream_id,
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
     if (data.size() > impl_->config.initial_max_data) {
+        return {TransportStatus::WouldBlock, 0, std::nullopt};
+    }
+    const auto queued = impl_->queued_stream_bytes();
+    if (data.size() > impl_->config.max_queued_send_bytes - queued) {
         return {TransportStatus::WouldBlock, 0, std::nullopt};
     }
     static constexpr std::uint8_t kEmpty = 0;

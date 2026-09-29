@@ -34,6 +34,7 @@ NativeQuicListenerConfig config_for(std::string_view protocol) {
     config.private_key_path =
         std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem";
     config.expected_alpn = alpn(protocol);
+    config.retry_token_lifetime = std::chrono::seconds{120};
     return config;
 }
 
@@ -155,6 +156,22 @@ TEST(PicoquicNativeListener, ReleasesBoundPortOnDestruction) {
 TEST(PicoquicNativeListener, RejectsZeroRetryTokenLifetime) {
     auto config = config_for("moqt-18");
     config.retry_token_lifetime = std::chrono::seconds{0};
+    auto result = NativeQuicListener::create(config);
+    EXPECT_EQ(result.listener, nullptr);
+    EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
+}
+
+TEST(PicoquicNativeListener, RejectsUnsupportedRetryTokenLifetime) {
+    auto config = config_for("moqt-18");
+    config.retry_token_lifetime = std::chrono::seconds{10};
+    auto result = NativeQuicListener::create(config);
+    EXPECT_EQ(result.listener, nullptr);
+    EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
+}
+
+TEST(PicoquicNativeListener, RejectsZeroSendQueueBound) {
+    auto config = config_for("moqt-21");
+    config.max_queued_send_bytes = 0;
     auto result = NativeQuicListener::create(config);
     EXPECT_EQ(result.listener, nullptr);
     EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
@@ -527,6 +544,29 @@ TEST(PicoquicNativeListener, ReportsIdleTimeout) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     EXPECT_TRUE(closed);
+}
+
+TEST(PicoquicNativeListener, BoundsCumulativeQueuedStreamWrites) {
+    auto result = NativeQuicListener::create(config_for("moqt-21"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-21",
+                     "hold-idle");
+    ASSERT_TRUE(peer.valid());
+    ASSERT_TRUE(pump_until_ready(*result.listener));
+    const auto opened = result.listener->open_bidi();
+    ASSERT_EQ(opened.status, TransportStatus::Success);
+
+    const std::vector<std::byte> chunk(256 * 1024, std::byte{0x41});
+    for (int index = 0; index < 4; ++index) {
+        const auto accepted = result.listener->write(opened.stream_id, chunk,
+                                                     false);
+        ASSERT_EQ(accepted.status, TransportStatus::Success);
+        ASSERT_EQ(accepted.accepted, chunk.size());
+    }
+    const auto blocked = result.listener->write(opened.stream_id, chunk,
+                                                false);
+    EXPECT_EQ(blocked.status, TransportStatus::WouldBlock);
+    EXPECT_EQ(blocked.accepted, 0U);
 }
 
 }  // namespace
