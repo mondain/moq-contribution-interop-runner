@@ -48,8 +48,11 @@ TEST(Draft21PublishOpen, UnsupportedActiveTypeIsNotConformanceFailure) {
         0, bytes({0x03, 0x00, 0x00}), false);
     EXPECT_TRUE(result.unsupported_message);
     EXPECT_FALSE(result.close_error.has_value());
-    EXPECT_EQ(state.on_client_stream(4, bytes({0x1e, 0x00, 0x00}), false)
-                  .close_error, 0x3u);
+    EXPECT_FALSE(result.invalid_first_message);
+    const auto reserved = state.on_client_stream(
+        4, bytes({0x1e, 0x00, 0x00}), false);
+    EXPECT_EQ(reserved.close_error, 0x3u);
+    EXPECT_TRUE(reserved.invalid_first_message);
 }
 
 TEST(Draft21PublishOpen, IncompleteFinIsRequestFailureNotSessionViolation) {

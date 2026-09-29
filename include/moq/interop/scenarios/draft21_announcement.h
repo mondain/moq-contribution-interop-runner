@@ -26,6 +26,7 @@ enum class Draft21AnnouncementEventKind {
     PublishObserved,
     ResponseDelivered,
     UnsupportedStream,
+    InvalidRequestOpener,
     ProtocolViolation,
     PeerClosed,
     HarnessLimit,

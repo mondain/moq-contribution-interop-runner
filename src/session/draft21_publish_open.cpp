@@ -55,6 +55,7 @@ PublishOpenResult PublishOpenState::on_client_stream(
     }
     if (std::holds_alternative<wire::DecodeError>(type)) {
         result.close_error = kProtocolViolation;
+        result.invalid_first_message = true;
         return result;
     }
     if (std::get<wire::draft21::MessageTypeInfo>(type).kind !=

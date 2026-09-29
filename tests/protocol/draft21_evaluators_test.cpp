@@ -21,7 +21,13 @@ const Outcome& outcome_for(const std::vector<Outcome>& outcomes,
 
 RequirementCatalog small_catalog() {
     return {21, "fixture-digest", true,
-            {{"D21-9-MUST-282", Strength::Must,
+            {{"D21-6-3-MUST-NOT-141", Strength::MustNot,
+              {"6.3", 2111, 2114, 1, 1}, "publisher",
+              "Only permitted messages start a request stream.",
+              Applicability::Applicable, Testability::Testable,
+              {"d21-publisher-request-stream-placement"},
+              {"d21-request-stream-first-message-allowed"}, ""},
+             {"D21-9-MUST-282", Strength::Must,
               {"9", 3368, 3369, 1, 1}, "publisher",
               "PUBLISH is first on its request stream.",
               Applicability::Applicable, Testability::Testable,
@@ -46,6 +52,8 @@ TEST(Draft21Evaluators, PassesOnlyObservedPublisherOpening) {
         small_catalog(), passed_context());
     EXPECT_EQ(outcome_for(outcomes, "D21-9-MUST-282").state,
               OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(outcomes, "D21-6-3-MUST-NOT-141").state,
+              OutcomeState::Pass);
     EXPECT_EQ(outcome_for(outcomes, "D21-OTHER-SHOULD-001").state,
               OutcomeState::NotRun);
 }
@@ -58,6 +66,25 @@ TEST(Draft21Evaluators, IncompleteExchangeStaysNotRun) {
         small_catalog(), context);
     EXPECT_EQ(outcome_for(outcomes, "D21-9-MUST-282").state,
               OutcomeState::NotRun);
+    EXPECT_EQ(outcome_for(outcomes, "D21-6-3-MUST-NOT-141").state,
+              OutcomeState::NotRun);
+}
+
+TEST(Draft21Evaluators, InvalidFirstMessageFailsMustNotWithoutCompletedPublish) {
+    auto context = passed_context();
+    context.complete = false;
+    context.target_publish_seen = false;
+    context.response_delivered = false;
+    context.evidence = {
+        {scenarios::Draft21AnnouncementEventKind::InvalidRequestOpener,
+         0, std::nullopt}};
+    const auto outcomes = evaluate_draft21_announcement(
+        small_catalog(), context);
+    EXPECT_EQ(outcome_for(outcomes, "D21-6-3-MUST-NOT-141").state,
+              OutcomeState::Fail);
+    EXPECT_EQ(outcome_for(outcomes, "D21-9-MUST-282").state,
+              OutcomeState::NotRun);
+    EXPECT_EQ(score(small_catalog(), outcomes).verdict, RunVerdict::Fail);
 }
 
 TEST(Draft21Evaluators, CheckedInCatalogRetainsAllOtherRows) {
@@ -72,8 +99,20 @@ TEST(Draft21Evaluators, CheckedInCatalogRetainsAllOtherRows) {
     EXPECT_EQ(outcome_for(outcomes, "D21-9-MUST-282").state,
               OutcomeState::Pass);
     EXPECT_EQ(outcome_for(outcomes, "D21-6-3-MUST-NOT-141").state,
-              OutcomeState::NotRun);
+              OutcomeState::Pass);
     EXPECT_EQ(score(catalog, outcomes).verdict, RunVerdict::Incomplete);
+
+    auto violation = passed_context();
+    violation.complete = false;
+    violation.target_publish_seen = false;
+    violation.response_delivered = false;
+    violation.evidence = {
+        {scenarios::Draft21AnnouncementEventKind::InvalidRequestOpener,
+         0, std::nullopt}};
+    const auto failed = evaluate_draft21_announcement(catalog, violation);
+    EXPECT_EQ(outcome_for(failed, "D21-6-3-MUST-NOT-141").state,
+              OutcomeState::Fail);
+    EXPECT_EQ(score(catalog, failed).verdict, RunVerdict::Fail);
 }
 
 }  // namespace

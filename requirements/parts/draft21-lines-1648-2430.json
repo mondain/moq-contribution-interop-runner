@@ -281,7 +281,7 @@
       "source": {"section": "6.3", "first_line": 2111, "last_line": 2114, "occurrence": 1, "clause": 1},
       "actor": "endpoint", "summary": "Do not begin a bidirectional request stream with a message other than TRACK_STATUS, SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS unless that other message type was negotiated.",
       "applicability": "Applicable", "testability": "Testable",
-      "scenarios": ["d21-publisher-request-stream-openers"],
+      "scenarios": ["d21-publisher-request-stream-placement", "d21-publisher-request-stream-openers"],
       "evaluators": ["d21-request-stream-first-message-allowed"],
       "rationale": "Inspect each publisher-opened bidirectional stream's first message with the negotiated extension set. SETUP belongs on each peer's unidirectional control stream and Objects on unidirectional data streams; neither is silently added to the seven default request openers."
     },

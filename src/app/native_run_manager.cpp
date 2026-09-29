@@ -158,6 +158,8 @@ storage::EvidenceEvent stored_draft21_evidence(
         result.kind = "response_delivered"; break;
     case scenarios::Draft21AnnouncementEventKind::UnsupportedStream:
         result.kind = "unsupported_stream"; break;
+    case scenarios::Draft21AnnouncementEventKind::InvalidRequestOpener:
+        result.kind = "invalid_request_opener"; break;
     case scenarios::Draft21AnnouncementEventKind::ProtocolViolation:
         result.kind = "protocol_violation"; break;
     case scenarios::Draft21AnnouncementEventKind::PeerClosed:

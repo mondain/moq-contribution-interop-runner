@@ -17,6 +17,7 @@ struct PublishOpenResult {
     std::optional<wire::draft21::PublishMessage> publish;
     std::optional<std::uint64_t> close_error;
     bool harness_limit = false;
+    bool invalid_first_message = false;
     bool unsupported_message = false;
     bool unsupported_followup = false;
     bool incomplete_request = false;

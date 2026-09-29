@@ -1159,6 +1159,80 @@ TEST(NativeQuicLive, HttpDraft21AnnouncementPersistsScoredPublisherRun) {
     EXPECT_FALSE(store->load(id).events.empty());
 }
 
+TEST(NativeQuicLive, HttpDraft21InvalidRequestOpenerFailsMustNot) {
+    // draft-ietf-moq-transport-21 section 6.3: only seven request openers.
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{18, "test", true, {}});
+    requirements::Requirement opening{
+        "D21-6-3-MUST-NOT-141", requirements::Strength::MustNot,
+        {"6.3", 2111, 2114, 1, 1}, "publisher",
+        "Only permitted messages start a request stream.",
+        requirements::Applicability::Applicable,
+        requirements::Testability::Testable,
+        {"d21-publisher-request-stream-placement"},
+        {"d21-request-stream-first-message-allowed"}, ""};
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{21, "test", true, {std::move(opening)}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 1, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const nlohmann::json request = {
+        {"draft", 21}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", nlohmann::json::array(
+            {"d21-publisher-request-stream-placement"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", nlohmann::json::array({"6d65646961"})},
+                   {"name_hex", "74657374"}}}};
+    const auto created = api.Post("/api/v1/runs", request.dump(),
+                                  "application/json");
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->status, 201) << created->body;
+    const auto body = nlohmann::json::parse(created->body);
+    const auto port = body.at("publisher_endpoint").at("port")
+                          .get<std::uint16_t>();
+    const auto id = body.at("run").at("id").get<std::string>();
+    auto client = test::QuicheTestClient::create(
+        {.port = port,
+         .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(pump_until(*client, [&] {
+        return client->stream(3).has_value();
+    }));
+    ASSERT_TRUE(client->send_stream(0, bytes({0x1e, 0x00, 0x00}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        return client->peer_close().has_value() &&
+               store->load(id).state == storage::RunState::Finalized;
+    }));
+    EXPECT_EQ(client->peer_close()->error_code, 0x3u);
+    const auto result = api.Get("/api/v1/runs/" + id);
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->status, 200);
+    const auto run = nlohmann::json::parse(result->body).at("run");
+    EXPECT_EQ(run.at("score").at("verdict"), "fail");
+    ASSERT_EQ(run.at("outcomes").size(), 1u);
+    EXPECT_EQ(run.at("outcomes").at(0).at("state"), "fail");
+    const auto stored = store->load(id);
+    EXPECT_TRUE(std::any_of(
+        stored.events.begin(), stored.events.end(),
+        [](const storage::EvidenceEvent& event) {
+            return event.kind == "invalid_request_opener" &&
+                   event.stream_id == "0";
+        }));
+}
+
 TEST(NativeQuicLive, HttpStopFinalizesAnActiveRunWithoutPublisherFailure) {
     TestPemFiles pem;
     auto store = std::make_shared<storage::SqliteRunStore>(

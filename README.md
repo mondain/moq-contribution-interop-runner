@@ -47,7 +47,10 @@ For draft 21, set `draft` to `21` and `scenarios` to
 PUBLISH arrives before SETUP completes, and records the observed PUBLISH and
 REQUEST_OK. This is a publisher-announcement test, not a subscriber-serving
 relay or a full draft-21 conformance test. Unexercised catalog lines remain
-`NOT_RUN`, so the overall result remains incomplete.
+`NOT_RUN`, so a valid run against the full catalog remains incomplete. An
+invalid first message on a publisher-opened request stream is recorded and
+fails `D21-6-3-MUST-NOT-141`; a different permitted but unsupported opener is
+not reported as a publisher failure.
 
 `namespace_hex` is an ordered array of 0–32 nonempty hex-encoded namespace
 fields; `name_hex` is the possibly empty hex-encoded Track Name. The decoded

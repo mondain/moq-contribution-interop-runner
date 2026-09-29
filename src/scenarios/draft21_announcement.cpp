@@ -161,6 +161,10 @@ void Draft21AnnouncementController::handle_request(
         return;
     }
     if (result.close_error) {
+        if (result.invalid_first_message) {
+            record(Draft21AnnouncementEventKind::InvalidRequestOpener,
+                   event.stream_id);
+        }
         close_protocol(*result.close_error, event.stream_id);
         return;
     }

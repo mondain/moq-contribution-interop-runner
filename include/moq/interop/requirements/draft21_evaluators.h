@@ -7,8 +7,8 @@
 
 namespace moq::interop::requirements {
 
-// The announcement profile evaluates only its directly exercised row.
-// Every other applicable, testable draft-21 row remains NOT_RUN.
+// The announcement profile evaluates only directly observed request-stream
+// placement and permitted-opening behavior. Other applicable rows are NOT_RUN.
 std::vector<Outcome> evaluate_draft21_announcement(
     const RequirementCatalog& catalog,
     const scenarios::Draft21AnnouncementContext& context);

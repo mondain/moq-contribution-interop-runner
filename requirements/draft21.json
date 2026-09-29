@@ -2758,6 +2758,7 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
+        "d21-publisher-request-stream-placement",
         "d21-publisher-request-stream-openers"
       ],
       "evaluators": [

@@ -241,5 +241,42 @@ TEST(Draft21Announcement, SecondPeerControlStreamClosesSession) {
     EXPECT_FALSE(controller.context().complete);
 }
 
+TEST(Draft21Announcement, ReservedRequestOpenerRecordsPublisherViolation) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {
+        established(),
+        transport::StreamDataEvent{0, bytes({0x1e, 0x00, 0x00}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Failed);
+    EXPECT_EQ(transport.close_error, 0x3u);
+    EXPECT_TRUE(std::any_of(
+        controller.context().evidence.begin(),
+        controller.context().evidence.end(),
+        [](const Draft21AnnouncementEvent& event) {
+            return event.kind ==
+                       Draft21AnnouncementEventKind::InvalidRequestOpener &&
+                   event.stream_id == 0;
+        }));
+}
+
+TEST(Draft21Announcement, AllowedUnsupportedRequestOpenerIsNotViolation) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {
+        established(),
+        transport::StreamDataEvent{0, bytes({0x03, 0x00, 0x00}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Running);
+    EXPECT_FALSE(transport.close_error);
+    EXPECT_FALSE(std::any_of(
+        controller.context().evidence.begin(),
+        controller.context().evidence.end(),
+        [](const Draft21AnnouncementEvent& event) {
+            return event.kind ==
+                   Draft21AnnouncementEventKind::InvalidRequestOpener;
+        }));
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

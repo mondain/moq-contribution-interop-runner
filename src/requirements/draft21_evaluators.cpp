@@ -8,6 +8,8 @@ namespace {
 
 constexpr const char* kScenario = "d21-publisher-request-stream-placement";
 constexpr const char* kEvaluator = "d21-publisher-first-message-placement";
+constexpr const char* kAllowedOpenerEvaluator =
+    "d21-request-stream-first-message-allowed";
 
 bool opening_correlated(
     const scenarios::Draft21AnnouncementContext& context) {
@@ -40,6 +42,12 @@ std::vector<Outcome> evaluate_draft21_announcement(
         throw std::invalid_argument("a complete draft-21 catalog is required");
     }
     const bool observed = opening_correlated(context);
+    const bool invalid_opener = std::any_of(
+        context.evidence.begin(), context.evidence.end(),
+        [](const scenarios::Draft21AnnouncementEvent& event) {
+            return event.kind ==
+                   scenarios::Draft21AnnouncementEventKind::InvalidRequestOpener;
+        });
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
     for (const auto& requirement : catalog.requirements) {
@@ -48,6 +56,17 @@ std::vector<Outcome> evaluate_draft21_announcement(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (requirement.id == "D21-6-3-MUST-NOT-141" &&
+                   requirement.testability == Testability::Testable &&
+                   std::find(requirement.scenarios.begin(),
+                             requirement.scenarios.end(), kScenario) !=
+                       requirement.scenarios.end() &&
+                   std::find(requirement.evaluators.begin(),
+                             requirement.evaluators.end(),
+                             kAllowedOpenerEvaluator) !=
+                       requirement.evaluators.end()) {
+            if (invalid_opener) state = OutcomeState::Fail;
+            else if (observed) state = OutcomeState::Pass;
         } else if (observed && requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() == kScenario &&
