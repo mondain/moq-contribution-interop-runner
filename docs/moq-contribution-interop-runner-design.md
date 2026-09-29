@@ -57,9 +57,12 @@ workflows, but they do not define correct MOQT behavior.
 
 ### Independence is enforced at module boundaries
 
-The application is a fresh C++20 implementation. It uses quiche through its C
-API for QUIC and HTTP/3 transport primitives. All WebTransport session handling
-above HTTP/3 and all MOQT behavior are implemented in this repository.
+The application is a fresh C++20 implementation. Picoquic supplies QUIC and
+its H3zero component supplies HTTP/3 primitives. This repository owns strict
+WebTransport admission, session-to-stream mapping, and all MOQT behavior.
+Neither picoquic's examples nor any publisher implementation define expected
+MOQT behavior. Quiche may remain a test-only independent peer, but is not linked
+into the validator or its production Docker image.
 
 The protocol implementation has explicit draft-18 and draft-21 modules. They
 share bounded byte-buffer and integer primitives only when the draft texts
@@ -111,7 +114,8 @@ requirements used for scoring.
 
 - C++20 application code.
 - CMake for configuration, build, test registration, and install rules.
-- quiche C API for QUIC and HTTP/3.
+- Pinned picoquic, H3zero, and picotls sources for QUIC, HTTP/3, and TLS.
+- Quiche as an optional, test-only independent QUIC peer.
 - SQLite3 for durable run, outcome, and evidence indexes.
 - nlohmann/json for manifests and JSON API serialization.
 - cpp-httplib for the plain HTTP control and results service.
@@ -182,9 +186,52 @@ transport events into a small internal interface:
 - expose negotiated protocol and connection identifiers;
 - expose timer and transport-error events.
 
-MOQT modules do not call quiche directly. This keeps transport mechanics from
+MOQT modules do not call picoquic directly. This keeps transport mechanics from
 changing protocol interpretation and permits transport-specific integration
 tests.
+
+### Picoquic migration and strict WebTransport profile
+
+Both native QUIC and WebTransport use picoquic in the production runner. The
+native listener replaces the current quiche-backed implementation behind the
+existing `SessionTransport` interface. Draft selection remains explicit: a run
+accepts its exact `moqt-18` or `moqt-21` ALPN and never falls back to another
+draft. QUIC DATAGRAM support is required for both drafts. A native MOQT stream
+may use RESET_STREAM or RESET_STREAM_AT according to the negotiated extension;
+absence of RESET_STREAM_AT alone is not a native-MOQT failure.
+
+The WebTransport listener uses H3zero for HTTP/3 framing and QPACK, but does
+not accept H3zero's legacy WebTransport compatibility behavior as proof of
+conformance. The target draft's WebTransport reference is authoritative:
+draft 21 references `draft-ietf-webtrans-http3-16`. Admission requires its
+WebTransport-capable HTTP/3 settings and QUIC transport parameters, including
+RESET_STREAM_AT, before processing a CONNECT. The request must use exact
+`webtransport-h3`, `https`, the configured authority and path, and an allowed
+Origin when present. Its `WT-Available-Protocols` value must be a valid
+Structured Fields list of strings containing the run's exact MOQT protocol;
+the selected `WT-Protocol` is one offered value. Malformed or missing required
+negotiation is rejected, not silently interpreted as a legacy WebTransport
+version or a different MoQT draft. Draft 18 instead references
+`draft-ietf-webtrans-http3-15`; its admission profile is checked separately
+against that version before enablement. The two profiles share behavior only
+where their referenced texts define the same semantics.
+
+The project-owned WebTransport adapter binds the accepted CONNECT session ID
+to its streams and HTTP datagrams, strips and emits only the prescribed
+WebTransport framing, translates reset and stop errors, and handles session
+close. A wrong session ID, malformed framing, unnegotiated datagram, or
+resource-limit violation cannot enter the MOQT decoder. H3zero changes needed
+to prevent legacy settings, token, or header acceptance are carried as small,
+pinned build-time patches with tests; the sibling picoquic checkout is never
+modified by this project. The final Docker runtime contains picoquic and its
+TLS dependencies but no quiche runtime dependency.
+
+Migration is complete only when existing native draft-18 and draft-21
+scenarios produce equivalent evidence and scores through picoquic, strict
+WebTransport transport tests pass, and the old quiche runtime can be removed.
+Until then, an unimplemented transport profile is reported as unsupported;
+there is no transparent backend fallback. Transport negotiation and internal
+adapter failures remain distinct from publisher-MOQT requirement failures.
 
 ### Wire modules
 
@@ -547,6 +594,13 @@ runs can reuse the same targets outside CI.
 An independent byte-scripted publisher fixture uses literal golden frames and
 does not call production encoders. It covers transport/session integration,
 run isolation, persistence, API responses, report rendering, and timeout paths.
+Quiche may be used to supply an independent test peer for picoquic native QUIC
+and the HTTP/3 WebTransport profile, but test expectations come from the
+checked-in drafts and the exact WebTransport draft they reference. Negative
+tests cover legacy WebTransport settings and tokens, missing required settings
+or transport parameters, malformed Structured Fields, wrong MOQT protocol,
+CONNECT origin and path errors, incorrect session IDs, datagram boundaries,
+reset and stop error translation, and connection/session cleanup.
 
 ### Black-box interop
 
