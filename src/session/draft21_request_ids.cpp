@@ -7,8 +7,7 @@ RequestIds::RequestIds(std::size_t maximum_entries)
 
 RequestIdResult RequestIds::observe(std::uint64_t id, Initiator initiator) {
     const auto expected_parity = initiator == Initiator::Client ? 0u : 1u;
-    if (id >= (std::uint64_t{1} << 62u) ||
-        (id & 1u) != expected_parity || seen_.contains(id)) {
+    if ((id & 1u) != expected_parity || seen_.contains(id)) {
         return RequestIdResult::InvalidRequestId;
     }
     if (seen_.size() >= maximum_entries_) {

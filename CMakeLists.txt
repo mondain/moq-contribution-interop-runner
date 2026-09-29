@@ -101,6 +101,7 @@ add_library(moq-interop-wire
     src/wire/draft21/control.cpp
     src/wire/draft21/goaway.cpp
     src/wire/draft21/key_values.cpp
+    src/wire/draft21/location_filter.cpp
     src/wire/draft21/publish.cpp
     src/wire/draft21/publisher_request.cpp
     src/wire/draft21/request_frame.cpp
@@ -401,6 +402,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-key-values
              COMMAND moq-interop-draft21-key-values-tests)
+
+    add_executable(moq-interop-draft21-location-filter-tests
+                   tests/golden/draft21_location_filter_test.cpp)
+    target_link_libraries(moq-interop-draft21-location-filter-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft21-location-filter
+             COMMAND moq-interop-draft21-location-filter-tests)
 
     add_executable(moq-interop-draft21-publish-tests
                    tests/golden/draft21_publish_test.cpp)

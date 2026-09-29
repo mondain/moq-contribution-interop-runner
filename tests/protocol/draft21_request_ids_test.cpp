@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 namespace moq::interop::session::draft21 {
 namespace {
 
@@ -24,8 +26,11 @@ TEST(Draft21RequestIds, RejectsParityAndDuplicateAcrossStreams) {
               RequestIdResult::InvalidRequestId);
     EXPECT_EQ(ids.observe(2, Initiator::Server),
               RequestIdResult::InvalidRequestId);
-    EXPECT_EQ(ids.observe(std::uint64_t{1} << 62u, Initiator::Client),
-              RequestIdResult::InvalidRequestId);
+    EXPECT_EQ(ids.observe((std::uint64_t{1} << 62u), Initiator::Client),
+              RequestIdResult::Accepted);
+    EXPECT_EQ(ids.observe(std::numeric_limits<std::uint64_t>::max(),
+                          Initiator::Server),
+              RequestIdResult::Accepted);
     EXPECT_EQ(ids.observe(1, Initiator::Server), RequestIdResult::Accepted);
 }
 
