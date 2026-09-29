@@ -4,8 +4,8 @@ Publisher-focused MoQT interoperability runner. The checked-in draft text in
 `docs/` is the protocol authority. The requirement inventories cover drafts 18
 and 21. The executable scenario currently covers one draft-18 native-QUIC
 publisher interaction: subscribe to a configured track and evaluate its initial
-response. A second, narrow draft-21 native-QUIC scenario accepts a publisher's
-PUBLISH for a configured track and sends an empty REQUEST_OK. WebTransport and
+response. Draft-21 native-QUIC profiles accept a publisher's PUBLISH for a
+configured track and send an empty REQUEST_OK. WebTransport and
 the remaining publisher requirements are cataloged but not executable yet.
 Requests for unsupported scenarios return HTTP 422; they are never silently
 scored as conformant.
@@ -41,9 +41,14 @@ The HTTP run configuration accepts an optional opaque-byte track fixture:
 }
 ```
 
-For draft 21, set `draft` to `21` and `scenarios` to
-`["d21-publisher-request-stream-placement"]`; the endpoint advertises ALPN
-`moqt-21`. The draft-21 runner waits for both SETUP messages, including when
+For draft 21, set `draft` to `21` and select exactly one of
+`d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or
+`d21-setup-duplicate-unknown-options` in `scenarios`; the endpoint advertises
+ALPN `moqt-21`. The two SETUP profiles send the draft-21 reserved GREASE option
+type `0x9D` once or twice, then require a valid PUBLISH and REQUEST_OK before
+scoring receiver requirements `D21-9-1-MUST-287`, `-288`, and (for duplicates)
+`-290` as passes. A close or timeout without that exchange stays `NOT_RUN`,
+not a publisher failure. The draft-21 runner waits for both SETUP messages, including when
 PUBLISH arrives before SETUP completes, and records the observed PUBLISH and
 REQUEST_OK. This is a publisher-announcement test, not a subscriber-serving
 relay or a full draft-21 conformance test. Unexercised catalog lines remain

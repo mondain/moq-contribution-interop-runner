@@ -18,6 +18,7 @@ namespace moq::interop::scenarios {
 using Draft21Clock = std::chrono::steady_clock;
 
 enum class Draft21AnnouncementStatus { Running, Passed, Failed, TimedOut };
+enum class Draft21SetupProbe { None, UnknownOption, DuplicateUnknownOption };
 
 enum class Draft21AnnouncementEventKind {
     TransportEstablished,
@@ -43,6 +44,7 @@ struct Draft21AnnouncementContext {
     bool target_publish_seen{false};
     bool response_delivered{false};
     std::vector<Draft21AnnouncementEvent> evidence;
+    Draft21SetupProbe setup_probe{Draft21SetupProbe::None};
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -58,7 +60,8 @@ public:
         transport::SessionTransport& transport,
         std::vector<std::vector<std::byte>> expected_namespace,
         std::vector<std::byte> expected_track_name,
-        std::chrono::milliseconds timeout);
+        std::chrono::milliseconds timeout,
+        Draft21SetupProbe setup_probe = Draft21SetupProbe::None);
 
     Draft21AnnouncementSnapshot poll(Draft21Clock::time_point now);
     [[nodiscard]] const Draft21AnnouncementContext& context() const noexcept;

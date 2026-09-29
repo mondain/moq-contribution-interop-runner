@@ -27,11 +27,14 @@ Draft21AnnouncementController::Draft21AnnouncementController(
     transport::SessionTransport& transport,
     std::vector<std::vector<std::byte>> expected_namespace,
     std::vector<std::byte> expected_track_name,
-    std::chrono::milliseconds timeout)
+    std::chrono::milliseconds timeout,
+    Draft21SetupProbe setup_probe)
     : transport_(transport),
       expected_namespace_(std::move(expected_namespace)),
       expected_track_name_(std::move(expected_track_name)),
-      timeout_(timeout) {}
+      timeout_(timeout) {
+    context_.setup_probe = setup_probe;
+}
 
 void Draft21AnnouncementController::record(
     Draft21AnnouncementEventKind kind,
@@ -229,8 +232,18 @@ void Draft21AnnouncementController::open_local_setup() {
         fail_harness();
         return;
     }
+    wire::draft21::SetupMessage setup;
+    if (context_.setup_probe != Draft21SetupProbe::None) {
+        // Section 13 reserves 0x9d as a GREASE Setup Option.  It is an
+        // odd (byte-valued) option in the version-independent namespace.
+        setup.options.push_back({0x9d, std::vector<std::byte>{std::byte{0xaa}}});
+        if (context_.setup_probe == Draft21SetupProbe::DuplicateUnknownOption) {
+            setup.options.push_back(
+                {0x9d, std::vector<std::byte>{std::byte{0xbb}}});
+        }
+    }
     wire::ByteWriter output(65'546);
-    if (wire::draft21::encode_setup({}, output)) {
+    if (wire::draft21::encode_setup(setup, output)) {
         fail_harness();
         return;
     }

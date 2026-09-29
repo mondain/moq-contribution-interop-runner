@@ -5612,7 +5612,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-setup-unknown-options"
+        "d21-setup-unknown-options",
+        "d21-setup-duplicate-unknown-options"
       ],
       "evaluators": [
         "d21-unknown-setup-options-ignored"
@@ -5634,7 +5635,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-setup-unknown-options"
+        "d21-setup-unknown-options",
+        "d21-setup-duplicate-unknown-options"
       ],
       "evaluators": [
         "d21-unknown-setup-options-ignored"

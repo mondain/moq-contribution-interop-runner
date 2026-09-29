@@ -26,6 +26,16 @@ constexpr std::string_view kSubscribeScenario =
     "subscribe-to-publisher-track";
 constexpr std::string_view kDraft21AnnouncementScenario =
     "d21-publisher-request-stream-placement";
+constexpr std::string_view kDraft21UnknownOptionScenario =
+    "d21-setup-unknown-options";
+constexpr std::string_view kDraft21DuplicateUnknownOptionScenario =
+    "d21-setup-duplicate-unknown-options";
+
+bool draft21_scenario_id(std::string_view scenario) {
+    return scenario == kDraft21AnnouncementScenario ||
+           scenario == kDraft21UnknownOptionScenario ||
+           scenario == kDraft21DuplicateUnknownOptionScenario;
+}
 
 std::vector<std::byte> bytes_of(const std::string& value) {
     std::vector<std::byte> result;
@@ -137,7 +147,8 @@ bool terminal(scenarios::ScenarioStatus status) {
 
 storage::EvidenceEvent stored_draft21_evidence(
     const scenarios::Draft21AnnouncementEvent& source,
-    scenarios::Draft21Clock::time_point started) {
+    scenarios::Draft21Clock::time_point started,
+    std::string_view scenario_id) {
     storage::EvidenceEvent result;
     result.monotonic_time_ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -168,7 +179,7 @@ storage::EvidenceEvent stored_draft21_evidence(
         result.kind = "harness_limit"; break;
     }
     result.detail = "draft-21 announcement evidence";
-    result.scenario_id = std::string(kDraft21AnnouncementScenario);
+    result.scenario_id = scenario_id;
     if (source.stream_id) {
         result.stream_id = std::to_string(*source.stream_id);
     }
@@ -309,7 +320,13 @@ public:
         scenarios::Draft21AnnouncementController controller(
             listener, std::move(name_space),
             bytes_of(run_config.track_fixture->track_name),
-            run_config.timeout);
+            run_config.timeout,
+            run_config.scenario_ids.front() == kDraft21UnknownOptionScenario
+                ? scenarios::Draft21SetupProbe::UnknownOption
+                : run_config.scenario_ids.front() ==
+                          kDraft21DuplicateUnknownOptionScenario
+                      ? scenarios::Draft21SetupProbe::DuplicateUnknownOption
+                      : scenarios::Draft21SetupProbe::None);
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();
@@ -320,7 +337,8 @@ public:
                 batch.reserve(evidence.size() - recorded);
                 for (; recorded < evidence.size(); ++recorded) {
                     batch.push_back(stored_draft21_evidence(
-                        evidence[recorded], started));
+                        evidence[recorded], started,
+                        run_config.scenario_ids.front()));
                 }
                 store->append_events(worker->id, batch);
             }
@@ -368,8 +386,8 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             std::vector<std::string>{std::string(kSubscribeScenario)};
     const bool draft21_scenario =
         config.draft == DraftVersion::Draft21 && impl_->draft21 &&
-        config.scenario_ids ==
-            std::vector<std::string>{std::string(kDraft21AnnouncementScenario)};
+        config.scenario_ids.size() == 1 &&
+        draft21_scenario_id(config.scenario_ids.front());
     if ((!draft18_scenario && !draft21_scenario) ||
         config.transport != TransportKind::NativeQuic ||
         config.mode != RunMode::Observed ||

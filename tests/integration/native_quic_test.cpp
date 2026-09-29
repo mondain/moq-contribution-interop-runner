@@ -1233,6 +1233,124 @@ TEST(NativeQuicLive, HttpDraft21InvalidRequestOpenerFailsMustNot) {
         }));
 }
 
+TEST(NativeQuicLive, HttpDraft21GreaseSetupProfilesScoreReceiverRequirements) {
+    // draft-ietf-moq-transport-21 sections 9.1, 13 and 16.4.
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{18, "test", true, {}});
+    const auto requirement = [](std::string id, bool duplicate_only) {
+        return requirements::Requirement{
+            std::move(id), requirements::Strength::Must,
+            {"9.1", 3454, 3454, 1, 1}, "receiver of SETUP",
+            "Ignore unknown Setup Options.",
+            requirements::Applicability::Applicable,
+            requirements::Testability::Testable,
+            duplicate_only
+                ? std::vector<std::string>{"d21-setup-duplicate-unknown-options"}
+                : std::vector<std::string>{"d21-setup-unknown-options",
+                                           "d21-setup-duplicate-unknown-options"},
+            {duplicate_only
+                 ? "d21-duplicate-unknown-setup-options-accepted"
+                 : "d21-unknown-setup-options-ignored"}, ""};
+    };
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            21, "test", true,
+            {requirement("D21-9-1-MUST-287", false),
+             requirement("D21-9-1-MUST-288", false),
+             requirement("D21-9-1-MUST-290", true)}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 2, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    struct Probe {
+        std::string scenario;
+        std::vector<std::byte> setup;
+        std::string verdict;
+        std::string duplicate_outcome;
+    };
+    const std::array probes{
+        Probe{"d21-setup-unknown-options",
+              bytes({0xaf, 0x00, 0x00, 0x04, 0x80, 0x9d, 0x01, 0xaa}),
+              "incomplete", "not_run"},
+        Probe{"d21-setup-duplicate-unknown-options",
+              bytes({0xaf, 0x00, 0x00, 0x07, 0x80, 0x9d, 0x01, 0xaa,
+                     0x00, 0x01, 0xbb}),
+              "pass", "pass"}};
+    for (const auto& probe : probes) {
+        SCOPED_TRACE(probe.scenario);
+        const nlohmann::json request = {
+            {"draft", 21}, {"transport", "native-quic"},
+            {"mode", "observed"},
+            {"scenarios", nlohmann::json::array({probe.scenario})},
+            {"timeout_ms", 1000},
+            {"track", {{"namespace_hex", nlohmann::json::array({"6d65646961"})},
+                       {"name_hex", "74657374"}}}};
+        const auto created = api.Post("/api/v1/runs", request.dump(),
+                                      "application/json");
+        ASSERT_TRUE(created);
+        ASSERT_EQ(created->status, 201) << created->body;
+        const auto body = nlohmann::json::parse(created->body);
+        const auto port = body.at("publisher_endpoint").at("port")
+                              .get<std::uint16_t>();
+        const auto id = body.at("run").at("id").get<std::string>();
+        auto client = test::QuicheTestClient::create(
+            {.port = port,
+             .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto setup = client->stream(3);
+            return setup && setup->data == probe.setup;
+        }));
+        ASSERT_TRUE(client->send_stream(
+            2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+        ASSERT_TRUE(client->send_stream(
+            0, bytes({0x1d, 0x00, 0x0f,
+                      0x00, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a',
+                      0x04, 't', 'e', 's', 't', 0x02, 0x00}), false));
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto response = client->stream(0);
+            return response && response->data ==
+                       bytes({0x07, 0x00, 0x01, 0x00}) &&
+                   store->load(id).state == storage::RunState::Finalized;
+        }));
+        const auto result = api.Get("/api/v1/runs/" + id);
+        ASSERT_TRUE(result);
+        ASSERT_EQ(result->status, 200);
+        const auto run = nlohmann::json::parse(result->body).at("run");
+        EXPECT_EQ(run.at("score").at("verdict"), probe.verdict);
+        const auto& outcomes = run.at("outcomes");
+        const auto state_for = [&](const char* requirement_id) {
+            const auto found = std::find_if(
+                outcomes.begin(), outcomes.end(),
+                [&](const auto& outcome) {
+                    return outcome.at("requirement_id") == requirement_id;
+                });
+            return found == outcomes.end()
+                       ? std::string("missing")
+                       : found->at("state").template get<std::string>();
+        };
+        EXPECT_EQ(state_for("D21-9-1-MUST-287"), "pass");
+        EXPECT_EQ(state_for("D21-9-1-MUST-288"), "pass");
+        EXPECT_EQ(state_for("D21-9-1-MUST-290"), probe.duplicate_outcome);
+        const auto stored = store->load(id);
+        ASSERT_FALSE(stored.events.empty());
+        for (const auto& event : stored.events) {
+            EXPECT_EQ(event.scenario_id, probe.scenario);
+        }
+    }
+}
+
 TEST(NativeQuicLive, HttpStopFinalizesAnActiveRunWithoutPublisherFailure) {
     TestPemFiles pem;
     auto store = std::make_shared<storage::SqliteRunStore>(

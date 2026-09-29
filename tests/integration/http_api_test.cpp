@@ -141,7 +141,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 2);
+    ASSERT_EQ(health.at("executable_profiles").size(), 4);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
@@ -152,6 +152,12 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("executable_profiles").at(1).at("scenario"),
               "d21-publisher-request-stream-placement");
     EXPECT_FALSE(health.at("executable_profiles").at(1).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(2).at("scenario"),
+              "d21-setup-unknown-options");
+    EXPECT_FALSE(health.at("executable_profiles").at(2).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(3).at("scenario"),
+              "d21-setup-duplicate-unknown-options");
+    EXPECT_FALSE(health.at("executable_profiles").at(3).at("configured"));
 
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2);

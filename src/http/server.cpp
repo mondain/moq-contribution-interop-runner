@@ -235,6 +235,16 @@ public:
                                               {"mode", "observed"},
                                               {"scenario", "d21-publisher-request-stream-placement"},
                                               {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft21)}},
+                                             {{"draft", 21}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "d21-setup-unknown-options"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft21)}},
+                                             {{"draft", 21}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "d21-setup-duplicate-unknown-options"},
+                                              {"configured", runs && runs->supports(
                                                   app::DraftVersion::Draft21)}}})},
                                          {"validator", detail::build_json(build)}});
             });
@@ -280,8 +290,13 @@ public:
                         std::vector<std::string>{"subscribe-to-publisher-track"};
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21 &&
-                    requested.scenario_ids ==
-                        std::vector<std::string>{"d21-publisher-request-stream-placement"};
+                    requested.scenario_ids.size() == 1 &&
+                    (requested.scenario_ids.front() ==
+                         "d21-publisher-request-stream-placement" ||
+                     requested.scenario_ids.front() ==
+                         "d21-setup-unknown-options" ||
+                     requested.scenario_ids.front() ==
+                         "d21-setup-duplicate-unknown-options");
                 if ((!draft18_scenario && !draft21_scenario) ||
                     requested.transport != app::TransportKind::NativeQuic ||
                     requested.mode != app::RunMode::Observed ||

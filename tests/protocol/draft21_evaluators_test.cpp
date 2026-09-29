@@ -115,5 +115,46 @@ TEST(Draft21Evaluators, CheckedInCatalogRetainsAllOtherRows) {
     EXPECT_EQ(score(catalog, failed).verdict, RunVerdict::Fail);
 }
 
+TEST(Draft21Evaluators, SetupProbeNeedsSetupBeforePublisherAction) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(
+        source, root / "requirements/draft21.json");
+    auto context = passed_context();
+    context.setup_probe = scenarios::Draft21SetupProbe::UnknownOption;
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-MUST-287").state,
+              OutcomeState::NotRun);
+
+    context.evidence.insert(
+        context.evidence.begin() + 1,
+        {scenarios::Draft21AnnouncementEventKind::LocalSetupSent, 3,
+         std::nullopt});
+    const auto one = evaluate_draft21_announcement(catalog, context);
+    EXPECT_EQ(outcome_for(one, "D21-9-1-MUST-287").state,
+              OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(one, "D21-9-1-MUST-288").state,
+              OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(one, "D21-9-1-MUST-290").state,
+              OutcomeState::NotRun);
+    EXPECT_EQ(outcome_for(one, "D21-9-MUST-282").state,
+              OutcomeState::NotRun);
+
+    context.setup_probe = scenarios::Draft21SetupProbe::DuplicateUnknownOption;
+    const auto duplicate = evaluate_draft21_announcement(catalog, context);
+    EXPECT_EQ(outcome_for(duplicate, "D21-9-1-MUST-287").state,
+              OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(duplicate, "D21-9-1-MUST-288").state,
+              OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(duplicate, "D21-9-1-MUST-290").state,
+              OutcomeState::Pass);
+
+    std::swap(context.evidence[1], context.evidence[2]);
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-MUST-290").state,
+              OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements
