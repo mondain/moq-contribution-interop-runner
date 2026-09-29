@@ -225,6 +225,11 @@ public:
                                          {"status", "ok"},
                                          {"database", {{"ready", true}}},
                                          {"supported_drafts", {18, 21}},
+                                         {"executable_profiles", Json::array({
+                                             {{"draft", 18}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "subscribe-to-publisher-track"},
+                                              {"configured", static_cast<bool>(runs)}}})},
                                          {"validator", detail::build_json(build)}});
             });
         });

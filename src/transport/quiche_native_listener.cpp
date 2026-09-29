@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <limits>
 #include <string_view>
 #include <system_error>
@@ -344,16 +345,15 @@ struct NativeQuicListener::Impl {
             std::memcmp(alpn, kDraft18Alpn.data(), alpn_size) != 0 ||
             !has_parameters || parameters.peer_max_datagram_frame_size < 0 ||
             maximum < 0) {
-            static constexpr std::array<std::byte, 28> reason{
-                std::byte{'D'}, std::byte{'A'}, std::byte{'T'}, std::byte{'A'},
-                std::byte{'G'}, std::byte{'R'}, std::byte{'A'}, std::byte{'M'},
-                std::byte{' '}, std::byte{'n'}, std::byte{'o'}, std::byte{'t'},
-                std::byte{' '}, std::byte{'n'}, std::byte{'e'}, std::byte{'g'},
-                std::byte{'o'}, std::byte{'t'}, std::byte{'i'}, std::byte{'a'},
-                std::byte{'t'}, std::byte{'e'}, std::byte{'d'}, std::byte{' '},
-                std::byte{'f'}, std::byte{'o'}, std::byte{'r'}, std::byte{' '}};
+            std::cerr << "native QUIC establishment rejected: alpn_size="
+                      << alpn_size << " peer_params=" << has_parameters
+                      << " peer_max_datagram_frame_size="
+                      << parameters.peer_max_datagram_frame_size
+                      << " writable_datagram_length=" << maximum << '\n';
+            static constexpr std::string_view reason =
+                "QUIC DATAGRAM not negotiated";
             connection->close(config.missing_datagram_application_error,
-                              reason);
+                              std::as_bytes(std::span(reason.data(), reason.size())));
             state = State::Closing;
             return;
         }

@@ -51,6 +51,8 @@ the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
 that endpoint, then retrieve `GET /api/v1/runs/{id}` or
 `GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
+`GET /healthz` distinguishes the two inventoried drafts from the currently
+executable profile and whether its listener is configured.
 `POST /api/v1/runs/{id}/stop` ends an active run and finalizes it as incomplete;
 it does not count the interrupted interaction as a publisher failure.
 Scoring distinguishes required MUST/MUST NOT, weighted recommendations, and
@@ -65,3 +67,22 @@ match the published UDP range. `scripts/container-build.sh build` creates the
 image from a clean committed tree; `docker compose up` starts the HTTP and UDP
 listeners. The HTTP endpoint is bound to localhost by default. Keep it on a
 trusted network because the API has no authentication yet.
+
+An opt-in black-box check against an external publisher is available:
+
+```sh
+bash tests/e2e/draft18-native-moqxr.sh \
+  "$PWD/build/moq-interop-runner" \
+  "/path/to/openmoq-publisher" \
+  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
+```
+
+The script starts a loopback runner with temporary TLS material, asks the
+publisher to connect, prints the run verdict and any scored requirements, and
+removes its temporary files. It requires `openssl`, `curl`, and `jq`; it is not
+part of the default CTest suite because `moqxr` and media input are external.
+This fixture publishes the `media` namespace and `vide_1` track expected by
+the script.
+If the publisher omits QUIC DATAGRAM negotiation, the runner rejects the
+session as required by draft 18 section 3.1, records the close, and leaves
+publisher behavior unscored rather than marking a pass.

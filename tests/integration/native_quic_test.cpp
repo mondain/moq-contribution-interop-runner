@@ -1010,6 +1010,10 @@ TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
                             {.port = 0}, runs);
     ASSERT_TRUE(server.start());
     httplib::Client api("127.0.0.1", server.port());
+    const auto health = api.Get("/healthz");
+    ASSERT_TRUE(health);
+    EXPECT_TRUE(nlohmann::json::parse(health->body)
+                    .at("executable_profiles").at(0).at("configured"));
     const nlohmann::json request = {
         {"draft", 18}, {"transport", "native-quic"},
         {"mode", "observed"},
@@ -1151,6 +1155,10 @@ TEST(NativeQuicLive, MissingDatagramProducesOnlyConfiguredLocalClose) {
             if (const auto* close = std::get_if<LocalCloseEvent>(&event)) {
                 local_close = close->error_space == CloseErrorSpace::Application &&
                               close->error_code == 77;
+                EXPECT_EQ(close->reason,
+                          bytes({'Q', 'U', 'I', 'C', ' ', 'D', 'A', 'T', 'A',
+                                 'G', 'R', 'A', 'M', ' ', 'n', 'o', 't', ' ',
+                                 'n', 'e', 'g', 'o', 't', 'i', 'a', 't', 'e', 'd'}));
             }
         }
         return local_close;
