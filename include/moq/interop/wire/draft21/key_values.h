@@ -24,6 +24,7 @@ enum class KeyValueEncodeError {
 
 DecodeResult<KeyValues> decode_key_values(Cursor& input,
                                           std::uint64_t count);
+DecodeResult<KeyValues> decode_key_values_to_end(Cursor& input);
 std::optional<KeyValueEncodeError> encode_key_values(
     const KeyValues& values, ByteWriter& output);
 

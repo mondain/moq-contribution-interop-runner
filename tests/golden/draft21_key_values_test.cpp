@@ -69,6 +69,30 @@ TEST(Draft21KeyValues, IncompletePairNeedsMoreWithoutConsumption) {
     EXPECT_EQ(input.offset(), 40u);
 }
 
+TEST(Draft21KeyValues, ParsesPropertiesToBoundedEnd) {
+    // draft-ietf-moq-transport-21 section 8.4: properties fill the frame tail.
+    const auto wire = bytes({0x01, 0x01, 'x', 0x01, 0x05});
+    Cursor input(wire);
+    const auto decoded = decode_key_values_to_end(input);
+    ASSERT_TRUE(std::holds_alternative<KeyValues>(decoded));
+    const auto& pairs = std::get<KeyValues>(decoded);
+    ASSERT_EQ(pairs.size(), 2u);
+    EXPECT_EQ(pairs[0].type, 1u);
+    EXPECT_EQ(pairs[1].type, 2u);
+    EXPECT_EQ(std::get<std::uint64_t>(pairs[1].value), 5u);
+    EXPECT_EQ(input.offset(), wire.size());
+}
+
+TEST(Draft21KeyValues, TruncatedBoundedPropertyIsViolation) {
+    const auto wire = bytes({0x01, 0x02, 'x'});
+    Cursor input(wire);
+    const auto decoded = decode_key_values_to_end(input);
+    ASSERT_TRUE(std::holds_alternative<DecodeError>(decoded));
+    EXPECT_EQ(std::get<DecodeError>(decoded).code,
+              DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(input.offset(), 0u);
+}
+
 TEST(Draft21KeyValues, EncodingRejectsOrderAndValueTypeAtomically) {
     ByteWriter output(20);
     ASSERT_TRUE(output.append_byte(std::byte{0xcc}));

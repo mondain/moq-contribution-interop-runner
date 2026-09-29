@@ -13,6 +13,39 @@ DecodeError violation(std::size_t offset, const char* detail) {
     return {DecodeErrorCode::ProtocolViolation, offset, detail};
 }
 
+DecodeResult<KeyValue> decode_one(Cursor& input,
+                                  std::uint64_t& previous_type) {
+    const auto pair_offset = input.offset();
+    const auto delta = read_vi64(input);
+    if (const auto* need = std::get_if<NeedMore>(&delta)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&delta)) return *error;
+    const auto increment = std::get<std::uint64_t>(delta);
+    if (increment > std::numeric_limits<std::uint64_t>::max() -
+                        previous_type) {
+        return violation(pair_offset, "draft-21 key-value type overflow");
+    }
+    const auto type = previous_type + increment;
+    previous_type = type;
+    if ((type & 1u) == 0u) {
+        const auto value = read_vi64(input);
+        if (const auto* need = std::get_if<NeedMore>(&value)) return *need;
+        if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
+        return KeyValue{type, std::get<std::uint64_t>(value)};
+    }
+    const auto length = read_vi64(input);
+    if (const auto* need = std::get_if<NeedMore>(&length)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&length)) return *error;
+    const auto declared = std::get<std::uint64_t>(length);
+    if (declared > kMaximumOddValueLength) {
+        return violation(pair_offset, "draft-21 odd value exceeds 65535 bytes");
+    }
+    const auto value = read_bytes(input, static_cast<std::size_t>(declared));
+    if (const auto* need = std::get_if<NeedMore>(&value)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
+    const auto bytes = std::get<std::span<const std::byte>>(value);
+    return KeyValue{type, std::vector<std::byte>(bytes.begin(), bytes.end())};
+}
+
 }  // namespace
 
 DecodeResult<KeyValues> decode_key_values(Cursor& input,
@@ -21,37 +54,27 @@ DecodeResult<KeyValues> decode_key_values(Cursor& input,
     KeyValues result;
     std::uint64_t previous_type = 0;
     for (std::uint64_t index = 0; index < count; ++index) {
+        const auto pair = decode_one(working, previous_type);
+        if (const auto* need = std::get_if<NeedMore>(&pair)) return *need;
+        if (const auto* error = std::get_if<DecodeError>(&pair)) return *error;
+        result.push_back(std::get<KeyValue>(pair));
+    }
+    input = working;
+    return result;
+}
+
+DecodeResult<KeyValues> decode_key_values_to_end(Cursor& input) {
+    Cursor working = input;
+    KeyValues result;
+    std::uint64_t previous_type = 0;
+    while (working.remaining() != 0) {
         const auto pair_offset = working.offset();
-        const auto delta = read_vi64(working);
-        if (const auto* need = std::get_if<NeedMore>(&delta)) return *need;
-        if (const auto* error = std::get_if<DecodeError>(&delta)) return *error;
-        const auto increment = std::get<std::uint64_t>(delta);
-        if (increment > std::numeric_limits<std::uint64_t>::max() -
-                            previous_type) {
-            return violation(pair_offset, "draft-21 key-value type overflow");
+        const auto pair = decode_one(working, previous_type);
+        if (std::holds_alternative<NeedMore>(pair)) {
+            return violation(pair_offset, "truncated draft-21 key-value pair");
         }
-        const auto type = previous_type + increment;
-        previous_type = type;
-        if ((type & 1u) == 0u) {
-            const auto value = read_vi64(working);
-            if (const auto* need = std::get_if<NeedMore>(&value)) return *need;
-            if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
-            result.push_back({type, std::get<std::uint64_t>(value)});
-            continue;
-        }
-        const auto length = read_vi64(working);
-        if (const auto* need = std::get_if<NeedMore>(&length)) return *need;
-        if (const auto* error = std::get_if<DecodeError>(&length)) return *error;
-        const auto declared = std::get<std::uint64_t>(length);
-        if (declared > kMaximumOddValueLength) {
-            return violation(pair_offset, "draft-21 odd value exceeds 65535 bytes");
-        }
-        const auto value = read_bytes(working, static_cast<std::size_t>(declared));
-        if (const auto* need = std::get_if<NeedMore>(&value)) return *need;
-        if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
-        const auto bytes = std::get<std::span<const std::byte>>(value);
-        result.push_back({type, std::vector<std::byte>(bytes.begin(),
-                                                      bytes.end())});
+        if (const auto* error = std::get_if<DecodeError>(&pair)) return *error;
+        result.push_back(std::get<KeyValue>(pair));
     }
     input = working;
     return result;
