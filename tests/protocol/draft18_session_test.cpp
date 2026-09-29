@@ -2848,5 +2848,51 @@ TEST(Draft18SessionObjects, DatagramAfterForwardEnableDoesNotViolate) {
                             }), 0);
 }
 
+TEST(Draft18SessionObjects, FragmentedSubgroupObjectAssociatesTrackAlias) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1, {}, {}}), false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.take_evidence(64);
+    session.on_event(StreamDataEvent{
+        6, {std::byte{0x10}, std::byte{0x01}, std::byte{0x02}}, false});
+    session.on_event(StreamDataEvent{
+        6, {std::byte{0x04}, std::byte{0x00}, std::byte{0x01},
+            std::byte{0xaa}}, true});
+    const auto evidence = session.take_evidence(64);
+    const auto observed = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::ObjectObserved;
+        });
+    ASSERT_NE(observed, evidence.end());
+    const auto& object = std::get<ObjectObservedEvidence>(observed->data);
+    EXPECT_EQ(object.request_id, 0u);
+    EXPECT_EQ(object.object.group_id, 2u);
+    EXPECT_EQ(object.object.object_id, 0u);
+    EXPECT_EQ(object.object.retained_payload,
+              (std::vector<std::byte>{std::byte{0xaa}}));
+}
+
+TEST(Draft18SessionObjects, MidObjectFinClosesWithProtocolViolation) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1, {}, {}}), false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.take_evidence(64);
+    const auto transition = session.on_event(StreamDataEvent{
+        6, {std::byte{0x10}, std::byte{0x01}, std::byte{0x02},
+            std::byte{0x04}, std::byte{0x00}, std::byte{0x03},
+            std::byte{0xaa}}, true});
+    const auto* close = close_action(transition);
+    ASSERT_NE(close, nullptr);
+    EXPECT_EQ(close->application_error, 0x3u);
+}
+
 }  // namespace
 }  // namespace moq::interop::session

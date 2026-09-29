@@ -515,6 +515,8 @@ public:
     struct StreamState {
         std::optional<PeerStreamKind> kind;
         std::vector<std::byte> buffered;
+        std::optional<wire::draft18::SubgroupDecoder> subgroup_decoder;
+        bool data_deferred_before_active{false};
         bool early_counted{false};
         bool fin_received{false};
     };
@@ -2002,6 +2004,39 @@ public:
         }
     }
 
+    void observe_object(SessionTransition& transition,
+                        wire::draft18::ObjectEvent object) {
+        std::optional<std::uint64_t> request_id;
+        std::optional<bool> forward_state;
+        if (object.track_alias) {
+            const auto alias = established_aliases.find(
+                {RequestInitiator::Peer, *object.track_alias});
+            if (alias != established_aliases.end()) {
+                const auto request = requests.find(alias->second);
+                if (request != requests.end() &&
+                    request->second.subscription) {
+                    request_id = request->second.request_id;
+                    forward_state =
+                        request->second.subscription->forward_state;
+                }
+            }
+        }
+        const bool forwarding_violation =
+            request_id && forward_state && !*forward_state &&
+            object.track_alias;
+        const auto group_id = object.group_id;
+        const auto object_id = object.object_id;
+        const auto track_alias = object.track_alias;
+        emit(transition, EvidenceKind::ObjectObserved,
+             ObjectObservedEvidence{request_id, forward_state,
+                                    std::move(object)});
+        if (forwarding_violation && !terminal()) {
+            emit(transition, EvidenceKind::ForwardStateViolation,
+                 ForwardStateViolationEvidence{
+                     *request_id, *track_alias, group_id, object_id});
+        }
+    }
+
     void process_stream_data(SessionTransition& transition,
                              const transport::StreamDataEvent& event) {
         if (!transport_established) {
@@ -2122,7 +2157,70 @@ public:
             return;
         }
 
+        if (*stream.kind == PeerStreamKind::Subgroup &&
+            phase == SessionPhase::Active &&
+            !stream.data_deferred_before_active) {
+            if (!stream.subgroup_decoder) {
+                stream.subgroup_decoder.emplace(config.wire_limits);
+            }
+            const auto old_decoder_bytes =
+                stream.subgroup_decoder->buffered_byte_count();
+            auto decoded = stream.subgroup_decoder->push(
+                stream.buffered, event.fin);
+            partial_bytes -= old_decoder_bytes + stream.buffered.size();
+            stream.buffered.clear();
+            partial_bytes += stream.subgroup_decoder->buffered_byte_count();
+            if (decoded.error) {
+                if (decoded.error->code ==
+                    wire::DecodeErrorCode::LengthExceedsLimit) {
+                    harness_limit(
+                        transition,
+                        HarnessLimitKind::ObjectPropertiesBytes,
+                        config.wire_limits.maximum_object_properties_length <
+                                std::numeric_limits<std::size_t>::max()
+                            ? config.wire_limits.maximum_object_properties_length + 1
+                            : config.wire_limits.maximum_object_properties_length,
+                        config.wire_limits.maximum_object_properties_length);
+                    return;
+                }
+                protocol_close(transition, event.stream_id,
+                               kProtocolViolation,
+                               "invalid subgroup stream");
+                return;
+            }
+            for (const auto& observation : decoded.observations) {
+                if (observation.kind ==
+                    wire::draft18::DecoderObservationKind::ShouldClose) {
+                    protocol_close(transition, event.stream_id,
+                                   kProtocolViolation,
+                                   "subgroup stream ended mid-object");
+                    return;
+                }
+                if (observation.kind ==
+                    wire::draft18::DecoderObservationKind::DraftAmbiguity) {
+                    emit(transition, EvidenceKind::DraftAmbiguity,
+                         DraftAmbiguityEvidence{event.stream_id,
+                                                observation.offset,
+                                                observation.detail});
+                    if (terminal()) return;
+                }
+            }
+            for (auto& object : decoded.objects) {
+                observe_object(transition, std::move(object));
+                if (terminal()) return;
+            }
+            if (event.fin) {
+                partial_bytes -=
+                    stream.subgroup_decoder->buffered_byte_count();
+                streams.erase(position);
+            }
+            return;
+        }
+
         const auto buffered_size = stream.buffered.size();
+        if (phase != SessionPhase::Active) {
+            stream.data_deferred_before_active = true;
+        }
         emit(transition, EvidenceKind::DeferredStreamBytes,
              DeferredBytesEvidence{event.stream_id, *stream.kind,
                                    std::move(stream.buffered), event.fin});
@@ -2173,6 +2271,10 @@ public:
                         const auto stream = streams.find(value.stream_id);
                         if (stream != streams.end()) {
                             partial_bytes -= stream->second.buffered.size();
+                            if (stream->second.subgroup_decoder) {
+                                partial_bytes -= stream->second
+                                    .subgroup_decoder->buffered_byte_count();
+                            }
                             streams.erase(stream);
                         }
                     }
@@ -2201,41 +2303,7 @@ public:
                         value.data, config.wire_limits);
                     if (auto* object =
                             std::get_if<wire::draft18::ObjectEvent>(&decoded)) {
-                        std::optional<std::uint64_t> request_id;
-                        std::optional<bool> forward_state;
-                        if (object->track_alias) {
-                            const auto alias = established_aliases.find(
-                                {RequestInitiator::Peer,
-                                 *object->track_alias});
-                            if (alias != established_aliases.end()) {
-                                const auto request =
-                                    requests.find(alias->second);
-                                if (request != requests.end() &&
-                                    request->second.subscription) {
-                                    request_id = request->second.request_id;
-                                    forward_state = request->second
-                                                        .subscription
-                                                        ->forward_state;
-                                }
-                            }
-                        }
-                        const bool forwarding_violation =
-                            request_id && forward_state && !*forward_state &&
-                            object->track_alias;
-                        const auto group_id = object->group_id;
-                        const auto object_id = object->object_id;
-                        const auto track_alias = object->track_alias;
-                        emit(transition, EvidenceKind::ObjectObserved,
-                             ObjectObservedEvidence{request_id,
-                                                    forward_state,
-                                                    std::move(*object)});
-                        if (forwarding_violation && !terminal()) {
-                            emit(transition,
-                                 EvidenceKind::ForwardStateViolation,
-                                 ForwardStateViolationEvidence{
-                                     *request_id, *track_alias,
-                                     group_id, object_id});
-                        }
+                        observe_object(transition, std::move(*object));
                     } else {
                         emit(transition, EvidenceKind::DeferredStreamBytes,
                              DeferredBytesEvidence{

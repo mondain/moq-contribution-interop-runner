@@ -132,6 +132,7 @@ enum class HarnessLimitKind {
     ActiveSubscriptions,
     SubscriptionHistory,
     SubscriptionKeyBytes,
+    ObjectPropertiesBytes,
 };
 
 struct TransportEstablishedEvidence {
