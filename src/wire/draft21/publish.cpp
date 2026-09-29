@@ -3,6 +3,7 @@
 #include "moq/interop/wire/draft21/request_frame.h"
 
 #include <span>
+#include <limits>
 #include <utility>
 #include <variant>
 
@@ -38,6 +39,72 @@ DecodeResult<std::vector<std::byte>> required_field(Cursor& input,
     }
     const auto bytes = std::get<std::span<const std::byte>>(result);
     return std::vector<std::byte>(bytes.begin(), bytes.end());
+}
+
+DecodeResult<std::vector<PublishParameter>> decode_publish_parameters(
+    Cursor& input, std::uint64_t count) {
+    Cursor working = input;
+    std::vector<PublishParameter> result;
+    std::uint64_t previous_type = 0;
+    for (std::uint64_t index = 0; index < count; ++index) {
+        const auto parameter_offset = working.offset();
+        const auto delta = required_vi64(working);
+        if (const auto* error = std::get_if<DecodeError>(&delta)) return *error;
+        const auto increment = std::get<std::uint64_t>(delta);
+        if (increment > std::numeric_limits<std::uint64_t>::max() -
+                            previous_type) {
+            return violation(parameter_offset, "draft-21 parameter type overflow");
+        }
+        const auto type = previous_type + increment;
+        if (increment == 0 && type != 0x03) {
+            return violation(parameter_offset, "duplicate draft-21 PUBLISH parameter");
+        }
+        previous_type = type;
+        if (type == 0x10 || type == 0x20 || type == 0x22) {
+            const auto value = read_bytes(working, 1);
+            if (std::holds_alternative<NeedMore>(value)) {
+                return violation(parameter_offset, "truncated draft-21 uint8 parameter");
+            }
+            if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
+            const auto octet = std::to_integer<std::uint8_t>(
+                std::get<std::span<const std::byte>>(value)[0]);
+            if ((type == 0x10 && octet > 1) ||
+                (type == 0x22 && (octet < 1 || octet > 2))) {
+                return violation(parameter_offset, "invalid draft-21 parameter value");
+            }
+            result.push_back({type, octet});
+        } else if (type == 0x02 || type == 0x06 || type == 0x08) {
+            const auto value = required_vi64(working);
+            if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
+            result.push_back({type, std::get<std::uint64_t>(value)});
+        } else if (type == 0x09) {
+            const auto group = required_vi64(working);
+            if (const auto* error = std::get_if<DecodeError>(&group)) return *error;
+            const auto object = required_vi64(working);
+            if (const auto* error = std::get_if<DecodeError>(&object)) return *error;
+            result.push_back({type, Location{std::get<std::uint64_t>(group),
+                                             std::get<std::uint64_t>(object)}});
+        } else if (type == 0x03 || type == 0x21) {
+            const auto value = read_length_prefixed_bytes(working, 65535);
+            if (std::holds_alternative<NeedMore>(value)) {
+                return violation(parameter_offset, "truncated draft-21 parameter value");
+            }
+            if (const auto* error = std::get_if<DecodeError>(&value)) {
+                if (error->code == DecodeErrorCode::LengthExceedsLimit) {
+                    return violation(parameter_offset, "draft-21 parameter value too long");
+                }
+                return *error;
+            }
+            const auto bytes = std::get<std::span<const std::byte>>(value);
+            result.push_back({type, std::vector<std::byte>(bytes.begin(),
+                                                            bytes.end())});
+        } else {
+            return violation(parameter_offset,
+                             "unknown or out-of-scope draft-21 PUBLISH parameter");
+        }
+    }
+    input = working;
+    return result;
 }
 
 }  // namespace
@@ -82,13 +149,10 @@ DecodeResult<PublishMessage> decode_publish(Cursor& input) {
     result.track_alias = std::get<std::uint64_t>(alias);
     const auto parameter_count = required_vi64(payload);
     if (const auto* error = std::get_if<DecodeError>(&parameter_count)) return *error;
-    const auto parameters = decode_key_values(
+    const auto parameters = decode_publish_parameters(
         payload, std::get<std::uint64_t>(parameter_count));
-    if (std::holds_alternative<NeedMore>(parameters)) {
-        return violation(payload.offset(), "truncated draft-21 PUBLISH parameters");
-    }
     if (const auto* error = std::get_if<DecodeError>(&parameters)) return *error;
-    result.parameters = std::get<KeyValues>(parameters);
+    result.parameters = std::get<std::vector<PublishParameter>>(parameters);
     const auto properties = decode_key_values_to_end(payload);
     if (const auto* error = std::get_if<DecodeError>(&properties)) return *error;
     result.track_properties = std::get<KeyValues>(properties);
