@@ -25,12 +25,15 @@ public:
                      session::PublisherSession& session);
 
     DispatchResult submit(const OpenRequestAction& action);
+    DispatchResult submit_setup();
     DispatchResult flush();
     [[nodiscard]] bool has_pending() const noexcept;
 
 private:
-    struct PendingRequest {
-        OpenRequestAction action;
+    struct PendingMessage {
+        wire::draft18::Message message;
+        session::LocalStreamPurpose purpose;
+        bool fin;
         std::vector<std::byte> frame;
         std::optional<transport::StreamId> stream_id;
         std::size_t accepted{0};
@@ -39,8 +42,9 @@ private:
 
     transport::SessionTransport& transport_;
     session::PublisherSession& session_;
-    std::optional<PendingRequest> pending_;
+    std::optional<PendingMessage> pending_;
     std::uint64_t next_request_id_{1};
+    bool setup_submitted_{false};
 };
 
 }  // namespace moq::interop::scenarios

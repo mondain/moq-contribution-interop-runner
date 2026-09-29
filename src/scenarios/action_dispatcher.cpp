@@ -52,7 +52,32 @@ DispatchResult ActionDispatcher::submit(const OpenRequestAction& action) {
                 transport::TransportStatus::InvalidState};
     }
     next_request_id_ += 2;
-    pending_ = PendingRequest{action,
+    pending_ = PendingMessage{action.message,
+                              session::LocalStreamPurpose::Request,
+                              action.fin,
+                              {writer.bytes().begin(), writer.bytes().end()},
+                              std::nullopt, 0, false};
+    return flush();
+}
+
+DispatchResult ActionDispatcher::submit_setup() {
+    if (pending_ || setup_submitted_ ||
+        session_.phase() == session::SessionPhase::Active ||
+        session_.phase() == session::SessionPhase::Closing ||
+        session_.phase() == session::SessionPhase::Closed) {
+        return {DispatchState::Failed, false, std::nullopt,
+                transport::TransportStatus::InvalidState};
+    }
+    wire::draft18::Message message = wire::draft18::SetupMessage{};
+    wire::ByteWriter writer(kMaximumDraft18MessageFrame);
+    if (!wire::draft18::encode_message(message, writer).has_value()) {
+        return {DispatchState::Failed, false, std::nullopt,
+                transport::TransportStatus::InternalError};
+    }
+    setup_submitted_ = true;
+    pending_ = PendingMessage{std::move(message),
+                              session::LocalStreamPurpose::Control,
+                              false,
                               {writer.bytes().begin(), writer.bytes().end()},
                               std::nullopt, 0, false};
     return flush();
@@ -72,11 +97,17 @@ DispatchResult ActionDispatcher::flush() {
     }
     auto& pending = *pending_;
     if (!pending.stream_id) {
-        if (phase != session::SessionPhase::Active) {
+        if (phase != (pending.purpose ==
+                              session::LocalStreamPurpose::Control
+                          ? session::SessionPhase::AwaitingSetup
+                          : session::SessionPhase::Active)) {
             return {DispatchState::Pending, false, std::nullopt,
                     std::nullopt};
         }
-        const auto opened = transport_.open_bidi();
+        const auto opened = pending.purpose ==
+                                    session::LocalStreamPurpose::Control
+                                ? transport_.open_uni()
+                                : transport_.open_bidi();
         if (opened.status != transport::TransportStatus::Success) {
             if (opened.status == transport::TransportStatus::StreamLimit ||
                 opened.status == transport::TransportStatus::WouldBlock) {
@@ -88,8 +119,7 @@ DispatchResult ActionDispatcher::flush() {
                     opened.status};
         }
         pending.stream_id = opened.stream_id;
-        session_.observe_local_stream(opened.stream_id,
-                                      session::LocalStreamPurpose::Request);
+        session_.observe_local_stream(opened.stream_id, pending.purpose);
     }
 
     const auto stream_id = *pending.stream_id;
@@ -120,7 +150,7 @@ DispatchResult ActionDispatcher::flush() {
         }
     }
 
-    if (pending.action.fin && !pending.fin_sent) {
+    if (pending.fin && !pending.fin_sent) {
         const auto result = transport_.write(stream_id, {}, true);
         if (result.status != transport::TransportStatus::Success ||
             result.accepted != 0) {
@@ -129,8 +159,7 @@ DispatchResult ActionDispatcher::flush() {
         }
         pending.fin_sent = true;
     }
-    session_.observe_local_message(stream_id, pending.action.message,
-                                   pending.action.fin);
+    session_.observe_local_message(stream_id, pending.message, pending.fin);
     pending_.reset();
     return {DispatchState::Complete, true, stream_id, std::nullopt};
 }

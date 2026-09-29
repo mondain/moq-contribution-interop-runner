@@ -21,11 +21,17 @@ public:
         return {transport::TransportStatus::Success,
                 1 + 4 * (open_count - 1)};
     }
-    transport::OpenResult open_uni() override { return {transport::TransportStatus::InvalidState, 0}; }
+    transport::OpenResult open_uni() override {
+        ++open_uni_count;
+        return {transport::TransportStatus::Success, 3};
+    }
     transport::OperationResult write(transport::StreamId stream_id,
                                      std::span<const std::byte> data,
                                      bool fin) override {
-        if ((stream_id & 3u) != 1u || fin) return {transport::TransportStatus::InvalidState, 0, {}};
+        if ((stream_id & 3u) != 1u && stream_id != 3) {
+            return {transport::TransportStatus::InvalidState, 0, {}};
+        }
+        if (fin) return {transport::TransportStatus::InvalidState, 0, {}};
         const auto result = next_write < scripted_writes.size()
             ? scripted_writes[next_write++]
             : transport::OperationResult{transport::TransportStatus::Success,
@@ -54,6 +60,7 @@ public:
     std::vector<transport::OperationResult> scripted_writes;
     std::size_t next_write{0};
     std::size_t open_count{0};
+    std::size_t open_uni_count{0};
     std::vector<transport::OpenResult> scripted_opens;
     std::size_t next_open{0};
 };
@@ -102,6 +109,85 @@ TEST(Draft18ActionDispatcher, FullyWrittenSubscribeBecomesDeliveredStimulus) {
                                                      session::RequestInitiator::Local &&
                                       request->request_id == 1;
                            }), evidence.end());
+}
+
+TEST(Draft18ActionDispatcher, SendsSetupOnServerControlStream) {
+    RecordingTransport transport;
+    session::PublisherSession session;
+    session.on_event(transport::ConnectionEstablishedEvent{
+        {std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+         std::byte{'-'}, std::byte{'1'}, std::byte{'8'}}, {}, {}, 1200});
+    ActionDispatcher dispatcher(transport, session);
+    const auto result = dispatcher.submit_setup();
+    EXPECT_EQ(result.state, DispatchState::Complete);
+    EXPECT_TRUE(result.stimulus_delivered);
+    EXPECT_EQ(result.stream_id, 3u);
+    EXPECT_EQ(transport.open_uni_count, 1u);
+    EXPECT_EQ(transport.open_count, 0u);
+
+    wire::Cursor cursor(transport.written);
+    const auto decoded = wire::draft18::decode_message(
+        wire::draft18::StreamRole::Control, cursor, {});
+    ASSERT_TRUE(std::holds_alternative<wire::draft18::Message>(decoded));
+    EXPECT_NE(std::get_if<wire::draft18::SetupMessage>(
+                  &std::get<wire::draft18::Message>(decoded)), nullptr);
+    EXPECT_EQ(cursor.offset(), transport.written.size());
+    const auto evidence = session.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const session::EvidenceEvent& event) {
+                               return event.kind ==
+                                      session::EvidenceKind::LocalSetupObserved;
+                           }), evidence.end());
+    constexpr std::array peer_setup{
+        std::byte{0xaf}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    session.on_event(transport::StreamDataEvent{
+        2, {peer_setup.begin(), peer_setup.end()}, false});
+    EXPECT_EQ(session.phase(), session::SessionPhase::Active);
+}
+
+TEST(Draft18ActionDispatcher, PartialSetupIsObservedOnlyAfterFullWrite) {
+    RecordingTransport transport;
+    transport.scripted_writes.push_back(
+        {transport::TransportStatus::Partial, 2, {}});
+    session::PublisherSession session;
+    session.on_event(transport::ConnectionEstablishedEvent{
+        {std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+         std::byte{'-'}, std::byte{'1'}, std::byte{'8'}}, {}, {}, 1200});
+    ActionDispatcher dispatcher(transport, session);
+    const auto first = dispatcher.submit_setup();
+    EXPECT_EQ(first.state, DispatchState::Pending);
+    EXPECT_FALSE(first.stimulus_delivered);
+    const auto early = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(early.begin(), early.end(),
+                            [](const session::EvidenceEvent& event) {
+                                return event.kind ==
+                                       session::EvidenceKind::LocalSetupObserved;
+                            }), 0);
+    const auto second = dispatcher.flush();
+    EXPECT_EQ(second.state, DispatchState::Complete);
+    EXPECT_TRUE(second.stimulus_delivered);
+    EXPECT_EQ(transport.open_uni_count, 1u);
+    const auto late = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(late.begin(), late.end(),
+                            [](const session::EvidenceEvent& event) {
+                                return event.kind ==
+                                       session::EvidenceKind::LocalSetupObserved;
+                            }), 1);
+}
+
+TEST(Draft18ActionDispatcher, SetupWaitsForTransportAndCannotBeRepeated) {
+    RecordingTransport transport;
+    session::PublisherSession session;
+    ActionDispatcher dispatcher(transport, session);
+    const auto queued = dispatcher.submit_setup();
+    EXPECT_EQ(queued.state, DispatchState::Pending);
+    EXPECT_EQ(transport.open_uni_count, 0u);
+    session.on_event(transport::ConnectionEstablishedEvent{
+        {std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+         std::byte{'-'}, std::byte{'1'}, std::byte{'8'}}, {}, {}, 1200});
+    EXPECT_TRUE(dispatcher.flush().stimulus_delivered);
+    EXPECT_EQ(dispatcher.submit_setup().state, DispatchState::Failed);
+    EXPECT_EQ(transport.open_uni_count, 1u);
 }
 
 TEST(Draft18ActionDispatcher, PartialWriteIsNotDeliveredUntilFlushed) {
