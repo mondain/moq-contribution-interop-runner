@@ -451,6 +451,18 @@ std::optional<bool> forward_parameter(
     return std::nullopt;
 }
 
+std::optional<wire::draft18::Location> largest_object_parameter(
+    const wire::draft18::Parameters& parameters) {
+    for (const auto& parameter : parameters) {
+        if (parameter.type != 0x09) continue;
+        if (const auto* location =
+                std::get_if<wire::draft18::Location>(&parameter.value)) {
+            return *location;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::size_t> setup_auth_cache_size(
     const wire::draft18::SetupMessage& setup) {
     for (const auto& option : setup.options) {
@@ -514,6 +526,8 @@ public:
             std::size_t retained_key_bytes{0};
             std::optional<std::uint64_t> track_alias;
             bool forward_state{true};
+            std::optional<wire::draft18::Location> largest_object;
+            std::optional<wire::draft18::Location> joining_location;
         };
 
         std::uint64_t request_id{0};
@@ -1118,7 +1132,10 @@ public:
             track, local_role, SubscriptionPhase::Pending, retained_bytes,
             publish ? std::optional<std::uint64_t>{publish->track_alias}
                     : std::nullopt,
-            initial_forward};
+            initial_forward,
+            publish ? largest_object_parameter(publish->parameters)
+                    : std::nullopt,
+            std::nullopt};
         active_subscriptions.emplace(active_key, request.stream_id);
         ++subscription_history;
         subscription_key_bytes += retained_bytes;
@@ -1176,10 +1193,15 @@ public:
             request.subscription->forward_state == new_state) return;
         const bool previous = request.subscription->forward_state;
         request.subscription->forward_state = new_state;
+        if (!previous && new_state) {
+            request.subscription->joining_location =
+                request.subscription->largest_object;
+        }
         if (optional_subscription_evidence_available(1, 0)) {
             emit(transition, EvidenceKind::ForwardStateChanged,
                  ForwardStateEvidence{request.request_id, request.stream_id,
-                                      actor, previous, new_state});
+                                      actor, previous, new_state,
+                                      request.subscription->joining_location});
         }
     }
 

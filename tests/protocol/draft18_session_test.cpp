@@ -2738,5 +2738,26 @@ TEST(Draft18SessionForward, SubscribeUpdateChangesStateOnlyWhenSpecified) {
     EXPECT_EQ(state.actor, RequestInitiator::Peer);
 }
 
+TEST(Draft18SessionForward, PublishResumingForwardSavesJoiningLocation) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x09, Location{3, 7}}, {0x10, Uint8ParameterValue{0}}},
+               {}}), false});
+    session.observe_local_message(
+        0, RequestOkMessage{{{0x10, Uint8ParameterValue{1}}}, {}}, false);
+    const auto evidence = session.take_evidence(64);
+    const auto changed = std::find_if(evidence.begin(), evidence.end(),
+                                      [](const EvidenceEvent& event) {
+                                          return event.kind == EvidenceKind::ForwardStateChanged;
+                                      });
+    ASSERT_NE(changed, evidence.end());
+    EXPECT_EQ(std::get<ForwardStateEvidence>(changed->data).joining_location,
+              (Location{3, 7}));
+}
+
 }  // namespace
 }  // namespace moq::interop::session

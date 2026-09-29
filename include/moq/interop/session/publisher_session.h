@@ -303,6 +303,7 @@ struct ForwardStateEvidence {
     RequestInitiator actor{RequestInitiator::Peer};
     bool old_state{true};
     bool new_state{true};
+    std::optional<wire::draft18::Location> joining_location;
 };
 
 struct SubscriptionPhaseEvidence {
