@@ -260,7 +260,12 @@ public:
                                               {"mode", "observed"},
                                               {"scenario", "d21-server-sends-path"},
                                               {"configured", runs && runs->supports(
-                                                  app::DraftVersion::Draft21)}}})},
+                                                  app::DraftVersion::Draft21)}},
+                                             {{"draft", 18}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "fetch-publisher-track-range"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft18)}}})},
                                          {"validator", detail::build_json(build)}});
             });
         });
@@ -305,7 +310,9 @@ public:
                     (requested.scenario_ids.front() ==
                          "subscribe-to-publisher-track" ||
                      requested.scenario_ids.front() ==
-                         "subscribe-again-to-established-publisher-track");
+                         "subscribe-again-to-established-publisher-track" ||
+                     requested.scenario_ids.front() ==
+                         "fetch-publisher-track-range");
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21 &&
                     requested.scenario_ids.size() == 1 &&

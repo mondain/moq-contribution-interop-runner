@@ -9,11 +9,13 @@ namespace {
 
 constexpr const char* kResponseEvaluator =
     "exactly-one-subscribe-ok-or-request-error";
+constexpr const char* kFetchResponseEvaluator =
+    "exactly-one-fetch-ok-or-request-error";
 constexpr const char* kDuplicateSubscriptionEvaluator =
     "duplicate-subscription-rejected";
 
-std::optional<OutcomeState> exactly_one_subscribe_response(
-    const ScenarioContext& context) {
+std::optional<OutcomeState> exactly_one_response(
+    const ScenarioContext& context, session::RequestKind kind) {
     if (!context.complete || !context.stimulus_delivered) {
         return std::nullopt;
     }
@@ -24,7 +26,7 @@ std::optional<OutcomeState> exactly_one_subscribe_response(
         const auto* request =
             std::get_if<session::RequestObservedEvidence>(&event.data);
         if (!request || request->initiator != session::RequestInitiator::Local ||
-            request->request_kind != session::RequestKind::Subscribe) {
+            request->request_kind != kind) {
             continue;
         }
         if (request_id) return OutcomeState::Fail;
@@ -45,12 +47,15 @@ std::optional<OutcomeState> exactly_one_subscribe_response(
                 response->stream_id != *stream_id) {
                 continue;
             }
-            const bool valid = response->request_kind ==
-                                   session::RequestKind::Subscribe &&
-                (std::holds_alternative<wire::draft18::SubscribeOkMessage>(
+            const bool valid = response->request_kind == kind &&
+                (std::holds_alternative<wire::draft18::RequestErrorMessage>(
                      response->message) ||
-                 std::holds_alternative<wire::draft18::RequestErrorMessage>(
-                     response->message));
+                 (kind == session::RequestKind::Subscribe &&
+                  std::holds_alternative<wire::draft18::SubscribeOkMessage>(
+                      response->message)) ||
+                 (kind == session::RequestKind::Fetch &&
+                  std::holds_alternative<wire::draft18::FetchOkMessage>(
+                      response->message)));
             if (!valid) invalid_response = true;
             ++accepted_responses;
         }
@@ -178,7 +183,22 @@ std::vector<Outcome> evaluate_draft18(
             const auto* context = unique_context(
                 scenarios, requirement.scenarios.front());
             if (context) {
-                state = exactly_one_subscribe_response(*context)
+                state = exactly_one_response(
+                            *context, session::RequestKind::Subscribe)
+                            .value_or(OutcomeState::NotRun);
+            }
+        } else if (requirement.testability == Testability::Testable &&
+                   requirement.scenarios.size() == 1 &&
+                   requirement.scenarios.front() ==
+                       "fetch-publisher-track-range" &&
+                   requirement.evaluators.size() == 1 &&
+                   requirement.evaluators.front() ==
+                       kFetchResponseEvaluator) {
+            const auto* context = unique_context(
+                scenarios, requirement.scenarios.front());
+            if (context) {
+                state = exactly_one_response(
+                            *context, session::RequestKind::Fetch)
                             .value_or(OutcomeState::NotRun);
             }
         } else if (requirement.testability == Testability::Testable &&

@@ -65,6 +65,33 @@ bool is_duplicate_subscription_error(const session::EvidenceEvent& event,
     return error && error->error_code == 0x19;
 }
 
+bool is_fetch_response(const session::EvidenceEvent& event,
+                       std::uint64_t request_id) {
+    if (event.kind != session::EvidenceKind::InitialResponseObserved) {
+        return false;
+    }
+    const auto* response =
+        std::get_if<session::InitialResponseEvidence>(&event.data);
+    return response && response->responder == session::RequestInitiator::Peer &&
+           response->original_request_id == request_id &&
+           response->request_kind == session::RequestKind::Fetch &&
+           (std::holds_alternative<wire::draft18::FetchOkMessage>(
+                response->message) ||
+            std::holds_alternative<wire::draft18::RequestErrorMessage>(
+                response->message));
+}
+
+bool is_extra_fetch_response(const session::EvidenceEvent& event,
+                             std::uint64_t request_id) {
+    if (is_fetch_response(event, request_id)) return true;
+    if (event.kind != session::EvidenceKind::ResponseViolation) return false;
+    const auto* violation =
+        std::get_if<session::ResponseViolationEvidence>(&event.data);
+    return violation && violation->responder ==
+                            session::RequestInitiator::Peer &&
+           violation->original_request_id == request_id;
+}
+
 }  // namespace
 
 ScenarioDefinition subscribe_to_publisher_track(
@@ -130,6 +157,37 @@ ScenarioDefinition subscribe_again_to_established_publisher_track(
         "reject-extra-duplicate-response", duplicate_window,
         [second_request_id](const session::EvidenceEvent& event) {
             return is_duplicate_response(event, second_request_id);
+        }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
+    return definition;
+}
+
+ScenarioDefinition fetch_publisher_track_range(
+    wire::draft18::TrackNamespace track_namespace,
+    wire::draft18::TrackName track_name, std::uint64_t request_id,
+    wire::draft18::Location start, wire::draft18::Location end,
+    std::chrono::milliseconds response_deadline,
+    std::chrono::milliseconds duplicate_window) {
+    if ((request_id & 1u) == 0u || end.group < start.group ||
+        (end.group == start.group && end.object < start.object)) {
+        throw std::invalid_argument("invalid draft-18 FETCH request");
+    }
+    ScenarioDefinition definition;
+    definition.id = "fetch-publisher-track-range";
+    definition.steps.push_back(ScenarioStep{
+        "await-fetch-response", response_deadline,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_fetch_response(event, request_id);
+        }, {},
+        {OpenRequestAction{wire::draft18::FetchMessage{
+            request_id,
+            wire::draft18::StandaloneFetch{
+                std::move(track_namespace), std::move(track_name),
+                start, end},
+            {}}}}});
+    definition.steps.push_back(ScenarioStep{
+        "reject-extra-fetch-response", duplicate_window,
+        [request_id](const session::EvidenceEvent& event) {
+            return is_extra_fetch_response(event, request_id);
         }, {}, {}, CompletionRule::NoMatchingEventUntilDeadline});
     return definition;
 }

@@ -3,8 +3,8 @@
 Publisher-focused MoQT interoperability runner. The checked-in draft text in
 `docs/` is the protocol authority. The requirement inventories cover drafts 18
 and 21. The draft-18 native-QUIC scenarios subscribe to a configured track,
-then optionally subscribe again to verify that an established same-role
-subscription is rejected with `DUPLICATE_SUBSCRIPTION`. Draft-21 native-QUIC
+optionally subscribe again to verify rejection with `DUPLICATE_SUBSCRIPTION`,
+or issue a standalone FETCH and check for exactly one response. Draft-21 native-QUIC
 profiles accept a publisher's PUBLISH for a
 configured track and send an empty REQUEST_OK. WebTransport and
 the remaining publisher requirements are cataloged but not executable yet.
@@ -48,6 +48,14 @@ For the draft-18 duplicate-subscription check, set `scenarios` to
 track, and scores `D18-5-1-MUST-004` from the response code. If the first
 subscription is not established, that conditional requirement remains
 `NOT_RUN` rather than becoming a publisher failure.
+
+For the draft-18 FETCH response check, use
+`["fetch-publisher-track-range"]`. The runner sends a standalone FETCH for
+the configured track from Location `{0, 0}` to `{0, 1}` and scores
+`D18-5-2-MUST-001` when exactly one `FETCH_OK` or `REQUEST_ERROR` is
+observed. The track fixture names the request target; it does not assert that
+the publisher has already published an Object. This profile does not score
+the response code, range validity, or FETCH object delivery.
 
 For draft 21, set `draft` to `21` and select exactly one of
 `d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or

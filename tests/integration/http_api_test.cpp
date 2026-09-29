@@ -141,7 +141,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 7);
+    ASSERT_EQ(health.at("executable_profiles").size(), 8);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
@@ -168,6 +168,9 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("executable_profiles").at(6).at("scenario"),
               "d21-server-sends-path");
     EXPECT_FALSE(health.at("executable_profiles").at(6).at("configured"));
+    EXPECT_EQ(health.at("executable_profiles").at(7).at("scenario"),
+              "fetch-publisher-track-range");
+    EXPECT_FALSE(health.at("executable_profiles").at(7).at("configured"));
 
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2);
@@ -295,6 +298,32 @@ TEST_F(HttpApiTest, ExposesDuplicateSubscriptionScenarioAsExecutable) {
         {"mode", "observed"},
         {"scenarios", Json::array(
             {"subscribe-again-to-established-publisher-track"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", Json::array({"6e"})},
+                   {"name_hex", "78"}}}};
+    const auto response = client_->Post(
+        "/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 503) << response->body;
+    EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
+              "publisher_listener_unavailable");
+}
+
+TEST_F(HttpApiTest, ExposesPublisherFetchScenarioAsExecutable) {
+    const auto health = get_json("/healthz");
+    bool listed = false;
+    for (const auto& profile : health.at("executable_profiles")) {
+        if (profile.at("draft") == 18 &&
+            profile.at("scenario") == "fetch-publisher-track-range") {
+            listed = true;
+            EXPECT_FALSE(profile.at("configured").get<bool>());
+        }
+    }
+    EXPECT_TRUE(listed);
+    const Json request = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", Json::array({"fetch-publisher-track-range"})},
         {"timeout_ms", 1000},
         {"track", {{"namespace_hex", Json::array({"6e"})},
                    {"name_hex", "78"}}}};

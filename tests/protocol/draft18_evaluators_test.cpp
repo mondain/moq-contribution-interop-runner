@@ -28,7 +28,14 @@ RequirementCatalog catalog() {
         Applicability::Applicable, Testability::Testable,
         {"subscribe-again-to-established-publisher-track"},
         {"duplicate-subscription-rejected"}, ""};
-    return {18, "fixture-digest", true, {required, duplicate, other}};
+    Requirement fetch{
+        "D18-5-2-MUST-001", Strength::Must,
+        {"5.2", 2159, 2160, 1, 1}, "publisher",
+        "Send exactly one FETCH_OK or REQUEST_ERROR for each FETCH.",
+        Applicability::Applicable, Testability::Testable,
+        {"fetch-publisher-track-range"},
+        {"exactly-one-fetch-ok-or-request-error"}, ""};
+    return {18, "fixture-digest", true, {required, duplicate, fetch, other}};
 }
 
 session::EvidenceEvent subscribe_request() {
@@ -45,6 +52,26 @@ session::EvidenceEvent subscribe_ok() {
                 session::RequestInitiator::Peer, 1,
                 session::RequestKind::Subscribe, 1,
                 wire::draft18::SubscribeOkMessage{7, {}, {}}}};
+}
+
+session::EvidenceEvent fetch_request() {
+    return {0, session::EvidenceKind::RequestObserved,
+            session::RequestObservedEvidence{
+                session::RequestInitiator::Local, 1,
+                session::RequestKind::Fetch, 1,
+                wire::draft18::FetchMessage{
+                    1, wire::draft18::StandaloneFetch{
+                        {{{std::byte{'n'}}}}, {{std::byte{'x'}}},
+                        {0, 0}, {0, 1}}, {}}}};
+}
+
+session::EvidenceEvent fetch_error() {
+    return {1, session::EvidenceKind::InitialResponseObserved,
+            session::InitialResponseEvidence{
+                session::RequestInitiator::Peer, 1,
+                session::RequestKind::Fetch, 1,
+                wire::draft18::RequestErrorMessage{
+                    0x11, 0, {}, std::nullopt}}};
 }
 
 const Outcome& outcome_for(const std::vector<Outcome>& outcomes,
@@ -183,6 +210,49 @@ TEST(Draft18Evaluators, ScoresDuplicateSubscriptionOnlyForSameTrackAndCode) {
     const auto different_track_outcomes =
         evaluate_draft18(catalog(), {&different_track, 1});
     EXPECT_EQ(outcome_for(different_track_outcomes, "D18-5-1-MUST-004").state,
+              OutcomeState::NotRun);
+}
+
+TEST(Draft18Evaluators, ScoresOneCorrelatedFetchResponse) {
+    const ScenarioContext rejected{
+        "fetch-publisher-track-range", true, true,
+        {fetch_request(), fetch_error()}};
+    const auto rejected_outcomes = evaluate_draft18(catalog(), {&rejected, 1});
+    EXPECT_EQ(outcome_for(rejected_outcomes, "D18-5-2-MUST-001").state,
+              OutcomeState::Pass);
+
+    auto accepted = rejected;
+    std::get<session::InitialResponseEvidence>(accepted.evidence[1].data)
+        .message = wire::draft18::FetchOkMessage{0, {0, 1}, {}, {}};
+    const auto accepted_outcomes = evaluate_draft18(catalog(), {&accepted, 1});
+    EXPECT_EQ(outcome_for(accepted_outcomes, "D18-5-2-MUST-001").state,
+              OutcomeState::Pass);
+}
+
+TEST(Draft18Evaluators, MissingOrDuplicateFetchResponseFails) {
+    const ScenarioContext missing{
+        "fetch-publisher-track-range", true, true, {fetch_request()}};
+    const auto missing_outcomes = evaluate_draft18(catalog(), {&missing, 1});
+    EXPECT_EQ(outcome_for(missing_outcomes, "D18-5-2-MUST-001").state,
+              OutcomeState::Fail);
+
+    const ScenarioContext duplicate{
+        "fetch-publisher-track-range", true, true,
+        {fetch_request(), fetch_error(),
+         {2, session::EvidenceKind::ResponseViolation,
+          session::ResponseViolationEvidence{
+              session::RequestInitiator::Peer, 1, 1,
+              wire::draft18::RequestErrorMessage{
+                  0x11, 0, {}, std::nullopt}}}}};
+    const auto duplicate_outcomes = evaluate_draft18(catalog(), {&duplicate, 1});
+    EXPECT_EQ(outcome_for(duplicate_outcomes, "D18-5-2-MUST-001").state,
+              OutcomeState::Fail);
+
+    auto undelivered = missing;
+    undelivered.stimulus_delivered = false;
+    const auto undelivered_outcomes =
+        evaluate_draft18(catalog(), {&undelivered, 1});
+    EXPECT_EQ(outcome_for(undelivered_outcomes, "D18-5-2-MUST-001").state,
               OutcomeState::NotRun);
 }
 

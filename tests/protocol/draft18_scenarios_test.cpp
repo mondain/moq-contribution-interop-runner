@@ -238,5 +238,61 @@ TEST(Draft18ScenarioEngine, DuplicateSubscriptionRejectsInvalidRequestIds) {
                  std::invalid_argument);
 }
 
+TEST(Draft18ScenarioEngine, FetchScenarioSendsStandaloneRangeAndWaitsForResponse) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(fetch_publisher_track_range(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1,
+        {0, 0}, {0, 1}, 100ms, 50ms));
+    const auto started = engine.start(start_time);
+    ASSERT_EQ(started.actions.size(), 1u);
+    const auto* open = std::get_if<OpenRequestAction>(&started.actions[0]);
+    ASSERT_NE(open, nullptr);
+    const auto* fetch = std::get_if<wire::draft18::FetchMessage>(&open->message);
+    ASSERT_NE(fetch, nullptr);
+    EXPECT_EQ(fetch->request_id, 1u);
+    const auto* standalone =
+        std::get_if<wire::draft18::StandaloneFetch>(&fetch->fetch);
+    ASSERT_NE(standalone, nullptr);
+    EXPECT_EQ(standalone->track_namespace.fields,
+              std::vector<std::vector<std::byte>>{{std::byte{'n'}}});
+    EXPECT_EQ(standalone->track_name.bytes,
+              std::vector<std::byte>{std::byte{'x'}});
+    EXPECT_EQ(standalone->start, (wire::draft18::Location{0, 0}));
+    EXPECT_EQ(standalone->end, (wire::draft18::Location{0, 1}));
+
+    const session::EvidenceEvent rejected{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Fetch, 1,
+            wire::draft18::RequestErrorMessage{0x11, 0, {}, std::nullopt}}};
+    EXPECT_EQ(engine.observe(rejected, start_time + 10ms).step_index, 1u);
+    EXPECT_EQ(engine.advance(start_time + 60ms).status,
+              ScenarioStatus::Passed);
+}
+
+TEST(Draft18ScenarioEngine, FetchScenarioAcceptsFetchOkAndRejectsDuplicate) {
+    const auto start_time = Clock::time_point{};
+    ScenarioEngine engine(fetch_publisher_track_range(
+        {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1,
+        {0, 0}, {0, 1}, 100ms, 50ms));
+    engine.start(start_time);
+    const session::EvidenceEvent accepted{
+        1, session::EvidenceKind::InitialResponseObserved,
+        session::InitialResponseEvidence{
+            session::RequestInitiator::Peer, 1,
+            session::RequestKind::Fetch, 1,
+            wire::draft18::FetchOkMessage{0, {0, 1}, {}, {}}}};
+    EXPECT_EQ(engine.observe(accepted, start_time + 10ms).step_index, 1u);
+    EXPECT_EQ(engine.observe(accepted, start_time + 20ms).status,
+              ScenarioStatus::Failed);
+}
+
+TEST(Draft18ScenarioEngine, FetchScenarioRejectsPeerParityRequestId) {
+    EXPECT_THROW(fetch_publisher_track_range(
+                     {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 0,
+                     {0, 0}, {0, 1}, 100ms, 50ms), std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios
