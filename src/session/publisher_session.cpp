@@ -453,6 +453,7 @@ public:
                 LocalSubscriptionRole::Publisher};
             SubscriptionPhase phase{SubscriptionPhase::Pending};
             std::size_t retained_key_bytes{0};
+            std::optional<std::uint64_t> track_alias;
         };
 
         std::uint64_t request_id{0};
@@ -485,6 +486,8 @@ public:
     std::map<SubscriptionIdentity, transport::StreamId,
              SubscriptionIdentityLess>
         active_subscriptions;
+    std::map<std::pair<RequestInitiator, std::uint64_t>, transport::StreamId>
+        established_aliases;
     std::optional<std::uint64_t> highest_peer_request_id;
     std::optional<std::uint64_t> highest_local_request_id;
     std::optional<std::uint64_t> peer_goaway_cutoff;
@@ -731,6 +734,8 @@ public:
         const auto identity = subscription_identity(message, request.initiator);
         if (!identity) return true;
         const auto& [track, local_role] = *identity;
+        const auto* publish =
+            std::get_if<wire::draft18::PublishMessage>(&message);
         // The request record and the active-role index each own a TrackKey.
         const auto key_bytes = track_key_bytes(track);
         const auto retained_bytes =
@@ -797,6 +802,11 @@ public:
             }
             return reject(0x19);
         }
+        if (publish && !validate_track_alias(
+                           transition, request.initiator,
+                           publish->track_alias, track, request.stream_id)) {
+            return false;
+        }
         if (subscription_history >= config.maximum_subscription_history) {
             harness_limit(transition, HarnessLimitKind::SubscriptionHistory,
                           subscription_history + 1,
@@ -832,7 +842,9 @@ public:
         const bool emit_optional = optional_subscription_evidence_available(
             additional_count, additional_bytes);
         request.subscription = RequestRecord::SubscriptionState{
-            track, local_role, SubscriptionPhase::Pending, retained_bytes};
+            track, local_role, SubscriptionPhase::Pending, retained_bytes,
+            publish ? std::optional<std::uint64_t>{publish->track_alias}
+                    : std::nullopt};
         active_subscriptions.emplace(active_key, request.stream_id);
         ++subscription_history;
         subscription_key_bytes += retained_bytes;
@@ -854,6 +866,35 @@ public:
         return true;
     }
 
+    bool validate_track_alias(SessionTransition& transition,
+                              RequestInitiator publisher,
+                              std::uint64_t alias, const TrackKey& track,
+                              transport::StreamId stream_id) {
+        const auto existing = established_aliases.find({publisher, alias});
+        if (existing == established_aliases.end()) {
+            return true;
+        }
+        const auto prior = requests.find(existing->second);
+        if (prior != requests.end() && prior->second.subscription &&
+            prior->second.subscription->track == track) return true;
+        if (publisher == RequestInitiator::Peer) {
+            protocol_close(transition, stream_id, 0x5,
+                           "duplicate track alias");
+        } else {
+            emit(transition, EvidenceKind::LocalObservationError,
+                 LocalObservationErrorEvidence{stream_id});
+        }
+        return false;
+    }
+
+    void establish_track_alias(RequestRecord& request,
+                               RequestInitiator publisher,
+                               std::uint64_t alias) {
+        if (!request.subscription) return;
+        request.subscription->track_alias = alias;
+        established_aliases[{publisher, alias}] = request.stream_id;
+    }
+
     void transition_subscription(SessionTransition& transition,
                                  RequestRecord& request,
                                  SubscriptionPhase next) {
@@ -864,6 +905,18 @@ public:
         request.subscription->phase = next;
         const auto retained_bytes = request.subscription->retained_key_bytes;
         if (next == SubscriptionPhase::Terminated) {
+            if (request.subscription->track_alias) {
+                const auto publisher = request.subscription->local_role ==
+                        LocalSubscriptionRole::Publisher
+                    ? RequestInitiator::Local
+                    : RequestInitiator::Peer;
+                const auto alias = established_aliases.find(
+                    {publisher, *request.subscription->track_alias});
+                if (alias != established_aliases.end() &&
+                    alias->second == request.stream_id) {
+                    established_aliases.erase(alias);
+                }
+            }
             active_subscriptions.erase(SubscriptionIdentity{
                 request.subscription->track,
                 request.subscription->local_role});
@@ -1042,6 +1095,14 @@ public:
     void terminalize_request_for_session(RequestRecord& request) {
         if (request.terminal) return;
         if (request.subscription) {
+            if (request.subscription->track_alias) {
+                const auto publisher = request.subscription->local_role ==
+                        LocalSubscriptionRole::Publisher
+                    ? RequestInitiator::Local
+                    : RequestInitiator::Peer;
+                established_aliases.erase(
+                    {publisher, *request.subscription->track_alias});
+            }
             reserved_request_terminal_evidence.push_back(EvidenceEvent{
                 next_sequence++, EvidenceKind::SubscriptionPhaseChanged,
                 SubscriptionPhaseEvidence{
@@ -1200,6 +1261,22 @@ public:
                 return response_violation(transition, request, responder,
                                           message, peer_fault);
             }
+            const auto* subscribe_ok =
+                std::get_if<wire::draft18::SubscribeOkMessage>(&message);
+            const auto alias = subscribe_ok
+                ? std::optional<std::uint64_t>{subscribe_ok->track_alias}
+                : request.subscription && request.kind == RequestKind::Publish
+                    ? request.subscription->track_alias
+                    : std::nullopt;
+            const auto publisher = request.kind == RequestKind::Subscribe
+                ? responder
+                : request.initiator;
+            if (!error && alias && request.subscription &&
+                !validate_track_alias(transition, publisher, *alias,
+                                      request.subscription->track,
+                                      request.stream_id)) {
+                return false;
+            }
             if (!preflight_evidence(transition, error ? 2 : 1,
                                     message_owned_bytes(message))) {
                 return false;
@@ -1214,6 +1291,7 @@ public:
             if (emitted && request.subscription && !error) {
                 transition_subscription(transition, request,
                                         SubscriptionPhase::Established);
+                if (alias) establish_track_alias(request, publisher, *alias);
             }
             if (emitted && error) {
                 terminalize_request(transition, request,

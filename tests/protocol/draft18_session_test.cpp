@@ -2188,5 +2188,93 @@ TEST(Draft18SessionSubscriptions, RequiredRejectionsSurviveNoOptionalEvidenceSpa
               0x10u);
 }
 
+TEST(Draft18SessionAliases, PeerPublishCannotReuseEstablishedAliasForDifferentTrack) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, {{std::byte{'a'}}}, 7, {}, {}}),
+        false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    const auto collision = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, {{std::byte{'b'}}}, 7, {}, {}}),
+        false});
+    ASSERT_NE(close_action(collision), nullptr);
+    EXPECT_EQ(close_action(collision)->application_error, 0x5u);
+}
+
+TEST(Draft18SessionAliases, PeerSubscribeOkCannotReuseEstablishedAlias) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, {{std::byte{'a'}}}, 7, {}, {}}),
+        false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, SubscribeMessage{1, name_space, {{std::byte{'b'}}}, {}}, false);
+    const auto collision = session.on_event(StreamDataEvent{
+        1, encode(SubscribeOkMessage{7, {}, {}}), false});
+    ASSERT_NE(close_action(collision), nullptr);
+    EXPECT_EQ(close_action(collision)->application_error, 0x5u);
+}
+
+TEST(Draft18SessionAliases, TerminationReleasesAliasForAnotherTrack) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, {{std::byte{'a'}}}, 7, {}, {}}),
+        false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.observe_local_stop_sending(0, 1);
+    const auto reuse = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, name_space, {{std::byte{'b'}}}, 7, {}, {}}),
+        false});
+    EXPECT_TRUE(reuse.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionAliases, SameNumericAliasIsLegalForOppositePublishers) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, name_space, {{std::byte{'a'}}}, 7, {}, {}}),
+        false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, PublishMessage{1, name_space, {{std::byte{'b'}}}, 7, {}, {}},
+        false);
+    const auto accepted = session.on_event(StreamDataEvent{
+        1, encode(RequestOkMessage{}), false});
+    EXPECT_TRUE(accepted.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionAliases, ReservedNamespaceRejectionPrecedesAliasCollision) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 7, {}, {}}), false});
+    session.observe_local_message(0, RequestOkMessage{}, false);
+    const auto reserved = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, {{{std::byte{'.'}}}},
+                                 {{std::byte{'b'}}}, 7, {}, {}}), false});
+    ASSERT_EQ(reserved.actions.size(), 1u);
+    const auto* send = std::get_if<SendMessageAction>(&reserved.actions.front());
+    ASSERT_NE(send, nullptr);
+    EXPECT_EQ(std::get<RequestErrorMessage>(send->message).error_code, 0x10u);
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
 }  // namespace
 }  // namespace moq::interop::session
