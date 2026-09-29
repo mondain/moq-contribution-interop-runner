@@ -103,6 +103,7 @@ add_library(moq-interop-wire
     src/wire/draft21/key_values.cpp
     src/wire/draft21/publish.cpp
     src/wire/draft21/request_frame.cpp
+    src/wire/draft21/request_error.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
 )
@@ -408,6 +409,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft21-token-tests PRIVATE
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-token COMMAND moq-interop-draft21-token-tests)
+
+    add_executable(moq-interop-draft21-request-error-tests
+                   tests/golden/draft21_request_error_test.cpp)
+    target_link_libraries(moq-interop-draft21-request-error-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft21-request-error
+             COMMAND moq-interop-draft21-request-error-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
