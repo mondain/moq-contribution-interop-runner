@@ -51,6 +51,8 @@ the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
 that endpoint, then retrieve `GET /api/v1/runs/{id}` or
 `GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
+`POST /api/v1/runs/{id}/stop` ends an active run and finalizes it as incomplete;
+it does not count the interrupted interaction as a publisher failure.
 Scoring distinguishes required MUST/MUST NOT, weighted recommendations, and
 coverage; unexecuted requirements remain visible rather than counting as
 passes. An incomplete or harness-failed run is not a publisher failure.

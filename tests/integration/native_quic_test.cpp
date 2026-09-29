@@ -1057,6 +1057,58 @@ TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
                   .at("run").at("score").at("verdict"), "pass");
 }
 
+TEST(NativeQuicLive, HttpStopFinalizesAnActiveRunWithoutPublisherFailure) {
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    requirements::Requirement response_requirement{
+        "D18-5.1-MUST-003", requirements::Strength::Must,
+        {"5.1", 1936, 1937, 1, 1}, "publisher",
+        "exactly one SUBSCRIBE response",
+        requirements::Applicability::Applicable,
+        requirements::Testability::Testable,
+        {"subscribe-to-publisher-track"},
+        {"exactly-one-subscribe-ok-or-request-error"}, ""};
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            18, "test", true, {std::move(response_requirement)}});
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{21, "test", true, {}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const nlohmann::json request = {
+        {"draft", 18}, {"transport", "native-quic"},
+        {"mode", "observed"},
+        {"scenarios", nlohmann::json::array({"subscribe-to-publisher-track"})},
+        {"timeout_ms", 1000},
+        {"track", {{"namespace_hex", nlohmann::json::array({"6e"})},
+                   {"name_hex", "78"}}}};
+    const auto created = api.Post("/api/v1/runs", request.dump(),
+                                  "application/json");
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->status, 201);
+    const auto id = nlohmann::json::parse(created->body)
+                        .at("run").at("id").get<std::string>();
+    const auto stopped = api.Post("/api/v1/runs/" + id + "/stop", "",
+                                  "application/json");
+    ASSERT_TRUE(stopped);
+    EXPECT_EQ(stopped->status, 200) << stopped->body;
+    EXPECT_EQ(store->load(id).state, storage::RunState::Finalized);
+    ASSERT_TRUE(store->load(id).score.has_value());
+    EXPECT_EQ(store->load(id).score->verdict,
+              requirements::RunVerdict::Incomplete);
+}
+
 TEST(NativeQuicLive, DifferentAlpnNeverEstablishes) {
     TestPemFiles pem;
     auto created = NativeQuicListener::create(live_config(pem));

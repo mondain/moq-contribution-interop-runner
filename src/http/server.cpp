@@ -327,8 +327,29 @@ public:
                 }
             });
         });
-        server.Post(R"(/api/v1/runs/(.+)/stop)", [](const httplib::Request&, httplib::Response& response) {
-            error_response(response, {501, "not_implemented", "Stopping runs is not implemented."});
+        server.Post(R"(/api/v1/runs/(.+)/stop)", [this](const httplib::Request& request,
+                                                       httplib::Response& response) {
+            guarded(response, [this, &request, &response] {
+                const std::string id = request.matches[1];
+                storage::RunRecord run;
+                try {
+                    run = store->load(id);
+                } catch (const std::out_of_range&) {
+                    throw ApiError{404, "run_not_found", "The requested run was not found."};
+                }
+                if (run.state == storage::RunState::Finalized) {
+                    throw ApiError{409, "run_finalized", "The run has already finalized."};
+                }
+                if (!runs) {
+                    throw ApiError{503, "publisher_listener_unavailable",
+                                   "The native publisher listener is not configured."};
+                }
+                if (!runs->stop(id)) {
+                    throw ApiError{409, "run_not_active", "The run is not active in this process."};
+                }
+                json_response(response, {{"schema_version", 1},
+                                         {"run", detail::run_json(store->load(id))}});
+            });
         });
         server.Get(R"(/results/(.+)\.json)", [this](const httplib::Request& request,
                                                       httplib::Response& response) {

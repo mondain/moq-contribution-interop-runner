@@ -229,8 +229,9 @@ TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
               "run_not_found");
     const auto stop = client_->Post("/api/v1/runs/" + id + "/stop", "", "application/json");
     ASSERT_TRUE(stop);
-    EXPECT_EQ(stop->status, 501);
-    EXPECT_EQ(Json::parse(stop->body).at("error").at("code"), "not_implemented");
+    EXPECT_EQ(stop->status, 503);
+    EXPECT_EQ(Json::parse(stop->body).at("error").at("code"),
+              "publisher_listener_unavailable");
 }
 
 TEST_F(HttpApiTest, RejectsExecutableRunWhenListenerIsUnconfigured) {
