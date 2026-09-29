@@ -59,5 +59,20 @@ TEST(Draft21Control, PartialFrameDoesNotAdvanceInput) {
     EXPECT_EQ(input.offset(), 20u);
 }
 
+TEST(Draft21Control, RejectsClientSetupDeleteAndUseAliasTokens) {
+    // draft-ietf-moq-transport-21 section 9.1.4 forbids a client
+    // DELETE or USE_ALIAS Token in SETUP as received by the server.
+    for (const auto alias_type : {0x00u, 0x02u}) {
+        const auto wire = bytes({0xaf, 0x00, 0x00, 0x04,
+                                 0x03, 0x02, alias_type, 0x07});
+        Cursor input(wire);
+        const auto decoded = decode_control_message(input, true, true);
+        ASSERT_TRUE(std::holds_alternative<DecodeError>(decoded));
+        EXPECT_EQ(std::get<DecodeError>(decoded).code,
+                  DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.offset(), 0u);
+    }
+}
+
 }  // namespace
 }  // namespace moq::interop::wire::draft21

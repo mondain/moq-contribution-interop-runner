@@ -102,6 +102,22 @@ TEST(Draft21Setup, DuplicateKnownOptionIsRejected) {
     EXPECT_EQ(input.offset(), 0u);
 }
 
+TEST(Draft21Setup, RejectsMalformedAuthorizationTokenOption) {
+    // draft-ietf-moq-transport-21 sections 8.9 and 9.1.4.
+    const auto wire = bytes({0xaf, 0x00, 0x00, 0x03,
+                             0x03, 0x01, 0x01});
+    Cursor input(wire);
+    const auto result = decode_setup(input);
+    ASSERT_TRUE(std::holds_alternative<DecodeError>(result));
+    EXPECT_EQ(std::get<DecodeError>(result).code,
+              DecodeErrorCode::KeyValueFormattingError);
+    EXPECT_EQ(input.offset(), 0u);
+    ByteWriter output(16);
+    EXPECT_EQ(encode_setup(SetupMessage{{SetupOption{3, bytes({0x01})}}},
+                           output), SetupEncodeError::InvalidValue);
+    EXPECT_EQ(output.size(), 0u);
+}
+
 TEST(Draft21Setup, PartialFrameNeedsMoreWithoutConsumingInput) {
     const auto wire = bytes({0xaf, 0x00, 0x00, 0x04, 0x06, 0x01});
     Cursor input(wire, 100);

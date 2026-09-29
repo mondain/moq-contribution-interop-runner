@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/wire/draft21/key_values.h"
+#include "moq/interop/wire/draft21/token.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +17,7 @@ struct Location {
 
 struct PublishParameter {
     std::uint64_t type;
-    std::variant<std::uint8_t, std::uint64_t, Location,
+    std::variant<std::uint8_t, std::uint64_t, Location, Token,
                  std::vector<std::byte>> value;
 };
 

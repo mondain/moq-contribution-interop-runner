@@ -96,8 +96,17 @@ DecodeResult<std::vector<PublishParameter>> decode_publish_parameters(
                 return *error;
             }
             const auto bytes = std::get<std::span<const std::byte>>(value);
-            result.push_back({type, std::vector<std::byte>(bytes.begin(),
-                                                            bytes.end())});
+            if (type == 0x03) {
+                const auto token = decode_token(bytes, working.offset() - bytes.size());
+                if (const auto* error = std::get_if<DecodeError>(&token)) return *error;
+                if (std::holds_alternative<NeedMore>(token)) {
+                    return violation(parameter_offset, "truncated draft-21 Token");
+                }
+                result.push_back({type, std::get<Token>(token)});
+            } else {
+                result.push_back({type, std::vector<std::byte>(bytes.begin(),
+                                                               bytes.end())});
+            }
         } else {
             return violation(parameter_offset,
                              "unknown or out-of-scope draft-21 PUBLISH parameter");

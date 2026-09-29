@@ -67,6 +67,37 @@ TEST(Draft21Publish, ParsesHighBitPriorityAsOneByteNotVarint) {
     EXPECT_EQ(std::get<std::uint8_t>(parameters[0].value), 200u);
 }
 
+TEST(Draft21Publish, ParsesAuthorizationTokenStructure) {
+    // draft-ietf-moq-transport-21 sections 8.9 and 9.20.3.
+    const auto wire = bytes({0x1d, 0x00, 0x14,
+                             0x01, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a',
+                             0x04, 't', 'e', 's', 't', 0x02,
+                             0x01, 0x03, 0x03, 0x03, 0x00, 0xaa});
+    Cursor input(wire);
+    const auto decoded = decode_publish(input);
+    ASSERT_TRUE(std::holds_alternative<PublishMessage>(decoded));
+    const auto& parameters = std::get<PublishMessage>(decoded).parameters;
+    ASSERT_EQ(parameters.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<Token>(parameters[0].value));
+    const auto& token = std::get<Token>(parameters[0].value);
+    EXPECT_EQ(token.alias_type, TokenAliasType::UseValue);
+    EXPECT_EQ(token.token_type, 0u);
+    EXPECT_EQ(token.value, bytes({0xaa}));
+}
+
+TEST(Draft21Publish, MalformedTokenUsesFormattingError) {
+    const auto wire = bytes({0x1d, 0x00, 0x12,
+                             0x01, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a',
+                             0x04, 't', 'e', 's', 't', 0x02,
+                             0x01, 0x03, 0x01, 0x01});
+    Cursor input(wire);
+    const auto decoded = decode_publish(input);
+    ASSERT_TRUE(std::holds_alternative<DecodeError>(decoded));
+    EXPECT_EQ(std::get<DecodeError>(decoded).code,
+              DecodeErrorCode::KeyValueFormattingError);
+    EXPECT_EQ(input.offset(), 0u);
+}
+
 TEST(Draft21Publish, RejectsOutOfScopeFillParameters) {
     // draft-ietf-moq-transport-21 sections 9.20.1 and 9.20.16.
     const auto wire = bytes({0x1d, 0x00, 0x11,

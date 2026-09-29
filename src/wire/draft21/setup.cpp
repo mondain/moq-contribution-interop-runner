@@ -1,5 +1,7 @@
 #include "moq/interop/wire/draft21/setup.h"
 
+#include "moq/interop/wire/draft21/token.h"
+
 #include <array>
 #include <limits>
 #include <span>
@@ -90,6 +92,14 @@ DecodeResult<SetupMessage> decode_setup(Cursor& input) {
         }
         if (const auto* error = std::get_if<DecodeError>(&value)) return *error;
         const auto value_bytes = std::get<std::span<const std::byte>>(value);
+        if (option_type == 3) {
+            const auto token = decode_token(value_bytes,
+                                            payload.offset() - value_bytes.size());
+            if (const auto* error = std::get_if<DecodeError>(&token)) return *error;
+            if (std::holds_alternative<NeedMore>(token)) {
+                return protocol_error(option_offset, "truncated SETUP Token");
+            }
+        }
         result.options.push_back({option_type,
                                   std::vector<std::byte>(value_bytes.begin(),
                                                          value_bytes.end())});
@@ -122,6 +132,10 @@ std::optional<SetupEncodeError> encode_setup(const SetupMessage& message,
         }
         const auto* bytes = std::get_if<std::vector<std::byte>>(&option.value);
         if (!bytes || bytes->size() > kMaximumBodyLength) {
+            return SetupEncodeError::InvalidValue;
+        }
+        if (option.type == 3 &&
+            !std::holds_alternative<Token>(decode_token(*bytes))) {
             return SetupEncodeError::InvalidValue;
         }
         if (!write_vi64(bytes->size(), body) || !body.append_bytes(*bytes)) {
