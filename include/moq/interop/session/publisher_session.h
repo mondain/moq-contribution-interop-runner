@@ -404,6 +404,7 @@ struct PublisherSessionConfig {
     std::size_t maximum_active_subscriptions{256};
     std::size_t maximum_subscription_history{4'096};
     std::size_t maximum_subscription_key_bytes{1u << 20};
+    std::size_t maximum_auth_token_cache_bytes{1u << 20};
     wire::draft18::Limits wire_limits{};
 };
 

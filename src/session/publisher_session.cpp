@@ -6,6 +6,7 @@
 #include <deque>
 #include <limits>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
@@ -289,7 +290,8 @@ bool valid_config(const PublisherSessionConfig& config) {
            config.maximum_local_stream_history != 0 &&
            config.maximum_active_subscriptions != 0 &&
            config.maximum_subscription_history != 0 &&
-           config.maximum_subscription_key_bytes != 0;
+           config.maximum_subscription_key_bytes != 0 &&
+           config.maximum_auth_token_cache_bytes != 0;
 }
 
 bool peer_initiated(transport::StreamId stream_id) {
@@ -424,6 +426,50 @@ std::optional<ReservedNamespaceCategory> reserved_namespace(
     return std::nullopt;
 }
 
+const wire::draft18::Parameters* message_parameters(
+    const wire::draft18::Message& message) {
+    return std::visit(
+        [](const auto& value) -> const wire::draft18::Parameters* {
+            if constexpr (requires { value.parameters; }) {
+                return &value.parameters;
+            }
+            return nullptr;
+        },
+        message);
+}
+
+std::optional<std::size_t> setup_auth_cache_size(
+    const wire::draft18::SetupMessage& setup) {
+    for (const auto& option : setup.options) {
+        if (option.type != 0x04) continue;
+        const auto* value =
+            std::get_if<wire::draft18::VarIntValue>(&option.value);
+        if (!value || value->value > std::numeric_limits<std::size_t>::max()) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(value->value);
+    }
+    return std::size_t{0};
+}
+
+std::optional<std::vector<wire::draft18::Token>> setup_tokens(
+    const wire::draft18::SetupMessage& setup) {
+    std::vector<wire::draft18::Token> tokens;
+    for (const auto& option : setup.options) {
+        if (option.type != 0x03) continue;
+        const auto* bytes =
+            std::get_if<wire::draft18::ByteValue>(&option.value);
+        if (!bytes) return std::nullopt;
+        wire::Cursor cursor(bytes->bytes);
+        const auto decoded = wire::draft18::decode_token(
+            cursor, bytes->bytes.size());
+        const auto* token = std::get_if<wire::draft18::Token>(&decoded);
+        if (!token) return std::nullopt;
+        tokens.push_back(*token);
+    }
+    return tokens;
+}
+
 }  // namespace
 
 class PublisherSession::Impl {
@@ -468,6 +514,7 @@ public:
         bool peer_goaway_observed{false};
         bool local_goaway_observed{false};
         bool terminal{false};
+        bool token_rejected{false};
         std::optional<SubscriptionState> subscription;
     };
 
@@ -488,6 +535,17 @@ public:
         active_subscriptions;
     std::map<std::pair<RequestInitiator, std::uint64_t>, transport::StreamId>
         established_aliases;
+    struct CachedToken {
+        std::uint64_t type{0};
+        std::vector<std::byte> value;
+    };
+    std::map<std::pair<RequestInitiator, std::uint64_t>, CachedToken>
+        token_cache;
+    std::size_t peer_token_cache_bytes{0};
+    std::size_t local_token_cache_bytes{0};
+    std::size_t peer_token_cache_limit{0};
+    std::size_t local_token_cache_limit{0};
+    std::vector<wire::draft18::Token> pending_local_setup_tokens;
     std::optional<std::uint64_t> highest_peer_request_id;
     std::optional<std::uint64_t> highest_local_request_id;
     std::optional<std::uint64_t> peer_goaway_cutoff;
@@ -724,8 +782,206 @@ public:
                                           stream_id, message})) {
             return false;
         }
+        if (const auto* parameters = message_parameters(message)) {
+            if (!process_token_parameters(transition, initiator, stream_id,
+                                          *parameters, true)) {
+                if (terminal()) return false;
+                requests.at(stream_id).token_rejected = true;
+                return true;
+            }
+        }
         return register_subscription(transition, requests.at(stream_id),
                                      message);
+    }
+
+    bool process_token_parameters(SessionTransition& transition,
+                                  RequestInitiator sender,
+                                  transport::StreamId stream_id,
+                                  const wire::draft18::Parameters& parameters,
+                                  bool fin_on_reject) {
+        auto& occupied = sender == RequestInitiator::Peer
+                             ? peer_token_cache_bytes
+                             : local_token_cache_bytes;
+        const auto limit = sender == RequestInitiator::Peer
+                               ? peer_token_cache_limit
+                               : local_token_cache_limit;
+        const auto reject = [&](std::uint64_t error_code) {
+            if (sender == RequestInitiator::Peer) {
+                transition.actions.emplace_back(SendMessageAction{
+                    stream_id,
+                    wire::draft18::RequestErrorMessage{
+                        error_code, 0, {}, std::nullopt},
+                    fin_on_reject});
+            } else {
+                emit(transition, EvidenceKind::LocalObservationError,
+                     LocalObservationErrorEvidence{stream_id});
+            }
+            return false;
+        };
+        const auto close_or_local_error = [&](std::uint64_t error_code,
+                                              const char* reason) {
+            if (sender == RequestInitiator::Peer) {
+                protocol_close(transition, stream_id, error_code, reason);
+            } else {
+                emit(transition, EvidenceKind::LocalObservationError,
+                     LocalObservationErrorEvidence{stream_id});
+            }
+            return false;
+        };
+        struct ResolvedToken {
+            std::uint64_t type;
+            std::span<const std::byte> value;
+        };
+        struct ResolvedTokenLess {
+            bool operator()(const ResolvedToken& lhs,
+                            const ResolvedToken& rhs) const {
+                if (lhs.type != rhs.type) return lhs.type < rhs.type;
+                return std::lexicographical_compare(
+                    lhs.value.begin(), lhs.value.end(),
+                    rhs.value.begin(), rhs.value.end());
+            }
+        };
+        std::set<ResolvedToken, ResolvedTokenLess> resolved;
+        std::vector<decltype(token_cache)::node_type> retired_tokens;
+        const auto append_resolved = [&](std::uint64_t type,
+                                         std::span<const std::byte> value) {
+            return resolved.insert(ResolvedToken{type, value}).second ||
+                   reject(0x4);
+        };
+        for (const auto& parameter : parameters) {
+            if (parameter.type != 0x03) continue;
+            const auto* token =
+                std::get_if<wire::draft18::Token>(&parameter.value);
+            if (!token) return close_or_local_error(0x6, "invalid token");
+            if (token->alias_type == wire::draft18::TokenAliasType::UseValue) {
+                if (!append_resolved(token->token_type.value_or(0),
+                                     token->token_value)) return false;
+                continue;
+            }
+            if (!token->alias) {
+                return close_or_local_error(0x6, "missing token alias");
+            }
+            const auto key = std::pair{sender, *token->alias};
+            const auto existing = token_cache.find(key);
+            if (token->alias_type == wire::draft18::TokenAliasType::Register) {
+                if (existing != token_cache.end()) {
+                    return close_or_local_error(
+                        0x14, "duplicate authorization token alias");
+                }
+                const auto bytes = std::size_t{16} + token->token_value.size();
+                if (bytes > limit - std::min(occupied, limit)) {
+                    return close_or_local_error(
+                        0x13, "authorization token cache overflow");
+                }
+                token_cache.emplace(key,
+                    CachedToken{token->token_type.value_or(0),
+                                token->token_value});
+                occupied += bytes;
+                if (!append_resolved(token->token_type.value_or(0),
+                                     token->token_value)) return false;
+            } else if (existing == token_cache.end()) {
+                return close_or_local_error(
+                    0x17, "unknown authorization token alias");
+            } else if (token->alias_type ==
+                       wire::draft18::TokenAliasType::Delete) {
+                occupied -= 16 + existing->second.value.size();
+                retired_tokens.push_back(token_cache.extract(existing));
+            } else {
+                if (!append_resolved(existing->second.type,
+                                     existing->second.value)) return false;
+            }
+        }
+        return true;
+    }
+
+    bool process_peer_setup_tokens(
+        SessionTransition& transition, transport::StreamId stream_id,
+        const wire::draft18::SetupMessage& setup) {
+        const auto tokens = setup_tokens(setup);
+        if (!tokens) {
+            protocol_close(transition, stream_id,
+                           kKeyValueFormattingError,
+                           "invalid setup token structure");
+            return false;
+        }
+        for (const auto& token : *tokens) {
+            if (token.alias_type == wire::draft18::TokenAliasType::Delete ||
+                token.alias_type == wire::draft18::TokenAliasType::UseAlias) {
+                protocol_close(transition, stream_id, kProtocolViolation,
+                               "setup cannot reference token alias");
+                return false;
+            }
+            if (token.alias_type == wire::draft18::TokenAliasType::UseValue) {
+                continue;
+            }
+            if (!token.alias) {
+                protocol_close(transition, stream_id,
+                               kKeyValueFormattingError,
+                               "setup token alias is missing");
+                return false;
+            }
+            const auto key = std::pair{RequestInitiator::Peer, *token.alias};
+            if (token_cache.contains(key)) {
+                protocol_close(transition, stream_id, 0x14,
+                               "duplicate setup token alias");
+                return false;
+            }
+            const auto size = std::size_t{16} + token.token_value.size();
+            if (size > peer_token_cache_limit -
+                           std::min(peer_token_cache_bytes,
+                                    peer_token_cache_limit)) {
+                // SETUP registration over the advertised limit is USE_VALUE.
+                continue;
+            }
+            token_cache.emplace(key,
+                CachedToken{token.token_type.value_or(0),
+                            token.token_value});
+            peer_token_cache_bytes += size;
+        }
+        return true;
+    }
+
+    bool apply_local_setup_tokens(SessionTransition& transition,
+                                  transport::StreamId stream_id) {
+        std::map<std::uint64_t, CachedToken> staged;
+        std::size_t staged_bytes = 0;
+        for (const auto& token : pending_local_setup_tokens) {
+            if (token.alias_type == wire::draft18::TokenAliasType::UseValue) {
+                continue;
+            }
+            if (token.alias_type != wire::draft18::TokenAliasType::Register ||
+                !token.alias) {
+                emit(transition, EvidenceKind::LocalObservationError,
+                     LocalObservationErrorEvidence{stream_id});
+                pending_local_setup_tokens.clear();
+                return false;
+            }
+            const auto key = std::pair{RequestInitiator::Local, *token.alias};
+            if (token_cache.contains(key) || staged.contains(*token.alias)) {
+                emit(transition, EvidenceKind::LocalObservationError,
+                     LocalObservationErrorEvidence{stream_id});
+                pending_local_setup_tokens.clear();
+                return false;
+            }
+            const auto size = std::size_t{16} + token.token_value.size();
+            if (size > local_token_cache_limit -
+                           std::min(local_token_cache_bytes + staged_bytes,
+                                    local_token_cache_limit)) {
+                continue;
+            }
+            staged.emplace(*token.alias,
+                           CachedToken{token.token_type.value_or(0),
+                                       token.token_value});
+            staged_bytes += size;
+        }
+        for (auto& [alias, token] : staged) {
+            token_cache.emplace(
+                std::pair{RequestInitiator::Local, alias},
+                std::move(token));
+        }
+        local_token_cache_bytes += staged_bytes;
+        pending_local_setup_tokens.clear();
+        return true;
     }
 
     bool register_subscription(SessionTransition& transition,
@@ -1000,6 +1256,7 @@ public:
             initiator == request.initiator || cross_publish_update;
         const bool context_valid =
             !request.terminal &&
+            !request.token_rejected &&
             request.request_phase != RequestPhase::UpdateFailed &&
             initiator_allowed &&
             (!cross_publish_update ||
@@ -1016,6 +1273,11 @@ public:
                                                update.request_id});
             }
             claim_request_id(initiator, update.request_id);
+            if (!process_token_parameters(transition, initiator,
+                                          request.stream_id,
+                                          update.parameters, false)) {
+                return !terminal();
+            }
             const wire::draft18::Message message = update;
             return emit(transition, EvidenceKind::RequestStateViolation,
                         RequestStateViolationEvidence{
@@ -1039,8 +1301,13 @@ public:
                                            update.request_id});
         }
         claim_request_id(initiator, update.request_id);
+        const bool tokens_accepted = process_token_parameters(
+            transition, initiator, request.stream_id,
+            update.parameters, false);
+        if (terminal()) return false;
         request.outstanding_updates.push_back(
             RequestRecord::PendingUpdate{update.request_id, initiator});
+        if (!tokens_accepted) return true;
         return emit(transition, EvidenceKind::UpdateObserved,
                     UpdateObservedEvidence{initiator, update.request_id,
                                            request.request_id,
@@ -1580,6 +1847,24 @@ public:
                                    "duplicate peer SETUP");
                     return;
                 }
+                const auto advertised_cache_size =
+                    setup_auth_cache_size(*setup);
+                if (!advertised_cache_size) {
+                    protocol_close(transition, stream_id,
+                                   kKeyValueFormattingError,
+                                   "invalid token cache option");
+                    return;
+                }
+                local_token_cache_limit = std::min(
+                    *advertised_cache_size,
+                    config.maximum_auth_token_cache_bytes);
+                if (!process_peer_setup_tokens(transition, stream_id,
+                                               *setup)) return;
+                if (local_setup_observed) {
+                    apply_local_setup_tokens(
+                        transition, *local_control_stream);
+                    if (terminal()) return;
+                }
                 peer_setup_observed = true;
                 emit(transition, EvidenceKind::PeerSetupReceived,
                      SetupEvidence{stream_id, *setup});
@@ -1905,6 +2190,31 @@ SessionTransition PublisherSession::observe_local_message(
     const auto* setup = std::get_if<wire::draft18::SetupMessage>(&message);
     if (setup && impl_->local_control_stream == stream_id &&
         !impl_->local_setup_observed && !fin) {
+        const auto advertised_cache_size = setup_auth_cache_size(*setup);
+        const auto local_tokens = setup_tokens(*setup);
+        const bool invalid_alias_reference =
+            local_tokens && std::any_of(
+                local_tokens->begin(), local_tokens->end(),
+                [](const wire::draft18::Token& token) {
+                    return token.alias_type ==
+                               wire::draft18::TokenAliasType::Delete ||
+                           token.alias_type ==
+                               wire::draft18::TokenAliasType::UseAlias;
+                });
+        if (!advertised_cache_size || !local_tokens ||
+            invalid_alias_reference ||
+            *advertised_cache_size >
+                impl_->config.maximum_auth_token_cache_bytes) {
+            impl_->emit(transition, EvidenceKind::LocalObservationError,
+                        LocalObservationErrorEvidence{stream_id});
+            return transition;
+        }
+        impl_->peer_token_cache_limit = *advertised_cache_size;
+        impl_->pending_local_setup_tokens = *local_tokens;
+        if (impl_->peer_setup_observed &&
+            !impl_->apply_local_setup_tokens(transition, stream_id)) {
+            return transition;
+        }
         impl_->local_setup_observed = true;
         impl_->emit(transition, EvidenceKind::LocalSetupObserved,
                     SetupEvidence{stream_id, *setup});

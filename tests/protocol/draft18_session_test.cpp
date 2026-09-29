@@ -2276,5 +2276,410 @@ TEST(Draft18SessionAliases, ReservedNamespaceRejectionPrecedesAliasCollision) {
     EXPECT_EQ(session.phase(), SessionPhase::Active);
 }
 
+TEST(Draft18SessionTokens, RegisterExceedsDefaultZeroCacheLimit) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const Token token{TokenAliasType::Register, 1, 0, {std::byte{'x'}}};
+    const auto result = session.on_event(StreamDataEvent{
+        0,
+        encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                              {{std::byte{'t'}}}, 1,
+                              {{0x03, token}}, {}}),
+        false});
+    ASSERT_NE(close_action(result), nullptr);
+    EXPECT_EQ(close_action(result)->application_error, 0x13u);
+}
+
+TEST(Draft18SessionTokens, DuplicateRegisteredAliasClosesSession) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const Token token{TokenAliasType::Register, 1, 0, {std::byte{'x'}}};
+    session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x03, token}}, {}}), false});
+    const auto duplicate = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, {{{std::byte{'n'}}}},
+                                 {{std::byte{'b'}}}, 2,
+                                 {{0x03, token}}, {}}), false});
+    ASSERT_NE(close_action(duplicate), nullptr);
+    EXPECT_EQ(close_action(duplicate)->application_error, 0x14u);
+}
+
+TEST(Draft18SessionTokens, UnknownAliasUsesSessionErrorCode) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const Token token{TokenAliasType::UseAlias, 9, std::nullopt, {}};
+    const auto result = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x03, token}}, {}}), false});
+    ASSERT_NE(close_action(result), nullptr);
+    EXPECT_EQ(close_action(result)->application_error, 0x17u);
+}
+
+TEST(Draft18SessionTokens, DeleteReleasesCacheCapacityAndAlias) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    const auto publish_with = [&](std::uint64_t id, char name,
+                                  Token token) {
+        return PublishMessage{id, name_space,
+                              {{static_cast<std::byte>(name)}}, id,
+                              {{0x03, std::move(token)}}, {}};
+    };
+    const auto registered = session.on_event(StreamDataEvent{
+        0, encode(publish_with(0, 'a',
+            Token{TokenAliasType::Register, 1, 0, {std::byte{'x'}}})), false});
+    EXPECT_TRUE(registered.actions.empty());
+    const auto removed = session.on_event(StreamDataEvent{
+        4, encode(publish_with(2, 'b',
+            Token{TokenAliasType::Delete, 1, std::nullopt, {}})), false});
+    EXPECT_TRUE(removed.actions.empty());
+    const auto reused = session.on_event(StreamDataEvent{
+        8, encode(publish_with(4, 'c',
+            Token{TokenAliasType::Register, 1, 0, {std::byte{'y'}}})), false});
+    EXPECT_TRUE(reused.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionTokens, CacheSizeIncludesSixteenByteAliasOverhead) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{32, {}}}}}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const auto first = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x03, Token{TokenAliasType::Register,
+                                               1, 0, {std::byte{'x'}}}}}, {}}),
+        false});
+    EXPECT_TRUE(first.actions.empty());
+    const auto overflow = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{2, {{{std::byte{'n'}}}},
+                                 {{std::byte{'b'}}}, 2,
+                                 {{0x03, Token{TokenAliasType::Register,
+                                               2, 0, {std::byte{'y'}}}}}, {}}),
+        false});
+    ASSERT_NE(close_action(overflow), nullptr);
+    EXPECT_EQ(close_action(overflow)->application_error, 0x13u);
+}
+
+TEST(Draft18SessionTokens, RepeatedResolvedTokenValueIsMalformed) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const auto result = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::Register, 1, 0,
+                             {std::byte{'x'}}}},
+                {0x03, Token{TokenAliasType::UseValue, std::nullopt, 0,
+                             {std::byte{'x'}}}}},
+               {}}),
+        false});
+    ASSERT_EQ(result.actions.size(), 1u);
+    const auto* send = std::get_if<SendMessageAction>(&result.actions.front());
+    ASSERT_NE(send, nullptr);
+    EXPECT_EQ(std::get<RequestErrorMessage>(send->message).error_code, 0x4u);
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionTokens, SetupRegisterOverDefaultZeroIsUseValue) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    establish_with_local_setup(session);
+    wire::ByteWriter encoded_token(64);
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::Register, 1, 0,
+                                   {std::byte{'x'}}},
+                             encoded_token).has_value());
+    const auto peer_setup = encode(SetupMessage{{
+        {0x03, ByteValue{{encoded_token.bytes().begin(),
+                          encoded_token.bytes().end()}}}}});
+    const auto setup_result = session.on_event(
+        StreamDataEvent{2, peer_setup, false});
+    EXPECT_TRUE(setup_result.actions.empty());
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    const auto use = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x03, Token{TokenAliasType::UseAlias,
+                                               1, std::nullopt, {}}}}, {}}),
+        false});
+    ASSERT_NE(close_action(use), nullptr);
+    EXPECT_EQ(close_action(use)->application_error, 0x17u);
+}
+
+TEST(Draft18SessionTokens, SetupRegisterWithinAdvertisedLimitCanBeUsed) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    wire::ByteWriter encoded_token(64);
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::Register, 1, 0,
+                                   {std::byte{'x'}}},
+                             encoded_token).has_value());
+    const auto peer_setup = encode(SetupMessage{{
+        {0x03, ByteValue{{encoded_token.bytes().begin(),
+                          encoded_token.bytes().end()}}}}});
+    const auto setup_result = session.on_event(
+        StreamDataEvent{2, peer_setup, false});
+    EXPECT_TRUE(setup_result.actions.empty());
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    const auto use = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{0, {{{std::byte{'n'}}}},
+                                 {{std::byte{'a'}}}, 1,
+                                 {{0x03, Token{TokenAliasType::UseAlias,
+                                               1, std::nullopt, {}}}}, {}}),
+        false});
+    EXPECT_TRUE(use.actions.empty());
+}
+
+TEST(Draft18SessionTokens, UnknownAliasInRequestUpdateClosesSession) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const TrackNamespace name_space{{{std::byte{'n'}}}};
+    session.on_event(StreamDataEvent{
+        0, encode(SubscribeMessage{0, name_space,
+                                   {{std::byte{'a'}}}, {}}), false});
+    session.observe_local_message(0, SubscribeOkMessage{7, {}, {}}, false);
+    const auto update = session.on_event(StreamDataEvent{
+        0, encode(RequestUpdateMessage{
+               2, {{0x03, Token{TokenAliasType::UseAlias,
+                                  9, std::nullopt, {}}}}}), false});
+    ASSERT_NE(close_action(update), nullptr);
+    EXPECT_EQ(close_action(update)->application_error, 0x17u);
+}
+
+TEST(Draft18SessionTokens, RegisterPersistsWhenTrackRequestIsRejected) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const auto rejected = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'.'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::Register, 1, 0,
+                             {std::byte{'x'}}}}}, {}}), false});
+    ASSERT_EQ(rejected.actions.size(), 1u);
+    EXPECT_EQ(std::get<RequestErrorMessage>(
+                  std::get<SendMessageAction>(rejected.actions.front()).message)
+                  .error_code,
+              0x10u);
+    const auto use = session.on_event(StreamDataEvent{
+        4, encode(PublishMessage{
+               2, {{{std::byte{'n'}}}}, {{std::byte{'b'}}}, 2,
+               {{0x03, Token{TokenAliasType::UseAlias, 1,
+                             std::nullopt, {}}}}, {}}), false});
+    EXPECT_TRUE(use.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionTokens, UnknownAliasCloseAbsorbsLaterFin) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    activate(session);
+    const auto rejected = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::UseAlias, 9,
+                             std::nullopt, {}}}}, {}}), false});
+    ASSERT_NE(close_action(rejected), nullptr);
+    const auto fin = session.on_event(StreamDataEvent{0, {}, true});
+    EXPECT_TRUE(fin.actions.empty());
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::RequestObserved;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind == EvidenceKind::ResponseViolation;
+                            }),
+              0);
+}
+
+TEST(Draft18SessionTokens, SetupCannotDeleteOrUseAlias) {
+    using namespace wire::draft18;
+    for (const auto alias_type : {TokenAliasType::Delete,
+                                  TokenAliasType::UseAlias}) {
+        PublisherSession session;
+        establish_with_local_setup(session);
+        wire::ByteWriter encoded_token(64);
+        ASSERT_TRUE(encode_token(Token{alias_type, 1, std::nullopt, {}},
+                                 encoded_token).has_value());
+        const auto result = session.on_event(StreamDataEvent{
+            2, encode(SetupMessage{{
+                   {0x03, ByteValue{{encoded_token.bytes().begin(),
+                                     encoded_token.bytes().end()}}}}}),
+            false});
+        ASSERT_NE(close_action(result), nullptr);
+        EXPECT_EQ(close_action(result)->application_error, 0x3u);
+    }
+}
+
+TEST(Draft18SessionTokens, AliasSpacesAreIndependentBySender) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    session.observe_local_message(
+        3, SetupMessage{{{0x04, VarIntValue{17, {}}}}}, false);
+    session.on_event(StreamDataEvent{
+        2, encode(SetupMessage{{{0x04, VarIntValue{17, {}}}}}), false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    const auto peer = session.on_event(StreamDataEvent{
+        0, encode(PublishMessage{
+               0, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::Register, 1, 0,
+                             {std::byte{'x'}}}}}, {}}), false});
+    EXPECT_TRUE(peer.actions.empty());
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    const auto local = session.observe_local_message(
+        1, PublishMessage{
+               1, {{{std::byte{'n'}}}}, {{std::byte{'b'}}}, 2,
+               {{0x03, Token{TokenAliasType::Register, 1, 0,
+                             {std::byte{'y'}}}}}, {}}, false);
+    EXPECT_TRUE(local.actions.empty());
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionTokens, LocalSetupAliasIsAvailableAfterPeerLimitArrives) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    wire::ByteWriter encoded_token(64);
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::Register, 1, 0,
+                                   {std::byte{'x'}}},
+                             encoded_token).has_value());
+    session.observe_local_message(
+        3, SetupMessage{{
+               {0x03, ByteValue{{encoded_token.bytes().begin(),
+                                 encoded_token.bytes().end()}}}}},
+        false);
+    session.on_event(StreamDataEvent{
+        2, encode(SetupMessage{{{0x04, VarIntValue{17, {}}}}}), false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    const auto use = session.observe_local_message(
+        1, PublishMessage{
+               1, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::UseAlias, 1,
+                             std::nullopt, {}}}}, {}}, false);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_EQ(std::count_if(evidence.begin(), evidence.end(),
+                            [](const EvidenceEvent& value) {
+                                return value.kind ==
+                                       EvidenceKind::LocalObservationError;
+                            }),
+              0);
+    EXPECT_TRUE(use.actions.empty());
+}
+
+TEST(Draft18SessionTokens, LocalSetupCannotReferenceUnregisteredAlias) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    wire::ByteWriter encoded_token(64);
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::UseAlias, 1,
+                                   std::nullopt, {}},
+                             encoded_token).has_value());
+    const auto invalid = session.observe_local_message(
+        3, SetupMessage{{
+               {0x03, ByteValue{{encoded_token.bytes().begin(),
+                                 encoded_token.bytes().end()}}}}},
+        false);
+    EXPECT_EQ(session.phase(), SessionPhase::AwaitingSetup);
+    const auto evidence = session.take_evidence(32);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& value) {
+                               return value.kind ==
+                                      EvidenceKind::LocalObservationError;
+                           }),
+              evidence.end());
+    EXPECT_TRUE(invalid.actions.empty());
+    session.observe_local_message(3, SetupMessage{}, false);
+    session.on_event(StreamDataEvent{2, {kSetup.begin(), kSetup.end()}, false});
+    EXPECT_EQ(session.phase(), SessionPhase::Active);
+}
+
+TEST(Draft18SessionTokens, InvalidLocalSetupRegistrationDoesNotPartiallyCache) {
+    using namespace wire::draft18;
+    PublisherSession session;
+    session.on_event(established());
+    session.observe_local_stream(3, LocalStreamPurpose::Control);
+    wire::ByteWriter first_token(64);
+    wire::ByteWriter second_token(64);
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::Register, 1, 0,
+                                   {std::byte{'x'}}},
+                             first_token).has_value());
+    ASSERT_TRUE(encode_token(Token{TokenAliasType::Register, 1, 0,
+                                   {std::byte{'y'}}},
+                             second_token).has_value());
+    session.observe_local_message(
+        3, SetupMessage{{
+               {0x03, ByteValue{{first_token.bytes().begin(),
+                                 first_token.bytes().end()}}},
+               {0x03, ByteValue{{second_token.bytes().begin(),
+                                 second_token.bytes().end()}}}}}, false);
+    session.on_event(StreamDataEvent{
+        2, encode(SetupMessage{{{0x04, VarIntValue{34, {}}}}}), false});
+    ASSERT_EQ(session.phase(), SessionPhase::Active);
+    session.take_evidence(64);
+    session.observe_local_stream(1, LocalStreamPurpose::Request);
+    session.observe_local_message(
+        1, PublishMessage{
+               1, {{{std::byte{'n'}}}}, {{std::byte{'a'}}}, 1,
+               {{0x03, Token{TokenAliasType::UseAlias, 1,
+                             std::nullopt, {}}}}, {}}, false);
+    const auto evidence = session.take_evidence(64);
+    EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                           [](const EvidenceEvent& value) {
+                               return value.kind ==
+                                      EvidenceKind::LocalObservationError;
+                           }),
+              evidence.end());
+}
+
 }  // namespace
 }  // namespace moq::interop::session
