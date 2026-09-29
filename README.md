@@ -43,8 +43,9 @@ The HTTP run configuration accepts an optional opaque-byte track fixture:
 
 For draft 21, set `draft` to `21` and select exactly one of
 `d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or
-`d21-setup-duplicate-unknown-options` in `scenarios`; the endpoint advertises
-ALPN `moqt-21`. The two SETUP profiles send the draft-21 reserved GREASE option
+`d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`, or
+`d21-server-sends-path` in `scenarios`; the endpoint advertises ALPN `moqt-21`.
+The two unknown-option SETUP profiles send the draft-21 reserved GREASE option
 type `0x9D` once or twice, then require a valid PUBLISH and REQUEST_OK before
 scoring receiver requirements `D21-9-1-MUST-287`, `-288`, and (for duplicates)
 `-290` as passes. A close or timeout without that exchange stays `NOT_RUN`,
@@ -56,6 +57,15 @@ relay or a full draft-21 conformance test. Unexercised catalog lines remain
 invalid first message on a publisher-opened request stream is recorded and
 fails `D21-6-3-MUST-NOT-141`; a different permitted but unsupported opener is
 not reported as a publisher failure.
+
+The AUTHORITY and PATH profiles deliberately send an otherwise well-formed
+server SETUP with one role-forbidden option. They score
+`D21-9-1-1-MUST-293` or `D21-9-1-2-MUST-300` only after the local SETUP and
+the publisher client's application close are observed. The expected close codes
+are `INVALID_AUTHORITY` (`0x19`) and `INVALID_PATH` (`0x8`); a different
+application close code fails the selected requirement, while an unobserved or
+transport-level close remains `NOT_RUN`. A completed publication after the
+forbidden option, without the required close, also fails the requirement.
 
 `namespace_hex` is an ordered array of 0–32 nonempty hex-encoded namespace
 fields; `name_hex` is the possibly empty hex-encoded Track Name. The decoded

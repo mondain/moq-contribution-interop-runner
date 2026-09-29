@@ -30,11 +30,33 @@ constexpr std::string_view kDraft21UnknownOptionScenario =
     "d21-setup-unknown-options";
 constexpr std::string_view kDraft21DuplicateUnknownOptionScenario =
     "d21-setup-duplicate-unknown-options";
+constexpr std::string_view kDraft21ServerAuthorityScenario =
+    "d21-server-sends-authority";
+constexpr std::string_view kDraft21ServerPathScenario =
+    "d21-server-sends-path";
 
 bool draft21_scenario_id(std::string_view scenario) {
     return scenario == kDraft21AnnouncementScenario ||
            scenario == kDraft21UnknownOptionScenario ||
-           scenario == kDraft21DuplicateUnknownOptionScenario;
+           scenario == kDraft21DuplicateUnknownOptionScenario ||
+           scenario == kDraft21ServerAuthorityScenario ||
+           scenario == kDraft21ServerPathScenario;
+}
+
+scenarios::Draft21SetupProbe draft21_setup_probe(std::string_view scenario) {
+    if (scenario == kDraft21UnknownOptionScenario) {
+        return scenarios::Draft21SetupProbe::UnknownOption;
+    }
+    if (scenario == kDraft21DuplicateUnknownOptionScenario) {
+        return scenarios::Draft21SetupProbe::DuplicateUnknownOption;
+    }
+    if (scenario == kDraft21ServerAuthorityScenario) {
+        return scenarios::Draft21SetupProbe::ServerAuthority;
+    }
+    if (scenario == kDraft21ServerPathScenario) {
+        return scenarios::Draft21SetupProbe::ServerPath;
+    }
+    return scenarios::Draft21SetupProbe::None;
 }
 
 std::vector<std::byte> bytes_of(const std::string& value) {
@@ -178,7 +200,10 @@ storage::EvidenceEvent stored_draft21_evidence(
     case scenarios::Draft21AnnouncementEventKind::HarnessLimit:
         result.kind = "harness_limit"; break;
     }
-    result.detail = "draft-21 announcement evidence";
+    result.detail = source.application_close_code
+        ? "draft-21 peer application close code " +
+              std::to_string(*source.application_close_code)
+        : "draft-21 announcement evidence";
     result.scenario_id = scenario_id;
     if (source.stream_id) {
         result.stream_id = std::to_string(*source.stream_id);
@@ -321,12 +346,7 @@ public:
             listener, std::move(name_space),
             bytes_of(run_config.track_fixture->track_name),
             run_config.timeout,
-            run_config.scenario_ids.front() == kDraft21UnknownOptionScenario
-                ? scenarios::Draft21SetupProbe::UnknownOption
-                : run_config.scenario_ids.front() ==
-                          kDraft21DuplicateUnknownOptionScenario
-                      ? scenarios::Draft21SetupProbe::DuplicateUnknownOption
-                      : scenarios::Draft21SetupProbe::None);
+            draft21_setup_probe(run_config.scenario_ids.front()));
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();

@@ -18,7 +18,9 @@ namespace moq::interop::scenarios {
 using Draft21Clock = std::chrono::steady_clock;
 
 enum class Draft21AnnouncementStatus { Running, Passed, Failed, TimedOut };
-enum class Draft21SetupProbe { None, UnknownOption, DuplicateUnknownOption };
+enum class Draft21SetupProbe {
+    None, UnknownOption, DuplicateUnknownOption, ServerAuthority, ServerPath
+};
 
 enum class Draft21AnnouncementEventKind {
     TransportEstablished,
@@ -37,6 +39,7 @@ struct Draft21AnnouncementEvent {
     Draft21AnnouncementEventKind kind;
     std::optional<transport::StreamId> stream_id;
     std::optional<std::uint64_t> request_id;
+    std::optional<std::uint64_t> application_close_code;
 };
 
 struct Draft21AnnouncementContext {
@@ -83,7 +86,9 @@ private:
 
     void record(Draft21AnnouncementEventKind kind,
                 std::optional<transport::StreamId> stream_id = std::nullopt,
-                std::optional<std::uint64_t> request_id = std::nullopt);
+                std::optional<std::uint64_t> request_id = std::nullopt,
+                std::optional<std::uint64_t> application_close_code =
+                    std::nullopt);
     void fail_harness();
     void close_protocol(std::uint64_t error,
                         std::optional<transport::StreamId> stream_id);

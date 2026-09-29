@@ -156,5 +156,52 @@ TEST(Draft21Evaluators, SetupProbeNeedsSetupBeforePublisherAction) {
               OutcomeState::NotRun);
 }
 
+TEST(Draft21Evaluators, ForbiddenServerUriOptionsRequireExactPeerClose) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(
+        source, root / "requirements/draft21.json");
+    for (const auto& probe : {
+             std::pair{scenarios::Draft21SetupProbe::ServerAuthority,
+                       "D21-9-1-1-MUST-293"},
+             std::pair{scenarios::Draft21SetupProbe::ServerPath,
+                       "D21-9-1-2-MUST-300"}}) {
+        auto context = passed_context();
+        context.complete = false;
+        context.target_publish_seen = false;
+        context.response_delivered = false;
+        context.setup_probe = probe.first;
+        context.evidence = {
+            {scenarios::Draft21AnnouncementEventKind::LocalSetupSent, 3,
+             std::nullopt},
+            {scenarios::Draft21AnnouncementEventKind::PeerClosed,
+             std::nullopt, std::nullopt}};
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              probe.second).state, OutcomeState::NotRun);
+        const auto expected = probe.first ==
+                                      scenarios::Draft21SetupProbe::ServerAuthority
+                                  ? 0x19u : 0x8u;
+        context.evidence[1].application_close_code = expected;
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              probe.second).state, OutcomeState::Pass);
+        context.evidence[1].application_close_code = 3;
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              probe.second).state, OutcomeState::Fail);
+        context.evidence.clear();
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              probe.second).state, OutcomeState::NotRun);
+
+        context = passed_context();
+        context.setup_probe = probe.first;
+        context.evidence.insert(
+            context.evidence.begin() + 1,
+            {scenarios::Draft21AnnouncementEventKind::LocalSetupSent, 3,
+             std::nullopt});
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              probe.second).state, OutcomeState::Fail);
+    }
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

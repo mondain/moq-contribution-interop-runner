@@ -245,6 +245,16 @@ public:
                                               {"mode", "observed"},
                                               {"scenario", "d21-setup-duplicate-unknown-options"},
                                               {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft21)}},
+                                             {{"draft", 21}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "d21-server-sends-authority"},
+                                              {"configured", runs && runs->supports(
+                                                  app::DraftVersion::Draft21)}},
+                                             {{"draft", 21}, {"transport", "native-quic"},
+                                              {"mode", "observed"},
+                                              {"scenario", "d21-server-sends-path"},
+                                              {"configured", runs && runs->supports(
                                                   app::DraftVersion::Draft21)}}})},
                                          {"validator", detail::build_json(build)}});
             });
@@ -296,7 +306,11 @@ public:
                      requested.scenario_ids.front() ==
                          "d21-setup-unknown-options" ||
                      requested.scenario_ids.front() ==
-                         "d21-setup-duplicate-unknown-options");
+                         "d21-setup-duplicate-unknown-options" ||
+                     requested.scenario_ids.front() ==
+                         "d21-server-sends-authority" ||
+                     requested.scenario_ids.front() ==
+                         "d21-server-sends-path");
                 if ((!draft18_scenario && !draft21_scenario) ||
                     requested.transport != app::TransportKind::NativeQuic ||
                     requested.mode != app::RunMode::Observed ||

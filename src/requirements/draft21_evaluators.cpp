@@ -17,6 +17,11 @@ constexpr const char* kUnknownEvaluator =
     "d21-unknown-setup-options-ignored";
 constexpr const char* kDuplicateEvaluator =
     "d21-duplicate-unknown-setup-options-accepted";
+constexpr const char* kAuthorityScenario = "d21-server-sends-authority";
+constexpr const char* kPathScenario = "d21-server-sends-path";
+constexpr const char* kAuthorityEvaluator =
+    "d21-server-authority-invalid-authority";
+constexpr const char* kPathEvaluator = "d21-server-path-invalid-path";
 
 bool includes(const std::vector<std::string>& values, const char* value) {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -69,10 +74,22 @@ std::vector<Outcome> evaluate_draft21_announcement(
         observed && setup_sent != context.evidence.end() &&
         publish_seen != context.evidence.end() && setup_sent < publish_seen &&
         context.setup_probe != scenarios::Draft21SetupProbe::None;
+    const bool publish_after_setup =
+        observed && setup_sent != context.evidence.end() &&
+        publish_seen != context.evidence.end() && setup_sent < publish_seen;
     const bool duplicate_probe_passed =
         unknown_probe_passed &&
         context.setup_probe ==
             scenarios::Draft21SetupProbe::DuplicateUnknownOption;
+    const auto peer_closed = std::find_if(
+        context.evidence.begin(), context.evidence.end(),
+        [](const scenarios::Draft21AnnouncementEvent& event) {
+            return event.kind ==
+                   scenarios::Draft21AnnouncementEventKind::PeerClosed;
+        });
+    const bool peer_closed_after_setup =
+        setup_sent != context.evidence.end() &&
+        peer_closed != context.evidence.end() && setup_sent < peer_closed;
     const bool invalid_opener = std::any_of(
         context.evidence.begin(), context.evidence.end(),
         [](const scenarios::Draft21AnnouncementEvent& event) {
@@ -103,6 +120,26 @@ std::vector<Outcome> evaluate_draft21_announcement(
                 includes(requirement.scenarios, kDuplicateScenario) &&
                 includes(requirement.evaluators, kDuplicateEvaluator)) {
                 state = OutcomeState::Pass;
+            }
+        } else if (requirement.id == "D21-9-1-1-MUST-293" ||
+                   requirement.id == "D21-9-1-2-MUST-300") {
+            const bool authority = requirement.id == "D21-9-1-1-MUST-293";
+            const auto expected_probe =
+                authority ? scenarios::Draft21SetupProbe::ServerAuthority
+                          : scenarios::Draft21SetupProbe::ServerPath;
+            if (context.setup_probe == expected_probe &&
+                includes(requirement.scenarios,
+                         authority ? kAuthorityScenario : kPathScenario) &&
+                includes(requirement.evaluators,
+                         authority ? kAuthorityEvaluator : kPathEvaluator)) {
+                if (publish_after_setup) {
+                    state = OutcomeState::Fail;
+                } else if (peer_closed_after_setup &&
+                           peer_closed->application_close_code) {
+                    state = *peer_closed->application_close_code ==
+                                    (authority ? 0x19u : 0x8u)
+                                ? OutcomeState::Pass : OutcomeState::Fail;
+                }
             }
         } else if (context.setup_probe == scenarios::Draft21SetupProbe::None &&
                    requirement.id == "D21-6-3-MUST-NOT-141" &&

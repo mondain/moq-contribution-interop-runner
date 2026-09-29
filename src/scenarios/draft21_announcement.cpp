@@ -39,12 +39,14 @@ Draft21AnnouncementController::Draft21AnnouncementController(
 void Draft21AnnouncementController::record(
     Draft21AnnouncementEventKind kind,
     std::optional<transport::StreamId> stream_id,
-    std::optional<std::uint64_t> request_id) {
+    std::optional<std::uint64_t> request_id,
+    std::optional<std::uint64_t> application_close_code) {
     if (context_.evidence.size() >= kMaximumEvidence) {
         fail_harness();
         return;
     }
-    context_.evidence.push_back({kind, stream_id, request_id});
+    context_.evidence.push_back(
+        {kind, stream_id, request_id, application_close_code});
 }
 
 void Draft21AnnouncementController::fail_harness() {
@@ -209,8 +211,17 @@ void Draft21AnnouncementController::handle_event(
         }
         return;
     }
-    if (std::holds_alternative<transport::PeerCloseEvent>(event) ||
-        std::holds_alternative<transport::LocalCloseEvent>(event) ||
+    if (const auto* close = std::get_if<transport::PeerCloseEvent>(&event)) {
+        const auto application_close_code =
+            close->error_space == transport::CloseErrorSpace::Application
+                ? std::optional<std::uint64_t>{close->error_code}
+                : std::nullopt;
+        record(Draft21AnnouncementEventKind::PeerClosed, std::nullopt,
+               std::nullopt, application_close_code);
+        status_ = Draft21AnnouncementStatus::TimedOut;
+        return;
+    }
+    if (std::holds_alternative<transport::LocalCloseEvent>(event) ||
         std::holds_alternative<transport::IdleTimeoutEvent>(event)) {
         record(Draft21AnnouncementEventKind::PeerClosed);
         status_ = Draft21AnnouncementStatus::TimedOut;
@@ -233,7 +244,8 @@ void Draft21AnnouncementController::open_local_setup() {
         return;
     }
     wire::draft21::SetupMessage setup;
-    if (context_.setup_probe != Draft21SetupProbe::None) {
+    if (context_.setup_probe == Draft21SetupProbe::UnknownOption ||
+        context_.setup_probe == Draft21SetupProbe::DuplicateUnknownOption) {
         // Section 13 reserves 0x9d as a GREASE Setup Option.  It is an
         // odd (byte-valued) option in the version-independent namespace.
         setup.options.push_back({0x9d, std::vector<std::byte>{std::byte{0xaa}}});
@@ -241,6 +253,14 @@ void Draft21AnnouncementController::open_local_setup() {
             setup.options.push_back(
                 {0x9d, std::vector<std::byte>{std::byte{0xbb}}});
         }
+    } else if (context_.setup_probe == Draft21SetupProbe::ServerAuthority) {
+        const auto authority = std::vector<std::byte>{
+            std::byte{'e'}, std::byte{'x'}, std::byte{'a'}, std::byte{'m'},
+            std::byte{'p'}, std::byte{'l'}, std::byte{'e'}, std::byte{'.'},
+            std::byte{'o'}, std::byte{'r'}, std::byte{'g'}};
+        setup.options.push_back({5, authority});
+    } else if (context_.setup_probe == Draft21SetupProbe::ServerPath) {
+        setup.options.push_back({1, std::vector<std::byte>{std::byte{'/'}}});
     }
     wire::ByteWriter output(65'546);
     if (wire::draft21::encode_setup(setup, output)) {

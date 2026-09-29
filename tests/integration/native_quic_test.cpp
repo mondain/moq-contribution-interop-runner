@@ -1351,6 +1351,157 @@ TEST(NativeQuicLive, HttpDraft21GreaseSetupProfilesScoreReceiverRequirements) {
     }
 }
 
+TEST(NativeQuicLive, HttpDraft21ForbiddenServerUriOptionsScorePeerClose) {
+    // draft-ietf-moq-transport-21 sections 9.1.1, 9.1.2, and 12.2.
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{18, "test", true, {}});
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{
+            21, "test", true,
+            {{"D21-9-1-1-MUST-293", requirements::Strength::Must,
+              {"9.1.1", 3493, 3494, 1, 1}, "client receiving AUTHORITY",
+              "Close with INVALID_AUTHORITY.",
+              requirements::Applicability::Applicable,
+              requirements::Testability::Testable,
+              {"d21-server-sends-authority"},
+              {"d21-server-authority-invalid-authority"}, ""},
+             {"D21-9-1-2-MUST-300", requirements::Strength::Must,
+              {"9.1.2", 3510, 3510, 1, 1}, "client receiving PATH",
+              "Close with INVALID_PATH.",
+              requirements::Applicability::Applicable,
+              requirements::Testability::Testable,
+              {"d21-server-sends-path"},
+              {"d21-server-path-invalid-path"}, ""}}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 2, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    http::HttpServer server(draft18, draft21, store,
+                            app::BuildInfo{"test", "test", {}},
+                            {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    struct Probe {
+        std::string scenario;
+        std::vector<std::byte> setup;
+        std::uint64_t close_code;
+        std::string pass_id;
+        std::string not_run_id;
+    };
+    const std::array probes{
+        Probe{"d21-server-sends-authority",
+              bytes({0xaf, 0x00, 0x00, 0x0d, 0x05, 0x0b,
+                     'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'o', 'r', 'g'}),
+              0x19, "D21-9-1-1-MUST-293", "D21-9-1-2-MUST-300"},
+        Probe{"d21-server-sends-path",
+              bytes({0xaf, 0x00, 0x00, 0x03, 0x01, 0x01, '/'}),
+              0x8, "D21-9-1-2-MUST-300", "D21-9-1-1-MUST-293"}};
+    for (const auto& probe : probes) {
+        SCOPED_TRACE(probe.scenario);
+        const nlohmann::json request = {
+            {"draft", 21}, {"transport", "native-quic"},
+            {"mode", "observed"},
+            {"scenarios", nlohmann::json::array({probe.scenario})},
+            {"timeout_ms", 1000},
+            {"track", {{"namespace_hex", nlohmann::json::array({"6d65646961"})},
+                       {"name_hex", "74657374"}}}};
+        const auto created = api.Post("/api/v1/runs", request.dump(),
+                                      "application/json");
+        ASSERT_TRUE(created);
+        ASSERT_EQ(created->status, 201) << created->body;
+        const auto body = nlohmann::json::parse(created->body);
+        const auto port = body.at("publisher_endpoint").at("port")
+                              .get<std::uint16_t>();
+        const auto id = body.at("run").at("id").get<std::string>();
+        auto client = test::QuicheTestClient::create(
+            {.port = port,
+             .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto setup = client->stream(3);
+            return setup && setup->data == probe.setup;
+        }));
+        ASSERT_TRUE(client->close(probe.close_code, {}));
+        ASSERT_TRUE(pump_until(*client, [&] {
+            return store->load(id).state == storage::RunState::Finalized;
+        }));
+        const auto result = api.Get("/api/v1/runs/" + id);
+        ASSERT_TRUE(result);
+        ASSERT_EQ(result->status, 200);
+        const auto run = nlohmann::json::parse(result->body).at("run");
+        EXPECT_EQ(run.at("score").at("verdict"), "incomplete");
+        const auto& outcomes = run.at("outcomes");
+        const auto state_for = [&](const std::string& requirement_id) {
+            const auto found = std::find_if(
+                outcomes.begin(), outcomes.end(),
+                [&](const auto& outcome) {
+                    return outcome.at("requirement_id") == requirement_id;
+                });
+            return found == outcomes.end()
+                       ? std::string("missing")
+                       : found->at("state").template get<std::string>();
+        };
+        EXPECT_EQ(state_for(probe.pass_id), "pass");
+        EXPECT_EQ(state_for(probe.not_run_id), "not_run");
+        const auto stored = store->load(id);
+        const auto close_event = std::find_if(
+            stored.events.begin(), stored.events.end(),
+            [](const auto& event) { return event.kind == "peer_closed"; });
+        ASSERT_NE(close_event, stored.events.end());
+        EXPECT_EQ(close_event->detail,
+                  "draft-21 peer application close code " +
+                      std::to_string(probe.close_code));
+
+        const auto wrong_created = api.Post("/api/v1/runs", request.dump(),
+                                            "application/json");
+        ASSERT_TRUE(wrong_created);
+        ASSERT_EQ(wrong_created->status, 201) << wrong_created->body;
+        const auto wrong_body = nlohmann::json::parse(wrong_created->body);
+        const auto wrong_port = wrong_body.at("publisher_endpoint").at("port")
+                                    .get<std::uint16_t>();
+        const auto wrong_id = wrong_body.at("run").at("id").get<std::string>();
+        auto wrong_client = test::QuicheTestClient::create(
+            {.port = wrong_port,
+             .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+        ASSERT_NE(wrong_client, nullptr);
+        ASSERT_TRUE(pump_until(*wrong_client, [&] {
+            const auto setup = wrong_client->stream(3);
+            return setup && setup->data == probe.setup;
+        }));
+        ASSERT_TRUE(wrong_client->close(3, {}));
+        ASSERT_TRUE(pump_until(*wrong_client, [&] {
+            return store->load(wrong_id).state == storage::RunState::Finalized;
+        }));
+        const auto wrong_result = api.Get("/api/v1/runs/" + wrong_id);
+        ASSERT_TRUE(wrong_result);
+        ASSERT_EQ(wrong_result->status, 200);
+        const auto wrong_run =
+            nlohmann::json::parse(wrong_result->body).at("run");
+        EXPECT_EQ(wrong_run.at("score").at("verdict"), "fail");
+        const auto& wrong_outcomes = wrong_run.at("outcomes");
+        const auto failed = std::find_if(
+            wrong_outcomes.begin(), wrong_outcomes.end(),
+            [&](const auto& outcome) {
+                return outcome.at("requirement_id") == probe.pass_id;
+            });
+        ASSERT_NE(failed, wrong_outcomes.end());
+        EXPECT_EQ(failed->at("state"), "fail");
+        const auto wrong_stored = store->load(wrong_id);
+        const auto wrong_close = std::find_if(
+            wrong_stored.events.begin(), wrong_stored.events.end(),
+            [](const auto& event) { return event.kind == "peer_closed"; });
+        ASSERT_NE(wrong_close, wrong_stored.events.end());
+        EXPECT_EQ(wrong_close->detail,
+                  "draft-21 peer application close code 3");
+    }
+}
+
 TEST(NativeQuicLive, HttpStopFinalizesAnActiveRunWithoutPublisherFailure) {
     TestPemFiles pem;
     auto store = std::make_shared<storage::SqliteRunStore>(
