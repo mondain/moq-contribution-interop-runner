@@ -154,7 +154,8 @@ target_compile_options(moq-interop-session PRIVATE
 
 add_library(moq-interop-scenarios
     src/scenarios/engine.cpp
-    src/scenarios/draft18.cpp)
+    src/scenarios/draft18.cpp
+    src/scenarios/action_dispatcher.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -259,6 +260,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft18-scenarios-tests PRIVATE
                           moq-interop-scenarios GTest::gtest_main)
     add_test(NAME draft18-scenarios COMMAND moq-interop-draft18-scenarios-tests)
+
+    add_executable(moq-interop-draft18-action-dispatcher-tests
+                   tests/protocol/draft18_action_dispatcher_test.cpp)
+    target_link_libraries(moq-interop-draft18-action-dispatcher-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft18-action-dispatcher
+             COMMAND moq-interop-draft18-action-dispatcher-tests)
 
     add_executable(moq-interop-draft18-evaluators-tests
                    tests/protocol/draft18_evaluators_test.cpp)
