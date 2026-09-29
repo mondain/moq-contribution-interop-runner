@@ -200,7 +200,7 @@ TEST(NativeQuicConfiguration, RejectsInvalidValuesBeforePathLoading) {
     const std::array cases{
         Case{[](auto& value) { value.expected_alpn.clear(); }},
         Case{[](auto& value) { value.expected_alpn = bytes({'m', 'o', 'q'}); }},
-        Case{[](auto& value) { value.bind_address = "0.0.0.0"; }},
+        Case{[](auto& value) { value.bind_address = "::"; }},
         Case{[](auto& value) { value.idle_timeout = std::chrono::milliseconds{0}; }},
         Case{[](auto& value) { value.retry_token_lifetime = std::chrono::seconds{0}; }},
         Case{[](auto& value) { value.max_udp_payload = 1199; }},
@@ -832,6 +832,27 @@ TEST(NativeQuicLifecycle, CloseImmediatelyRejectsEveryApplicationOperation) {
               TransportStatus::ConnectionClosed);
 }
 
+TEST(NativeQuicLive, WildcardUdpBindAcceptsLoopbackPublisher) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.bind_address = "0.0.0.0";
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    EXPECT_EQ(created.listener->bound_endpoint().address, "0.0.0.0");
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            established |=
+                std::holds_alternative<ConnectionEstablishedEvent>(event);
+        }
+        return established;
+    }));
+}
+
 TEST(NativeQuicLive, RetryHandshakeOwnsEvidenceAndDeliversStreamAndDatagram) {
     TestPemFiles pem;
     auto created = NativeQuicListener::create(live_config(pem));
@@ -1001,7 +1022,7 @@ TEST(NativeQuicLive, HttpRunCreationReturnsUsablePublisherEndpoint) {
     auto runs = std::make_shared<app::NativeRunManager>(
         draft18, store,
         app::NativeRunManagerConfig{
-            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .bind_address = "0.0.0.0", .advertised_address = "127.0.0.1",
             .port_start = 0, .port_end = 0,
             .maximum_active_runs = 1, .certificate_path = pem.certificate(),
             .private_key_path = pem.key()});

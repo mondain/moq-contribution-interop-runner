@@ -842,7 +842,7 @@ NativeQuicListenerError validate_config(
     const NativeQuicListenerConfig& config) {
     constexpr auto max_varint = (std::uint64_t{1} << 62u) - 1u;
     constexpr auto max_stream_count = std::uint64_t{1} << 60u;
-    if (config.bind_address == "0.0.0.0" || config.bind_address == "::") {
+    if (config.bind_address == "::") {
         return NativeQuicListenerError::UnsupportedBindAddress;
     }
     if (config.bind_address.empty() ||
@@ -1103,7 +1103,7 @@ NativeQuicListenerCreateResult create_native_quic_listener(
     address.sin_family = AF_INET;
     address.sin_port = htons(impl->config.bind_port);
     if (inet_pton(AF_INET, impl->config.bind_address.c_str(),
-                  &address.sin_addr) != 1 || address.sin_addr.s_addr == 0) {
+                  &address.sin_addr) != 1) {
         return {nullptr, NativeQuicListenerError::UnsupportedBindAddress};
     }
     impl->socket_fd = impl->dependencies.socket.open(
