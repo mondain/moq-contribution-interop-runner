@@ -241,6 +241,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
                                "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-native-quic-tests PRIVATE
                           moq-interop-transport moq-interop-quiche
+                          moq-interop-scenarios
                           GTest::gtest_main)
     target_compile_options(moq-interop-native-quic-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>

@@ -1,4 +1,6 @@
 #include "moq/interop/transport/native_quic_listener.h"
+#include "moq/interop/scenarios/draft18.h"
+#include "moq/interop/scenarios/run_controller.h"
 #include "transport/quiche_native_listener_internal.h"
 #include "support/quiche_client.h"
 
@@ -870,6 +872,48 @@ TEST(NativeQuicLive, RetryHandshakeOwnsEvidenceAndDeliversStreamAndDatagram) {
         }
         return got_stream && got_datagram;
     }));
+}
+
+TEST(NativeQuicLive, Draft18ControllerCompletesSubscribeResponseOverQuic) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::QuicheTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    namespace scenarios = moq::interop::scenarios;
+    scenarios::Draft18RunController controller(
+        *created.listener,
+        scenarios::subscribe_to_publisher_track(
+            {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1,
+            std::chrono::milliseconds(500), std::chrono::milliseconds(20)));
+
+    ASSERT_TRUE(pump_until(*client, [&] {
+        controller.poll(scenarios::Clock::now());
+        const auto setup = client->stream(3);
+        return client->established() && setup && setup->data.size() == 4;
+    }));
+    EXPECT_EQ(client->stream(3)->data,
+              bytes({0xaf, 0x00, 0x00, 0x00}));
+    ASSERT_TRUE(client->send_stream(
+        2, bytes({0xaf, 0x00, 0x00, 0x00}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        controller.poll(scenarios::Clock::now());
+        const auto request = client->stream(1);
+        return request && request->data.size() == 10;
+    }));
+    EXPECT_EQ(client->stream(1)->data,
+              bytes({0x03, 0x00, 0x07, 0x01, 0x01, 0x01,
+                     'n', 0x01, 'x', 0x00}));
+    ASSERT_TRUE(controller.context().stimulus_delivered);
+    ASSERT_TRUE(client->send_stream(
+        1, bytes({0x04, 0x00, 0x04, 0x05, 0x00, 0x02, 0x09}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto state = controller.poll(scenarios::Clock::now());
+        return state.status == scenarios::ScenarioStatus::Passed;
+    }));
+    EXPECT_TRUE(controller.context().complete);
 }
 
 TEST(NativeQuicLive, DifferentAlpnNeverEstablishes) {
