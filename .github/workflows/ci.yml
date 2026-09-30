@@ -54,6 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Install probe dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
       - name: Build pinned image
         run: bash scripts/container-build.sh build
       - name: Check image health
@@ -73,12 +75,36 @@ jobs:
             --docs /usr/share/moq-interop/docs \
             --requirements /usr/share/moq-interop/requirements \
             --tls-cert /run/moq-interop-tls/cert.pem \
-            --tls-key /run/moq-interop-tls/key.pem
+            --tls-key /run/moq-interop-tls/key.pem \
+            --driver-executable /bin/true \
+            --driver-log-root /tmp/driver-logs
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:18080/healthz; then
-              exit 0
+            if curl --fail --silent http://127.0.0.1:18080/healthz \
+                | jq -e '.status == "ok" and any(.executable_profiles[];
+                    .mode == "driven" and .configured)' >/dev/null; then
+              break
             fi
             sleep 1
           done
-          docker logs moq-interop-ci
-          exit 1
+          created=$(curl --fail --silent --show-error -X POST \
+            http://127.0.0.1:18080/api/v1/runs \
+            -H 'Content-Type: application/json' \
+            -d '{"draft":18,"transport":"webtransport","mode":"driven","scenarios":["subscribe-to-publisher-track"],"timeout_ms":1000,"track":{"namespace_hex":["6e"],"name_hex":"78"}}')
+          run_id=$(jq -er '.run.id' <<<"$created")
+          for attempt in $(seq 1 30); do
+            result=$(curl --fail --silent --show-error \
+              "http://127.0.0.1:18080/api/v1/runs/$run_id")
+            if jq -e '.run.state == "finalized" and .run.verdict == "error"' \
+                <<<"$result" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          jq -e '.run.state == "finalized" and .run.verdict == "error"' \
+            <<<"$result" >/dev/null
+          curl --fail --silent --show-error \
+            "http://127.0.0.1:18080/api/v1/runs/$run_id/events" \
+            | jq -e 'any(.items[]; .kind == "publisher_process")' >/dev/null
+          curl --fail --silent --show-error \
+            "http://127.0.0.1:18080/results/$run_id.json" \
+            | jq -e '.requirements | length > 0' >/dev/null
