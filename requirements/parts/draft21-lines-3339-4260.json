@@ -77,7 +77,7 @@
       "id": "D21-9-1-1-MUST-NOT-292", "strength": "MustNot",
       "source": {"section": "9.1.1", "first_line": 3489, "last_line": 3490, "occurrence": 1, "clause": 2},
       "actor": "endpoint sending SETUP over WebTransport", "summary": "Do not send AUTHORITY when WebTransport is used.",
-      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-webtransport-publisher-setup"], "evaluators": ["d21-webtransport-no-authority-option"],
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-webtransport-publisher-setup", "d21-publisher-request-stream-placement"], "evaluators": ["d21-webtransport-no-authority-option"],
       "rationale": "The listener can inspect the client publisher's WebTransport SETUP. Section 6.2.1 carries the URI in the extended CONNECT exchange instead; no publisher-versus-subscriber assumption is needed."
     },
     {
@@ -126,7 +126,7 @@
       "id": "D21-9-1-2-MUST-NOT-299", "strength": "MustNot",
       "source": {"section": "9.1.2", "first_line": 3505, "last_line": 3506, "occurrence": 1, "clause": 2},
       "actor": "endpoint sending SETUP over WebTransport", "summary": "Do not send PATH when WebTransport is used.",
-      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-webtransport-publisher-setup"], "evaluators": ["d21-webtransport-no-path-option"],
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-webtransport-publisher-setup", "d21-publisher-request-stream-placement"], "evaluators": ["d21-webtransport-no-path-option"],
       "rationale": "Observe the publisher client's WebTransport SETUP. The request URI is already conveyed through extended CONNECT under Section 6.2.1."
     },
     {

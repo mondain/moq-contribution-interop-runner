@@ -207,6 +207,18 @@ storage::EvidenceEvent stored_draft21_evidence(
         ? "draft-21 peer application close code " +
               std::to_string(*source.application_close_code)
         : "draft-21 announcement evidence";
+    if (source.kind == scenarios::Draft21AnnouncementEventKind::PeerSetupReceived) {
+        result.detail = "draft-21 peer SETUP option types: ";
+        if (source.setup_option_types.empty()) {
+            result.detail += "none";
+        } else {
+            for (std::size_t index = 0; index < source.setup_option_types.size();
+                 ++index) {
+                if (index != 0) result.detail += ",";
+                result.detail += std::to_string(source.setup_option_types[index]);
+            }
+        }
+    }
     result.scenario_id = scenario_id;
     if (source.stream_id) {
         result.stream_id = std::to_string(*source.stream_id);

@@ -239,5 +239,42 @@ TEST(Draft21Evaluators, WebTransportServerUriOptionRowsRequireExactClose) {
     }
 }
 
+TEST(Draft21Evaluators, PublisherWebTransportSetupOmitsAuthorityAndPath) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(
+        source, root / "requirements/draft21.json");
+    auto context = passed_context();
+    context.webtransport = true;
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-1-MUST-NOT-292").state, OutcomeState::NotRun);
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-2-MUST-NOT-299").state, OutcomeState::NotRun);
+
+    context.evidence.insert(context.evidence.begin() + 1,
+        {scenarios::Draft21AnnouncementEventKind::PeerSetupReceived, 2,
+         std::nullopt});
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-1-MUST-NOT-292").state, OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-2-MUST-NOT-299").state, OutcomeState::Pass);
+
+    context.complete = false;
+    context.peer_setup_option_types = {5};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-1-MUST-NOT-292").state, OutcomeState::Fail);
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-2-MUST-NOT-299").state, OutcomeState::NotRun);
+    context.peer_setup_option_types = {1};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-1-MUST-NOT-292").state, OutcomeState::NotRun);
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-2-MUST-NOT-299").state, OutcomeState::Fail);
+    context.webtransport = false;
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          "D21-9-1-2-MUST-NOT-299").state, OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

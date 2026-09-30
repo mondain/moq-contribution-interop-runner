@@ -43,6 +43,7 @@ struct Draft21AnnouncementEvent {
     std::optional<transport::StreamId> stream_id;
     std::optional<std::uint64_t> request_id;
     std::optional<std::uint64_t> application_close_code;
+    std::vector<std::uint64_t> setup_option_types;
 };
 
 struct Draft21AnnouncementContext {
@@ -52,6 +53,7 @@ struct Draft21AnnouncementContext {
     std::vector<Draft21AnnouncementEvent> evidence;
     Draft21SetupProbe setup_probe{Draft21SetupProbe::None};
     bool webtransport{false};
+    std::vector<std::uint64_t> peer_setup_option_types;
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -100,7 +102,8 @@ private:
                 std::optional<transport::StreamId> stream_id = std::nullopt,
                 std::optional<std::uint64_t> request_id = std::nullopt,
                 std::optional<std::uint64_t> application_close_code =
-                    std::nullopt);
+                    std::nullopt,
+                std::vector<std::uint64_t> setup_option_types = {});
     void fail_harness();
     void close_protocol(std::uint64_t error,
                         std::optional<transport::StreamId> stream_id);

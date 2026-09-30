@@ -5720,7 +5720,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-webtransport-publisher-setup"
+        "d21-webtransport-publisher-setup",
+        "d21-publisher-request-stream-placement"
       ],
       "evaluators": [
         "d21-webtransport-no-authority-option"
@@ -5864,7 +5865,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-webtransport-publisher-setup"
+        "d21-webtransport-publisher-setup",
+        "d21-publisher-request-stream-placement"
       ],
       "evaluators": [
         "d21-webtransport-no-path-option"

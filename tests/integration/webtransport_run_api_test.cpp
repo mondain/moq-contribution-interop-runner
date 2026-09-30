@@ -67,7 +67,10 @@ bool publish_setup(unsigned port, unsigned draft,
                    const std::shared_ptr<storage::SqliteRunStore>& store,
                    const app::RunId& id,
                    std::optional<std::uint64_t> reject_code = std::nullopt,
-                   std::string expected_requirement_id = {}) {
+                   std::string expected_requirement_id = {},
+                   std::vector<std::uint8_t> peer_setup = {0xaf, 0, 0, 0},
+                   requirements::OutcomeState expected_state =
+                       requirements::OutcomeState::Pass) {
     const int socket_fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (socket_fd < 0) return false;
     const int flags = ::fcntl(socket_fd, F_GETFL, 0);
@@ -167,9 +170,8 @@ bool publish_setup(unsigned port, unsigned draft,
                 auto* stream = picowt_create_local_stream(cnx, 0, h3,
                                                            control->stream_id);
                 if (stream == nullptr) break;
-                static constexpr std::array<std::uint8_t, 4> setup{0xaf, 0, 0, 0};
                 if (picoquic_add_to_stream_with_ctx(cnx, stream->stream_id,
-                    setup.data(), setup.size(), 0, stream) != 0) break;
+                    peer_setup.data(), peer_setup.size(), 0, stream) != 0) break;
                 setup_sent = true;
             }
             if (draft == 18 && state.request_bytes.size() >= 10 &&
@@ -191,17 +193,18 @@ bool publish_setup(unsigned port, unsigned draft,
                     if (picoquic_close(cnx, *reject_code) != 0) break;
                     close_sent = true;
                 }
-                if (reject_code) {
+                if (reject_code || !expected_requirement_id.empty()) {
                     success = std::any_of(run.outcomes.begin(), run.outcomes.end(),
                         [&](const auto& outcome) {
                             return outcome.requirement_id == expected_requirement_id &&
-                                   outcome.state == requirements::OutcomeState::Pass;
+                                   outcome.state == expected_state;
                         });
                     if (success) continue;
                 }
                 for (const auto& event : run.events) {
                     if (event.kind == "peer_setup_received" &&
-                        (draft == 21 || response_sent) && !reject_code)
+                        (draft == 21 || response_sent) && !reject_code &&
+                        expected_requirement_id.empty())
                         success = true;
                 }
                 if (draft == 18) {
@@ -339,6 +342,55 @@ TEST(WebTransportRunApi, ScoresForbiddenServerSetupOptionsByTransport) {
         const auto audit = requirements::audit_execution(
             *draft21, requirements::draft21_executable_bindings(), records);
         EXPECT_TRUE(audit.consistent());
+    }
+}
+
+TEST(WebTransportRunApi, ScoresForbiddenPublisherSetupOptionsWithEvidence) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    for (const auto& [row, option, error] : {
+             std::tuple{"D21-9-1-1-MUST-NOT-292",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 5, 1, 'x'}, 5u},
+             std::tuple{"D21-9-1-2-MUST-NOT-299",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 1, 1, '/'}, 1u}}) {
+        const Json request{{"draft", 21}, {"transport", "webtransport"},
+                           {"mode", "observed"},
+                           {"scenarios", Json::array({"d21-publisher-request-stream-placement"})},
+                           {"timeout_ms", 2000},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                      {"name_hex", "78"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(),
+                                       "application/json");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 201) << response->body;
+        const auto body = Json::parse(response->body);
+        const auto id = body.at("run").at("id").get<std::string>();
+        const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+        ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt, row,
+                                  option, requirements::OutcomeState::Fail));
+        const auto record = store->load(id);
+        ASSERT_EQ(record.state, storage::RunState::Finalized);
+        const auto received = std::find_if(record.events.begin(),
+            record.events.end(), [](const auto& event) {
+                return event.kind == "peer_setup_received";
+            });
+        ASSERT_NE(received, record.events.end());
+        EXPECT_NE(received->detail.find("option types: " + std::to_string(error)),
+                  std::string::npos);
+        const std::array records{record};
+        EXPECT_TRUE(requirements::audit_execution(
+            *draft21, requirements::draft21_executable_bindings(), records).consistent());
     }
 }
 

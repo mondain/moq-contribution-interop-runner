@@ -43,13 +43,15 @@ void Draft21AnnouncementController::record(
     Draft21AnnouncementEventKind kind,
     std::optional<transport::StreamId> stream_id,
     std::optional<std::uint64_t> request_id,
-    std::optional<std::uint64_t> application_close_code) {
+    std::optional<std::uint64_t> application_close_code,
+    std::vector<std::uint64_t> setup_option_types) {
     if (context_.evidence.size() >= kMaximumEvidence) {
         fail_harness();
         return;
     }
-    context_.evidence.push_back(
-        {kind, stream_id, request_id, application_close_code});
+    context_.evidence.push_back({kind, stream_id, request_id,
+                                 application_close_code,
+                                 std::move(setup_option_types)});
 }
 
 void Draft21AnnouncementController::fail_harness() {
@@ -80,8 +82,26 @@ void Draft21AnnouncementController::handle_control(
         return;
     }
     for (const auto& message : result.messages) {
-        if (std::holds_alternative<wire::draft21::SetupMessage>(message)) {
-            record(Draft21AnnouncementEventKind::PeerSetupReceived, stream_id);
+        const auto* setup = std::get_if<wire::draft21::SetupMessage>(&message);
+        if (!setup) continue;
+        context_.peer_setup_option_types.clear();
+        for (const auto& option : setup->options)
+            context_.peer_setup_option_types.push_back(option.type);
+        record(Draft21AnnouncementEventKind::PeerSetupReceived, stream_id,
+               std::nullopt, std::nullopt,
+               context_.peer_setup_option_types);
+        if (!context_.webtransport) continue;
+        if (std::find(context_.peer_setup_option_types.begin(),
+                      context_.peer_setup_option_types.end(), 5u) !=
+            context_.peer_setup_option_types.end()) {
+            close_protocol(0x19, stream_id);
+            return;
+        }
+        if (std::find(context_.peer_setup_option_types.begin(),
+                      context_.peer_setup_option_types.end(), 1u) !=
+            context_.peer_setup_option_types.end()) {
+            close_protocol(0x8, stream_id);
+            return;
         }
     }
 }

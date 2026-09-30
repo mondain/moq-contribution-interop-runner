@@ -22,6 +22,9 @@ constexpr const char* kPathScenario = "d21-server-sends-path";
 constexpr const char* kAuthorityEvaluator =
     "d21-server-authority-invalid-authority";
 constexpr const char* kPathEvaluator = "d21-server-path-invalid-path";
+constexpr const char* kNoAuthorityEvaluator =
+    "d21-webtransport-no-authority-option";
+constexpr const char* kNoPathEvaluator = "d21-webtransport-no-path-option";
 
 bool includes(const std::vector<std::string>& values, const char* value) {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -96,6 +99,12 @@ std::vector<Outcome> evaluate_draft21_announcement(
             return event.kind ==
                    scenarios::Draft21AnnouncementEventKind::InvalidRequestOpener;
         });
+    const bool peer_setup_received = std::any_of(
+        context.evidence.begin(), context.evidence.end(),
+        [](const scenarios::Draft21AnnouncementEvent& event) {
+            return event.kind ==
+                   scenarios::Draft21AnnouncementEventKind::PeerSetupReceived;
+        });
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
     for (const auto& requirement : catalog.requirements) {
@@ -104,6 +113,26 @@ std::vector<Outcome> evaluate_draft21_announcement(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (requirement.id == "D21-9-1-1-MUST-NOT-292" ||
+                   requirement.id == "D21-9-1-2-MUST-NOT-299") {
+            const bool authority =
+                requirement.id == "D21-9-1-1-MUST-NOT-292";
+            if (context.webtransport && peer_setup_received &&
+                includes(requirement.scenarios, kScenario) &&
+                includes(requirement.evaluators,
+                         authority ? kNoAuthorityEvaluator : kNoPathEvaluator)) {
+                const auto option_type = authority ? 5u : 1u;
+                if (std::find(context.peer_setup_option_types.begin(),
+                              context.peer_setup_option_types.end(),
+                              option_type) !=
+                    context.peer_setup_option_types.end()) {
+                    state = OutcomeState::Fail;
+                } else if (observed &&
+                           context.setup_probe ==
+                               scenarios::Draft21SetupProbe::None) {
+                    state = OutcomeState::Pass;
+                }
+            }
         } else if (requirement.id == "D21-9-1-MUST-287" ||
                    requirement.id == "D21-9-1-MUST-288") {
             const auto* scenario =
@@ -180,6 +209,10 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
          kAllowedOpenerEvaluator, {"publish_observed", "response_delivered"}},
         {21, "D21-9-MUST-282", kScenario, kEvaluator,
          {"publish_observed", "response_delivered"}},
+        {21, "D21-9-1-1-MUST-NOT-292", kScenario,
+         kNoAuthorityEvaluator, {"peer_setup_received"}},
+        {21, "D21-9-1-2-MUST-NOT-299", kScenario,
+         kNoPathEvaluator, {"peer_setup_received"}},
         {21, "D21-9-1-MUST-287", kUnknownScenario,
          kUnknownEvaluator,
          {"local_setup_sent", "publish_observed", "response_delivered"}},

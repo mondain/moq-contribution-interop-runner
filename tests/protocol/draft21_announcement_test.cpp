@@ -142,6 +142,36 @@ TEST(Draft21Announcement, ServerUriProbesSendExactSetupOptionOverWebTransport) {
     }
 }
 
+TEST(Draft21Announcement, WebTransportRejectsForbiddenPublisherSetupOptions) {
+    for (const auto& [peer_setup, expected_error] : {
+             std::pair{bytes({0xaf, 0x00, 0x00, 0x0d, 0x05, 0x0b,
+                              'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'o', 'r', 'g'}),
+                       0x19u},
+             std::pair{bytes({0xaf, 0x00, 0x00, 0x03, 0x01, 0x01, '/'}),
+                       0x8u}}) {
+        ScriptedTransport transport;
+        Draft21AnnouncementController controller(
+            transport, {bytes({'m', 'e', 'd', 'i', 'a'})},
+            bytes({'t', 'e', 's', 't'}), std::chrono::milliseconds(100),
+            Draft21SetupProbe::None, true);
+        transport.inbound = {established(),
+            transport::StreamDataEvent{2, peer_setup, false}};
+        const auto result = controller.poll(Draft21Clock::time_point{});
+        EXPECT_EQ(transport.close_error, expected_error);
+        EXPECT_EQ(result.status, Draft21AnnouncementStatus::Failed);
+        EXPECT_FALSE(result.harness_failed);
+        const auto& evidence = controller.context().evidence;
+        const auto setup_event = std::find_if(
+            evidence.begin(), evidence.end(), [](const auto& event) {
+                return event.kind ==
+                    Draft21AnnouncementEventKind::PeerSetupReceived;
+            });
+        ASSERT_NE(setup_event, evidence.end());
+        EXPECT_EQ(setup_event->setup_option_types,
+                  std::vector<std::uint64_t>{expected_error == 0x19u ? 5u : 1u});
+    }
+}
+
 TEST(Draft21Announcement, AcknowledgesNamespaceBeforeTargetPublish) {
     ScriptedTransport transport;
     auto controller = make_controller(transport);

@@ -167,7 +167,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-5/175 draft-18 and 9/175 draft-21 applicable, testable MUST/MUST NOT rows
+5/175 draft-18 and 11/175 draft-21 applicable, testable MUST/MUST NOT rows
 have registered executable bindings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
