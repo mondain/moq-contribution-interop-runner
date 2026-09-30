@@ -13,7 +13,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake g++ libsqlite3-dev libssl-dev perl pkg-config jq
+          sudo apt-get install -y cmake g++ libsqlite3-dev libssl-dev perl pkg-config jq openssl curl
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - name: Build

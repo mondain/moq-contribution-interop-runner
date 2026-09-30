@@ -153,6 +153,17 @@ is expected for the current narrow profiles. As of this checkpoint, only
 5/175 draft-18 and 7/175 draft-21 applicable, testable MUST/MUST NOT rows
 have registered executable bindings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
+After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
+stored execution evidence. The JSON output gains `execution_audit` with
+per-run canonical SHA-256 hashes, scored-row counts, and explicit findings for
+passed rows missing declared evidence, score mismatches, active/error runs,
+and inconsistent repeats. Run ID, timestamps, and incidental evidence arrival
+order are excluded from the hash, while evidence kind counts remain significant;
+draft, transport, track, timeout, and validator revision remain part of the
+comparison group. A zero-run audit can be consistent but proves no behavior.
+Compare repetitions only when the publisher binary and fixture are the same;
+publisher identity is not yet stored as a grouping key. Run this audit after
+the service has stopped creating runs so pagination sees a stable database.
 
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner

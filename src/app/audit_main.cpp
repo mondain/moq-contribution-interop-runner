@@ -5,14 +5,19 @@
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/execution_audit.h"
+#include "moq/interop/storage/run_store.h"
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <algorithm>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -23,6 +28,7 @@ using Json = nlohmann::json;
 struct Options {
     unsigned draft{0};
     std::string format{"text"};
+    std::optional<std::filesystem::path> database;
     std::filesystem::path docs =
         std::filesystem::exists(
             std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "docs")
@@ -37,7 +43,7 @@ struct Options {
 
 void usage() {
     std::cerr << "Usage: moq-interop-audit --draft 18|21 [--format text|json] "
-                 "[--docs DIR] [--requirements DIR]\n";
+                 "[--docs DIR] [--requirements DIR] [--database PATH]\n";
 }
 
 Options parse(int argc, char* argv[]) {
@@ -58,6 +64,8 @@ Options parse(int argc, char* argv[]) {
             result.docs = value;
         } else if (flag == "--requirements") {
             result.requirements = value;
+        } else if (flag == "--database") {
+            result.database = value;
         } else {
             throw std::invalid_argument("unknown option " + std::string(flag));
         }
@@ -95,6 +103,28 @@ int main(int argc, char* argv[]) {
                 catalog, bindings,
                 moq::interop::app::executable_scenarios(options.draft));
         const bool static_complete = source_audit.ok() && report.complete();
+        std::optional<moq::interop::requirements::ExecutionAudit> execution;
+        std::vector<moq::interop::storage::RunRecord> runs;
+        if (options.database) {
+            if (!std::filesystem::is_regular_file(*options.database))
+                throw std::invalid_argument("run database does not exist");
+            moq::interop::storage::SqliteRunStore store(
+                *options.database, moq::interop::app::build_info());
+            for (std::size_t offset = 0;; offset += 100) {
+                const auto page = store.list({100, offset});
+                for (const auto& summary : page.items) {
+                    if (static_cast<unsigned>(summary.config.draft) == options.draft)
+                        runs.push_back(store.load(summary.id));
+                }
+                if (!page.next_offset) break;
+            }
+            std::sort(runs.begin(), runs.end(),
+                [](const auto& left, const auto& right) {
+                    return left.id < right.id;
+                });
+            execution = moq::interop::requirements::audit_execution(
+                catalog, bindings, runs);
+        }
         if (options.format == "text") {
             std::cout << "Draft " << options.draft << " source " << source.sha256 << '\n'
                       << "Required executable coverage: " << report.required_covered
@@ -105,6 +135,13 @@ int main(int argc, char* argv[]) {
                       << (source_audit.ok() ? "complete" : "failed") << '\n'
                       << "Static gate: " << (static_complete ? "PASS" : "FAIL")
                       << " (" << report.findings.size() << " findings)\n";
+            if (execution) {
+                std::cout << "Execution audit: "
+                          << (execution->consistent() ? "consistent" : "findings")
+                          << " (" << execution->run_count << " runs, "
+                          << execution->scored_rows << " scored rows, "
+                          << execution->findings.size() << " findings)\n";
+            }
         } else {
             Json findings = Json::array();
             for (const auto& finding : report.findings) {
@@ -124,6 +161,30 @@ int main(int argc, char* argv[]) {
                                     {"first_line", row.source.first_line}});
             }
             const auto build = moq::interop::app::build_info();
+            Json execution_json = nullptr;
+            if (execution) {
+                Json dynamic_findings = Json::array();
+                for (const auto& finding : execution->findings) {
+                    dynamic_findings.push_back({{"code", finding.code},
+                        {"run_id", finding.run_id},
+                        {"requirement_id", finding.requirement_id},
+                        {"detail", finding.detail}});
+                }
+                Json run_digests = Json::array();
+                for (const auto& run : runs) {
+                    run_digests.push_back({{"run_id", run.id},
+                        {"transport", run.config.transport ==
+                             moq::interop::app::TransportKind::WebTransport
+                             ? "webtransport" : "native-quic"},
+                        {"canonical_sha256",
+                         moq::interop::requirements::canonical_result_sha256(run)}});
+                }
+                execution_json = {{"consistent", execution->consistent()},
+                    {"run_count", execution->run_count},
+                    {"scored_rows", execution->scored_rows},
+                    {"findings", std::move(dynamic_findings)},
+                    {"runs", std::move(run_digests)}};
+            }
             const Json output = {
                 {"schema_version", 1}, {"draft", options.draft},
                 {"source_sha256", source.sha256},
@@ -139,10 +200,11 @@ int main(int argc, char* argv[]) {
                                          {"optional_covered", report.optional_covered},
                                          {"optional_total", report.optional_total}}},
                 {"findings", std::move(findings)},
-                {"classified_residuals", std::move(residual)}};
+                {"classified_residuals", std::move(residual)},
+                {"execution_audit", std::move(execution_json)}};
             std::cout << output.dump(2) << '\n';
         }
-        return static_complete ? 0 : 1;
+        return static_complete && (!execution || execution->consistent()) ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << "moq-interop-audit: " << error.what() << '\n';
         usage();

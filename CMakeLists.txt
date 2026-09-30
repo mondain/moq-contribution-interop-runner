@@ -140,6 +140,13 @@ target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/ge
 target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
                       SQLite::SQLite3)
 
+add_library(moq-interop-execution-audit
+    src/requirements/execution_audit.cpp)
+target_link_libraries(moq-interop-execution-audit PUBLIC
+    moq-interop-requirements moq-interop-storage)
+target_link_libraries(moq-interop-execution-audit PRIVATE
+    OpenSSL::Crypto nlohmann_json::nlohmann_json)
+
 set(MOQ_INTEROP_HTTP_SOURCES
     src/http/server.cpp
     src/http/json.cpp
@@ -230,7 +237,8 @@ target_compile_definitions(moq-interop-audit PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(moq-interop-audit PRIVATE
     moq-interop-requirements moq-interop-draft18-evaluators
-    moq-interop-draft21-evaluators nlohmann_json::nlohmann_json)
+    moq-interop-draft21-evaluators moq-interop-execution-audit
+    nlohmann_json::nlohmann_json)
 install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
 install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
         FILES_MATCHING PATTERN "*.txt")
@@ -522,6 +530,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-draft21-evaluators GTest::gtest_main)
     add_test(NAME completeness COMMAND moq-interop-completeness-tests)
 
+    add_executable(moq-interop-execution-audit-tests
+                   tests/integration/execution_audit_test.cpp)
+    target_link_libraries(moq-interop-execution-audit-tests PRIVATE
+        moq-interop-execution-audit GTest::gtest_main)
+    add_test(NAME execution-audit COMMAND moq-interop-execution-audit-tests)
+    add_test(NAME audit-cli-smoke
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-smoke.sh"
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-audit>")
+    set_tests_properties(audit-cli-smoke PROPERTIES RESOURCE_LOCK "audit-cli-port")
+
     add_executable(moq-interop-run-store-tests tests/unit/run_store_test.cpp)
     target_link_libraries(moq-interop-run-store-tests PRIVATE moq-interop-storage
                           GTest::gtest_main)
@@ -566,7 +585,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     target_link_libraries(moq-interop-webtransport-run-api-tests PRIVATE
-                          moq-interop-http httplib::httplib
+                          moq-interop-http moq-interop-execution-audit
+                          httplib::httplib
                           nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME webtransport-run-api COMMAND moq-interop-webtransport-run-api-tests)
 

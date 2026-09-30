@@ -1,6 +1,9 @@
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/http/server.h"
 #include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/storage/run_store.h"
 
 #include <gtest/gtest.h>
@@ -258,6 +261,17 @@ TEST(WebTransportRunApi, AllocatesExactPublisherUrlForBothDrafts) {
             EXPECT_EQ(store->load(id).state, storage::RunState::Finalized);
         } else {
             EXPECT_EQ(stopped->status, 200) << stopped->body;
+        }
+        const auto record = store->load(id);
+        const auto bindings = draft == 18
+            ? requirements::draft18_executable_bindings()
+            : requirements::draft21_executable_bindings();
+        const std::array records{record};
+        const auto audit = requirements::audit_execution(
+            draft == 18 ? *draft18 : *draft21, bindings, records);
+        for (const auto& finding : audit.findings) {
+            EXPECT_NE(finding.code, "missing_evaluator_evidence")
+                << finding.requirement_id << " " << finding.detail;
         }
     }
 }
