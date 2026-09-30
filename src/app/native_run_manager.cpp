@@ -1,5 +1,6 @@
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/publisher_driver.h"
+#include "moq/interop/app/scenario_registry.h"
 
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
@@ -25,8 +26,6 @@ namespace {
 
 using namespace std::chrono_literals;
 
-constexpr std::string_view kSubscribeScenario =
-    "subscribe-to-publisher-track";
 constexpr std::string_view kDuplicateSubscribeScenario =
     "subscribe-again-to-established-publisher-track";
 constexpr std::string_view kFetchScenario = "fetch-publisher-track-range";
@@ -34,8 +33,6 @@ constexpr std::string_view kSubscribeNamespaceScenario =
     "subscribe-namespace-at-publisher";
 constexpr std::string_view kSubscribeTracksScenario =
     "subscribe-tracks-at-publisher";
-constexpr std::string_view kDraft21AnnouncementScenario =
-    "d21-publisher-request-stream-placement";
 constexpr std::string_view kDraft21UnknownOptionScenario =
     "d21-setup-unknown-options";
 constexpr std::string_view kDraft21DuplicateUnknownOptionScenario =
@@ -44,14 +41,6 @@ constexpr std::string_view kDraft21ServerAuthorityScenario =
     "d21-server-sends-authority";
 constexpr std::string_view kDraft21ServerPathScenario =
     "d21-server-sends-path";
-
-bool draft21_scenario_id(std::string_view scenario) {
-    return scenario == kDraft21AnnouncementScenario ||
-           scenario == kDraft21UnknownOptionScenario ||
-           scenario == kDraft21DuplicateUnknownOptionScenario ||
-           scenario == kDraft21ServerAuthorityScenario ||
-           scenario == kDraft21ServerPathScenario;
-}
 
 scenarios::Draft21SetupProbe draft21_setup_probe(std::string_view scenario) {
     if (scenario == kDraft21UnknownOptionScenario) {
@@ -523,15 +512,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     const bool draft18_scenario =
         config.draft == DraftVersion::Draft18 &&
         config.scenario_ids.size() == 1 &&
-        (config.scenario_ids.front() == kSubscribeScenario ||
-         config.scenario_ids.front() == kDuplicateSubscribeScenario ||
-         config.scenario_ids.front() == kFetchScenario ||
-         config.scenario_ids.front() == kSubscribeNamespaceScenario ||
-         config.scenario_ids.front() == kSubscribeTracksScenario);
+        executable_scenario(18, config.scenario_ids.front());
     const bool draft21_scenario =
         config.draft == DraftVersion::Draft21 && impl_->draft21 &&
         config.scenario_ids.size() == 1 &&
-        draft21_scenario_id(config.scenario_ids.front());
+        executable_scenario(21, config.scenario_ids.front());
     if ((!draft18_scenario && !draft21_scenario) ||
         (config.mode == RunMode::Driven && !supports_driven()) ||
         !supports(config.draft)) {

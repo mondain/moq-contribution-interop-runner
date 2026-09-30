@@ -20,6 +20,24 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 2
+      - name: Audit draft release gates
+        run: |
+          for draft in 18 21; do
+            set +e
+            ./build/moq-interop-audit --draft "$draft" --format json \
+              >"$RUNNER_TEMP/audit-$draft.json"
+            status=$?
+            set -e
+            jq -e '.source_audit.complete and
+              (.classified_residuals | all(.[]; .reason | length > 0))' \
+              "$RUNNER_TEMP/audit-$draft.json" >/dev/null
+            ready=$(jq -r '.static_complete' "$RUNNER_TEMP/audit-$draft.json")
+            case "$ready:$status" in true:0|false:1) ;; *) exit 1 ;; esac
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: draft-completeness-audits
+          path: ${{ runner.temp }}/audit-*.json
 
   sanitizers:
     runs-on: ubuntu-24.04

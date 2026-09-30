@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/requirements/scoring.h"
+#include "moq/interop/requirements/completeness.h"
 #include "moq/interop/session/publisher_session.h"
 
 #include <span>
@@ -22,5 +23,7 @@ struct ScenarioContext {
 std::vector<Outcome> evaluate_draft18(
     const RequirementCatalog& catalog,
     std::span<const ScenarioContext> scenarios);
+
+std::vector<ExecutableBinding> draft18_executable_bindings();
 
 }  // namespace moq::interop::requirements

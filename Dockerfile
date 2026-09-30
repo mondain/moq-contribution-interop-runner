@@ -75,6 +75,7 @@ RUN apt-get update \
     && install -d --owner=10001 --group=10001 --mode=0750 /var/lib/moq-interop
 
 COPY --from=builder /opt/moq-interop/bin/moq-interop-runner /usr/local/bin/moq-interop-runner
+COPY --from=builder /opt/moq-interop/bin/moq-interop-audit /usr/local/bin/moq-interop-audit
 COPY --from=builder /opt/moq-interop/share/moq-interop/ /usr/share/moq-interop/
 COPY adapters/moqxr/run.sh /usr/local/lib/moq-interop/moqxr/run.sh
 

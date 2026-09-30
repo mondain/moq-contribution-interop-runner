@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/requirements/scoring.h"
+#include "moq/interop/requirements/completeness.h"
 #include "moq/interop/scenarios/draft21_announcement.h"
 
 #include <vector>
@@ -12,5 +13,7 @@ namespace moq::interop::requirements {
 std::vector<Outcome> evaluate_draft21_announcement(
     const RequirementCatalog& catalog,
     const scenarios::Draft21AnnouncementContext& context);
+
+std::vector<ExecutableBinding> draft21_executable_bindings();
 
 }  // namespace moq::interop::requirements

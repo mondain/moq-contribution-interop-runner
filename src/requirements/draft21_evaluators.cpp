@@ -166,4 +166,23 @@ std::vector<Outcome> evaluate_draft21_announcement(
     return outcomes;
 }
 
+std::vector<ExecutableBinding> draft21_executable_bindings() {
+    return {
+        {21, "D21-6-3-MUST-NOT-141", kScenario,
+         kAllowedOpenerEvaluator, {"publish_observed"}},
+        {21, "D21-9-MUST-282", kScenario, kEvaluator,
+         {"publish_observed"}},
+        {21, "D21-9-1-MUST-287", kUnknownScenario,
+         kUnknownEvaluator, {"publish_observed"}},
+        {21, "D21-9-1-MUST-288", kUnknownScenario,
+         kUnknownEvaluator, {"publish_observed"}},
+        {21, "D21-9-1-MUST-290", kDuplicateScenario,
+         kDuplicateEvaluator, {"publish_observed"}},
+        {21, "D21-9-1-1-MUST-293", kAuthorityScenario,
+         kAuthorityEvaluator, {"peer_closed"}},
+        {21, "D21-9-1-2-MUST-300", kPathScenario,
+         kPathEvaluator, {"peer_closed"}},
+    };
+}
+
 }  // namespace moq::interop::requirements

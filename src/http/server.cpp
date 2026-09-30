@@ -1,5 +1,6 @@
 #include "moq/interop/http/server.h"
 #include "moq/interop/http/result_schema.h"
+#include "moq/interop/app/scenario_registry.h"
 
 #include "detail.h"
 
@@ -359,33 +360,12 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request);
-                const bool draft18_scenario =
-                    requested.draft == app::DraftVersion::Draft18 &&
-                    requested.scenario_ids.size() == 1 &&
-                    (requested.scenario_ids.front() ==
-                         "subscribe-to-publisher-track" ||
-                     requested.scenario_ids.front() ==
-                         "subscribe-again-to-established-publisher-track" ||
-                     requested.scenario_ids.front() ==
-                         "fetch-publisher-track-range" ||
-                     requested.scenario_ids.front() ==
-                         "subscribe-namespace-at-publisher" ||
-                     requested.scenario_ids.front() ==
-                         "subscribe-tracks-at-publisher");
                 const bool draft21_scenario =
-                    requested.draft == app::DraftVersion::Draft21 &&
-                    requested.scenario_ids.size() == 1 &&
-                    (requested.scenario_ids.front() ==
-                         "d21-publisher-request-stream-placement" ||
-                     requested.scenario_ids.front() ==
-                         "d21-setup-unknown-options" ||
-                     requested.scenario_ids.front() ==
-                         "d21-setup-duplicate-unknown-options" ||
-                     requested.scenario_ids.front() ==
-                         "d21-server-sends-authority" ||
-                     requested.scenario_ids.front() ==
-                         "d21-server-sends-path");
-                if ((!draft18_scenario && !draft21_scenario) ||
+                    requested.draft == app::DraftVersion::Draft21;
+                if (requested.scenario_ids.size() != 1 ||
+                    !app::executable_scenario(
+                        static_cast<unsigned>(requested.draft),
+                        requested.scenario_ids.front()) ||
                     (requested.mode == app::RunMode::Driven && runs &&
                      !runs->supports_driven()) ||
                     (runs && !runs->supports(requested.draft))) {

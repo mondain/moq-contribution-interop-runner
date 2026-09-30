@@ -1,0 +1,151 @@
+#include "moq/interop/app/version.h"
+#include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/completeness.h"
+#include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
+
+#include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace {
+
+using moq::interop::requirements::Applicability;
+using moq::interop::requirements::Testability;
+using Json = nlohmann::json;
+
+struct Options {
+    unsigned draft{0};
+    std::string format{"text"};
+    std::filesystem::path docs =
+        std::filesystem::exists(
+            std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "docs")
+            ? std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "docs"
+            : "/usr/share/moq-interop/docs";
+    std::filesystem::path requirements =
+        std::filesystem::exists(
+            std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "requirements")
+            ? std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR) / "requirements"
+            : "/usr/share/moq-interop/requirements";
+};
+
+void usage() {
+    std::cerr << "Usage: moq-interop-audit --draft 18|21 [--format text|json] "
+                 "[--docs DIR] [--requirements DIR]\n";
+}
+
+Options parse(int argc, char* argv[]) {
+    Options result;
+    for (int index = 1; index < argc; ++index) {
+        const std::string_view flag(argv[index]);
+        if (++index >= argc) throw std::invalid_argument("missing value for " + std::string(flag));
+        const std::string value(argv[index]);
+        if (flag == "--draft") {
+            if (value == "18") result.draft = 18;
+            else if (value == "21") result.draft = 21;
+            else throw std::invalid_argument("draft must be 18 or 21");
+        } else if (flag == "--format") {
+            if (value != "text" && value != "json")
+                throw std::invalid_argument("format must be text or json");
+            result.format = value;
+        } else if (flag == "--docs") {
+            result.docs = value;
+        } else if (flag == "--requirements") {
+            result.requirements = value;
+        } else {
+            throw std::invalid_argument("unknown option " + std::string(flag));
+        }
+    }
+    if (result.draft == 0) throw std::invalid_argument("--draft is required");
+    return result;
+}
+
+const char* classification(const moq::interop::requirements::Requirement& row) {
+    if (row.applicability == Applicability::Informative) return "informative";
+    if (row.applicability == Applicability::NotApplicable) return "not_applicable";
+    if (row.testability == Testability::NotTestable) return "not_testable";
+    return nullptr;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+    try {
+        const auto options = parse(argc, argv);
+        const auto source = moq::interop::requirements::load_draft_source(
+            options.draft, options.docs,
+            options.requirements / "draft-digests.json");
+        const auto catalog =
+            moq::interop::requirements::RequirementCatalog::load(
+                source, options.requirements /
+                    ("draft" + std::to_string(options.draft) + ".json"));
+        const auto source_audit =
+            moq::interop::requirements::audit_normative_occurrences(source, catalog);
+        const auto bindings = options.draft == 18
+            ? moq::interop::requirements::draft18_executable_bindings()
+            : moq::interop::requirements::draft21_executable_bindings();
+        const auto report =
+            moq::interop::requirements::audit_completeness(
+                catalog, bindings,
+                moq::interop::app::executable_scenarios(options.draft));
+        const bool static_complete = source_audit.ok() && report.complete();
+        if (options.format == "text") {
+            std::cout << "Draft " << options.draft << " source " << source.sha256 << '\n'
+                      << "Required executable coverage: " << report.required_covered
+                      << '/' << report.required_total << '\n'
+                      << "Optional executable coverage: " << report.optional_covered
+                      << '/' << report.optional_total << '\n'
+                      << "Source-keyword audit: "
+                      << (source_audit.ok() ? "complete" : "failed") << '\n'
+                      << "Static gate: " << (static_complete ? "PASS" : "FAIL")
+                      << " (" << report.findings.size() << " findings)\n";
+        } else {
+            Json findings = Json::array();
+            for (const auto& finding : report.findings) {
+                findings.push_back({{"code", finding.code},
+                                    {"requirement_id", finding.requirement_id},
+                                    {"detail", finding.detail},
+                                    {"blocking", finding.blocking}});
+            }
+            Json residual = Json::array();
+            for (const auto& row : catalog.requirements) {
+                const char* state = classification(row);
+                if (!state) continue;
+                residual.push_back({{"requirement_id", row.id},
+                                    {"classification", state},
+                                    {"reason", row.rationale},
+                                    {"section", row.source.section},
+                                    {"first_line", row.source.first_line}});
+            }
+            const auto build = moq::interop::app::build_info();
+            const Json output = {
+                {"schema_version", 1}, {"draft", options.draft},
+                {"source_sha256", source.sha256},
+                {"source_revision", build.source_revision},
+                {"static_complete", static_complete},
+                {"source_audit", {{"complete", source_audit.ok()},
+                                  {"missing_count", source_audit.missing.size()},
+                                  {"multiply_classified_count",
+                                   source_audit.multiply_classified.size()},
+                                  {"errors", source_audit.errors}}},
+                {"executable_coverage", {{"required_covered", report.required_covered},
+                                         {"required_total", report.required_total},
+                                         {"optional_covered", report.optional_covered},
+                                         {"optional_total", report.optional_total}}},
+                {"findings", std::move(findings)},
+                {"classified_residuals", std::move(residual)}};
+            std::cout << output.dump(2) << '\n';
+        }
+        return static_complete ? 0 : 1;
+    } catch (const std::exception& error) {
+        std::cerr << "moq-interop-audit: " << error.what() << '\n';
+        usage();
+        return 2;
+    }
+}

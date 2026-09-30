@@ -7,6 +7,12 @@
 namespace moq::interop::requirements {
 namespace {
 
+constexpr const char* kSubscribeScenario = "subscribe-to-publisher-track";
+constexpr const char* kDuplicateScenario =
+    "subscribe-again-to-established-publisher-track";
+constexpr const char* kFetchScenario = "fetch-publisher-track-range";
+constexpr const char* kNamespaceScenario = "subscribe-namespace-at-publisher";
+constexpr const char* kTracksScenario = "subscribe-tracks-at-publisher";
 constexpr const char* kResponseEvaluator =
     "exactly-one-subscribe-ok-or-request-error";
 constexpr const char* kFetchResponseEvaluator =
@@ -185,7 +191,7 @@ std::vector<Outcome> evaluate_draft18(
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
-                       "subscribe-to-publisher-track" &&
+                       kSubscribeScenario &&
                    requirement.evaluators.size() == 1 &&
                    requirement.evaluators.front() == kResponseEvaluator) {
             const auto* context = unique_context(
@@ -198,7 +204,7 @@ std::vector<Outcome> evaluate_draft18(
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
-                       "fetch-publisher-track-range" &&
+                       kFetchScenario &&
                    requirement.evaluators.size() == 1 &&
                    requirement.evaluators.front() ==
                        kFetchResponseEvaluator) {
@@ -212,7 +218,7 @@ std::vector<Outcome> evaluate_draft18(
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
-                       "subscribe-namespace-at-publisher" &&
+                       kNamespaceScenario &&
                    requirement.evaluators.size() == 1 &&
                    requirement.evaluators.front() ==
                        kNamespaceResponseEvaluator) {
@@ -226,7 +232,7 @@ std::vector<Outcome> evaluate_draft18(
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
-                       "subscribe-tracks-at-publisher" &&
+                       kTracksScenario &&
                    requirement.evaluators.size() == 1 &&
                    requirement.evaluators.front() ==
                        kTracksResponseEvaluator) {
@@ -240,7 +246,7 @@ std::vector<Outcome> evaluate_draft18(
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
-                       "subscribe-again-to-established-publisher-track" &&
+                       kDuplicateScenario &&
                    requirement.evaluators.size() == 1 &&
                    requirement.evaluators.front() ==
                        kDuplicateSubscriptionEvaluator) {
@@ -254,6 +260,22 @@ std::vector<Outcome> evaluate_draft18(
         outcomes.push_back({requirement.id, state});
     }
     return outcomes;
+}
+
+std::vector<ExecutableBinding> draft18_executable_bindings() {
+    return {
+        {18, "D18-5-1-MUST-001", kSubscribeScenario, kResponseEvaluator,
+         {"request_observed", "initial_response_observed"}},
+        {18, "D18-5-1-MUST-004", kDuplicateScenario,
+         kDuplicateSubscriptionEvaluator,
+         {"request_observed", "initial_response_observed"}},
+        {18, "D18-5-2-MUST-001", kFetchScenario, kFetchResponseEvaluator,
+         {"request_observed", "initial_response_observed"}},
+        {18, "D18-6-1-MUST-001", kNamespaceScenario, kNamespaceResponseEvaluator,
+         {"request_observed", "initial_response_observed"}},
+        {18, "D18-6-1-MUST-003", kTracksScenario, kTracksResponseEvaluator,
+         {"request_observed", "initial_response_observed"}},
+    };
 }
 
 }  // namespace moq::interop::requirements

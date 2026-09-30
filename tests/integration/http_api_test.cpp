@@ -1,4 +1,5 @@
 #include "moq/interop/http/server.h"
+#include "moq/interop/app/scenario_registry.h"
 
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/storage/run_store.h"
@@ -143,6 +144,11 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
     ASSERT_EQ(health.at("executable_profiles").size(), 40);
+    for (const auto& profile : health.at("executable_profiles")) {
+        EXPECT_TRUE(app::executable_scenario(
+            profile.at("draft").get<unsigned>(),
+            profile.at("scenario").get<std::string>()));
+    }
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),

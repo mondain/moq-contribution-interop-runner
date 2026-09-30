@@ -143,6 +143,17 @@ weighted score, and coverage have separate numerators and denominators in
 the result exports. An incomplete or harness-failed run is not a publisher
 failure.
 
+Run `build/moq-interop-audit --draft 18` or `--draft 21` to inspect the
+static completeness gate. Add `--format json` for sorted per-requirement findings,
+draft digest and source revision, executable coverage counts, and residual
+`not_testable`/`not_applicable` rows with reasons and draft citations. Exit
+status 0 means the source and required evaluator/scenario/evidence registry
+checks pass; status 1 means the draft is not yet executable-complete, which
+is expected for the current narrow profiles. As of this checkpoint, only
+5/175 draft-18 and 7/175 draft-21 applicable, testable MUST/MUST NOT rows
+have registered executable bindings. A registered binding is a static gate,
+not proof that a publisher passed it; run results still require live evidence.
+
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner
 starts its native listener first, passes the exact endpoint and track fixture

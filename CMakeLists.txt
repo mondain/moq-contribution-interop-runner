@@ -129,6 +129,7 @@ add_library(moq-interop-requirements
     src/requirements/draft_source.cpp
     src/requirements/catalog.cpp
     src/requirements/audit.cpp
+    src/requirements/completeness.cpp
     src/requirements/scoring.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
@@ -224,6 +225,13 @@ target_compile_definitions(moq-interop-runner PRIVATE
 target_link_libraries(moq-interop-runner PRIVATE moq-interop-http
                       moq-interop-transport)
 install(TARGETS moq-interop-runner RUNTIME DESTINATION bin)
+add_executable(moq-interop-audit src/app/audit_main.cpp)
+target_compile_definitions(moq-interop-audit PRIVATE
+    MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(moq-interop-audit PRIVATE
+    moq-interop-requirements moq-interop-draft18-evaluators
+    moq-interop-draft21-evaluators nlohmann_json::nlohmann_json)
+install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
 install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
         FILES_MATCHING PATTERN "*.txt")
 install(DIRECTORY requirements/ DESTINATION share/moq-interop/requirements
@@ -504,6 +512,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-scoring-tests PRIVATE moq-interop-requirements
                           GTest::gtest_main)
     add_test(NAME scoring COMMAND moq-interop-scoring-tests)
+
+    add_executable(moq-interop-completeness-tests
+                   tests/unit/completeness_test.cpp)
+    target_compile_definitions(moq-interop-completeness-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-completeness-tests PRIVATE
+        moq-interop-requirements moq-interop-draft18-evaluators
+        moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME completeness COMMAND moq-interop-completeness-tests)
 
     add_executable(moq-interop-run-store-tests tests/unit/run_store_test.cpp)
     target_link_libraries(moq-interop-run-store-tests PRIVATE moq-interop-storage
