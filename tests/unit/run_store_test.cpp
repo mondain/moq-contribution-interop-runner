@@ -94,6 +94,28 @@ TEST(RunStoreTest, CreatesVersionTwoSchemaAndEnablesForeignKeys) {
     EXPECT_TRUE(store.foreign_keys_enabled());
 }
 
+TEST(RunStoreTest, RecoversOnlyInterruptedRunsAsErrors) {
+    TemporaryDatabase database;
+    app::RunId interrupted, completed;
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        interrupted = store.create_run(sample_config());
+        completed = store.create_run(sample_config());
+        store.finalize(completed, sample_score(), {});
+    }
+    SqliteRunStore reopened(database.path(), sample_build());
+    EXPECT_EQ(reopened.recover_interrupted(), 1u);
+    EXPECT_EQ(reopened.recover_interrupted(), 0u);
+    const auto recovered = reopened.load(interrupted);
+    ASSERT_EQ(recovered.state, RunState::Finalized);
+    ASSERT_TRUE(recovered.score);
+    EXPECT_EQ(recovered.score->verdict, requirements::RunVerdict::Error);
+    ASSERT_EQ(recovered.events.size(), 1u);
+    EXPECT_EQ(recovered.events.front().kind, "runner_recovery");
+    EXPECT_EQ(reopened.load(completed).score->verdict,
+              requirements::RunVerdict::Fail);
+}
+
 TEST(RunStoreTest, SchemaRejectsFinalizedStateWithoutFinalizationTimestamp) {
     TemporaryDatabase database;
     app::RunId active_id;

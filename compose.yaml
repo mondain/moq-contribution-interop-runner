@@ -18,6 +18,12 @@ services:
     volumes:
       - validator-results:/var/lib/moq-interop
       - "${MOQ_INTEROP_TLS_DIR:-./tls}:/run/moq-interop-tls:ro"
+      - "${MOQ_INTEROP_PUBLISHER_DIR:-./publisher}:/opt/publisher:ro"
+    environment:
+      MOQ_INTEROP_DRIVER_EXECUTABLE: ${MOQ_INTEROP_DRIVER_EXECUTABLE:-}
+      MOQ_INTEROP_DRIVER_FIXTURE: ${MOQ_INTEROP_DRIVER_FIXTURE:-/opt/publisher/fixture.mp4}
+      MOQ_INTEROP_DRIVER_LOG_ROOT: /var/lib/moq-interop/driver-logs
+      MOQXR_BIN: ${MOQXR_BIN:-/opt/publisher/openmoq-publisher}
     command:
       - --bind
       - 0.0.0.0

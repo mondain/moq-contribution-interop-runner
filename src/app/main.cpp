@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -45,6 +46,11 @@ void usage(std::ostream& output) {
               "  --require-publisher-origin  require Origin on WebTransport CONNECT\n"
               "  --tls-cert PATH         PEM certificate for QUIC/WebTransport\n"
               "  --tls-key PATH          PEM private key for QUIC/WebTransport\n"
+              "  --driver-executable PATH  publisher adapter executable\n"
+              "  --driver-arg VALUE      publisher adapter argument (repeatable)\n"
+              "  --driver-fixture PATH   publisher media fixture\n"
+              "  --driver-ca PATH        publisher TLS trust file (defaults to --tls-cert)\n"
+              "  --driver-log-root PATH  per-run publisher logs\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -83,7 +89,29 @@ Options parse_options(int argc, char* argv[]) {
         else if (argument == "--require-publisher-origin") options.native.webtransport_require_origin = true;
         else if (argument == "--tls-cert") options.native.certificate_path = value(argument);
         else if (argument == "--tls-key") options.native.private_key_path = value(argument);
+        else if (argument == "--driver-executable") options.native.driver_executable = value(argument);
+        else if (argument == "--driver-arg") options.native.driver_arguments.emplace_back(value(argument));
+        else if (argument == "--driver-fixture") options.native.driver_fixture = value(argument);
+        else if (argument == "--driver-ca") options.native.driver_tls_ca = value(argument);
+        else if (argument == "--driver-log-root") options.native.driver_log_root = value(argument);
         else throw std::invalid_argument("unknown option: " + std::string(argument));
+    }
+    if (options.native.driver_executable.empty()) {
+        if (const char* executable = std::getenv("MOQ_INTEROP_DRIVER_EXECUTABLE");
+            executable && *executable)
+            options.native.driver_executable = executable;
+    }
+    if (!options.native.driver_executable.empty()) {
+        if (options.native.driver_fixture.empty()) {
+            if (const char* fixture = std::getenv("MOQ_INTEROP_DRIVER_FIXTURE");
+                fixture && *fixture)
+                options.native.driver_fixture = fixture;
+        }
+        if (options.native.driver_log_root.empty()) {
+            if (const char* logs = std::getenv("MOQ_INTEROP_DRIVER_LOG_ROOT");
+                logs && *logs)
+                options.native.driver_log_root = logs;
+        }
     }
     if (options.native.certificate_path.empty() != options.native.private_key_path.empty()) {
         throw std::invalid_argument("--tls-cert and --tls-key must be supplied together");
@@ -94,6 +122,9 @@ Options parse_options(int argc, char* argv[]) {
     if (options.native.webtransport_require_origin &&
         options.native.webtransport_allowed_origins.empty()) {
         throw std::invalid_argument("--require-publisher-origin requires --publisher-origin");
+    }
+    if (options.native.driver_executable.empty() != options.native.driver_log_root.empty()) {
+        throw std::invalid_argument("--driver-executable and --driver-log-root must be supplied together");
     }
     options.native.maximum_active_runs = static_cast<std::size_t>(
         options.native.port_end - options.native.port_start + 1);
@@ -130,6 +161,9 @@ int main(int argc, char* argv[]) {
             moq::interop::requirements::RequirementCatalog::load(
                 source21, options.requirements / "draft21.json"));
         auto store = std::make_shared<moq::interop::storage::SqliteRunStore>(options.database, build);
+        const auto recovered = store->recover_interrupted();
+        if (recovered != 0)
+            std::cerr << "Recovered " << recovered << " interrupted runs as ERROR\n";
         std::shared_ptr<moq::interop::app::NativeRunManager> runs;
         if (!options.native.certificate_path.empty()) {
             runs = std::make_shared<moq::interop::app::NativeRunManager>(

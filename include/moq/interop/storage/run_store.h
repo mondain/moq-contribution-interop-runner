@@ -104,6 +104,8 @@ public:
 
     int schema_version() const;
     bool foreign_keys_enabled() const;
+    // Call once at service startup, before accepting new runs.
+    std::size_t recover_interrupted();
 
 private:
     class Impl;

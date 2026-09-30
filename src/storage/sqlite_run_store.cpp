@@ -566,6 +566,34 @@ void SqliteRunStore::finalize(const app::RunId& id,
     transaction.commit();
 }
 
+std::size_t SqliteRunStore::recover_interrupted() {
+    std::size_t recovered = 0;
+    for (std::size_t offset = 0;; offset += kMaximumPageSize) {
+        const auto page = list({kMaximumPageSize, offset});
+        for (const auto& summary : page.items) {
+            if (summary.state != RunState::Active) continue;
+            const auto record = load(summary.id);
+            const bool has_marker = std::any_of(record.events.begin(), record.events.end(),
+                [](const auto& event) { return event.kind == "runner_recovery"; });
+            if (!has_marker) {
+                EvidenceEvent marker;
+                marker.kind = "runner_recovery";
+                marker.detail = "runner restarted while this run was active";
+                marker.wall_time_unix_ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                append_events(summary.id, std::span(&marker, 1));
+            }
+            const requirements::ScoreSummary error{
+                requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+            finalize(summary.id, error, {});
+            ++recovered;
+        }
+        if (!page.next_offset) break;
+    }
+    return recovered;
+}
+
 RunRecord SqliteRunStore::load(const app::RunId& id) const {
     std::lock_guard lock(impl_->mutex);
     Statement run(

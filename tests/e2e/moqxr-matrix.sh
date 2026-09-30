@@ -27,19 +27,10 @@ for draft in 18 21; do
             udp_port=19208
         fi
         printf 'matrix draft=%s transport=%s\n' "$draft" "$transport"
-        if [[ "$transport" == native_quic ]]; then
-            MOQ_INTEROP_USE_MOQXR_ADAPTER=1 MOQ_INTEROP_ALLOW_PUBLISHER_FAILURE=1 \
-                MOQ_INTEROP_TEST_HTTP_PORT="$http_port" \
-                MOQ_INTEROP_TEST_UDP_PORT="$udp_port" \
-                bash "$script_dir/draft18-native-moqxr.sh" \
-                "$runner_bin" "$publisher_bin" "$fixture" "$draft"
-        else
-            MOQ_INTEROP_USE_MOQXR_ADAPTER=1 MOQ_INTEROP_ALLOW_PUBLISHER_FAILURE=1 \
-                MOQ_INTEROP_TEST_HTTP_PORT="$http_port" \
-                MOQ_INTEROP_TEST_UDP_PORT="$udp_port" \
-                bash "$script_dir/webtransport-moqxr.sh" \
-                "$draft" "$runner_bin" "$publisher_bin" "$fixture"
-        fi
+        MOQ_INTEROP_TEST_HTTP_PORT="$http_port" \
+            MOQ_INTEROP_TEST_UDP_PORT="$udp_port" \
+            bash "$script_dir/driven-moqxr.sh" \
+            "$draft" "$transport" "$runner_bin" "$publisher_bin" "$fixture"
     done
 done
 printf 'matrix harness completed; publisher exits and scored rows are reported above\n'

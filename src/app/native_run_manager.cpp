@@ -1,4 +1,5 @@
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/publisher_driver.h"
 
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -226,6 +228,18 @@ storage::EvidenceEvent stored_draft21_evidence(
     return result;
 }
 
+storage::EvidenceEvent driver_evidence(const DriverResult& result,
+                                       std::string_view scenario_id) {
+    storage::EvidenceEvent event;
+    event.wall_time_unix_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    event.kind = "publisher_process";
+    event.detail = serialize_driver_result(result);
+    event.scenario_id = std::string(scenario_id);
+    return event;
+}
+
 }  // namespace
 
 class NativeRunManager::Impl {
@@ -250,7 +264,10 @@ public:
             (draft21 && (draft21->draft != 21 || !draft21->complete)) ||
             config.maximum_active_runs == 0 ||
             config.port_start > config.port_end ||
-            (config.port_start == 0) != (config.port_end == 0)) {
+            (config.port_start == 0) != (config.port_end == 0) ||
+            (config.driver_executable.empty() != config.driver_log_root.empty()) ||
+            (!config.driver_executable.empty() &&
+             !config.driver_executable.is_absolute())) {
             throw std::invalid_argument("invalid native run manager configuration");
         }
     }
@@ -282,16 +299,59 @@ public:
     void run(Worker* worker,
              std::unique_ptr<transport::SessionTransport> listener,
              RunConfig run_config) {
+        PublisherDriver driver;
+        DriverHandle handle;
+        auto record_driver = [&] {
+            if (!handle.valid()) return;
+            const auto result = driver.stop(handle);
+            handle = {};
+            const auto event = driver_evidence(result, run_config.scenario_ids.front());
+            store->append_events(worker->id, std::span(&event, 1));
+        };
         try {
+            if (run_config.mode == RunMode::Driven) {
+                const auto host = worker->endpoint.address.find(':') != std::string::npos
+                    ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
+                const std::string endpoint =
+                    (run_config.transport == TransportKind::WebTransport
+                        ? "https://" : "moqt://") + host + ":" +
+                    std::to_string(worker->endpoint.port) + "/moq";
+                DriverRequest request;
+                request.executable = config.driver_executable;
+                request.arguments = config.driver_arguments;
+                request.run_id = worker->id;
+                request.scenario_id = run_config.scenario_ids.front();
+                request.endpoint = endpoint;
+                request.draft = run_config.draft;
+                request.transport = run_config.transport;
+                request.track = *run_config.track_fixture;
+                request.fixture = config.driver_fixture;
+                request.tls_ca = config.driver_tls_ca.empty()
+                    ? config.certificate_path : config.driver_tls_ca;
+                request.log_dir = config.driver_log_root / worker->id;
+                request.scenario_timeout = run_config.timeout;
+                request.process_timeout = run_config.timeout + 1000ms;
+                const auto started = driver.start(request);
+                if (started.status != DriverStartStatus::Started) {
+                    DriverResult failure;
+                    failure.error = started.error;
+                    const auto event = driver_evidence(
+                        failure, run_config.scenario_ids.front());
+                    store->append_events(worker->id, std::span(&event, 1));
+                    throw std::runtime_error("publisher driver start failed: " + started.error);
+                }
+                handle = started.handle;
+            }
             if (run_config.draft == DraftVersion::Draft21) {
-                run_draft21(worker, *listener, run_config);
+                run_draft21(worker, *listener, run_config, &driver, handle, record_driver);
             } else {
-                run_draft18(worker, *listener, run_config);
+                run_draft18(worker, *listener, run_config, &driver, handle, record_driver);
             }
         } catch (const std::exception& error) {
             std::cerr << "publisher run " << worker->id << " failed: "
                       << error.what() << '\n';
             try {
+                record_driver();
                 const requirements::ScoreSummary failure{
                     requirements::RunVerdict::Error,
                     {0, 0}, {0, 0}, {0, 0}};
@@ -307,7 +367,8 @@ public:
 
     void run_draft18(Worker* worker,
                      transport::SessionTransport& listener,
-                     const RunConfig& run_config) {
+                     const RunConfig& run_config, PublisherDriver* driver,
+                     DriverHandle handle, const std::function<void()>& record_driver) {
             const auto started = scenarios::Clock::now();
             const auto deadline = started + run_config.timeout;
             const auto quiet = std::clamp(run_config.timeout / 4, 1ms, 50ms);
@@ -364,8 +425,16 @@ public:
                 }
                 if (terminal(snapshot.status) || snapshot.harness_failed ||
                     now >= deadline) break;
+                const bool connected = std::any_of(evidence.begin(), evidence.end(),
+                    [](const auto& event) {
+                        return event.kind == session::EvidenceKind::TransportEstablished;
+                    });
+                if (handle.valid() && driver->poll(handle).status != DriverStatus::Running &&
+                    !connected)
+                    throw std::runtime_error("publisher exited before connecting");
                 std::this_thread::sleep_for(1ms);
             }
+            record_driver();
             auto context = controller.context();
             if (worker->stop_requested) context.complete = false;
             const auto outcomes = requirements::evaluate_draft18(
@@ -377,7 +446,8 @@ public:
 
     void run_draft21(Worker* worker,
                      transport::SessionTransport& listener,
-                     const RunConfig& run_config) {
+                     const RunConfig& run_config, PublisherDriver* driver,
+                     DriverHandle handle, const std::function<void()>& record_driver) {
         const auto started = scenarios::Draft21Clock::now();
         const auto deadline = started + run_config.timeout;
         std::vector<std::vector<std::byte>> name_space;
@@ -406,8 +476,16 @@ public:
             }
             if (snapshot.status != scenarios::Draft21AnnouncementStatus::Running ||
                 snapshot.harness_failed || now >= deadline) break;
+            const bool connected = std::any_of(evidence.begin(), evidence.end(),
+                [](const auto& event) {
+                    return event.kind == scenarios::Draft21AnnouncementEventKind::TransportEstablished;
+                });
+            if (handle.valid() && driver->poll(handle).status != DriverStatus::Running &&
+                !connected)
+                throw std::runtime_error("publisher exited before connecting");
             std::this_thread::sleep_for(1ms);
         }
+        record_driver();
         auto context = controller.context();
         if (worker->stop_requested) context.complete = false;
         const auto outcomes = requirements::evaluate_draft21_announcement(
@@ -455,7 +533,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         config.scenario_ids.size() == 1 &&
         draft21_scenario_id(config.scenario_ids.front());
     if ((!draft18_scenario && !draft21_scenario) ||
-        config.mode != RunMode::Observed ||
+        (config.mode == RunMode::Driven && !supports_driven()) ||
         !supports(config.draft)) {
         return {RunStartStatus::Unsupported, {}, {}};
     }
@@ -562,6 +640,10 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
 bool NativeRunManager::supports(DraftVersion draft) const noexcept {
     return draft == DraftVersion::Draft18 ||
            (draft == DraftVersion::Draft21 && impl_->draft21 != nullptr);
+}
+
+bool NativeRunManager::supports_driven() const noexcept {
+    return !impl_->config.driver_executable.empty();
 }
 
 bool NativeRunManager::stop(const RunId& id) {

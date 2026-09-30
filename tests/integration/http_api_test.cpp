@@ -142,7 +142,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 20);
+    ASSERT_EQ(health.at("executable_profiles").size(), 40);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("draft"), 18);
     EXPECT_EQ(health.at("executable_profiles").at(0).at("transport"), "native-quic");
     EXPECT_EQ(health.at("executable_profiles").at(0).at("scenario"),
@@ -183,6 +183,13 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
         EXPECT_EQ(profile.at("transport"), "webtransport");
         EXPECT_EQ(profile.at("draft"),
                   health.at("executable_profiles").at(index).at("draft"));
+        EXPECT_FALSE(profile.at("configured"));
+    }
+    for (std::size_t index = 0; index < 20; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + 20);
+        EXPECT_EQ(profile.at("mode"), "driven");
+        EXPECT_EQ(profile.at("transport"),
+                  health.at("executable_profiles").at(index).at("transport"));
         EXPECT_FALSE(profile.at("configured"));
     }
 

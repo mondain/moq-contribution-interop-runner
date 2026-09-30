@@ -308,6 +308,14 @@ public:
                     webtransport["transport"] = "webtransport";
                     profiles.push_back(std::move(webtransport));
                 }
+                const auto observed_count = profiles.size();
+                for (std::size_t index = 0; index < observed_count; ++index) {
+                    auto driven = profiles.at(index);
+                    driven["mode"] = "driven";
+                    driven["configured"] = driven.at("configured").get<bool>() &&
+                        runs->supports_driven();
+                    profiles.push_back(std::move(driven));
+                }
                 json_response(response, {{"schema_version", 1},
                                          {"status", "ok"},
                                          {"database", {{"ready", true}}},
@@ -378,10 +386,11 @@ public:
                      requested.scenario_ids.front() ==
                          "d21-server-sends-path");
                 if ((!draft18_scenario && !draft21_scenario) ||
-                    requested.mode != app::RunMode::Observed ||
+                    (requested.mode == app::RunMode::Driven && runs &&
+                     !runs->supports_driven()) ||
                     (runs && !runs->supports(requested.draft))) {
                     throw ApiError{422, "unsupported_run_config",
-                                   "The requested observed scenario is not executable."};
+                                   "The requested scenario or mode is not executable."};
                 }
                 if (!requested.track_fixture || requested.timeout < std::chrono::milliseconds(2)) {
                     throw ApiError{400, "invalid_run_config",

@@ -300,5 +300,50 @@ TEST(WebTransportRunApi, OccupiedPortDoesNotCreateRunAndStopReleasesIt) {
     ::close(rebound);
 }
 
+TEST(WebTransportRunApi, DrivenPublisherExitIsDiagnosticOnly) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    const auto log_root = std::filesystem::temp_directory_path() /
+        ("moq-interop-driven-" + std::to_string(::getpid()));
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 2,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem",
+            .driver_executable = "/bin/true", .driver_log_root = log_root});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    for (const int draft : {18, 21}) {
+        const Json request{{"draft", draft}, {"transport", "webtransport"},
+                           {"mode", "driven"},
+                           {"scenarios", Json::array({draft == 18
+                               ? "subscribe-to-publisher-track"
+                               : "d21-publisher-request-stream-placement"})},
+                           {"timeout_ms", 200},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                       {"name_hex", "78"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 201) << response->body;
+        const auto id = Json::parse(response->body).at("run").at("id").get<std::string>();
+        for (int i = 0; i < 300 && store->load(id).state != storage::RunState::Finalized; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const auto run = store->load(id);
+        ASSERT_EQ(run.state, storage::RunState::Finalized);
+        EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Error);
+        bool saw_exit = false;
+        for (const auto& event : run.events)
+            if (event.kind == "publisher_process" &&
+                event.detail.find("\"exit_code\":0") != std::string::npos)
+                saw_exit = true;
+        EXPECT_TRUE(saw_exit);
+        EXPECT_TRUE(std::filesystem::exists(log_root / id / "request.json"));
+    }
+}
+
 }  // namespace
 }  // namespace moq::interop

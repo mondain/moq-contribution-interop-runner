@@ -24,6 +24,11 @@ struct NativeRunManagerConfig {
     std::filesystem::path private_key_path;
     std::vector<std::string> webtransport_allowed_origins{};
     bool webtransport_require_origin{false};
+    std::filesystem::path driver_executable{};
+    std::vector<std::string> driver_arguments{};
+    std::filesystem::path driver_fixture{};
+    std::filesystem::path driver_tls_ca{};
+    std::filesystem::path driver_log_root{};
 };
 
 enum class RunStartStatus {
@@ -62,6 +67,7 @@ public:
     RunStartResult start(const RunConfig& config);
     bool stop(const RunId& id);
     [[nodiscard]] bool supports(DraftVersion draft) const noexcept;
+    [[nodiscard]] bool supports_driven() const noexcept;
 
 private:
     class Impl;

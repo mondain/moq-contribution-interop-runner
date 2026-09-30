@@ -125,6 +125,10 @@ the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
 WebTransport publisher. Native publishers connect to the returned UDP address
 and port with the draft ALPN. Then retrieve `GET /api/v1/runs/{id}` or
 `GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
+`GET /results/{id}` is the server-rendered requirement-by-requirement report.
+`GET /results/{id}.json` exports every catalog row and its evidence;
+`GET /results/{id}.tap` exports scenario-level TAP 14 diagnostics. The HTML
+report supports `strength`, `outcome`, `section`, and `scenario` filters.
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
 `GET /healthz` distinguishes the two inventoried drafts from the narrow
 executable profiles and whether their listeners are configured.
@@ -132,7 +136,47 @@ executable profiles and whether their listeners are configured.
 it does not count the interrupted interaction as a publisher failure.
 Scoring distinguishes required MUST/MUST NOT, weighted recommendations, and
 coverage; unexecuted requirements remain visible rather than counting as
-passes. An incomplete or harness-failed run is not a publisher failure.
+passes. MUST/MUST NOT carry weight 10, SHOULD/SHOULD NOT weight 3, and MAY
+weight 1. A failed required row yields a `fail` verdict; otherwise any
+unexecuted applicable, testable row yields `incomplete`. The required score,
+weighted score, and coverage have separate numerators and denominators in
+the result exports. An incomplete or harness-failed run is not a publisher
+failure.
+
+To launch a publisher automatically, configure a trusted executable adapter
+at runner startup and set the run request's `mode` to `"driven"`. The runner
+starts its native listener first, passes the exact endpoint and track fixture
+through the versioned JSON contract, and saves the adapter's stdout/stderr,
+exit status, and SHA-256 log hashes under a per-run directory. An adapter
+cannot set expected behavior or requirement scores. A publisher that exits
+before connecting yields a run-level `ERROR` with logs retained; once
+connected, scores derive from MoQT observations, not process exit status.
+The adapter executable and arguments are set by the operator, never by an
+unauthenticated HTTP caller.
+
+For `moqxr`, the bundled adapter requires `bash` and `jq` and expects the
+`media` namespace and `vide_1` track. This example uses the sibling build and
+fixture; substitute actual publisher paths if they differ:
+
+```sh
+MOQXR_BIN="$(realpath ../moqxr/build/openmoq-publisher)" \
+  build/moq-interop-runner --bind 127.0.0.1 --port 8080 \
+  --publisher-bind 127.0.0.1 --publisher-port-start 4443 \
+  --publisher-port-end 4452 --tls-cert cert.pem --tls-key key.pem \
+  --driver-executable "$PWD/adapters/moqxr/run.sh" \
+  --driver-fixture "$(realpath ../moqxr/tests/fixtures/locmaf-publisher.mp4)" \
+  --driver-log-root "$PWD/driver-logs"
+```
+
+Submit the same run JSON shown above with `"mode":"driven"`,
+`"namespace_hex":["6d65646961"]`, and `"name_hex":"766964655f31"`.
+Use draft 18 or 21 and `native-quic` or `webtransport`; the adapter maps
+these to `moqxr` CLI options. For another publisher, implement the JSON
+contract in `adapters/contract.schema.json` and configure its executable
+with `--driver-executable`, optional repeated `--driver-arg`,
+`--driver-fixture`, optional `--driver-ca`, and `--driver-log-root`. The
+executable path must be absolute; arguments are never interpreted as a shell
+command. Observed mode remains available without an adapter.
 
 For Docker Compose, put `cert.pem` and `key.pem` in a directory readable by
 container UID 10001, set `MOQ_INTEROP_TLS_DIR` to that directory, and set
@@ -142,8 +186,39 @@ match the published UDP range. `scripts/container-build.sh build` creates the
 image from a clean committed tree; `docker compose up` starts the HTTP and UDP
 listeners. The HTTP endpoint is bound to localhost by default. Keep it on a
 trusted network because the API has no authentication yet.
+For container-driven runs, put a compatible publisher, media fixture, and any
+custom adapter in `MOQ_INTEROP_PUBLISHER_DIR` (mounted read-only at
+`/opt/publisher`). Set `MOQ_INTEROP_DRIVER_EXECUTABLE` to the in-container
+adapter path, such as `/usr/local/lib/moq-interop/moqxr/run.sh`, and set
+`MOQ_INTEROP_DRIVER_FIXTURE` to its in-container fixture path. For the bundled
+`moqxr` adapter, set `MOQXR_BIN` to the publisher executable path under
+`/opt/publisher`; the default is `/opt/publisher/openmoq-publisher`.
+Container logs are retained in the `validator-results` volume under
+`driver-logs/<run-id>`. If the adapter variable is unset, Compose runs
+observed mode only. The published host and UDP range must be reachable from
+the publisher process; `127.0.0.1` is valid only within the same network
+namespace.
+On graceful SIGTERM, active runs stop and finalize as incomplete. If the
+process or container is killed before it can finalize, the next startup
+marks each interrupted active run `ERROR` and records a `runner_recovery`
+event; already-finalized results are left unchanged. Keep the SQLite database
+and driver logs on persistent storage if results must survive container
+replacement.
 
 An opt-in black-box check against an external publisher is available:
+
+```sh
+bash tests/e2e/moqxr-matrix.sh \
+  "$PWD/build/moq-interop-runner" \
+  "/path/to/openmoq-publisher" \
+  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
+```
+
+This starts four independent **driven** HTTP runs: drafts 18 and 21 over
+native QUIC and WebTransport. It checks runner health, process diagnostics,
+retained contract input, and the full requirement export; it reports pass/fail
+row counts without requiring the publisher to pass. Use the scripts below for
+manual observed-mode diagnostics.
 
 ```sh
 bash tests/e2e/draft18-native-moqxr.sh \

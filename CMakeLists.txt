@@ -211,7 +211,7 @@ target_compile_options(moq-interop-draft21-evaluators PRIVATE
 
 add_library(moq-interop-runs src/app/native_run_manager.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
-    moq-interop-transport moq-interop-scenarios
+    moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
     moq-interop-storage)
 target_compile_options(moq-interop-runs PRIVATE
@@ -389,7 +389,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-quiche-legacy-runs-tests PUBLIC
         moq-interop-quiche-legacy-tests moq-interop-scenarios
         moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-        moq-interop-storage moq-interop-transport)
+        moq-interop-storage moq-interop-transport
+        moq-interop-publisher-driver)
     add_library(moq-interop-quiche-legacy-http-tests ${MOQ_INTEROP_HTTP_SOURCES})
     target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
         moq-interop-app moq-interop-requirements

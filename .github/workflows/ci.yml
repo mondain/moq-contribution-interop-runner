@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libsqlite3-dev libssl-dev perl pkg-config jq
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 2
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libsqlite3-dev libssl-dev perl pkg-config
+      - name: Configure
+        run: >-
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_C_FLAGS=-fsanitize=address,undefined
+          -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined
+          -DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=OFF
+      - name: Build focused tests
+        run: >-
+          cmake --build build-asan --parallel 2 --target
+          moq-interop-publisher-driver-tests moq-interop-run-store-tests
+          moq-interop-webtransport-run-api-tests moq-interop-result-export-tests
+      - name: Run focused tests
+        run: >-
+          ctest --test-dir build-asan --output-on-failure --parallel 2
+          -R '^(publisher-driver|run-store|webtransport-run-api|result-export)$'
+
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build pinned image
+        run: bash scripts/container-build.sh build
+      - name: Check image health
+        run: |
+          test_dir=$(mktemp -d)
+          trap 'docker rm -f moq-interop-ci >/dev/null 2>&1 || true; rm -rf "$test_dir"' EXIT
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$test_dir/key.pem" -out "$test_dir/cert.pem" \
+            -subj /CN=localhost -days 1 >/dev/null 2>&1
+          chmod 644 "$test_dir/key.pem" "$test_dir/cert.pem"
+          docker run -d --name moq-interop-ci --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            -v "$test_dir:/run/moq-interop-tls:ro" \
+            -p 127.0.0.1:18080:8080/tcp \
+            moq-contribution-interop-runner:local \
+            --bind 0.0.0.0 --port 8080 --database /tmp/runs.sqlite3 \
+            --docs /usr/share/moq-interop/docs \
+            --requirements /usr/share/moq-interop/requirements \
+            --tls-cert /run/moq-interop-tls/cert.pem \
+            --tls-key /run/moq-interop-tls/key.pem
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/healthz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs moq-interop-ci
+          exit 1

@@ -62,7 +62,9 @@ LABEL org.moq-interop.debian-snapshot="${DEBIAN_SNAPSHOT}" \
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
+        bash \
         curl \
+        jq \
         libsqlite3-0 \
         libssl3 \
     && rm -rf /var/lib/apt/lists/* /var/log/apt/* \
@@ -74,6 +76,7 @@ RUN apt-get update \
 
 COPY --from=builder /opt/moq-interop/bin/moq-interop-runner /usr/local/bin/moq-interop-runner
 COPY --from=builder /opt/moq-interop/share/moq-interop/ /usr/share/moq-interop/
+COPY adapters/moqxr/run.sh /usr/local/lib/moq-interop/moqxr/run.sh
 
 USER 10001:10001
 WORKDIR /var/lib/moq-interop
