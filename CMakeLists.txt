@@ -145,6 +145,7 @@ set(MOQ_INTEROP_HTTP_SOURCES
     src/http/result_schema.cpp
     src/http/tap.cpp
     src/http/report.cpp
+    src/http/report_styles.cpp
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
@@ -521,6 +522,14 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-result-export-tests PRIVATE
         moq-interop-http nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME result-export COMMAND moq-interop-result-export-tests)
+
+    add_executable(moq-interop-report-accessibility-tests
+                   tests/integration/report_accessibility_test.cpp)
+    target_include_directories(moq-interop-report-accessibility-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/http")
+    target_link_libraries(moq-interop-report-accessibility-tests PRIVATE
+        moq-interop-http GTest::gtest_main)
+    add_test(NAME report-accessibility COMMAND moq-interop-report-accessibility-tests)
 
     add_executable(moq-interop-publisher-driver-tests
                    tests/unit/publisher_driver_test.cpp)

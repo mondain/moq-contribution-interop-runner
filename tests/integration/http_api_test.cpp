@@ -7,6 +7,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -433,6 +434,75 @@ TEST_F(HttpApiTest, ExportsCompleteResultRowsAndScenarioTap) {
     EXPECT_NE(tap->body.find("\"result\":\"error\""), std::string::npos);
     EXPECT_EQ(get_json("/results/unknown.tap", 404).at("error").at("code"),
               "run_not_found");
+}
+
+TEST_F(HttpApiTest, RendersFilteredRequirementDetailWithEscapedEvidence) {
+    const auto source = catalog(18);
+    const auto found = std::find_if(
+        source->requirements.begin(), source->requirements.end(),
+        [](const requirements::Requirement& row) {
+            return row.applicability == requirements::Applicability::Applicable &&
+                   row.testability == requirements::Testability::Testable &&
+                   row.strength == requirements::Strength::Must &&
+                   std::find(row.scenarios.begin(), row.scenarios.end(),
+                             "subscribe-to-publisher-track") != row.scenarios.end();
+        });
+    ASSERT_NE(found, source->requirements.end());
+    app::RunConfig config{app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+                          app::RunMode::Observed, {"subscribe-to-publisher-track"}, 1s};
+    const auto id = store_->create_run(config);
+    storage::EvidenceEvent event;
+    event.kind = "peer_setup_received";
+    event.detail = "<script>alert('bad')</script>&";
+    event.requirement_id = found->id;
+    store_->append_events(id, std::vector{event});
+    const requirements::ScoreSummary score{requirements::RunVerdict::Incomplete,
+                                            {10, 20}, {10, 20}, {10, 20}};
+    store_->finalize(id, score,
+                     std::vector<requirements::Outcome>{
+                         {found->id, requirements::OutcomeState::Pass}});
+
+    const auto response = client_->Get("/results/" + id);
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+    EXPECT_EQ(response->get_header_value("Content-Type"), "text/html; charset=utf-8");
+    EXPECT_NE(response->body.find("Required score"), std::string::npos);
+    EXPECT_NE(response->body.find("10/20"), std::string::npos);
+    EXPECT_NE(response->body.find("<th scope=\"col\">Requirement"), std::string::npos);
+    EXPECT_NE(response->body.find("<details>"), std::string::npos);
+    EXPECT_NE(response->body.find("background:#fff;color:#17212b"),
+              std::string::npos);
+    EXPECT_NE(response->body.find("summary:focus"), std::string::npos);
+    EXPECT_NE(response->body.find("&lt;script&gt;"), std::string::npos);
+    EXPECT_EQ(response->body.find("<script>"), std::string::npos);
+    EXPECT_NE(response->body.find("/results/" + id + ".json"), std::string::npos);
+    EXPECT_NE(response->body.find("/results/" + id + ".tap"), std::string::npos);
+
+    const auto filtered = client_->Get("/results/" + id + "?outcome=pass");
+    ASSERT_TRUE(filtered);
+    EXPECT_EQ(filtered->status, 200);
+    EXPECT_NE(filtered->body.find(found->id), std::string::npos);
+    EXPECT_NE(filtered->body.find("Rows shown: 1"), std::string::npos);
+    const auto section = client_->Get("/results/" + id +
+                                       "?outcome=pass&section=5.1&strength=MUST");
+    ASSERT_TRUE(section);
+    EXPECT_EQ(section->status, 200);
+    EXPECT_NE(section->body.find("Rows shown: 1"), std::string::npos);
+    const auto scenario = client_->Get(
+        "/results/" + id +
+        "?outcome=pass&scenario=subscribe-to-publisher-track");
+    ASSERT_TRUE(scenario);
+    EXPECT_EQ(scenario->status, 200);
+    EXPECT_NE(scenario->body.find("Rows shown: 1"), std::string::npos);
+    const auto invalid = get_json("/results/" + id + "?outcome=unknown", 400);
+    EXPECT_EQ(invalid.at("error").at("code"), "invalid_report_filter");
+    EXPECT_EQ(get_json("/results/" + id + "?strength=MUST%0Ainjected", 400)
+                  .at("error").at("code"),
+              "invalid_report_filter");
+    const auto list = client_->Get("/results");
+    ASSERT_TRUE(list);
+    EXPECT_NE(list->body.find("href=\"/results/" + id + "\""),
+              std::string::npos);
 }
 
 TEST_F(HttpApiTest, StopsAndRestartsCleanlyInProcess) {

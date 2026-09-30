@@ -1,5 +1,10 @@
 #include "detail.h"
+#include "moq/interop/http/result_schema.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <map>
 #include <sstream>
 #include <string_view>
 
@@ -49,6 +54,36 @@ std::string ratio(const std::optional<requirements::ScoreSummary>& score,
     return std::to_string(value.earned) + "/" + std::to_string(value.possible);
 }
 
+std::string outcome_name(const nlohmann::json& row) {
+    return row.at("outcome").is_null()
+               ? "unobserved" : row.at("outcome").get<std::string>();
+}
+
+bool matches(const nlohmann::json& row, const ReportFilters& filters) {
+    if (!filters.strength.empty() &&
+        row.at("strength").get<std::string>() != filters.strength)
+        return false;
+    if (!filters.outcome.empty() && outcome_name(row) != filters.outcome)
+        return false;
+    if (!filters.section.empty() &&
+        row.at("source").at("section").get<std::string>().rfind(filters.section, 0) != 0)
+        return false;
+    if (!filters.scenario.empty()) {
+        const auto& scenarios = row.at("scenarios");
+        if (std::find(scenarios.begin(), scenarios.end(), filters.scenario) ==
+            scenarios.end())
+            return false;
+    }
+    return true;
+}
+
+std::string ratio(const nlohmann::json& score, std::string_view key) {
+    if (score.is_null()) return "0/0";
+    const auto& value = score.at(std::string(key));
+    return std::to_string(value.at("earned").get<std::uint64_t>()) + "/" +
+           std::to_string(value.at("possible").get<std::uint64_t>());
+}
+
 }  // namespace
 
 std::string render_run_list(std::span<const storage::RunSummary> runs) {
@@ -56,21 +91,22 @@ std::string render_run_list(std::span<const storage::RunSummary> runs) {
     output << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
               "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
               "<title>MoQ contribution interop results</title><style>"
-              "body{background:#fff;color:#17212b;font-family:sans-serif;margin:2rem}"
-              "table{border-collapse:collapse;width:100%}th,td{border:1px solid #6b7280;padding:.5rem;text-align:left}"
-              "th{background:#dbeafe}.status{font-weight:bold}.PASS{color:#116329}.FAIL,.ERROR{color:#a40000}"
-              ".PENDING,.INCOMPLETE{color:#704b00}</style></head><body>"
+           << report_styles() << "</style></head><body>"
               "<main><h1>MoQ contribution interop results</h1>";
     if (runs.empty()) {
         output << "<p>No runs have been created.</p>";
     } else {
-        output << "<table><caption>Newest runs first</caption><thead><tr><th>Run</th><th>State</th>"
-                  "<th>Verdict</th><th>Draft</th><th>Transport</th><th>Mode</th><th>Scenarios</th>"
-                  "<th>Required</th><th>Weighted</th><th>Coverage</th></tr></thead><tbody>";
+        output << "<table><caption>Newest runs first</caption><thead><tr>"
+                  "<th scope=\"col\">Run</th><th scope=\"col\">State</th>"
+                  "<th scope=\"col\">Verdict</th><th scope=\"col\">Draft</th>"
+                  "<th scope=\"col\">Transport</th><th scope=\"col\">Mode</th>"
+                  "<th scope=\"col\">Scenarios</th><th scope=\"col\">Required</th>"
+                  "<th scope=\"col\">Weighted</th><th scope=\"col\">Coverage</th>"
+                  "</tr></thead><tbody>";
         for (const auto& run : runs) {
             const auto verdict = verdict_name(run);
-            output << "<tr><td><a href=\"/results/" << escape_html(run.id) << ".json\">"
-                   << escape_html(run.id) << "</a></td><td>"
+            output << "<tr><th scope=\"row\"><a href=\"/results/" << escape_html(run.id) << "\">"
+                   << escape_html(run.id) << "</a></th><td>"
                    << (run.state == storage::RunState::Active ? "ACTIVE" : "FINALIZED")
                    << "</td><td class=\"status " << verdict << "\">" << verdict
                    << "</td><td>" << static_cast<unsigned>(run.config.draft) << "</td><td>"
@@ -88,6 +124,96 @@ std::string render_run_list(std::span<const storage::RunSummary> runs) {
         output << "</tbody></table>";
     }
     output << "</main></body></html>";
+    return output.str();
+}
+
+std::string render_run_detail(const storage::RunRecord& run,
+                              const requirements::RequirementCatalog& catalog,
+                              const ReportFilters& filters) {
+    const auto document = serialize_result(run, catalog);
+    std::map<std::uint64_t, nlohmann::json> evidence;
+    for (const auto& event : document.at("evidence"))
+        evidence[event.at("sequence").get<std::uint64_t>()] = event;
+    std::ostringstream output;
+    output << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+              "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+              "<title>MoQ run " << escape_html(run.id) << "</title><style>"
+           << report_styles() << "</style></head><body><main>"
+              "<nav><a href=\"/results\">All runs</a></nav><h1>Run "
+           << escape_html(run.id) << "</h1><p>Draft "
+           << catalog.draft << "; transport "
+           << escape_html(transport_name(run.config.transport)) << "; mode "
+           << escape_html(mode_name(run.config.mode)) << "; state "
+           << (run.state == storage::RunState::Active ? "ACTIVE" : "FINALIZED")
+           << ".</p><p><a href=\"/results/" << escape_html(run.id)
+           << ".json\">Download JSON</a> · <a href=\"/results/"
+           << escape_html(run.id) << ".tap\">Download TAP 14</a></p>";
+    const auto& score = document.at("run").at("score");
+    const auto verdict = document.at("run").at("verdict").is_null()
+                             ? "PENDING"
+                             : document.at("run").at("verdict").get<std::string>();
+    output << "<h2>Scores</h2><p>Verdict: <strong class=\"status\">"
+           << escape_html(verdict) << "</strong>; Required score: "
+           << ratio(score, "required") << "; Weighted score: "
+           << ratio(score, "weighted") << "; Coverage: "
+           << ratio(score, "coverage") << ".</p>";
+    output << "<form method=\"get\" action=\"/results/" << escape_html(run.id)
+           << "\"><fieldset><legend>Filter requirements</legend>"
+              "<label>Strength <input name=\"strength\" value=\""
+           << escape_html(filters.strength)
+           << "\"></label><label>Outcome <input name=\"outcome\" value=\""
+           << escape_html(filters.outcome)
+           << "\"></label><label>Section <input name=\"section\" value=\""
+           << escape_html(filters.section)
+           << "\"></label><label>Scenario <input name=\"scenario\" value=\""
+           << escape_html(filters.scenario)
+           << "\"></label><button type=\"submit\">Apply filters</button>"
+              "</fieldset></form>";
+
+    std::size_t shown = 0;
+    std::ostringstream rows;
+    for (const auto& row : document.at("requirements")) {
+        if (!matches(row, filters)) continue;
+        ++shown;
+        const auto status = outcome_name(row);
+        rows << "<tr><th scope=\"row\"><code>" << escape_html(row.at("id").get<std::string>())
+             << "</code></th><td>" << escape_html(row.at("strength").get<std::string>())
+             << "</td><td>" << escape_html(row.at("source").at("section").get<std::string>())
+             << " (lines " << row.at("source").at("first_line").get<std::size_t>()
+             << "–" << row.at("source").at("last_line").get<std::size_t>()
+             << ")</td><td>" << escape_html(row.at("summary").get<std::string>())
+             << "</td><td>" << escape_html(row.at("applicability").get<std::string>())
+             << "; " << escape_html(row.at("testability").get<std::string>())
+             << "</td><td>" << row.at("weight").get<std::uint64_t>()
+             << (row.at("score_eligible").get<bool>() ? " eligible" : " excluded")
+             << "</td><td><strong>" << escape_html(status) << "</strong></td><td>"
+             << escape_html(row.at("rationale").get<std::string>())
+             << "</td><td><details><summary>Evidence ("
+             << row.at("evidence_sequences").size() << ")</summary>";
+        if (row.at("evidence_sequences").empty()) {
+            rows << "<p>No evidence recorded.</p>";
+        } else {
+            rows << "<ul>";
+            for (const auto sequence : row.at("evidence_sequences")) {
+                const auto found = evidence.find(sequence.get<std::uint64_t>());
+                if (found == evidence.end()) continue;
+                rows << "<li><code>" << escape_html(found->second.at("kind").get<std::string>())
+                     << "</code>: " << escape_html(found->second.at("detail").get<std::string>())
+                     << "</li>";
+            }
+            rows << "</ul>";
+        }
+        rows << "</details></td></tr>";
+    }
+    output << "<h2>Requirements</h2><p>Rows shown: " << shown
+           << " of " << document.at("requirements").size() << "</p>"
+              "<table><caption>Draft requirement outcomes</caption><thead><tr>"
+              "<th scope=\"col\">Requirement</th><th scope=\"col\">Strength</th>"
+              "<th scope=\"col\">Section</th><th scope=\"col\">Expected behavior</th>"
+              "<th scope=\"col\">Applicability</th><th scope=\"col\">Weight</th>"
+              "<th scope=\"col\">Outcome</th><th scope=\"col\">Rationale</th>"
+              "<th scope=\"col\">Evidence</th></tr></thead><tbody>"
+           << rows.str() << "</tbody></table></main></body></html>";
     return output.str();
 }
 

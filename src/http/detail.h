@@ -21,5 +21,15 @@ nlohmann::json pagination_json(std::size_t limit, std::size_t offset, std::size_
                                const std::optional<std::size_t>& next_offset);
 
 std::string render_run_list(std::span<const storage::RunSummary> runs);
+struct ReportFilters {
+    std::string strength;
+    std::string outcome;
+    std::string section;
+    std::string scenario;
+};
+std::string_view report_styles();
+std::string render_run_detail(const storage::RunRecord& run,
+                              const requirements::RequirementCatalog& catalog,
+                              const ReportFilters& filters);
 
 }  // namespace moq::interop::http::detail

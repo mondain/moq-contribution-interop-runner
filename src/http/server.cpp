@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <iostream>
@@ -95,6 +96,34 @@ storage::RunQuery query(const httplib::Request& request) {
         throw ApiError{400, "invalid_pagination", "offset is too large."};
     }
     return result;
+}
+
+detail::ReportFilters report_filters(const httplib::Request& request) {
+    detail::ReportFilters filters;
+    const auto read = [&](std::string_view name, std::size_t maximum) {
+        if (!request.has_param(std::string(name))) return std::string{};
+        auto value = request.get_param_value(std::string(name));
+        if (value.size() > maximum ||
+            std::any_of(value.begin(), value.end(), [](unsigned char c) { return c < 0x20; }))
+            throw ApiError{400, "invalid_report_filter", "Report filter is invalid."};
+        return value;
+    };
+    filters.strength = read("strength", 16);
+    filters.outcome = read("outcome", 32);
+    filters.section = read("section", 64);
+    filters.scenario = read("scenario", 256);
+    if (!filters.strength.empty() &&
+        filters.strength != "MUST" && filters.strength != "MUST NOT" &&
+        filters.strength != "SHOULD" && filters.strength != "SHOULD NOT" &&
+        filters.strength != "MAY")
+        throw ApiError{400, "invalid_report_filter", "Strength filter is invalid."};
+    if (!filters.outcome.empty() &&
+        filters.outcome != "pass" && filters.outcome != "fail" &&
+        filters.outcome != "not_run" && filters.outcome != "not_testable" &&
+        filters.outcome != "not_applicable" && filters.outcome != "unobserved" &&
+        filters.outcome != "error")
+        throw ApiError{400, "invalid_report_filter", "Outcome filter is invalid."};
+    return filters;
 }
 
 app::RunConfig parse_run_config(const httplib::Request& request) {
@@ -468,6 +497,23 @@ public:
                     response.set_header("X-Content-Type-Options", "nosniff");
                     response.set_content(serialize_tap14(run, catalog),
                                          "text/plain; charset=utf-8");
+                } catch (const std::out_of_range&) {
+                    throw ApiError{404, "run_not_found", "The requested run was not found."};
+                }
+            });
+        });
+        server.Get(R"(/results/(.+))", [this](const httplib::Request& request,
+                                               httplib::Response& response) {
+            guarded(response, [this, &request, &response] {
+                const auto filters = report_filters(request);
+                try {
+                    const auto run = store->load(request.matches[1]);
+                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
+                                              ? *draft18 : *draft21;
+                    response.status = 200;
+                    html_headers(response);
+                    response.set_content(detail::render_run_detail(run, catalog, filters),
+                                         "text/html; charset=utf-8");
                 } catch (const std::out_of_range&) {
                     throw ApiError{404, "run_not_found", "The requested run was not found."};
                 }
