@@ -515,8 +515,13 @@ network.
 | `GET /results/{id}.tap` | Optional scenario-level TAP 14 export |
 
 `POST /api/v1/runs` accepts a draft, transport, mode, scenario selection,
-resource limits, and deadlines. It returns the run identifier, assigned
-publisher endpoint, TLS trust information, and expiration time.
+and timeout. It returns the run identifier and assigned publisher endpoint.
+Native QUIC returns an address, UDP port, and `moqt-18` or `moqt-21` ALPN.
+WebTransport returns an HTTPS URL and path, HTTP/3 ALPN, and selected
+`moqt-18` or `moqt-21` WebTransport application protocol. The operator supplies
+the PEM certificate and private key at startup and must separately establish
+publisher trust in that certificate; the response does not embed private key
+material or claim a publisher has trusted the certificate.
 
 JSON responses carry an API schema version. Collection endpoints are paginated.
 Malformed input returns a structured client error; resource exhaustion or port

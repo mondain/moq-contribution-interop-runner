@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace moq::interop::app {
 
@@ -21,6 +22,8 @@ struct NativeRunManagerConfig {
     std::size_t maximum_active_runs{1};
     std::filesystem::path certificate_path;
     std::filesystem::path private_key_path;
+    std::vector<std::string> webtransport_allowed_origins{};
+    bool webtransport_require_origin{false};
 };
 
 enum class RunStartStatus {
@@ -35,6 +38,9 @@ struct RunStartResult {
     RunStartStatus status{RunStartStatus::ListenerError};
     RunId id;
     transport::BoundEndpoint endpoint;
+    std::string url{};
+    std::string path{};
+    std::string protocol{};
 };
 
 class NativeRunManager {

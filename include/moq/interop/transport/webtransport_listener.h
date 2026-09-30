@@ -12,6 +12,7 @@ namespace moq::interop::transport {
 struct WebTransportListenerConfig {
     NativeQuicListenerConfig quic;
     std::string authority;
+    std::string advertised_host;
     std::string path = "/moq";
     std::vector<std::string> allowed_origins;
     std::string application_protocol;

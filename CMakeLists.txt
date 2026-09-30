@@ -380,7 +380,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-quiche-legacy-runs-tests PUBLIC
         moq-interop-quiche-legacy-tests moq-interop-scenarios
         moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-        moq-interop-storage)
+        moq-interop-storage moq-interop-transport)
     add_library(moq-interop-quiche-legacy-http-tests
                 src/http/server.cpp src/http/json.cpp src/http/report.cpp)
     target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
@@ -508,6 +508,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)
+
+    add_executable(moq-interop-webtransport-run-api-tests
+                   tests/integration/webtransport_run_api_test.cpp)
+    target_compile_definitions(moq-interop-webtransport-run-api-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_link_libraries(moq-interop-webtransport-run-api-tests PRIVATE
+                          moq-interop-http httplib::httplib
+                          nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME webtransport-run-api COMMAND moq-interop-webtransport-run-api-tests)
 
     add_executable(moq-interop-cursor-tests tests/golden/cursor_test.cpp)
     target_link_libraries(moq-interop-cursor-tests PRIVATE moq-interop-wire GTest::gtest_main)

@@ -2,12 +2,13 @@
 
 Publisher-focused MoQT interoperability runner. The checked-in draft text in
 `docs/` is the protocol authority. The requirement inventories cover drafts 18
-and 21. The draft-18 native-QUIC scenarios subscribe to a configured track,
+and 21. The draft-18 scenarios subscribe to a configured track,
 optionally subscribe again to verify rejection with `DUPLICATE_SUBSCRIPTION`,
-or issue a standalone FETCH and check for exactly one response. Draft-21 native-QUIC
+or issue a standalone FETCH and check for exactly one response. Draft-21
 profiles accept a publisher's PUBLISH for a
-configured track and send an empty REQUEST_OK. WebTransport and
-the remaining publisher requirements are cataloged but not executable yet.
+configured track and send an empty REQUEST_OK. These observed-mode scenarios
+can run over native QUIC or WebTransport. The remaining publisher requirements
+are cataloged but not executable yet.
 Requests for unsupported scenarios return HTTP 422; they are never silently
 scored as conformant.
 
@@ -37,7 +38,13 @@ Without both TLS files, the HTTP inventory and stored-result endpoints remain
 available, but POST `/api/v1/runs` returns HTTP 503 for executable scenarios.
 The certificate must be trusted by the publisher being tested. The service
 binds one UDP port per active run, up to the configured port range. It does not
-forward to subscribers.
+forward to subscribers. A WebTransport client that sends `Origin` must use an
+origin explicitly listed with repeatable `--publisher-origin https://host`
+options. Non-browser clients may omit `Origin`; use
+`--require-publisher-origin` to require it. The client must negotiate HTTP/3,
+QUIC/H3 DATAGRAM, RESET_STREAM_AT, and the current WebTransport settings and
+extended CONNECT profile; legacy WebTransport settings or protocol tokens are
+rejected before MOQT bytes are scored.
 
 The HTTP run configuration accepts an optional opaque-byte track fixture:
 
@@ -79,7 +86,9 @@ first-response ordering requirements or subsequent namespace/track updates.
 For draft 21, set `draft` to `21` and select exactly one of
 `d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or
 `d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`, or
-`d21-server-sends-path` in `scenarios`; the endpoint advertises ALPN `moqt-21`.
+`d21-server-sends-path` in `scenarios`; the native endpoint advertises ALPN
+`moqt-21`, while WebTransport uses ALPN `h3` and selects `moqt-21` through
+`WT-Available-Protocols` / `WT-Protocol`.
 The two unknown-option SETUP profiles send the draft-21 reserved GREASE option
 type `0x9D` once or twice, then require a valid PUBLISH and REQUEST_OK before
 scoring receiver requirements `D21-9-1-MUST-287`, `-288`, and (for duplicates)
@@ -110,8 +119,11 @@ including NUL, without imposing a text canonicalization on publishers.
 Create a run with `curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
   -H 'Content-Type: application/json' -d @run.json`, where `run.json` contains
 the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
-`address`, `port`, and the selected draft's ALPN. Configure the publisher to connect to
-that endpoint, then retrieve `GET /api/v1/runs/{id}` or
+`address`, `port`, and ALPN. For WebTransport, change `transport` to
+`"webtransport"` in the run request; the endpoint also returns an HTTPS `url`,
+`path`, and exact `moqt-18` or `moqt-21` `protocol`. Give that URL to a
+WebTransport publisher. Native publishers connect to the returned UDP address
+and port with the draft ALPN. Then retrieve `GET /api/v1/runs/{id}` or
 `GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
 `GET /healthz` distinguishes the two inventoried drafts from the narrow
@@ -151,6 +163,19 @@ observation, not a validator pass or a reason to bypass that draft requirement.
 The optional test peer exercises the actual HTTP-created run and production
 native listener for both drafts without depending on a particular publisher:
 `ctest --test-dir build -R 'draft(18|21)-native' --output-on-failure`.
+The WebTransport run API test creates both draft endpoints, performs an HTTP/3
+extended CONNECT with a scripted publisher, sends MOQT SETUP, and checks stored
+`peer_setup_received` evidence. For draft 18 it also answers the runner's
+SUBSCRIBE and checks the scored single-response requirement:
+`ctest --test-dir build -R webtransport-run-api --output-on-failure`.
+The sibling `moq-rs/moq-pub` is a useful publisher reference but its checked-in
+`moq-transport` currently lists draft versions only through 14 and ALPN
+`moq-00`, so it is not a draft-18/21 acceptance fixture. The diagnostic
+`tests/e2e/draft18-webtransport-smoke.sh` and
+`tests/e2e/draft21-webtransport-smoke.sh` take the runner binary, moqxr
+publisher binary, and MP4 fixture as arguments. Both currently fail with
+moqxr after SETUP: the runner does not yet acknowledge the publisher's
+PUBLISH_NAMESPACE request, so these scripts are not passing acceptance tests.
 
 The script starts a loopback runner with temporary TLS material, asks the
 publisher to connect, prints the run verdict and any scored requirements, and

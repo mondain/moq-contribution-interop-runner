@@ -80,9 +80,13 @@ WebTransportSession::WebTransportSession(StreamId connect_stream_id,
                                          WebTransportSessionLimits limits,
                                          picoquic_cnx_t* connection,
                                          h3zero_callback_ctx_t* h3,
-                                         h3zero_stream_ctx_t* control)
+                                         h3zero_stream_ctx_t* control,
+                                         picohttp_post_data_cb_fn stream_callback,
+                                         void* stream_callback_context)
     : connect_stream_id_(connect_stream_id), limits_(limits),
-      connection_(connection), h3_(h3), control_(control) {}
+      connection_(connection), h3_(h3), control_(control),
+      stream_callback_(stream_callback),
+      stream_callback_context_(stream_callback_context) {}
 
 StreamId WebTransportSession::connect_stream_id() const noexcept {
     return connect_stream_id_;
@@ -209,6 +213,8 @@ OpenResult WebTransportSession::open(bool bidirectional) {
     auto* stream = picowt_create_local_stream(connection_, bidirectional ? 1 : 0,
                                                h3_, connect_stream_id_);
     if (stream == nullptr) return {TransportStatus::StreamLimit, 0};
+    stream->path_callback = stream_callback_;
+    stream->path_callback_ctx = stream_callback_context_;
     writable_streams_.insert(stream->stream_id);
     if (bidirectional) readable_streams_.insert(stream->stream_id);
     return {TransportStatus::Success, stream->stream_id};

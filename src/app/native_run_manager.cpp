@@ -6,6 +6,7 @@
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/scenarios/draft21_announcement.h"
 #include "moq/interop/scenarios/run_controller.h"
+#include "moq/interop/transport/webtransport_listener.h"
 
 #include <algorithm>
 #include <atomic>
@@ -275,7 +276,7 @@ public:
     }
 
     void run(Worker* worker,
-             std::unique_ptr<transport::NativeQuicListener> listener,
+             std::unique_ptr<transport::SessionTransport> listener,
              RunConfig run_config) {
         try {
             if (run_config.draft == DraftVersion::Draft21) {
@@ -284,7 +285,7 @@ public:
                 run_draft18(worker, *listener, run_config);
             }
         } catch (const std::exception& error) {
-            std::cerr << "native run " << worker->id << " failed: "
+            std::cerr << "publisher run " << worker->id << " failed: "
                       << error.what() << '\n';
             try {
                 const requirements::ScoreSummary failure{
@@ -292,7 +293,7 @@ public:
                     {0, 0}, {0, 0}, {0, 0}};
                 store->finalize(worker->id, failure, {});
             } catch (const std::exception& finalization_error) {
-                std::cerr << "native run " << worker->id
+                std::cerr << "publisher run " << worker->id
                           << " finalization failed: "
                           << finalization_error.what() << '\n';
             }
@@ -301,7 +302,7 @@ public:
     }
 
     void run_draft18(Worker* worker,
-                     transport::NativeQuicListener& listener,
+                     transport::SessionTransport& listener,
                      const RunConfig& run_config) {
             const auto started = scenarios::Clock::now();
             const auto deadline = started + run_config.timeout;
@@ -371,7 +372,7 @@ public:
     }
 
     void run_draft21(Worker* worker,
-                     transport::NativeQuicListener& listener,
+                     transport::SessionTransport& listener,
                      const RunConfig& run_config) {
         const auto started = scenarios::Draft21Clock::now();
         const auto deadline = started + run_config.timeout;
@@ -450,7 +451,6 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         config.scenario_ids.size() == 1 &&
         draft21_scenario_id(config.scenario_ids.front());
     if ((!draft18_scenario && !draft21_scenario) ||
-        config.transport != TransportKind::NativeQuic ||
         config.mode != RunMode::Observed ||
         !supports(config.draft)) {
         return {RunStartStatus::Unsupported, {}, {}};
@@ -468,10 +468,41 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     if (impl_->workers.size() >= impl_->config.maximum_active_runs) {
         return {RunStartStatus::PortExhausted, {}, {}};
     }
-    std::unique_ptr<transport::NativeQuicListener> listener;
+    std::unique_ptr<transport::SessionTransport> listener;
     transport::BoundEndpoint endpoint;
+    std::string url;
+    std::string path;
+    std::string protocol;
     for (unsigned port = impl_->config.port_start;
          port <= impl_->config.port_end; ++port) {
+        if (config.transport == TransportKind::WebTransport) {
+            transport::WebTransportListenerConfig listener_config;
+            listener_config.quic.bind_address = impl_->config.bind_address;
+            listener_config.quic.bind_port = static_cast<std::uint16_t>(port);
+            listener_config.quic.certificate_path = impl_->config.certificate_path;
+            listener_config.quic.private_key_path = impl_->config.private_key_path;
+            listener_config.advertised_host = impl_->config.advertised_address;
+            listener_config.allowed_origins = impl_->config.webtransport_allowed_origins;
+            listener_config.require_origin = impl_->config.webtransport_require_origin;
+            listener_config.application_protocol = draft21_scenario ? "moqt-21" : "moqt-18";
+            auto created = transport::WebTransportListener::create(
+                std::move(listener_config));
+            if (created.listener) {
+                endpoint = created.listener->bound_endpoint();
+                if (!impl_->config.advertised_address.empty())
+                    endpoint.address = impl_->config.advertised_address;
+                path = "/moq";
+                protocol = draft21_scenario ? "moqt-21" : "moqt-18";
+                const auto host = endpoint.address.find(':') != std::string::npos
+                    ? "[" + endpoint.address + "]" : endpoint.address;
+                url = "https://" + host + ":" + std::to_string(endpoint.port) + path;
+                listener = std::move(created.listener);
+                break;
+            }
+            if (created.error != transport::NativeQuicListenerError::BindFailed)
+                return {RunStartStatus::ListenerError, {}, {}};
+            continue;
+        }
         transport::NativeQuicListenerConfig listener_config;
         listener_config.bind_address = impl_->config.bind_address;
         listener_config.bind_port = static_cast<std::uint16_t>(port);
@@ -521,7 +552,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         impl_->store->finalize(id, failure, {});
         return {RunStartStatus::ListenerError, {}, {}};
     }
-    return {RunStartStatus::Started, id, endpoint};
+    return {RunStartStatus::Started, id, endpoint, url, path, protocol};
 }
 
 bool NativeRunManager::supports(DraftVersion draft) const noexcept {

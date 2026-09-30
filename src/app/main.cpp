@@ -37,12 +37,14 @@ void usage(std::ostream& output) {
               "  --database PATH         SQLite database path\n"
               "  --docs PATH             checked-in draft text directory\n"
               "  --requirements PATH     requirement catalog directory\n"
-              "  --publisher-bind ADDRESS  native QUIC bind address\n"
+              "  --publisher-bind ADDRESS  QUIC/WebTransport bind address\n"
               "  --publisher-advertise ADDRESS  host/address returned to publishers\n"
               "  --publisher-port-start PORT  first UDP publisher port (default 4443)\n"
               "  --publisher-port-end PORT    last UDP publisher port (default 4452)\n"
-              "  --tls-cert PATH         PEM certificate for native QUIC\n"
-              "  --tls-key PATH          PEM private key for native QUIC\n"
+              "  --publisher-origin ORIGIN  allowed WebTransport Origin (repeatable)\n"
+              "  --require-publisher-origin  require Origin on WebTransport CONNECT\n"
+              "  --tls-cert PATH         PEM certificate for QUIC/WebTransport\n"
+              "  --tls-key PATH          PEM private key for QUIC/WebTransport\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -77,6 +79,8 @@ Options parse_options(int argc, char* argv[]) {
         else if (argument == "--publisher-advertise") options.native.advertised_address = value(argument);
         else if (argument == "--publisher-port-start") options.native.port_start = parse_port(value(argument));
         else if (argument == "--publisher-port-end") options.native.port_end = parse_port(value(argument));
+        else if (argument == "--publisher-origin") options.native.webtransport_allowed_origins.emplace_back(value(argument));
+        else if (argument == "--require-publisher-origin") options.native.webtransport_require_origin = true;
         else if (argument == "--tls-cert") options.native.certificate_path = value(argument);
         else if (argument == "--tls-key") options.native.private_key_path = value(argument);
         else throw std::invalid_argument("unknown option: " + std::string(argument));
@@ -86,6 +90,10 @@ Options parse_options(int argc, char* argv[]) {
     }
     if (options.native.port_start > options.native.port_end) {
         throw std::invalid_argument("publisher port start must not exceed port end");
+    }
+    if (options.native.webtransport_require_origin &&
+        options.native.webtransport_allowed_origins.empty()) {
+        throw std::invalid_argument("--require-publisher-origin requires --publisher-origin");
     }
     options.native.maximum_active_runs = static_cast<std::size_t>(
         options.native.port_end - options.native.port_start + 1);

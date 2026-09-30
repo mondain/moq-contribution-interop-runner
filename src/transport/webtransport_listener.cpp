@@ -55,6 +55,13 @@ std::vector<std::byte> application_protocol_bytes(const std::string& value) {
     return result;
 }
 
+std::string authority_host(std::string host) {
+    if (host.find(':') != std::string::npos &&
+        (host.empty() || host.front() != '['))
+        return "[" + host + "]";
+    return host;
+}
+
 }  // namespace
 
 struct WebTransportListener::Impl {
@@ -213,7 +220,7 @@ struct WebTransportListener::Impl {
                                       config.quic.max_event_payload_bytes,
                                       usable,
                                       config.quic.max_queued_send_bytes},
-            cnx, h3, control);
+            cnx, h3, control, route_callback, this);
         session_connection = cnx;
         session->establish(application_protocol_bytes(config.application_protocol),
                            cid_bytes(picoquic_get_local_cnxid(cnx)),
@@ -352,7 +359,9 @@ WebTransportListenerCreateResult WebTransportListener::create(
         : ntohs(reinterpret_cast<const sockaddr_in6*>(&impl->local_address)->sin6_port);
 
     if (impl->config.authority.empty())
-        impl->config.authority = impl->endpoint.address + ":" +
+        impl->config.authority = authority_host(impl->config.advertised_host.empty()
+                                     ? impl->endpoint.address
+                                     : impl->config.advertised_host) + ":" +
                                  std::to_string(impl->endpoint.port);
     impl->profile = impl->config.application_protocol == "moqt-18"
         ? WebTransportProfile::Draft18Wt15 : WebTransportProfile::Draft21Wt16;

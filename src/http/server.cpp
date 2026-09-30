@@ -221,11 +221,7 @@ public:
                     std::cerr << "Database readiness check failed with an unknown exception\n";
                     throw ApiError{503, "database_not_ready", "The database is not ready."};
                 }
-                json_response(response, {{"schema_version", 1},
-                                         {"status", "ok"},
-                                         {"database", {{"ready", true}}},
-                                         {"supported_drafts", {18, 21}},
-                                         {"executable_profiles", Json::array({
+                Json profiles = Json::array({
                                              {{"draft", 18}, {"transport", "native-quic"},
                                               {"mode", "observed"},
                                               {"scenario", "subscribe-to-publisher-track"},
@@ -275,7 +271,18 @@ public:
                                               {"mode", "observed"},
                                               {"scenario", "subscribe-tracks-at-publisher"},
                                               {"configured", runs && runs->supports(
-                                                  app::DraftVersion::Draft18)}}})},
+                                                  app::DraftVersion::Draft18)}}});
+                const auto native_count = profiles.size();
+                for (std::size_t index = 0; index < native_count; ++index) {
+                    auto webtransport = profiles.at(index);
+                    webtransport["transport"] = "webtransport";
+                    profiles.push_back(std::move(webtransport));
+                }
+                json_response(response, {{"schema_version", 1},
+                                         {"status", "ok"},
+                                         {"database", {{"ready", true}}},
+                                         {"supported_drafts", {18, 21}},
+                                         {"executable_profiles", std::move(profiles)},
                                          {"validator", detail::build_json(build)}});
             });
         });
@@ -341,11 +348,10 @@ public:
                      requested.scenario_ids.front() ==
                          "d21-server-sends-path");
                 if ((!draft18_scenario && !draft21_scenario) ||
-                    requested.transport != app::TransportKind::NativeQuic ||
                     requested.mode != app::RunMode::Observed ||
                     (runs && !runs->supports(requested.draft))) {
                     throw ApiError{422, "unsupported_run_config",
-                                   "The requested native-QUIC observed scenario is not executable."};
+                                   "The requested observed scenario is not executable."};
                 }
                 if (!requested.track_fixture || requested.timeout < std::chrono::milliseconds(2)) {
                     throw ApiError{400, "invalid_run_config",
@@ -358,12 +364,22 @@ public:
                 const auto started = runs->start(requested);
                 switch (started.status) {
                 case app::RunStartStatus::Started:
+                    {
+                    Json publisher_endpoint = {
+                        {"address", started.endpoint.address},
+                        {"port", started.endpoint.port},
+                        {"alpn", requested.transport == app::TransportKind::WebTransport
+                                     ? "h3" : draft21_scenario ? "moqt-21" : "moqt-18"}};
+                    if (requested.transport == app::TransportKind::WebTransport) {
+                        publisher_endpoint["url"] = started.url;
+                        publisher_endpoint["path"] = started.path;
+                        publisher_endpoint["protocol"] = started.protocol;
+                    }
                     json_response(response, {{"schema_version", 1},
                         {"run", detail::run_json(store->load(started.id))},
-                        {"publisher_endpoint", {{"address", started.endpoint.address},
-                                                {"port", started.endpoint.port},
-                                                {"alpn", draft21_scenario ? "moqt-21" : "moqt-18"}}}}, 201);
+                        {"publisher_endpoint", std::move(publisher_endpoint)}}, 201);
                     return;
+                    }
                 case app::RunStartStatus::Unsupported:
                     throw ApiError{422, "unsupported_run_config", "This run configuration is not executable."};
                 case app::RunStartStatus::InvalidConfig:
@@ -371,7 +387,7 @@ public:
                 case app::RunStartStatus::PortExhausted:
                     throw ApiError{503, "publisher_ports_exhausted", "No publisher listener port is available."};
                 case app::RunStartStatus::ListenerError:
-                    throw ApiError{503, "publisher_listener_unavailable", "The native publisher listener could not start."};
+                    throw ApiError{503, "publisher_listener_unavailable", "The publisher listener could not start."};
                 }
             });
         });

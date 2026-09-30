@@ -34,7 +34,9 @@ public:
     WebTransportSession(StreamId connect_stream_id, WebTransportSessionLimits limits,
                         picoquic_cnx_t* connection = nullptr,
                         h3zero_callback_ctx_t* h3 = nullptr,
-                        h3zero_stream_ctx_t* control = nullptr);
+                        h3zero_stream_ctx_t* control = nullptr,
+                        picohttp_post_data_cb_fn stream_callback = nullptr,
+                        void* stream_callback_context = nullptr);
 
     [[nodiscard]] StreamId connect_stream_id() const noexcept;
     void establish(std::vector<std::byte> application_protocol,
@@ -75,6 +77,8 @@ private:
     picoquic_cnx_t* connection_;
     h3zero_callback_ctx_t* h3_;
     h3zero_stream_ctx_t* control_;
+    picohttp_post_data_cb_fn stream_callback_;
+    void* stream_callback_context_;
     std::deque<TransportEvent> events_;
     std::unordered_set<StreamId> writable_streams_;
     std::unordered_set<StreamId> readable_streams_;

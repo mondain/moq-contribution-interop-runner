@@ -69,14 +69,19 @@ TEST(WebTransportListener, BindsAndReleasesUdpPortWithoutAdmittingSession) {
 struct ClientState {
     bool accepted = false;
     bool refused = false;
+    std::uint64_t expected_server_stream = 0;
+    std::vector<std::uint8_t> server_bytes;
 };
 
-int client_callback(picoquic_cnx_t*, std::uint8_t*, std::size_t,
-                    picohttp_call_back_event_t event, h3zero_stream_ctx_t*,
+int client_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
+                    picohttp_call_back_event_t event, h3zero_stream_ctx_t* stream,
                     void* context) {
     auto* state = static_cast<ClientState*>(context);
     if (event == picohttp_callback_connect_accepted) state->accepted = true;
     if (event == picohttp_callback_connect_refused) state->refused = true;
+    if (event == picohttp_callback_post_data && stream != nullptr &&
+        stream->stream_id == state->expected_server_stream && bytes != nullptr)
+        state->server_bytes.insert(state->server_bytes.end(), bytes, bytes + length);
     return 0;
 }
 
@@ -258,6 +263,70 @@ void exercise_connect(const char* token, const char* offered,
         }
         EXPECT_TRUE(delivered);
         EXPECT_TRUE(datagram_delivered);
+
+        ASSERT_EQ(h3zero_declare_stream_prefix(h3, control->stream_id,
+                                               client_callback, &state), 0);
+        const auto server_stream = created.listener->open_bidi();
+        ASSERT_EQ(server_stream.status, TransportStatus::Success);
+        state.expected_server_stream = server_stream.stream_id;
+        static constexpr std::array<std::byte, 3> request{
+            std::byte{'r'}, std::byte{'e'}, std::byte{'q'}};
+        ASSERT_EQ(created.listener->write(server_stream.stream_id, request, false).status,
+                  TransportStatus::Success);
+        for (int step = 0; step < 1000 && state.server_bytes.size() < request.size();
+             ++step) {
+            (void)created.listener->poll(8);
+            for (int packet = 0; packet < 8; ++packet) {
+                sockaddr_in peer{};
+                socklen_t peer_size = sizeof(peer);
+                const auto length = ::recvfrom(socket_fd, incoming.data(), incoming.size(),
+                    0, reinterpret_cast<sockaddr*>(&peer), &peer_size);
+                if (length < 0) break;
+                auto local = client_address;
+                ASSERT_EQ(picoquic_incoming_packet(quic, incoming.data(),
+                    static_cast<std::size_t>(length),
+                    reinterpret_cast<sockaddr*>(&peer),
+                    reinterpret_cast<sockaddr*>(&local), 0, 0,
+                    picoquic_current_time()), 0);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        EXPECT_EQ(state.server_bytes,
+                  (std::vector<std::uint8_t>{'r', 'e', 'q'}));
+        auto* reply_stream = h3zero_find_stream(h3, server_stream.stream_id);
+        ASSERT_NE(reply_stream, nullptr);
+        static constexpr std::array<std::uint8_t, 3> reply{'o', 'k', '!'};
+        ASSERT_EQ(picoquic_add_to_stream_with_ctx(cnx, server_stream.stream_id,
+            reply.data(), reply.size(), 0, reply_stream), 0);
+        bool reply_received = false;
+        for (int step = 0; step < 1000 && !reply_received; ++step) {
+            for (int packet = 0; packet < 8; ++packet) {
+                sockaddr_storage destination{};
+                sockaddr_storage source{};
+                picoquic_connection_id_t log_id{};
+                picoquic_cnx_t* last = nullptr;
+                std::size_t length = 0;
+                int interface_index = 0;
+                ASSERT_EQ(picoquic_prepare_next_packet(quic, picoquic_current_time(),
+                    outgoing.data(), outgoing.size(), &length, &destination,
+                    &source, &interface_index, &log_id, &last), 0);
+                if (length == 0) break;
+                ASSERT_EQ(::sendto(socket_fd, outgoing.data(), length, 0,
+                    reinterpret_cast<sockaddr*>(&destination), sizeof(server_address)),
+                    static_cast<ssize_t>(length));
+            }
+            for (const auto& event : created.listener->poll(8)) {
+                if (const auto* data = std::get_if<StreamDataEvent>(&event)) {
+                    if (data->stream_id == server_stream.stream_id) {
+                        EXPECT_EQ(data->data, (std::vector<std::byte>{
+                            std::byte{'o'}, std::byte{'k'}, std::byte{'!'}}));
+                        reply_received = true;
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        EXPECT_TRUE(reply_received);
     }
     h3zero_callback_delete_context(cnx, h3);
     picoquic_free(quic);
