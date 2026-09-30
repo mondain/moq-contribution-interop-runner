@@ -94,10 +94,11 @@ bool publish_setup(unsigned port, unsigned draft,
     PublisherState state;
     if (picowt_prepare_client_cnx(quic, reinterpret_cast<sockaddr*>(&remote),
             &cnx, &h3, &control, picoquic_current_time(), "runner.test") == 0 &&
+        h3zero_declare_stream_prefix(h3, control->stream_id,
+            publisher_callback, &state) == 0 &&
         picoquic_start_client_cnx(cnx) == 0) {
         bool connect_sent = false;
         bool setup_sent = false;
-        bool prefix_declared = false;
         bool response_sent = false;
         std::array<std::uint8_t, 2048> outgoing{};
         std::array<std::uint8_t, 2048> incoming{};
@@ -153,11 +154,6 @@ bool publish_setup(unsigned port, unsigned draft,
                 if (picoquic_add_to_stream_with_ctx(cnx, control->stream_id,
                     frame.data(), cursor - frame.data(), 0, control) != 0) break;
                 connect_sent = true;
-            }
-            if (state.accepted && !prefix_declared) {
-                if (h3zero_declare_stream_prefix(h3, control->stream_id,
-                        publisher_callback, &state) != 0) break;
-                prefix_declared = true;
             }
             if (state.accepted && !setup_sent) {
                 auto* stream = picowt_create_local_stream(cnx, 0, h3,

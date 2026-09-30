@@ -108,6 +108,33 @@ void Draft18RunController::record_evidence(Clock::time_point now) {
         }
         for (auto& event : events) {
             context_.evidence.push_back(std::move(event));
+            const auto& observed = context_.evidence.back();
+            if (observed.kind == session::EvidenceKind::RequestObserved) {
+                const auto* request = std::get_if<session::RequestObservedEvidence>(
+                    &observed.data);
+                if (request && request->initiator == session::RequestInitiator::Peer) {
+                    const auto* ns = std::get_if<wire::draft18::PublishNamespaceMessage>(
+                        &request->message);
+                    // Only the parameter-free, parsed announcement is accepted
+                    // automatically. A token-bearing announcement needs an
+                    // authorization decision, not an implicit acceptance.
+                    if (ns && ns->parameters.empty()) {
+                        const bool forbidden_dot = !ns->track_namespace.fields.empty() &&
+                            ns->track_namespace.fields.front() ==
+                                std::vector<std::byte>{std::byte{'.'}};
+                        if (forbidden_dot) {
+                            queued_messages_.push_back(session::SendMessageAction{
+                                request->stream_id,
+                                wire::draft18::RequestErrorMessage{
+                                    0x10, 0, {}, std::nullopt}, true});
+                        } else {
+                            queued_messages_.push_back(session::SendMessageAction{
+                                request->stream_id,
+                                wire::draft18::RequestOkMessage{}, false});
+                        }
+                    }
+                }
+            }
             if (engine_.status() == ScenarioStatus::Running &&
                 !scenario_action_pending_) {
                 dispatch(engine_.observe(context_.evidence.back(), now), now);
@@ -163,6 +190,7 @@ ControllerSnapshot Draft18RunController::poll(Clock::time_point now) {
     if (!harness_failed_ && !scenario_action_pending_) {
         dispatch(engine_.advance(now), now);
     }
+    if (!harness_failed_) send_queued_messages();
     context_.complete = !harness_failed_ &&
                         context_.stimulus_delivered &&
                         final_status(engine_.status());

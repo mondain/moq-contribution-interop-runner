@@ -15,10 +15,10 @@ if [[ "$draft" != 18 && "$draft" != 21 ]]; then
     exit 2
 fi
 scenario=subscribe-to-publisher-track
-publisher_extra=()
+publisher_forward=0
 if [[ "$draft" == 21 ]]; then
     scenario=d21-publisher-request-stream-placement
-    publisher_extra=(--preannounce-tracks)
+    publisher_forward=1
 fi
 http_port=${MOQ_INTEROP_TEST_HTTP_PORT:-19191}
 udp_port=${MOQ_INTEROP_TEST_UDP_PORT:-19192}
@@ -89,7 +89,7 @@ set +e
 OPENMOQ_PICOQUIC_TRACE=1 "$publisher_bin" \
     --input "$media_file" --endpoint "$endpoint_url" \
     --transport webtransport --namespace media --draft "$draft" \
-    --forward 0 --timeout 10 --insecure "${publisher_extra[@]}" \
+    --forward "$publisher_forward" --timeout 10 --insecure \
     >"$test_dir/publisher.log" 2>&1
 publisher_exit=$?
 set -e
@@ -107,6 +107,8 @@ result_json=$(curl --fail --silent --show-error \
 setup_events=$(curl --fail --silent --show-error \
     "http://127.0.0.1:$http_port/api/v1/runs/$run_id/events?limit=100" |
     jq '[.items[] | select(.kind == "peer_setup_received")] | length')
+pass_count=$(jq '[.run.outcomes[] | select(.state == "pass")] | length' \
+    <<<"$result_json")
 printf 'publisher_exit=%s run_id=%s state=%s verdict=%s setup_events=%s\n' \
     "$publisher_exit" "$run_id" \
     "$(jq -r '.run.state' <<<"$result_json")" \
@@ -114,7 +116,7 @@ printf 'publisher_exit=%s run_id=%s state=%s verdict=%s setup_events=%s\n' \
 jq -r '.run.outcomes[] | select(.state == "pass" or .state == "fail") | "\(.requirement_id) \(.state)"' \
     <<<"$result_json"
 
-if [[ "$publisher_exit" -ne 0 || "$setup_events" -eq 0 ]]; then
+if [[ "$publisher_exit" -ne 0 || "$setup_events" -eq 0 || "$pass_count" -eq 0 ]]; then
     printf 'recorded events:\n' >&2
     curl --fail --silent --show-error \
         "http://127.0.0.1:$http_port/api/v1/runs/$run_id/events?limit=100" |

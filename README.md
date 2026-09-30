@@ -173,11 +173,29 @@ The sibling `moq-rs/moq-pub` is a useful publisher reference but its checked-in
 `moq-00`, so it is not a draft-18/21 acceptance fixture. The diagnostic
 `tests/e2e/draft18-webtransport-smoke.sh` and
 `tests/e2e/draft21-webtransport-smoke.sh` take the runner binary, moqxr
-publisher binary, and MP4 fixture as arguments. Both currently fail with
-moqxr after SETUP: the runner does not yet acknowledge the publisher's
-PUBLISH_NAMESPACE request, so these scripts are not passing acceptance tests.
+publisher binary, and MP4 fixture as arguments. They require a successful
+publisher exit, observed SETUP, and at least one passing requirement. They
+currently complete with moqxr in both drafts; the overall run verdict remains
+`incomplete` because these smoke scenarios cover only a small part of each
+draft's requirement inventory.
 
-The script starts a loopback runner with temporary TLS material, asks the
+```sh
+bash tests/e2e/draft18-webtransport-smoke.sh \
+  "$PWD/build/moq-interop-runner" \
+  "/path/to/openmoq-publisher" \
+  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
+bash tests/e2e/draft21-webtransport-smoke.sh \
+  "$PWD/build/moq-interop-runner" \
+  "/path/to/openmoq-publisher" \
+  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
+```
+
+The runner acknowledges parameter-free PUBLISH_NAMESPACE requests needed for
+these contribution flows and rejects the forbidden `.` namespace. It does not
+silently authorize token-bearing announcements; those are not executable in
+the current observed profiles.
+
+Each script starts a loopback runner with temporary TLS material, asks the
 publisher to connect, prints the run verdict and any scored requirements, and
 removes its temporary files. It requires `openssl`, `curl`, and `jq`; it is not
 part of the default CTest suite because `moqxr` and media input are external.

@@ -13,8 +13,14 @@
 
 namespace moq::interop::session::draft21 {
 
+struct PublishNamespaceOpen {
+    std::uint64_t request_id{0};
+    std::vector<std::vector<std::byte>> track_namespace;
+};
+
 struct PublishOpenResult {
     std::optional<wire::draft21::PublishMessage> publish;
+    std::optional<PublishNamespaceOpen> publish_namespace;
     std::optional<std::uint64_t> close_error;
     bool harness_limit = false;
     bool invalid_first_message = false;

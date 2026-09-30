@@ -30,8 +30,12 @@ public:
     transport::OperationResult write(transport::StreamId stream,
                                      std::span<const std::byte> data,
                                      bool fin) override {
-        if (fin || (stream != 0 && stream != 3)) {
+        if (stream != 0 && stream != 3 && stream != 4) {
             return {transport::TransportStatus::InvalidState, 0, {}};
+        }
+        if (fin) {
+            ++fin_count;
+            return {transport::TransportStatus::Success, 0, {}};
         }
         if (stream == 0 && block_response) {
             return {transport::TransportStatus::WouldBlock, 0, {}};
@@ -71,6 +75,7 @@ public:
     std::vector<transport::TransportEvent> inbound;
     std::vector<std::byte> setup_bytes;
     std::vector<std::byte> response_bytes;
+    std::size_t fin_count{0};
     std::optional<std::uint64_t> close_error;
     bool block_response{false};
     bool partial_response_once{false};
@@ -94,6 +99,11 @@ transport::StreamDataEvent publish(unsigned request_id = 0,
                       0x04, 't', 'e', 's', last_name_byte, 0x02, 0x00}), false};
 }
 
+transport::StreamDataEvent publish_namespace() {
+    return {0, bytes({0x06, 0x00, 0x09, 0x00, 0x01,
+                      0x05, 'm', 'e', 'd', 'i', 'a', 0x00}), false};
+}
+
 Draft21AnnouncementController make_controller(ScriptedTransport& transport) {
     return {transport, {bytes({'m', 'e', 'd', 'i', 'a'})},
             bytes({'t', 'e', 's', 't'}), std::chrono::milliseconds(100)};
@@ -111,6 +121,43 @@ TEST(Draft21Announcement, AcceptsExpectedPublishAfterSetup) {
     EXPECT_TRUE(controller.context().target_publish_seen);
     EXPECT_TRUE(controller.context().response_delivered);
     EXPECT_TRUE(controller.context().complete);
+}
+
+TEST(Draft21Announcement, AcknowledgesNamespaceBeforeTargetPublish) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(), setup(), publish_namespace()};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Running);
+    EXPECT_FALSE(controller.context().response_delivered);
+    EXPECT_EQ(transport.response_bytes, bytes({0x07, 0x00, 0x01, 0x00}));
+    auto track = publish(2);
+    track.stream_id = 4;
+    transport.inbound = {track};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{} +
+                              std::chrono::milliseconds(1)).status,
+              Draft21AnnouncementStatus::Passed);
+    EXPECT_EQ(transport.response_bytes,
+              bytes({0x07, 0x00, 0x01, 0x00, 0x07, 0x00, 0x01, 0x00}));
+    EXPECT_EQ(std::count_if(controller.context().evidence.begin(),
+                            controller.context().evidence.end(),
+                            [](const Draft21AnnouncementEvent& event) {
+                                return event.kind ==
+                                    Draft21AnnouncementEventKind::NamespaceResponseDelivered;
+                            }), 1);
+}
+
+TEST(Draft21Announcement, RejectsForbiddenDotNamespace) {
+    ScriptedTransport transport;
+    auto controller = make_controller(transport);
+    transport.inbound = {established(), setup(),
+        transport::StreamDataEvent{0,
+            bytes({0x06, 0x00, 0x05, 0x00, 0x01, 0x01, '.', 0x00}), false}};
+    EXPECT_EQ(controller.poll(Draft21Clock::time_point{}).status,
+              Draft21AnnouncementStatus::Running);
+    EXPECT_FALSE(controller.context().response_delivered);
+    EXPECT_EQ(transport.fin_count, 1u);
+    EXPECT_FALSE(transport.response_bytes.empty());
 }
 
 TEST(Draft21Announcement, HoldsEarlyPublishUntilBothSetups) {

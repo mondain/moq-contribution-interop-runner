@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -26,6 +27,8 @@ enum class Draft21AnnouncementEventKind {
     TransportEstablished,
     LocalSetupSent,
     PeerSetupReceived,
+    NamespaceObserved,
+    NamespaceResponseDelivered,
     PublishObserved,
     ResponseDelivered,
     UnsupportedStream,
@@ -75,6 +78,11 @@ private:
         std::uint64_t request_id;
         bool target;
     };
+    struct PendingNamespace {
+        transport::StreamId stream_id;
+        std::uint64_t request_id;
+        bool forbidden_dot;
+    };
     struct PendingWrite {
         transport::StreamId stream_id;
         std::vector<std::byte> bytes;
@@ -82,6 +90,8 @@ private:
         bool setup{false};
         bool target_response{false};
         std::uint64_t request_id{0};
+        bool namespace_response{false};
+        bool fin_after{false};
     };
 
     void record(Draft21AnnouncementEventKind kind,
@@ -113,6 +123,7 @@ private:
     std::map<transport::StreamId, std::vector<std::byte>> uni_probes_;
     std::vector<transport::StreamId> ignored_uni_streams_;
     std::vector<PendingPublication> pending_publications_;
+    std::vector<PendingNamespace> pending_namespaces_;
     std::deque<PendingWrite> writes_;
     Draft21AnnouncementStatus status_{Draft21AnnouncementStatus::Running};
     bool transport_established_{false};

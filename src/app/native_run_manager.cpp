@@ -193,6 +193,10 @@ storage::EvidenceEvent stored_draft21_evidence(
         result.kind = "local_setup_sent"; break;
     case scenarios::Draft21AnnouncementEventKind::PeerSetupReceived:
         result.kind = "peer_setup_received"; break;
+    case scenarios::Draft21AnnouncementEventKind::NamespaceObserved:
+        result.kind = "namespace_observed"; break;
+    case scenarios::Draft21AnnouncementEventKind::NamespaceResponseDelivered:
+        result.kind = "namespace_response_delivered"; break;
     case scenarios::Draft21AnnouncementEventKind::PublishObserved:
         result.kind = "publish_observed"; break;
     case scenarios::Draft21AnnouncementEventKind::ResponseDelivered:

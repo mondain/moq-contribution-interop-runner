@@ -1,6 +1,7 @@
 #include "moq/interop/scenarios/draft21_announcement.h"
 
 #include "moq/interop/wire/draft21/request_ok.h"
+#include "moq/interop/wire/draft21/request_error.h"
 #include "moq/interop/wire/draft21/setup.h"
 
 #include <algorithm>
@@ -177,6 +178,15 @@ void Draft21AnnouncementController::handle_request(
         record(Draft21AnnouncementEventKind::UnsupportedStream,
                event.stream_id);
     }
+    if (result.publish_namespace) {
+        record(Draft21AnnouncementEventKind::NamespaceObserved,
+               event.stream_id, result.publish_namespace->request_id);
+        const auto& name_space = result.publish_namespace->track_namespace;
+        const bool forbidden_dot = !name_space.empty() &&
+            name_space.front() == std::vector<std::byte>{std::byte{'.'}};
+        pending_namespaces_.push_back({event.stream_id,
+            result.publish_namespace->request_id, forbidden_dot});
+    }
     if (!result.publish) return;
     const bool target = result.publish->track_namespace == expected_namespace_ &&
                         result.publish->track_name == expected_track_name_;
@@ -275,6 +285,22 @@ void Draft21AnnouncementController::open_local_setup() {
 
 void Draft21AnnouncementController::queue_pending_responses() {
     if (control_.phase() != session::draft21::ControlPhase::Active) return;
+    for (const auto& ns : pending_namespaces_) {
+        wire::ByteWriter output(16);
+        const bool encoded = ns.forbidden_dot
+            ? !wire::draft21::encode_request_error(
+                  {0x10, 0, {}, std::nullopt}, false, true, output).has_value()
+            : wire::draft21::encode_empty_publish_ok(output);
+        if (!encoded) {
+            fail_harness();
+            return;
+        }
+        writes_.push_back({ns.stream_id,
+                           {output.bytes().begin(), output.bytes().end()},
+                           0, false, false, ns.request_id, true,
+                           ns.forbidden_dot});
+    }
+    pending_namespaces_.clear();
     for (const auto& publish : pending_publications_) {
         wire::ByteWriter output(16);
         if (!wire::draft21::encode_empty_publish_ok(output)) {
@@ -291,23 +317,38 @@ void Draft21AnnouncementController::queue_pending_responses() {
 void Draft21AnnouncementController::flush_writes() {
     while (!writes_.empty() && !harness_failed_) {
         auto& front = writes_.front();
-        const auto remaining = std::span<const std::byte>(front.bytes).subspan(
-            front.offset);
-        const auto written = transport_.write(front.stream_id, remaining, false);
-        if (written.status == transport::TransportStatus::WouldBlock ||
-            written.status == transport::TransportStatus::StreamLimit) return;
-        if ((written.status != transport::TransportStatus::Success &&
-             written.status != transport::TransportStatus::Partial) ||
-            written.accepted == 0 || written.accepted > remaining.size()) {
-            fail_harness();
-            return;
+        if (front.offset < front.bytes.size()) {
+            const auto remaining = std::span<const std::byte>(front.bytes).subspan(
+                front.offset);
+            const auto written = transport_.write(front.stream_id, remaining, false);
+            if (written.status == transport::TransportStatus::WouldBlock ||
+                written.status == transport::TransportStatus::StreamLimit) return;
+            if ((written.status != transport::TransportStatus::Success &&
+                 written.status != transport::TransportStatus::Partial) ||
+                written.accepted == 0 || written.accepted > remaining.size()) {
+                fail_harness();
+                return;
+            }
+            front.offset += written.accepted;
+            if (front.offset < front.bytes.size()) return;
         }
-        front.offset += written.accepted;
-        if (front.offset < front.bytes.size()) return;
+        if (front.fin_after) {
+            const auto finished = transport_.write(front.stream_id, {}, true);
+            if (finished.status == transport::TransportStatus::WouldBlock) return;
+            if (finished.status != transport::TransportStatus::Success ||
+                finished.accepted != 0) {
+                fail_harness();
+                return;
+            }
+            front.fin_after = false;
+        }
         if (front.setup) {
             control_.on_local_setup_sent();
             record(Draft21AnnouncementEventKind::LocalSetupSent,
                    front.stream_id);
+        } else if (front.namespace_response) {
+            record(Draft21AnnouncementEventKind::NamespaceResponseDelivered,
+                   front.stream_id, front.request_id);
         } else {
             record(Draft21AnnouncementEventKind::ResponseDelivered,
                    front.stream_id, front.request_id);

@@ -35,6 +35,22 @@ TEST(Draft21PublishOpen, ParsesFragmentedPublishAndValidatesRequestIds) {
     EXPECT_EQ(state.on_client_stream(4, publish(0), false).close_error, 0x4u);
 }
 
+TEST(Draft21PublishOpen, AcceptsNamespaceAnnouncementBeforePublish) {
+    PublishOpenState state;
+    const auto announcement = bytes({0x06, 0x00, 0x09, 0x00, 0x01,
+                                     0x05, 'm', 'e', 'd', 'i', 'a', 0x00});
+    EXPECT_FALSE(state.on_client_stream(0, {announcement.data(), 4}, false)
+                     .publish_namespace.has_value());
+    const auto result = state.on_client_stream(
+        0, {announcement.data() + 4, announcement.size() - 4}, false);
+    ASSERT_TRUE(result.publish_namespace.has_value());
+    EXPECT_EQ(result.publish_namespace->request_id, 0u);
+    EXPECT_EQ(result.publish_namespace->track_namespace,
+              std::vector<std::vector<std::byte>>({bytes({'m', 'e', 'd', 'i', 'a'})}));
+    EXPECT_FALSE(result.close_error.has_value());
+    EXPECT_TRUE(state.on_client_stream(4, publish(2), false).publish.has_value());
+}
+
 TEST(Draft21PublishOpen, AcceptsOutOfOrderStreamsButRejectsOddClientId) {
     PublishOpenState state;
     EXPECT_TRUE(state.on_client_stream(4, publish(4), false).publish.has_value());

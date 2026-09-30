@@ -423,8 +423,13 @@ OpenResult WebTransportListener::open_uni() {
 }
 OperationResult WebTransportListener::write(StreamId id, std::span<const std::byte> data,
                                              bool fin) {
-    return impl_->session ? impl_->session->write(id, data, fin) :
-                            OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
+    if (!impl_->session)
+        return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto result = impl_->session->write(id, data, fin);
+    if (result.status == TransportStatus::Success ||
+        result.status == TransportStatus::Partial)
+        impl_->pump_send();
+    return result;
 }
 OperationResult WebTransportListener::reset(StreamId id, std::uint64_t error) {
     return impl_->session ? impl_->session->reset(id, error) :

@@ -170,6 +170,74 @@ TEST(Draft18RunController, SendsSessionGeneratedRequestErrorOnPeerStream) {
                   &std::get<wire::draft18::Message>(decoded)), nullptr);
 }
 
+TEST(Draft18RunController, AcknowledgesPublisherNamespaceOnRequestStream) {
+    ScriptedTransport transport;
+    Draft18RunController controller(
+        transport,
+        subscribe_to_publisher_track(
+            {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1,
+            std::chrono::milliseconds(100), std::chrono::milliseconds(20)));
+    const auto now = Clock::time_point{};
+    transport.inbound.push_back(transport::ConnectionEstablishedEvent{
+        {std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+         std::byte{'-'}, std::byte{'1'}, std::byte{'8'}}, {}, {}, 1200});
+    transport.inbound.push_back(transport::StreamDataEvent{
+        2, {std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+            std::byte{0x00}}, false});
+    ASSERT_FALSE(controller.poll(now).harness_failed);
+
+    wire::ByteWriter request_wire(256);
+    ASSERT_TRUE(wire::draft18::encode_message(
+        wire::draft18::PublishNamespaceMessage{
+            0, {{{std::byte{'n'}}}}, {}}, request_wire).has_value());
+    transport.inbound.push_back(transport::StreamDataEvent{
+        0, {request_wire.bytes().begin(), request_wire.bytes().end()}, false});
+    const auto result = controller.poll(now + std::chrono::milliseconds(1));
+    EXPECT_FALSE(result.harness_failed);
+    ASSERT_FALSE(transport.response_bytes.empty());
+    EXPECT_EQ(transport.fin_count, 0u);
+    wire::Cursor cursor(transport.response_bytes);
+    const auto decoded = wire::draft18::decode_message(
+        wire::draft18::StreamRole::Request, cursor, {});
+    ASSERT_TRUE(std::holds_alternative<wire::draft18::Message>(decoded));
+    EXPECT_NE(std::get_if<wire::draft18::RequestOkMessage>(
+                  &std::get<wire::draft18::Message>(decoded)), nullptr);
+}
+
+TEST(Draft18RunController, RejectsForbiddenDotNamespace) {
+    ScriptedTransport transport;
+    Draft18RunController controller(
+        transport,
+        subscribe_to_publisher_track(
+            {{{std::byte{'n'}}}}, {{std::byte{'x'}}}, 1,
+            std::chrono::milliseconds(100), std::chrono::milliseconds(20)));
+    const auto now = Clock::time_point{};
+    transport.inbound.push_back(transport::ConnectionEstablishedEvent{
+        {std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+         std::byte{'-'}, std::byte{'1'}, std::byte{'8'}}, {}, {}, 1200});
+    transport.inbound.push_back(transport::StreamDataEvent{
+        2, {std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+            std::byte{0x00}}, false});
+    ASSERT_FALSE(controller.poll(now).harness_failed);
+
+    wire::ByteWriter request_wire(256);
+    ASSERT_TRUE(wire::draft18::encode_message(
+        wire::draft18::PublishNamespaceMessage{
+            0, {{{std::byte{'.'}}}}, {}}, request_wire).has_value());
+    transport.inbound.push_back(transport::StreamDataEvent{
+        0, {request_wire.bytes().begin(), request_wire.bytes().end()}, false});
+    EXPECT_FALSE(controller.poll(now + std::chrono::milliseconds(1)).harness_failed);
+    EXPECT_EQ(transport.fin_count, 1u);
+    wire::Cursor cursor(transport.response_bytes);
+    const auto decoded = wire::draft18::decode_message(
+        wire::draft18::StreamRole::Request, cursor, {});
+    ASSERT_TRUE(std::holds_alternative<wire::draft18::Message>(decoded));
+    const auto* error = std::get_if<wire::draft18::RequestErrorMessage>(
+        &std::get<wire::draft18::Message>(decoded));
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->error_code, 0x10u);
+}
+
 TEST(Draft18RunController, PeerCloseDuringBlockedStimulusIsNotHarnessFailure) {
     ScriptedTransport transport;
     transport.block_request_after_two_bytes = true;
