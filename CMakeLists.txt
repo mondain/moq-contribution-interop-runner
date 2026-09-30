@@ -157,7 +157,7 @@ set(MOQ_INTEROP_HTTP_SOURCES
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
-                      moq-interop-storage)
+                      moq-interop-storage moq-interop-execution-audit)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 
 add_library(moq-interop-transport
@@ -410,7 +410,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_library(moq-interop-quiche-legacy-http-tests ${MOQ_INTEROP_HTTP_SOURCES})
     target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
         moq-interop-app moq-interop-requirements
-        moq-interop-quiche-legacy-runs-tests moq-interop-storage)
+        moq-interop-quiche-legacy-runs-tests moq-interop-storage
+        moq-interop-execution-audit)
     target_link_libraries(moq-interop-quiche-legacy-http-tests PRIVATE
         httplib::httplib nlohmann_json::nlohmann_json)
     add_executable(moq-interop-runner-legacy-tests src/app/main.cpp)

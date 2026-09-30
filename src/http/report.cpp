@@ -86,13 +86,38 @@ std::string ratio(const nlohmann::json& score, std::string_view key) {
 
 }  // namespace
 
-std::string render_run_list(std::span<const storage::RunSummary> runs) {
+std::string render_run_list(std::span<const storage::RunSummary> runs,
+                            const nlohmann::json& completeness) {
     std::ostringstream output;
     output << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
               "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
               "<title>MoQ contribution interop results</title><style>"
            << report_styles() << "</style></head><body>"
-              "<main><h1>MoQ contribution interop results</h1>";
+              "<main><h1>MoQ contribution interop results</h1>"
+              "<h2>Validator completeness</h2><p>Executable evaluator coverage is "
+              "not publisher conformance. <a href=\"/results/completeness.json\">"
+              "Download completeness JSON</a>.</p><table><caption>Static coverage and "
+              "observed runs by draft and transport</caption><thead><tr>"
+              "<th scope=\"col\">Draft</th><th scope=\"col\">Transport</th>"
+              "<th scope=\"col\">Required evaluator coverage</th>"
+              "<th scope=\"col\">Optional evaluator coverage</th>"
+              "<th scope=\"col\">Runs</th><th scope=\"col\">Observed requirements</th>"
+              "</tr></thead><tbody>";
+    for (const auto& draft : completeness.at("drafts")) {
+        for (const auto& transport : draft.at("transports")) {
+            output << "<tr><td>" << draft.at("draft").get<unsigned>() << "</td><td>"
+                   << escape_html(transport.at("transport").get<std::string>())
+                   << "</td><td>" << draft.at("required_covered").get<std::size_t>()
+                   << "/" << draft.at("required_total").get<std::size_t>()
+                   << "</td><td>" << draft.at("optional_covered").get<std::size_t>()
+                   << "/" << draft.at("optional_total").get<std::size_t>()
+                   << "</td><td>" << transport.at("run_count").get<std::size_t>()
+                   << "</td><td>"
+                   << transport.at("observed_requirement_count").get<std::size_t>()
+                   << "</td></tr>";
+        }
+    }
+    output << "</tbody></table><h2>Runs</h2>";
     if (runs.empty()) {
         output << "<p>No runs have been created.</p>";
     } else {

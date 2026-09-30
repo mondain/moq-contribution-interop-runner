@@ -129,6 +129,20 @@ and port with the draft ALPN. Then retrieve `GET /api/v1/runs/{id}` or
 `GET /results/{id}.json` exports every catalog row and its evidence;
 `GET /results/{id}.tap` exports scenario-level TAP 14 diagnostics. The HTML
 report supports `strength`, `outcome`, `section`, and `scenario` filters.
+`GET /results/completeness.json` downloads the validator's live completeness
+inventory; the `/results` page summarizes the same data by draft and transport.
+Each draft entry identifies its source digest and validator revision, catalog
+row count, registered required/optional evaluator coverage, static findings,
+and classified `not_testable`/`not_applicable`/informative rows with reasons
+and draft section/line citations. Each transport entry reports run count,
+scored outcome rows, distinct requirements with an evidence-backed pass/fail
+observation, execution-audit consistency, and cited `not_run` rows. A pass/fail
+observation is not itself proof of conformance: inspect the execution findings
+and the individual run's evidence before making a conformance claim. An empty
+transport has zero observed coverage and all applicable, testable rows remain
+`not_run`. This HTTP inventory reflects the currently stored runs; the release
+audit artifact below additionally records exact verification commands, draft
+digests, publisher binary/fixture hashes, and stage results.
 `GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
 `GET /healthz` distinguishes the two inventoried drafts from the narrow
 executable profiles and whether their listeners are configured.

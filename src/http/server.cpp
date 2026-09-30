@@ -1,6 +1,10 @@
 #include "moq/interop/http/server.h"
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/requirements/completeness.h"
+#include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/execution_audit.h"
 
 #include "detail.h"
 
@@ -15,6 +19,8 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -217,6 +223,127 @@ void html_headers(httplib::Response& response) {
     response.set_header("Content-Security-Policy",
                         "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
                         "frame-ancestors 'none'");
+}
+
+bool has_declared_evidence(const storage::RunRecord& run,
+                           std::span<const requirements::ExecutableBinding> bindings,
+                           const std::string& requirement_id) {
+    for (const auto& binding : bindings) {
+        if (binding.requirement_id != requirement_id || binding.evidence_kinds.empty() ||
+            std::find(run.config.scenario_ids.begin(), run.config.scenario_ids.end(),
+                      binding.scenario_id) == run.config.scenario_ids.end()) continue;
+        const bool complete = std::all_of(binding.evidence_kinds.begin(),
+            binding.evidence_kinds.end(), [&](const std::string& kind) {
+                return std::any_of(run.events.begin(), run.events.end(),
+                    [&](const storage::EvidenceEvent& event) {
+                        return event.kind == kind && event.scenario_id &&
+                               *event.scenario_id == binding.scenario_id;
+                    });
+            });
+        if (complete) return true;
+    }
+    return false;
+}
+
+Json completeness_json(const requirements::RequirementCatalog& draft18,
+                       const requirements::RequirementCatalog& draft21,
+                       const storage::RunStore& store, const app::BuildInfo& build) {
+    Json drafts = Json::array();
+    for (const auto* catalog : {&draft18, &draft21}) {
+        const auto bindings = catalog->draft == 18
+            ? requirements::draft18_executable_bindings()
+            : requirements::draft21_executable_bindings();
+        const auto audit = requirements::audit_completeness(
+            *catalog, bindings, app::executable_scenarios(catalog->draft));
+        Json findings = Json::array();
+        for (const auto& finding : audit.findings) {
+            findings.push_back({{"code", finding.code},
+                                {"requirement_id", finding.requirement_id},
+                                {"detail", finding.detail},
+                                {"blocking", finding.blocking}});
+        }
+        Json residuals = Json::array();
+        for (const auto& row : catalog->requirements) {
+            const char* classification = nullptr;
+            if (row.applicability == requirements::Applicability::Informative)
+                classification = "informative";
+            else if (row.applicability == requirements::Applicability::NotApplicable)
+                classification = "not_applicable";
+            else if (row.testability == requirements::Testability::NotTestable)
+                classification = "not_testable";
+            if (!classification) continue;
+            residuals.push_back({{"requirement_id", row.id},
+                                 {"classification", classification},
+                                 {"reason", row.rationale},
+                                 {"section", row.source.section},
+                                 {"first_line", row.source.first_line}});
+        }
+        Json transports = Json::array();
+        for (const auto transport : {app::TransportKind::NativeQuic,
+                                     app::TransportKind::WebTransport}) {
+            std::vector<storage::RunRecord> runs;
+            for (std::size_t offset = 0;; offset += 100) {
+                const auto page = store.list({100, offset});
+                for (const auto& summary : page.items) {
+                    if (static_cast<unsigned>(summary.config.draft) == catalog->draft &&
+                        summary.config.transport == transport)
+                        runs.push_back(store.load(summary.id));
+                }
+                if (!page.next_offset) break;
+            }
+            const auto execution = requirements::audit_execution(*catalog, bindings, runs);
+            Json execution_findings = Json::array();
+            for (const auto& finding : execution.findings) {
+                execution_findings.push_back({{"code", finding.code},
+                                              {"run_id", finding.run_id},
+                                              {"requirement_id", finding.requirement_id},
+                                              {"detail", finding.detail}});
+            }
+            std::set<std::string> observed;
+            for (const auto& run : runs) {
+                for (const auto& outcome : run.outcomes) {
+                    if ((outcome.state == requirements::OutcomeState::Pass ||
+                         outcome.state == requirements::OutcomeState::Fail) &&
+                        has_declared_evidence(run, bindings, outcome.requirement_id))
+                        observed.insert(outcome.requirement_id);
+                }
+            }
+            Json not_run = Json::array();
+            for (const auto& row : catalog->requirements) {
+                if (row.applicability != requirements::Applicability::Applicable ||
+                    row.testability != requirements::Testability::Testable ||
+                    observed.contains(row.id)) continue;
+                not_run.push_back({{"requirement_id", row.id},
+                                   {"classification", "not_run"},
+                                   {"reason", "No evidence-backed scored observation for this draft and transport."},
+                                   {"section", row.source.section},
+                                   {"first_line", row.source.first_line}});
+            }
+            transports.push_back({{"transport", transport == app::TransportKind::NativeQuic
+                                                  ? "native-quic" : "webtransport"},
+                                  {"run_count", execution.run_count},
+                                  {"scored_rows", execution.scored_rows},
+                                  {"observed_requirement_count", observed.size()},
+                                  {"execution_consistent", execution.consistent()},
+                                  {"execution_finding_count", execution.findings.size()},
+                                  {"execution_findings", std::move(execution_findings)},
+                                  {"not_run_count", not_run.size()},
+                                  {"not_run", std::move(not_run)}});
+        }
+        drafts.push_back({{"draft", catalog->draft},
+                          {"source_sha256", catalog->source_sha256},
+                          {"catalog_rows", catalog->requirements.size()},
+                          {"required_covered", audit.required_covered},
+                          {"required_total", audit.required_total},
+                          {"optional_covered", audit.optional_covered},
+                          {"optional_total", audit.optional_total},
+                          {"evaluator_complete", audit.complete()},
+                          {"findings", std::move(findings)},
+                          {"classified_residuals", std::move(residuals)},
+                          {"transports", std::move(transports)}});
+    }
+    return {{"schema_version", 1}, {"source_revision", build.source_revision},
+            {"drafts", std::move(drafts)}};
 }
 
 }  // namespace
@@ -462,6 +589,12 @@ public:
                                          {"run", detail::run_json(store->load(id))}});
             });
         });
+        server.Get("/results/completeness.json", [this](const httplib::Request&,
+                                                        httplib::Response& response) {
+            guarded(response, [this, &response] {
+                json_response(response, completeness_json(*draft18, *draft21, *store, build));
+            });
+        });
         server.Get(R"(/results/(.+)\.json)", [this](const httplib::Request& request,
                                                       httplib::Response& response) {
             guarded(response, [this, &request, &response] {
@@ -513,7 +646,9 @@ public:
                 const auto runs = store->list({100, 0});
                 response.status = 200;
                 html_headers(response);
-                response.set_content(detail::render_run_list(runs.items), "text/html; charset=utf-8");
+                response.set_content(detail::render_run_list(
+                    runs.items, completeness_json(*draft18, *draft21, *store, build)),
+                    "text/html; charset=utf-8");
             });
         });
         server.set_error_handler([](const httplib::Request&, httplib::Response& response) {

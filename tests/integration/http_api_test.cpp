@@ -2,6 +2,9 @@
 #include "moq/interop/app/scenario_registry.h"
 
 #include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/completeness.h"
+#include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/storage/run_store.h"
 
 #include <gtest/gtest.h>
@@ -208,6 +211,82 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     const auto report = client_->Get("/results");
     ASSERT_TRUE(report);
     EXPECT_NE(report->body.find("No runs have been created."), std::string::npos);
+}
+
+TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
+    const auto document = get_json("/results/completeness.json");
+    EXPECT_EQ(document.at("schema_version"), 1);
+    EXPECT_EQ(document.at("source_revision"), test_build().source_revision);
+    ASSERT_EQ(document.at("drafts").size(), 2);
+    for (const unsigned draft : {18u, 21u}) {
+        const auto current = catalog(draft);
+        const auto bindings = draft == 18
+            ? requirements::draft18_executable_bindings()
+            : requirements::draft21_executable_bindings();
+        const auto audit = requirements::audit_completeness(
+            *current, bindings, app::executable_scenarios(draft));
+        const auto& item = document.at("drafts").at(draft == 18 ? 0 : 1);
+        EXPECT_EQ(item.at("draft"), draft);
+        EXPECT_EQ(item.at("source_sha256"), current->source_sha256);
+        EXPECT_EQ(item.at("catalog_rows"), current->requirements.size());
+        EXPECT_EQ(item.at("required_covered"), audit.required_covered);
+        EXPECT_EQ(item.at("required_total"), audit.required_total);
+        EXPECT_EQ(item.at("optional_covered"), audit.optional_covered);
+        EXPECT_EQ(item.at("optional_total"), audit.optional_total);
+        EXPECT_EQ(item.at("evaluator_complete"), audit.complete());
+        ASSERT_EQ(item.at("transports").size(), 2);
+        for (const auto& transport : item.at("transports")) {
+            EXPECT_TRUE(transport.at("transport") == "native-quic" ||
+                        transport.at("transport") == "webtransport");
+            EXPECT_EQ(transport.at("run_count"), 0);
+            EXPECT_EQ(transport.at("observed_requirement_count"), 0);
+        }
+        for (const auto& residual : item.at("classified_residuals")) {
+            EXPECT_FALSE(residual.at("reason").get<std::string>().empty());
+            EXPECT_FALSE(residual.at("section").get<std::string>().empty());
+            EXPECT_GT(residual.at("first_line").get<std::size_t>(), 0);
+        }
+    }
+    const auto page = client_->Get("/results");
+    ASSERT_TRUE(page);
+    EXPECT_EQ(page->status, 200);
+    EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
+    EXPECT_NE(page->body.find("5/175"), std::string::npos);
+    EXPECT_NE(page->body.find("7/175"), std::string::npos);
+}
+
+TEST_F(HttpApiTest, ScoredRowWithoutEvaluatorEvidenceRemainsNotRun) {
+    const auto source = catalog(18);
+    const auto binding = requirements::draft18_executable_bindings().front();
+    app::RunConfig config{app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+                          app::RunMode::Observed, {binding.scenario_id}, 1s};
+    const auto id = store_->create_run(config);
+    const std::vector<requirements::Outcome> outcomes{
+        {binding.requirement_id, requirements::OutcomeState::Pass}};
+    store_->finalize(id, requirements::score(*source, outcomes), outcomes);
+
+    const auto document = get_json("/results/completeness.json");
+    const auto& native = document.at("drafts").at(0).at("transports").at(0);
+    const auto& webtransport = document.at("drafts").at(0).at("transports").at(1);
+    EXPECT_EQ(native.at("run_count"), 1);
+    EXPECT_EQ(native.at("scored_rows"), 1);
+    EXPECT_EQ(native.at("observed_requirement_count"), 0);
+    EXPECT_FALSE(native.at("execution_consistent"));
+    EXPECT_TRUE(std::any_of(native.at("execution_findings").begin(),
+                            native.at("execution_findings").end(),
+                            [&](const Json& finding) {
+        return finding.at("code") == "missing_evaluator_evidence" &&
+               finding.at("run_id") == id &&
+               finding.at("requirement_id") == binding.requirement_id;
+    }));
+    EXPECT_EQ(webtransport.at("run_count"), 0);
+    EXPECT_EQ(webtransport.at("observed_requirement_count"), 0);
+    const auto& not_run = native.at("not_run");
+    EXPECT_TRUE(std::any_of(not_run.begin(), not_run.end(), [&](const Json& row) {
+        return row.at("requirement_id") == binding.requirement_id &&
+               !row.at("reason").get<std::string>().empty() &&
+               !row.at("section").get<std::string>().empty();
+    }));
 }
 
 TEST_F(HttpApiTest, ValidatesDraftAndPaginatesRequirements) {

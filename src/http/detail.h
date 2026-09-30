@@ -20,7 +20,8 @@ nlohmann::json event_json(const storage::EvidenceEvent& event);
 nlohmann::json pagination_json(std::size_t limit, std::size_t offset, std::size_t total,
                                const std::optional<std::size_t>& next_offset);
 
-std::string render_run_list(std::span<const storage::RunSummary> runs);
+std::string render_run_list(std::span<const storage::RunSummary> runs,
+                            const nlohmann::json& completeness);
 struct ReportFilters {
     std::string strength;
     std::string outcome;
