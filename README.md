@@ -165,6 +165,17 @@ Compare repetitions only when the publisher binary and fixture are the same;
 publisher identity is not yet stored as a grouping key. Run this audit after
 the service has stopped creating runs so pagination sees a stable database.
 
+The draft release gate can be run with
+`bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit "$PWD/build/moq-interop-audit"`.
+Choose a new output directory for each run; the command refuses to overwrite an
+existing one. It writes `release-audit.json`, the two full draft audit JSON files, command
+receipts, and logs. The `check` mode validates the artifact against the checked-in
+draft digests and current source revision. This is intentionally a failing gate
+at present: the required sanitizer, fuzz, Docker matrix, and publisher stages
+are marked `missing`, and both draft catalogs still lack many evaluators. The
+manually dispatched `Draft release audit` workflow retains the same evidence
+as an artifact and fails until every required stage and static gate passes.
+
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner
 starts its native listener first, passes the exact endpoint and track fixture

@@ -540,6 +540,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>")
     set_tests_properties(audit-cli-smoke PROPERTIES RESOURCE_LOCK "audit-cli-port")
+    add_test(NAME release-audit-check-contract
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
+                     --check-only)
 
     add_executable(moq-interop-run-store-tests tests/unit/run_store_test.cpp)
     target_link_libraries(moq-interop-run-store-tests PRIVATE moq-interop-storage

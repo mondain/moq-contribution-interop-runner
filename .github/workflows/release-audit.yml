@@ -1,0 +1,39 @@
+name: Draft release audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libsqlite3-dev libssl-dev perl pkg-config jq openssl curl ripgrep
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Run release gate and retain incomplete evidence
+        id: release
+        run: |
+          set +e
+          bash tests/e2e/release-audit.sh run "$RUNNER_TEMP/release-audit" \
+            "$PWD/build/moq-interop-audit"
+          result=$?
+          set -e
+          printf 'exit_code=%s\n' "$result" >>"$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload release audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: draft-release-audit
+          path: ${{ runner.temp }}/release-audit/
+          if-no-files-found: warn
+      - name: Enforce release gate
+        if: always()
+        run: test "${{ steps.release.outputs.exit_code }}" = 0
