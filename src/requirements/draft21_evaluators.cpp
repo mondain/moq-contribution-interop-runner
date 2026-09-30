@@ -122,12 +122,20 @@ std::vector<Outcome> evaluate_draft21_announcement(
                 state = OutcomeState::Pass;
             }
         } else if (requirement.id == "D21-9-1-1-MUST-293" ||
-                   requirement.id == "D21-9-1-2-MUST-300") {
-            const bool authority = requirement.id == "D21-9-1-1-MUST-293";
+                   requirement.id == "D21-9-1-1-MUST-294" ||
+                   requirement.id == "D21-9-1-2-MUST-300" ||
+                   requirement.id == "D21-9-1-2-MUST-301") {
+            const bool webtransport_only =
+                requirement.id == "D21-9-1-1-MUST-294" ||
+                requirement.id == "D21-9-1-2-MUST-301";
+            const bool authority =
+                requirement.id == "D21-9-1-1-MUST-293" ||
+                requirement.id == "D21-9-1-1-MUST-294";
             const auto expected_probe =
                 authority ? scenarios::Draft21SetupProbe::ServerAuthority
                           : scenarios::Draft21SetupProbe::ServerPath;
-            if (context.setup_probe == expected_probe &&
+            if ((!webtransport_only || context.webtransport) &&
+                context.setup_probe == expected_probe &&
                 includes(requirement.scenarios,
                          authority ? kAuthorityScenario : kPathScenario) &&
                 includes(requirement.evaluators,
@@ -189,7 +197,11 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
          {"local_setup_sent", "publish_observed", "response_delivered"}},
         {21, "D21-9-1-1-MUST-293", kAuthorityScenario,
          kAuthorityEvaluator, {"local_setup_sent", "peer_closed"}},
+        {21, "D21-9-1-1-MUST-294", kAuthorityScenario,
+         kAuthorityEvaluator, {"local_setup_sent", "peer_closed"}},
         {21, "D21-9-1-2-MUST-300", kPathScenario,
+         kPathEvaluator, {"local_setup_sent", "peer_closed"}},
+        {21, "D21-9-1-2-MUST-301", kPathScenario,
          kPathEvaluator, {"local_setup_sent", "peer_closed"}},
     };
 }

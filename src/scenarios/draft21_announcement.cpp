@@ -29,12 +29,14 @@ Draft21AnnouncementController::Draft21AnnouncementController(
     std::vector<std::vector<std::byte>> expected_namespace,
     std::vector<std::byte> expected_track_name,
     std::chrono::milliseconds timeout,
-    Draft21SetupProbe setup_probe)
+    Draft21SetupProbe setup_probe,
+    bool webtransport)
     : transport_(transport),
       expected_namespace_(std::move(expected_namespace)),
       expected_track_name_(std::move(expected_track_name)),
       timeout_(timeout) {
     context_.setup_probe = setup_probe;
+    context_.webtransport = webtransport;
 }
 
 void Draft21AnnouncementController::record(

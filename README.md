@@ -84,7 +84,7 @@ detects duplicate replies; these profiles do not yet score the separate
 first-response ordering requirements or subsequent namespace/track updates.
 
 For draft 21, set `draft` to `21` and select exactly one of
-`d21-publisher-request-stream-placement`, `d21-setup-unknown-options`, or
+`d21-publisher-request-stream-placement`, `d21-setup-unknown-options`,
 `d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`, or
 `d21-server-sends-path` in `scenarios`; the native endpoint advertises ALPN
 `moqt-21`, while WebTransport uses ALPN `h3` and selects `moqt-21` through
@@ -110,6 +110,9 @@ are `INVALID_AUTHORITY` (`0x19`) and `INVALID_PATH` (`0x8`); a different
 application close code fails the selected requirement, while an unobserved or
 transport-level close remains `NOT_RUN`. A completed publication after the
 forbidden option, without the required close, also fails the requirement.
+Over WebTransport, the same probes additionally score the transport-specific
+`D21-9-1-1-MUST-294` or `D21-9-1-2-MUST-301`. Native-QUIC runs leave those
+WebTransport-only rows `NOT_RUN`.
 
 `namespace_hex` is an ordered array of 0–32 nonempty hex-encoded namespace
 fields; `name_hex` is the possibly empty hex-encoded Track Name. The decoded
@@ -164,7 +167,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-5/175 draft-18 and 7/175 draft-21 applicable, testable MUST/MUST NOT rows
+5/175 draft-18 and 9/175 draft-21 applicable, testable MUST/MUST NOT rows
 have registered executable bindings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit

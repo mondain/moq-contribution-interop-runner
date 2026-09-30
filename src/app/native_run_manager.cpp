@@ -447,7 +447,8 @@ public:
             listener, std::move(name_space),
             bytes_of(run_config.track_fixture->track_name),
             run_config.timeout,
-            draft21_setup_probe(run_config.scenario_ids.front()));
+            draft21_setup_probe(run_config.scenario_ids.front()),
+            run_config.transport == TransportKind::WebTransport);
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();

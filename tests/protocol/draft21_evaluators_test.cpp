@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <stdexcept>
+#include <tuple>
 
 namespace moq::interop::requirements {
 namespace {
@@ -200,6 +201,41 @@ TEST(Draft21Evaluators, ForbiddenServerUriOptionsRequireExactPeerClose) {
              std::nullopt});
         EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
                               probe.second).state, OutcomeState::Fail);
+    }
+}
+
+TEST(Draft21Evaluators, WebTransportServerUriOptionRowsRequireExactClose) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(
+        source, root / "requirements/draft21.json");
+    for (const auto& [probe, webtransport_row, native_row, expected] : {
+             std::tuple{scenarios::Draft21SetupProbe::ServerAuthority,
+                        "D21-9-1-1-MUST-294", "D21-9-1-1-MUST-293", 0x19u},
+             std::tuple{scenarios::Draft21SetupProbe::ServerPath,
+                        "D21-9-1-2-MUST-301", "D21-9-1-2-MUST-300", 0x8u}}) {
+        auto context = passed_context();
+        context.complete = false;
+        context.target_publish_seen = false;
+        context.response_delivered = false;
+        context.setup_probe = probe;
+        context.evidence = {
+            {scenarios::Draft21AnnouncementEventKind::LocalSetupSent, 3,
+             std::nullopt},
+            {scenarios::Draft21AnnouncementEventKind::PeerClosed,
+             std::nullopt, std::nullopt, expected}};
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              webtransport_row).state, OutcomeState::NotRun);
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              native_row).state, OutcomeState::Pass);
+
+        context.webtransport = true;
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              webtransport_row).state, OutcomeState::Pass);
+        context.evidence[1].application_close_code = 3;
+        EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                              webtransport_row).state, OutcomeState::Fail);
     }
 }
 

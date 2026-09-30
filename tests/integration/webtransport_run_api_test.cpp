@@ -24,8 +24,10 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace moq::interop {
@@ -63,7 +65,9 @@ int publisher_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
 
 bool publish_setup(unsigned port, unsigned draft,
                    const std::shared_ptr<storage::SqliteRunStore>& store,
-                   const app::RunId& id) {
+                   const app::RunId& id,
+                   std::optional<std::uint64_t> reject_code = std::nullopt,
+                   std::string expected_requirement_id = {}) {
     const int socket_fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (socket_fd < 0) return false;
     const int flags = ::fcntl(socket_fd, F_GETFL, 0);
@@ -103,6 +107,7 @@ bool publish_setup(unsigned port, unsigned draft,
         bool connect_sent = false;
         bool setup_sent = false;
         bool response_sent = false;
+        bool close_sent = false;
         std::array<std::uint8_t, 2048> outgoing{};
         std::array<std::uint8_t, 2048> incoming{};
         for (int step = 0; step < 3000 && !success; ++step) {
@@ -178,9 +183,25 @@ bool publish_setup(unsigned port, unsigned draft,
             }
             if (setup_sent) {
                 const auto run = store->load(id);
+                if (reject_code && !close_sent &&
+                    std::any_of(run.events.begin(), run.events.end(),
+                        [](const auto& event) {
+                            return event.kind == "local_setup_sent";
+                        })) {
+                    if (picoquic_close(cnx, *reject_code) != 0) break;
+                    close_sent = true;
+                }
+                if (reject_code) {
+                    success = std::any_of(run.outcomes.begin(), run.outcomes.end(),
+                        [&](const auto& outcome) {
+                            return outcome.requirement_id == expected_requirement_id &&
+                                   outcome.state == requirements::OutcomeState::Pass;
+                        });
+                    if (success) continue;
+                }
                 for (const auto& event : run.events) {
                     if (event.kind == "peer_setup_received" &&
-                        (draft == 21 || response_sent))
+                        (draft == 21 || response_sent) && !reject_code)
                         success = true;
                 }
                 if (draft == 18) {
@@ -273,6 +294,51 @@ TEST(WebTransportRunApi, AllocatesExactPublisherUrlForBothDrafts) {
             EXPECT_NE(finding.code, "missing_evaluator_evidence")
                 << finding.requirement_id << " " << finding.detail;
         }
+    }
+}
+
+TEST(WebTransportRunApi, ScoresForbiddenServerSetupOptionsByTransport) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    for (const auto& [scenario, row, code] : {
+             std::tuple{"d21-server-sends-authority", "D21-9-1-1-MUST-294", 0x19u},
+             std::tuple{"d21-server-sends-path", "D21-9-1-2-MUST-301", 0x8u}}) {
+        const Json request{{"draft", 21}, {"transport", "webtransport"},
+                           {"mode", "observed"},
+                           {"scenarios", Json::array({scenario})},
+                           {"timeout_ms", 2000},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                      {"name_hex", "78"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(),
+                                       "application/json");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 201) << response->body;
+        const auto body = Json::parse(response->body);
+        const auto id = body.at("run").at("id").get<std::string>();
+        const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+        ASSERT_TRUE(publish_setup(port, 21, store, id, code, row));
+        const auto record = store->load(id);
+        ASSERT_EQ(record.state, storage::RunState::Finalized);
+        EXPECT_EQ(std::count_if(record.outcomes.begin(), record.outcomes.end(),
+                                [&](const auto& outcome) {
+            return outcome.requirement_id == row &&
+                   outcome.state == requirements::OutcomeState::Pass;
+        }), 1);
+        const std::array records{record};
+        const auto audit = requirements::audit_execution(
+            *draft21, requirements::draft21_executable_bindings(), records);
+        EXPECT_TRUE(audit.consistent());
     }
 }
 

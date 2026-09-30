@@ -51,6 +51,7 @@ struct Draft21AnnouncementContext {
     bool response_delivered{false};
     std::vector<Draft21AnnouncementEvent> evidence;
     Draft21SetupProbe setup_probe{Draft21SetupProbe::None};
+    bool webtransport{false};
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -67,7 +68,8 @@ public:
         std::vector<std::vector<std::byte>> expected_namespace,
         std::vector<std::byte> expected_track_name,
         std::chrono::milliseconds timeout,
-        Draft21SetupProbe setup_probe = Draft21SetupProbe::None);
+        Draft21SetupProbe setup_probe = Draft21SetupProbe::None,
+        bool webtransport = false);
 
     Draft21AnnouncementSnapshot poll(Draft21Clock::time_point now);
     [[nodiscard]] const Draft21AnnouncementContext& context() const noexcept;

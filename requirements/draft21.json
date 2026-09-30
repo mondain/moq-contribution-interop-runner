@@ -5764,10 +5764,12 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-webtransport-server-sends-authority"
+        "d21-webtransport-server-sends-authority",
+        "d21-server-sends-authority"
       ],
       "evaluators": [
-        "d21-webtransport-authority-invalid-authority"
+        "d21-webtransport-authority-invalid-authority",
+        "d21-server-authority-invalid-authority"
       ],
       "rationale": "Inject the option on WebTransport and observe the publisher client's close. The server-origin condition also applies and prescribes the same code; it does not prevent exercising the WebTransport case."
     },
@@ -5906,10 +5908,12 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-webtransport-server-sends-path"
+        "d21-webtransport-server-sends-path",
+        "d21-server-sends-path"
       ],
       "evaluators": [
-        "d21-webtransport-path-invalid-path"
+        "d21-webtransport-path-invalid-path",
+        "d21-server-path-invalid-path"
       ],
       "rationale": "The injected server option on WebTransport triggers the required error at the publisher client. Both the transport and server-origin violations prescribe INVALID_PATH."
     },

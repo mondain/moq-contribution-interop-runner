@@ -123,6 +123,25 @@ TEST(Draft21Announcement, AcceptsExpectedPublishAfterSetup) {
     EXPECT_TRUE(controller.context().complete);
 }
 
+TEST(Draft21Announcement, ServerUriProbesSendExactSetupOptionOverWebTransport) {
+    for (const auto& [probe, expected] : {
+             std::pair{Draft21SetupProbe::ServerAuthority,
+                       bytes({0xaf, 0x00, 0x00, 0x0d, 0x05, 0x0b,
+                              'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'o', 'r', 'g'})},
+             std::pair{Draft21SetupProbe::ServerPath,
+                       bytes({0xaf, 0x00, 0x00, 0x03, 0x01, 0x01, '/'})}}) {
+        ScriptedTransport transport;
+        Draft21AnnouncementController controller(
+            transport, {bytes({'m', 'e', 'd', 'i', 'a'})},
+            bytes({'t', 'e', 's', 't'}), std::chrono::milliseconds(100),
+            probe, true);
+        transport.inbound = {established(), setup()};
+        controller.poll(Draft21Clock::time_point{});
+        EXPECT_TRUE(controller.context().webtransport);
+        EXPECT_EQ(transport.setup_bytes, expected);
+    }
+}
+
 TEST(Draft21Announcement, AcknowledgesNamespaceBeforeTargetPublish) {
     ScriptedTransport transport;
     auto controller = make_controller(transport);
