@@ -36,7 +36,8 @@ cleanup() {
             rm -f -- "$test_dir/cert.pem" "$test_dir/key.pem" \
                 "$test_dir/runs.sqlite3" "$test_dir/runs.sqlite3-shm" \
                 "$test_dir/runs.sqlite3-wal" "$test_dir/runner.log" \
-                "$test_dir/publisher.log" "$test_dir/stop.json"
+                "$test_dir/publisher.log" "$test_dir/stop.json" \
+                "$test_dir/request.json"
             rmdir -- "$test_dir"
             ;;
     esac
@@ -85,12 +86,29 @@ if [[ "$run_id" == null || "$endpoint_port" != "$udp_port" ||
     exit 1
 fi
 
-set +e
-OPENMOQ_PICOQUIC_TRACE=1 "$publisher_bin" \
-    --input "$media_file" --endpoint "moqt://127.0.0.1:$udp_port/moq" \
-    --namespace media --draft "$draft" --forward 0 --timeout 10 --insecure \
-    "${publisher_extra[@]}" \
-    >"$test_dir/publisher.log" 2>&1
+if [[ "${MOQ_INTEROP_USE_MOQXR_ADAPTER:-0}" == 1 ]]; then
+    jq -n --arg endpoint "moqt://127.0.0.1:$udp_port/moq" \
+        --arg fixture "$media_file" --arg ca "$test_dir/cert.pem" \
+        --arg log_dir "$test_dir" --arg run_id "$run_id" \
+        --arg scenario "$scenario" --argjson draft "$draft" '{
+            schema_version: 1, run_id: $run_id, scenario_id: $scenario,
+            endpoint: $endpoint, draft: $draft, transport: "native_quic",
+            namespace_hex: ["6d65646961"], track_name_hex: "766964655f31",
+            fixture: $fixture, tls_ca: $ca, log_dir: $log_dir,
+            scenario_timeout_ms: 10000, process_timeout_ms: 12000
+        }' >"$test_dir/request.json"
+    set +e
+    MOQXR_BIN="$publisher_bin" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" \
+        "$root_dir/adapters/moqxr/run.sh" >"$test_dir/publisher.log" 2>&1
+else
+    set +e
+    OPENMOQ_PICOQUIC_TRACE=1 "$publisher_bin" \
+        --input "$media_file" --endpoint "moqt://127.0.0.1:$udp_port/moq" \
+        --namespace media --draft "$draft" --forward 0 --timeout 10 --insecure \
+        "${publisher_extra[@]}" \
+        >"$test_dir/publisher.log" 2>&1
+fi
 publisher_exit=$?
 set -e
 
@@ -128,6 +146,16 @@ printf 'publisher_exit=%s run_id=%s state=%s verdict=%s events=%s\n' \
     "$(jq -r '.run.events.total' <<<"$result_json")"
 jq -r '.run.outcomes[] | select(.state == "pass" or .state == "fail") | "\(.requirement_id) \(.state)"' \
     <<<"$result_json"
+
+if [[ "${MOQ_INTEROP_ALLOW_PUBLISHER_FAILURE:-0}" == 1 ]]; then
+    if [[ "$publisher_exit" -eq 64 ||
+          $(jq -r '.run.state' <<<"$result_json") != finalized ||
+          $(jq '.run.outcomes | length' <<<"$result_json") -eq 0 ]]; then
+        printf 'matrix run did not finalize with scored rows\n' >&2
+        exit 1
+    fi
+    exit 0
+fi
 
 if [[ "$publisher_exit" -ne 0 || \
       $(jq -r '.run.events.total' <<<"$result_json") -eq 0 ]]; then

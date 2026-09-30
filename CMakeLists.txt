@@ -522,6 +522,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-publisher-driver nlohmann_json::nlohmann_json
         GTest::gtest_main)
     add_test(NAME publisher-driver COMMAND moq-interop-publisher-driver-tests)
+    add_test(NAME moqxr-adapter-contract
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-contract.sh")
 
     add_executable(moq-interop-webtransport-run-api-tests
                    tests/integration/webtransport_run_api_test.cpp)
