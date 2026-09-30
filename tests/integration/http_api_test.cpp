@@ -411,6 +411,30 @@ TEST_F(HttpApiTest, RendersEscapedAccessibleZeroScoreReport) {
     EXPECT_NE(response->body.find("0/0"), std::string::npos);
 }
 
+TEST_F(HttpApiTest, ExportsCompleteResultRowsAndScenarioTap) {
+    app::RunConfig config{app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+                          app::RunMode::Observed, {"subscribe-to-publisher-track"}, 1s};
+    const auto id = store_->create_run(config);
+    const requirements::ScoreSummary score{requirements::RunVerdict::Error,
+                                            {0, 0}, {0, 0}, {0, 0}};
+    store_->finalize(id, score, {});
+
+    const auto document = get_json("/results/" + id + ".json");
+    EXPECT_EQ(document.at("schema_version"), 1);
+    EXPECT_EQ(document.at("requirements").size(), 598);
+    EXPECT_TRUE(document.at("requirements").at(0).at("outcome").is_null());
+    EXPECT_EQ(document.at("run").at("verdict"), "error");
+
+    const auto tap = client_->Get("/results/" + id + ".tap");
+    ASSERT_TRUE(tap);
+    EXPECT_EQ(tap->status, 200);
+    EXPECT_EQ(tap->get_header_value("Content-Type"), "text/plain; charset=utf-8");
+    EXPECT_EQ(tap->body.rfind("TAP version 14\n1..1\nnot ok 1 - ", 0), 0);
+    EXPECT_NE(tap->body.find("\"result\":\"error\""), std::string::npos);
+    EXPECT_EQ(get_json("/results/unknown.tap", 404).at("error").at("code"),
+              "run_not_found");
+}
+
 TEST_F(HttpApiTest, StopsAndRestartsCleanlyInProcess) {
     server_->stop();
     EXPECT_FALSE(server_->running());

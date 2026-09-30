@@ -93,6 +93,8 @@ bool exactly_not_applicable(const Observations& observations) {
 
 }  // namespace
 
+std::uint64_t score_weight(Strength strength) { return weight(strength); }
+
 ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> outcomes) {
     if (!catalog.complete) return error_summary();
 

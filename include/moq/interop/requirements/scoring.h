@@ -28,6 +28,7 @@ struct ScoreSummary {
     ScoreRatio coverage;
 };
 
+std::uint64_t score_weight(Strength strength);
 ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> outcomes);
 
 }  // namespace moq::interop::requirements

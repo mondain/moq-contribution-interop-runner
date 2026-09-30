@@ -1,4 +1,5 @@
 #include "moq/interop/http/server.h"
+#include "moq/interop/http/result_schema.h"
 
 #include "detail.h"
 
@@ -447,8 +448,26 @@ public:
                                                       httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 try {
-                    json_response(response, {{"schema_version", 1},
-                                             {"run", detail::run_json(store->load(request.matches[1]))}});
+                    const auto run = store->load(request.matches[1]);
+                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
+                                              ? *draft18 : *draft21;
+                    json_response(response, serialize_result(run, catalog));
+                } catch (const std::out_of_range&) {
+                    throw ApiError{404, "run_not_found", "The requested run was not found."};
+                }
+            });
+        });
+        server.Get(R"(/results/(.+)\.tap)", [this](const httplib::Request& request,
+                                                     httplib::Response& response) {
+            guarded(response, [this, &request, &response] {
+                try {
+                    const auto run = store->load(request.matches[1]);
+                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
+                                              ? *draft18 : *draft21;
+                    response.status = 200;
+                    response.set_header("X-Content-Type-Options", "nosniff");
+                    response.set_content(serialize_tap14(run, catalog),
+                                         "text/plain; charset=utf-8");
                 } catch (const std::out_of_range&) {
                     throw ApiError{404, "run_not_found", "The requested run was not found."};
                 }

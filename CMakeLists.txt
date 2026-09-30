@@ -139,11 +139,14 @@ target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/ge
 target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
                       SQLite::SQLite3)
 
-add_library(moq-interop-http
+set(MOQ_INTEROP_HTTP_SOURCES
     src/http/server.cpp
     src/http/json.cpp
+    src/http/result_schema.cpp
+    src/http/tap.cpp
     src/http/report.cpp
 )
+add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
                       moq-interop-storage)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
@@ -386,8 +389,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-quiche-legacy-tests moq-interop-scenarios
         moq-interop-draft18-evaluators moq-interop-draft21-evaluators
         moq-interop-storage moq-interop-transport)
-    add_library(moq-interop-quiche-legacy-http-tests
-                src/http/server.cpp src/http/json.cpp src/http/report.cpp)
+    add_library(moq-interop-quiche-legacy-http-tests ${MOQ_INTEROP_HTTP_SOURCES})
     target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
         moq-interop-app moq-interop-requirements
         moq-interop-quiche-legacy-runs-tests moq-interop-storage)
@@ -513,6 +515,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)
+
+    add_executable(moq-interop-result-export-tests
+                   tests/integration/result_export_test.cpp)
+    target_link_libraries(moq-interop-result-export-tests PRIVATE
+        moq-interop-http nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME result-export COMMAND moq-interop-result-export-tests)
 
     add_executable(moq-interop-publisher-driver-tests
                    tests/unit/publisher_driver_test.cpp)
