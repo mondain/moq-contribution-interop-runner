@@ -171,10 +171,12 @@ Choose a new output directory for each run; the command refuses to overwrite an
 existing one. It writes `release-audit.json`, the two full draft audit JSON files, command
 receipts, and logs. The `check` mode validates the artifact against the checked-in
 draft digests and current source revision. This is intentionally a failing gate
-at present: the required sanitizer, fuzz, Docker matrix, and publisher stages
-are marked `missing`, and both draft catalogs still lack many evaluators. The
+at present: the required Docker matrix and publisher stages are marked
+`missing`, and both draft catalogs still lack many evaluators. Native tests,
+focused ASan/UBSan tests, and bounded libFuzzer smoke tests are executed. The
 manually dispatched `Draft release audit` workflow retains the same evidence
 as an artifact and fails until every required stage and static gate passes.
+Local release audits therefore also require Clang with libFuzzer and `timeout`.
 
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner

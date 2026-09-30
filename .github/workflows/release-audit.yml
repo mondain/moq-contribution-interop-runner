@@ -12,7 +12,7 @@ jobs:
       - name: Install build and audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake g++ libsqlite3-dev libssl-dev perl pkg-config jq openssl curl ripgrep
+          sudo apt-get install -y cmake clang g++ libsqlite3-dev libssl-dev perl pkg-config jq openssl curl ripgrep
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - name: Build

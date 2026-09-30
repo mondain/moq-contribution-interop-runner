@@ -110,6 +110,10 @@ jq -e '.stages | any(.[]; .id == "audit_d18" and .status == "fail")' \
     "$test_dir/run/release-audit.json" >/dev/null
 jq -e '.stages | any(.[]; .id == "native_suite" and .status == "pass" and .exit_code == 0)' \
     "$test_dir/run/release-audit.json" >/dev/null
+jq -e '.stages | any(.[]; .id == "asan_ubsan" and .status == "pass" and .exit_code == 0)' \
+    "$test_dir/run/release-audit.json" >/dev/null
+jq -e '.stages | any(.[]; .id == "fuzz_smoke" and .status == "pass" and .exit_code == 0)' \
+    "$test_dir/run/release-audit.json" >/dev/null
 jq -e '.stages | any(.[]; .id == "docker_d21_webtransport" and .status == "missing")' \
     "$test_dir/run/release-audit.json" >/dev/null
 rg -q 'stage docker_d21_webtransport: missing' "$test_dir/run.log"

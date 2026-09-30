@@ -29,4 +29,6 @@ graphify-work/*
 !graphify-out/GRAPH_REPORT.md
 
 /build/
+/build-asan/
+/build-fuzz/
 /build-picoquic-prod/

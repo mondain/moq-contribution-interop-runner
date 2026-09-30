@@ -47,6 +47,10 @@ if [[ $# -eq 3 && "$1" == run ]]; then
     }
     run_stage native_suite ctest --test-dir "$root_dir/build" \
         --output-on-failure --parallel 2
+    run_stage asan_ubsan timeout 900 bash \
+        "$root_dir/tests/e2e/sanitizer-smoke.sh"
+    run_stage fuzz_smoke timeout 900 bash \
+        "$root_dir/tests/e2e/fuzz-smoke.sh"
     drafts='[]'
     for draft in 18 21; do
         command="$audit_bin --draft $draft --format json --docs $root_dir/docs --requirements $root_dir/requirements"
