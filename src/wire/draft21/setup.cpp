@@ -60,9 +60,6 @@ DecodeResult<SetupMessage> decode_setup(Cursor& input) {
             return protocol_error(option_offset, "SETUP option type overflow");
         }
         const auto option_type = previous_type + increment;
-        if (increment == 0 && known_option(option_type) && option_type != 3) {
-            return protocol_error(option_offset, "duplicate SETUP option");
-        }
         previous_type = option_type;
 
         if ((option_type & 1u) == 0u) {

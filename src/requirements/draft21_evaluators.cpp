@@ -25,6 +25,27 @@ constexpr const char* kPathEvaluator = "d21-server-path-invalid-path";
 constexpr const char* kNoAuthorityEvaluator =
     "d21-webtransport-no-authority-option";
 constexpr const char* kNoPathEvaluator = "d21-webtransport-no-path-option";
+constexpr const char* kMultiplicityEvaluator =
+    "d21-setup-option-duplicates-only-when-permitted";
+
+enum class SetupMultiplicity { Valid, Invalid, Indeterminate };
+
+SetupMultiplicity setup_multiplicity(
+    const std::vector<std::uint64_t>& option_types) {
+    bool unknown_duplicate = false;
+    for (std::size_t index = 1; index < option_types.size(); ++index) {
+        const auto type = option_types[index];
+        if (type != option_types[index - 1] || type == 3u) continue;
+        if (type == 1u || type == 4u || type == 5u || type == 6u ||
+            type == 7u || type == 8u) {
+            return SetupMultiplicity::Invalid;
+        }
+        // An unknown extension can define its own repetition rule.
+        unknown_duplicate = true;
+    }
+    return unknown_duplicate ? SetupMultiplicity::Indeterminate
+                             : SetupMultiplicity::Valid;
+}
 
 bool includes(const std::vector<std::string>& values, const char* value) {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -113,6 +134,18 @@ std::vector<Outcome> evaluate_draft21_announcement(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (requirement.id == "D21-9-1-MUST-NOT-289") {
+            if (context.setup_probe == scenarios::Draft21SetupProbe::None &&
+                peer_setup_received && includes(requirement.scenarios, kScenario) &&
+                includes(requirement.evaluators, kMultiplicityEvaluator)) {
+                const auto multiplicity =
+                    setup_multiplicity(context.peer_setup_option_types);
+                if (multiplicity == SetupMultiplicity::Invalid) {
+                    state = OutcomeState::Fail;
+                } else if (multiplicity == SetupMultiplicity::Valid && observed) {
+                    state = OutcomeState::Pass;
+                }
+            }
         } else if (requirement.id == "D21-9-1-1-MUST-NOT-292" ||
                    requirement.id == "D21-9-1-2-MUST-NOT-299") {
             const bool authority =
@@ -209,6 +242,8 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
          kAllowedOpenerEvaluator, {"publish_observed", "response_delivered"}},
         {21, "D21-9-MUST-282", kScenario, kEvaluator,
          {"publish_observed", "response_delivered"}},
+        {21, "D21-9-1-MUST-NOT-289", kScenario,
+         kMultiplicityEvaluator, {"peer_setup_received"}},
         {21, "D21-9-1-1-MUST-NOT-292", kScenario,
          kNoAuthorityEvaluator, {"peer_setup_received"}},
         {21, "D21-9-1-2-MUST-NOT-299", kScenario,

@@ -98,9 +98,9 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        EXPECT_EQ(report.required_covered, draft == 18 ? 5u : 11u);
+        EXPECT_EQ(report.required_covered, draft == 18 ? 5u : 12u);
         EXPECT_EQ(report.required_total - report.required_covered,
-                  draft == 18 ? 170u : 164u);
+                  draft == 18 ? 170u : 163u);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
     }
 }

@@ -101,6 +101,11 @@ relay or a full draft-21 conformance test. Unexercised catalog lines remain
 invalid first message on a publisher-opened request stream is recorded and
 fails `D21-6-3-MUST-NOT-141`; a different permitted but unsupported opener is
 not reported as a publisher failure.
+The same publisher-announcement run inspects the publisher's SETUP option
+types for `D21-9-1-MUST-NOT-289`. It fails repeated known non-repeatable
+types, allows repeated AUTHORIZATION TOKEN options, and leaves repeated
+unknown extension types unscored because their sender multiplicity rule is
+not known to this runner. A pass requires a completed PUBLISH exchange.
 
 The AUTHORITY and PATH profiles deliberately send an otherwise well-formed
 server SETUP with one role-forbidden option. They score
@@ -167,7 +172,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-5/175 draft-18 and 11/175 draft-21 applicable, testable MUST/MUST NOT rows
+5/175 draft-18 and 12/175 draft-21 applicable, testable MUST/MUST NOT rows
 have registered executable bindings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit

@@ -5658,7 +5658,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-publisher-setup-option-multiplicity"
+        "d21-publisher-setup-option-multiplicity",
+        "d21-publisher-request-stream-placement"
       ],
       "evaluators": [
         "d21-setup-option-duplicates-only-when-permitted"

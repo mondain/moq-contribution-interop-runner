@@ -89,17 +89,23 @@ TEST(Draft21Setup, UnknownDuplicateOptionsRemainDecodable) {
     EXPECT_EQ(options[1].type, 32u);
 }
 
-TEST(Draft21Setup, DuplicateKnownOptionIsRejected) {
-    // draft-ietf-moq-transport-21 section 9.1 permits repetition only when
-    // an individual known option defines it; MAX_FILTER_RANGES does not.
+TEST(Draft21Setup, DuplicateKnownOptionRemainsObservableForScoring) {
+    // The sender violates section 9.1, but decoding must retain both options
+    // so the publisher-focused evaluator can identify the sender's error.
     const auto wire = bytes({0xaf, 0x00, 0x00, 0x04,
                              0x06, 0x01, 0x00, 0x02});
     Cursor input(wire);
     const auto result = decode_setup(input);
-    ASSERT_TRUE(std::holds_alternative<DecodeError>(result));
-    EXPECT_EQ(std::get<DecodeError>(result).code,
-              DecodeErrorCode::ProtocolViolation);
-    EXPECT_EQ(input.offset(), 0u);
+    ASSERT_TRUE(std::holds_alternative<SetupMessage>(result));
+    const auto& options = std::get<SetupMessage>(result).options;
+    ASSERT_EQ(options.size(), 2u);
+    EXPECT_EQ(options[0].type, 6u);
+    EXPECT_EQ(options[1].type, 6u);
+    EXPECT_EQ(input.offset(), wire.size());
+    ByteWriter output(wire.size());
+    EXPECT_EQ(encode_setup(std::get<SetupMessage>(result), output),
+              SetupEncodeError::InvalidValue);
+    EXPECT_EQ(output.size(), 0u);
 }
 
 TEST(Draft21Setup, RejectsMalformedAuthorizationTokenOption) {

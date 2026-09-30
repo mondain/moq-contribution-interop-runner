@@ -56,7 +56,7 @@
       "id": "D21-9-1-MUST-NOT-289", "strength": "MustNot",
       "source": {"section": "9.1", "first_line": 3478, "last_line": 3480, "occurrence": 1, "clause": 1},
       "actor": "sender of SETUP", "summary": "Do not repeat an Option Type in one SETUP unless its definition explicitly allows multiple instances.",
-      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-setup-option-multiplicity"], "evaluators": ["d21-setup-option-duplicates-only-when-permitted"],
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-publisher-setup-option-multiplicity", "d21-publisher-request-stream-placement"], "evaluators": ["d21-setup-option-duplicates-only-when-permitted"],
       "rationale": "Decode publisher SETUP and compare option types with their draft-21 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
     },
     {

@@ -345,7 +345,7 @@ TEST(WebTransportRunApi, ScoresForbiddenServerSetupOptionsByTransport) {
     }
 }
 
-TEST(WebTransportRunApi, ScoresForbiddenPublisherSetupOptionsWithEvidence) {
+TEST(WebTransportRunApi, ScoresPublisherSetupOptionViolationsWithEvidence) {
     const app::BuildInfo build{"test", "test", {}};
     auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
     auto draft18 = catalog(18);
@@ -359,11 +359,16 @@ TEST(WebTransportRunApi, ScoresForbiddenPublisherSetupOptionsWithEvidence) {
     http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
     ASSERT_TRUE(server.start());
     httplib::Client api("127.0.0.1", server.port());
-    for (const auto& [row, option, error] : {
+    for (const auto& [row, option, evidence] : {
              std::tuple{"D21-9-1-1-MUST-NOT-292",
-                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 5, 1, 'x'}, 5u},
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 5, 1, 'x'},
+                        "option types: 5"},
              std::tuple{"D21-9-1-2-MUST-NOT-299",
-                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 1, 1, '/'}, 1u}}) {
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 1, 1, '/'},
+                        "option types: 1"},
+             std::tuple{"D21-9-1-MUST-NOT-289",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 4, 4, 1, 0, 2},
+                        "option types: 4,4"}}) {
         const Json request{{"draft", 21}, {"transport", "webtransport"},
                            {"mode", "observed"},
                            {"scenarios", Json::array({"d21-publisher-request-stream-placement"})},
@@ -386,7 +391,7 @@ TEST(WebTransportRunApi, ScoresForbiddenPublisherSetupOptionsWithEvidence) {
                 return event.kind == "peer_setup_received";
             });
         ASSERT_NE(received, record.events.end());
-        EXPECT_NE(received->detail.find("option types: " + std::to_string(error)),
+        EXPECT_NE(received->detail.find(evidence),
                   std::string::npos);
         const std::array records{record};
         EXPECT_TRUE(requirements::audit_execution(

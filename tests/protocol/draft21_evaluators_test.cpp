@@ -276,5 +276,39 @@ TEST(Draft21Evaluators, PublisherWebTransportSetupOmitsAuthorityAndPath) {
                           "D21-9-1-2-MUST-NOT-299").state, OutcomeState::NotRun);
 }
 
+TEST(Draft21Evaluators, PublisherSetupRepeatsOnlyPermittedOptionTypes) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(
+        source, root / "requirements/draft21.json");
+    constexpr const char* row = "D21-9-1-MUST-NOT-289";
+    auto context = passed_context();
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::NotRun);
+    context.evidence.insert(context.evidence.begin() + 1,
+        {scenarios::Draft21AnnouncementEventKind::PeerSetupReceived, 2,
+         std::nullopt});
+    context.peer_setup_option_types = {3, 3};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::Pass);
+    context.peer_setup_option_types = {3, 3, 0x9d, 0x9d};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::NotRun);
+    context.complete = false;
+    context.peer_setup_option_types = {4, 4};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::Fail);
+    context.peer_setup_option_types = {4, 4, 0x9d, 0x9d};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::Fail);
+    context.peer_setup_option_types = {1, 1};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::Fail);
+    context.peer_setup_option_types = {3, 3};
+    EXPECT_EQ(outcome_for(evaluate_draft21_announcement(catalog, context),
+                          row).state, OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements
