@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:moq-contribution-interop-runner:publisher-driver-request:1",
+  "title": "MoQ contribution publisher-driver request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "scenario_id",
+    "endpoint",
+    "draft",
+    "transport",
+    "namespace_hex",
+    "track_name_hex",
+    "fixture",
+    "tls_ca",
+    "log_dir",
+    "scenario_timeout_ms",
+    "process_timeout_ms"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "scenario_id": { "type": "string", "minLength": 1 },
+    "endpoint": { "type": "string", "minLength": 1 },
+    "draft": { "enum": [18, 21] },
+    "transport": { "enum": ["native_quic", "webtransport"] },
+    "namespace_hex": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(?:[0-9a-f]{2})*$" }
+    },
+    "track_name_hex": { "type": "string", "pattern": "^(?:[0-9a-f]{2})*$" },
+    "fixture": { "type": "string" },
+    "tls_ca": { "type": "string" },
+    "log_dir": { "type": "string", "minLength": 1 },
+    "scenario_timeout_ms": { "type": "integer", "minimum": 0 },
+    "process_timeout_ms": { "type": "integer", "minimum": 1 }
+  }
+}

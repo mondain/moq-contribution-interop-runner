@@ -98,6 +98,11 @@ target_compile_definitions(moq-interop-app INTERFACE
     MOQ_INTEROP_SQLITE3_REVISION="${SQLite3_VERSION}"
 )
 
+add_library(moq-interop-publisher-driver src/app/publisher_driver.cpp)
+target_link_libraries(moq-interop-publisher-driver PUBLIC moq-interop-app)
+target_link_libraries(moq-interop-publisher-driver PRIVATE
+    nlohmann_json::nlohmann_json OpenSSL::Crypto)
+
 add_library(moq-interop-wire
     src/wire/common/cursor.cpp
     src/wire/draft18/messages.cpp
@@ -508,6 +513,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)
+
+    add_executable(moq-interop-publisher-driver-tests
+                   tests/unit/publisher_driver_test.cpp)
+    target_compile_definitions(moq-interop-publisher-driver-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-publisher-driver-tests PRIVATE
+        moq-interop-publisher-driver nlohmann_json::nlohmann_json
+        GTest::gtest_main)
+    add_test(NAME publisher-driver COMMAND moq-interop-publisher-driver-tests)
 
     add_executable(moq-interop-webtransport-run-api-tests
                    tests/integration/webtransport_run_api_test.cpp)
