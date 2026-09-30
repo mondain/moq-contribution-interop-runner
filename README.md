@@ -165,18 +165,30 @@ Compare repetitions only when the publisher binary and fixture are the same;
 publisher identity is not yet stored as a grouping key. Run this audit after
 the service has stopped creating runs so pagination sees a stable database.
 
-The draft release gate can be run with
-`bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit "$PWD/build/moq-interop-audit"`.
-Choose a new output directory for each run; the command refuses to overwrite an
-existing one. It writes `release-audit.json`, the two full draft audit JSON files, command
-receipts, and logs. The `check` mode validates the artifact against the checked-in
-draft digests and current source revision. This is intentionally a failing gate
-at present: the required Docker matrix and publisher stages are marked
-`missing`, and both draft catalogs still lack many evaluators. Native tests,
-focused ASan/UBSan tests, and bounded libFuzzer smoke tests are executed. The
-manually dispatched `Draft release audit` workflow retains the same evidence
-as an artifact and fails until every required stage and static gate passes.
-Local release audits therefore also require Clang with libFuzzer and `timeout`.
+The draft release gate accepts a new output directory, audit CLI, and optional
+Docker image, synthetic native peer, moqxr executable, and MP4 fixture:
+
+```sh
+bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit \
+  "$PWD/build/moq-interop-audit" "moq-interop-runner:$(git rev-parse --short HEAD)" \
+  "$PWD/build/moq-interop-quiche-peer" \
+  /path/to/openmoq-publisher /path/to/locmaf-publisher.mp4
+```
+
+Use an image built from the exact current commit; a mismatched revision label
+is rejected. Omitting the four optional arguments records the Docker and
+publisher stages as `missing`. The command refuses to overwrite an existing
+output directory. It writes `release-audit.json`, full draft audits, command
+receipts, Docker run results/events, moqxr repeat databases, and logs. The
+report records the external publisher version, executable SHA-256, and fixture
+SHA-256 so a passing matrix cannot be confused with a different local build.
+The `check` mode validates that artifact against the checked-in draft digests and
+current source revision. Native tests, focused ASan/UBSan tests, and bounded
+libFuzzer smoke tests run in either mode. The manually dispatched `Draft release
+audit` workflow builds a pinned moqxr checkout and source-matched image, retains
+the same evidence, and fails until every required stage and static gate passes.
+The gate is intentionally failing now because both draft catalogs still lack
+many evaluators. Local audits require Clang with libFuzzer and `timeout`.
 
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner

@@ -21,6 +21,9 @@ make_report() {
         --arg revision "$source_revision" '{
         schema_version: 1,
         source_revision: $revision,
+        publisher: {version: "openmoq-publisher test-build",
+                    binary_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    fixture_sha256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
         drafts: [
             {draft: 18, source_sha256: $digest18, static_complete: $complete},
             {draft: 21, source_sha256: $digest21, static_complete: $complete}
@@ -56,6 +59,27 @@ rg -q 'draft 21 static gate incomplete' "$test_dir/check.log"
 
 make_report true "$stages"
 bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json"
+
+jq 'del(.publisher)' "$test_dir/report.json" >"$test_dir/no-publisher.json"
+if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/no-publisher.json" \
+    >"$test_dir/check.log" 2>&1; then
+    printf 'release report without publisher identity was accepted\n' >&2
+    exit 1
+fi
+rg -q 'publisher identity missing' "$test_dir/check.log"
+
+extra_stages=$(jq -n --argjson stages "$stages" '$stages + [{
+    id: "docker_d18_native_quic", command: "unexpected-command",
+    status: "pass", exit_code: 0}]')
+make_report true "$extra_stages"
+if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json" \
+    >"$test_dir/check.log" 2>&1; then
+    printf 'unregistered release stage was accepted\n' >&2
+    exit 1
+fi
+rg -q 'unregistered stage: docker_d18_native_quic' "$test_dir/check.log"
+
+make_report true "$stages"
 
 jq '(.drafts[] | select(.draft == 18) | .source_sha256) =
     "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"' \

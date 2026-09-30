@@ -11,6 +11,7 @@ audit_bin=$(realpath "$3")
 publisher_bin=$(realpath "$4")
 fixture=$(realpath "$5")
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+artifact_dir=${MOQ_INTEROP_REPEAT_ARTIFACT_DIR:-}
 test_dir=$(mktemp -d /tmp/moq-interop-repeat.XXXXXX)
 runner_pid=
 http_port=${MOQ_INTEROP_TEST_HTTP_PORT:-19341}
@@ -21,6 +22,18 @@ cleanup() {
     if [[ -n "$runner_pid" ]]; then
         kill "$runner_pid" 2>/dev/null || true
         wait "$runner_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$artifact_dir" ]]; then
+        mkdir -p -- "$artifact_dir"
+        for name in audit.json runner.log runs.sqlite3 runs.sqlite3-wal \
+                    runs.sqlite3-shm; do
+            if [[ -f "$test_dir/$name" ]]; then
+                cp -- "$test_dir/$name" "$artifact_dir/$name"
+            fi
+        done
+        if [[ -d "$test_dir/logs" ]]; then
+            cp -a -- "$test_dir/logs" "$artifact_dir/logs"
+        fi
     fi
     if [[ "$status" -ne 0 && "${MOQ_INTEROP_KEEP_FAILED:-0}" == 1 ]]; then
         printf 'retained repeatability artifacts: %s\n' "$test_dir" >&2

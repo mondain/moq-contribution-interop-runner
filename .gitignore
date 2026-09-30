@@ -31,4 +31,5 @@ graphify-work/*
 /build/
 /build-asan/
 /build-fuzz/
+/external/
 /build-picoquic-prod/

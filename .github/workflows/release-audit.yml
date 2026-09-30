@@ -9,6 +9,11 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: openmoq/moqxr
+          ref: dda5025a0531faa019d97e9fc5c1ebc024605c04
+          path: external/moqxr
       - name: Install build and audit dependencies
         run: |
           sudo apt-get update
@@ -17,12 +22,28 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - name: Build
         run: cmake --build build --parallel 2
+      - name: Build pinned external publisher
+        run: |
+          cmake -S external/moqxr -B external/moqxr/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENMOQ_BUILD_TESTS=OFF \
+            -DOPENMOQ_RUN_PICOQUIC_SMOKE_TESTS=OFF
+          cmake --build external/moqxr/build --parallel 2 \
+            --target openmoq-publisher
+      - name: Build source-matched Docker validator
+        run: |
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            -t "moq-interop-runner:$GITHUB_SHA" .
       - name: Run release gate and retain incomplete evidence
         id: release
         run: |
           set +e
           bash tests/e2e/release-audit.sh run "$RUNNER_TEMP/release-audit" \
-            "$PWD/build/moq-interop-audit"
+            "$PWD/build/moq-interop-audit" \
+            "moq-interop-runner:$GITHUB_SHA" \
+            "$PWD/build/moq-interop-quiche-peer" \
+            "$PWD/external/moqxr/build/openmoq-publisher" \
+            "$PWD/external/moqxr/tests/fixtures/locmaf-publisher.mp4"
           result=$?
           set -e
           printf 'exit_code=%s\n' "$result" >>"$GITHUB_OUTPUT"

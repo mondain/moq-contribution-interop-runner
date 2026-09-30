@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    printf 'Usage: %s check REPORT_JSON | run OUTPUT_DIR AUDIT_BIN\n' "$0" >&2
+    printf 'Usage: %s check REPORT_JSON | run OUTPUT_DIR AUDIT_BIN [IMAGE NATIVE_PEER MOQXR_BIN MP4_FIXTURE]\n' "$0" >&2
     exit 2
 }
 
@@ -14,7 +14,7 @@ required_stages=(
     audit_d18 audit_d21
 )
 
-if [[ $# -eq 3 && "$1" == run ]]; then
+if [[ ( $# -eq 3 || $# -eq 7 ) && "$1" == run ]]; then
     output_dir=$2
     if [[ -e "$output_dir" ]]; then
         printf 'output directory already exists: %s\n' "$output_dir" >&2
@@ -41,9 +41,12 @@ if [[ $# -eq 3 && "$1" == run ]]; then
         if [[ "$status" -eq 124 ]]; then stage_status=timeout; fi
         stages=$(jq -n --argjson previous "$stages" --arg id "$id" \
             --arg command "$command" --arg status "$stage_status" \
-            --argjson exit_code "$status" '$previous | map(
-                if .id == $id then {id: $id, command: $command,
-                    status: $status, exit_code: $exit_code} else . end)')
+            --argjson exit_code "$status" '
+                {id: $id, command: $command, status: $status,
+                 exit_code: $exit_code} as $receipt |
+                if any($previous[]; .id == $id) then
+                    $previous | map(if .id == $id then $receipt else . end)
+                else $previous + [$receipt] end')
     }
     run_stage native_suite ctest --test-dir "$root_dir/build" \
         --output-on-failure --parallel 2
@@ -51,6 +54,41 @@ if [[ $# -eq 3 && "$1" == run ]]; then
         "$root_dir/tests/e2e/sanitizer-smoke.sh"
     run_stage fuzz_smoke timeout 900 bash \
         "$root_dir/tests/e2e/fuzz-smoke.sh"
+    publisher=null
+    if [[ $# -eq 7 ]]; then
+        image=$4
+        native_peer=$(realpath "$5")
+        publisher_bin=$(realpath "$6")
+        fixture=$(realpath "$7")
+        publisher_version=$("$publisher_bin" --version 2>&1) || publisher_version=
+        publisher_hash=$(sha256sum "$publisher_bin")
+        publisher_hash=${publisher_hash%% *}
+        fixture_hash=$(sha256sum "$fixture")
+        fixture_hash=${fixture_hash%% *}
+        publisher=$(jq -n --arg version "$publisher_version" \
+            --arg binary_sha256 "$publisher_hash" \
+            --arg fixture_sha256 "$fixture_hash" \
+            '{version: $version, binary_sha256: $binary_sha256,
+              fixture_sha256: $fixture_sha256}')
+        for draft in 18 21; do
+            for transport in native_quic webtransport; do
+                stage_transport=$transport
+                if [[ "$transport" == native_quic ]]; then stage_transport=native; fi
+                stage_id="docker_d${draft}_${stage_transport}"
+                run_stage "$stage_id" timeout 120 env \
+                    "MOQ_INTEROP_CASE_ARTIFACT_DIR=$output_dir/$stage_id" bash \
+                    "$root_dir/tests/e2e/docker-publisher-case.sh" \
+                    "$draft" "$transport" "$image" "$native_peer" \
+                    "$publisher_bin" "$fixture"
+            done
+            stage_id="moqxr_d${draft}_webtransport"
+            run_stage "$stage_id" timeout 180 env \
+                "MOQ_INTEROP_REPEAT_ARTIFACT_DIR=$output_dir/$stage_id" bash \
+                "$root_dir/tests/e2e/repeatability.sh" "$draft" \
+                "$root_dir/build/moq-interop-runner" "$audit_bin" \
+                "$publisher_bin" "$fixture"
+        done
+    fi
     drafts='[]'
     for draft in 18 21; do
         command="$audit_bin --draft $draft --format json --docs $root_dir/docs --requirements $root_dir/requirements"
@@ -75,8 +113,9 @@ if [[ $# -eq 3 && "$1" == run ]]; then
                     status: $status, exit_code: $exit_code} else . end)')
     done
     jq -n --arg revision "$revision" --argjson drafts "$drafts" \
-        --argjson stages "$stages" '{schema_version: 1,
-          source_revision: $revision, drafts: $drafts, stages: $stages}' \
+        --argjson stages "$stages" --argjson publisher "$publisher" \
+        '{schema_version: 1, source_revision: $revision,
+          publisher: $publisher, drafts: $drafts, stages: $stages}' \
         >"$output_dir/release-audit.json"
     exec bash "$0" check "$output_dir/release-audit.json"
 fi
@@ -144,6 +183,27 @@ for id in "${required_stages[@]}"; do
         failed=1
     fi
 done
+
+while IFS= read -r id; do
+    known=0
+    for required in "${required_stages[@]}"; do
+        if [[ "$id" == "$required" ]]; then known=1; break; fi
+    done
+    if [[ "$known" == 0 ]]; then
+        printf 'unregistered stage: %s\n' "$id" >&2
+        failed=1
+    fi
+done < <(jq -r '.stages[] | .id // ""' "$report")
+
+if jq -e 'any(.stages[]; (.id | startswith("moqxr_")) and
+    .status == "pass")' "$report" >/dev/null; then
+    if ! jq -e '.publisher | (.version | type == "string" and length > 0) and
+        (.binary_sha256 | test("^[0-9a-f]{64}$")) and
+        (.fixture_sha256 | test("^[0-9a-f]{64}$"))' "$report" >/dev/null; then
+        printf 'publisher identity missing or invalid\n' >&2
+        failed=1
+    fi
+fi
 
 if [[ "$failed" -ne 0 ]]; then
     exit 1

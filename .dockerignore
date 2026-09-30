@@ -4,6 +4,7 @@
 .superpowers
 build
 build-*
+external
 tests
 docs/*.md
 docs/plans
