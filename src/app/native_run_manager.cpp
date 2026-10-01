@@ -112,6 +112,8 @@ const char* evidence_name(session::EvidenceKind kind) {
         return "peer_setup_received";
     case session::EvidenceKind::SetupOptionDuplicate:
         return "setup_option_duplicate";
+    case session::EvidenceKind::PeerStreamClassified:
+        return "peer_stream_classified";
     case session::EvidenceKind::RequestObserved:
         return "request_observed";
     case session::EvidenceKind::InitialResponseObserved:
@@ -167,6 +169,19 @@ storage::EvidenceEvent stored_evidence(
         result.detail = "draft-18 duplicate SETUP option type " +
                         std::to_string(duplicate->option_type);
         result.stream_id = std::to_string(duplicate->stream_id);
+    } else if (const auto* stream =
+                   std::get_if<session::StreamEvidence>(&source.data)) {
+        result.stream_id = std::to_string(stream->stream_id);
+    } else if (const auto* violation =
+                   std::get_if<session::ProtocolViolationEvidence>(
+                       &source.data)) {
+        if (violation->stream_id) {
+            result.stream_id = std::to_string(*violation->stream_id);
+        }
+        if (violation->opener_message_type) {
+            result.detail = "draft-18 protocol close with peer request opener type " +
+                            std::to_string(*violation->opener_message_type);
+        }
     }
     result.scenario_id = scenario_id;
     if (const auto* request =

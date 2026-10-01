@@ -404,5 +404,60 @@ TEST(Draft18Evaluators, WebTransportPublisherSetupOmitsAuthorityAndPath) {
                           path).state, OutcomeState::NotRun);
 }
 
+TEST(Draft18Evaluators, PublisherRequestStreamOpenerRequiresObservedValidMessage) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(
+        source, root / "requirements/draft18.json");
+    constexpr const char* row = "D18-3-3-MUST-NOT-001";
+    ScenarioContext context{"subscribe-to-publisher-track", true, true,
+                            {subscribe_request(), subscribe_ok()}};
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+
+    context.evidence.push_back({
+        2, session::EvidenceKind::PeerStreamClassified,
+        session::StreamEvidence{0, session::PeerStreamKind::Request}});
+    context.evidence.push_back({
+        3, session::EvidenceKind::RequestObserved,
+        session::RequestObservedEvidence{
+            session::RequestInitiator::Peer, 0,
+            session::RequestKind::Publish, 0,
+            wire::draft18::PublishMessage{0, {}, {}, 0, {}, {}}}});
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Pass);
+    auto without_subscribe_response = context;
+    without_subscribe_response.evidence.erase(
+        without_subscribe_response.evidence.begin() + 1);
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked,
+                  {&without_subscribe_response, 1}), row).state,
+              OutcomeState::Pass);
+
+    context.evidence.pop_back();
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+    context.evidence.push_back({
+        3, session::EvidenceKind::ProtocolViolation,
+        session::ProtocolViolationEvidence{0, 0x3, {}, 0x2f00}});
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Fail);
+    std::get<session::ProtocolViolationEvidence>(
+        context.evidence.back().data).opener_message_type = 0x3fffu;
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Fail);
+
+    context.complete = false;
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Fail);
+
+    context.evidence.pop_back();
+    context.evidence.push_back({
+        3, session::EvidenceKind::ProtocolViolation,
+        session::ProtocolViolationEvidence{0, 0x3, {}, std::nullopt}});
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

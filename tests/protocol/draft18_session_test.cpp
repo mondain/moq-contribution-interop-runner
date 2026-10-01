@@ -516,6 +516,24 @@ TEST(Draft18SessionRequests, ProtocolCloseCompactsEveryActiveRequest) {
     }
 }
 
+TEST(Draft18SessionRequests, InvalidFirstMessageRetainsRawOpenerTypeInCloseEvidence) {
+    PublisherSession session;
+    activate(session);
+    const std::array invalid{std::byte{0xbf}, std::byte{0xff}, std::byte{0x00}};
+    const auto transition = session.on_event(
+        StreamDataEvent{0, {invalid.begin(), invalid.end()}, false});
+    ASSERT_NE(close_action(transition), nullptr);
+    EXPECT_EQ(close_action(transition)->application_error, 0x3u);
+    const auto evidence = session.take_evidence(64);
+    const auto violation = std::find_if(
+        evidence.begin(), evidence.end(), [](const EvidenceEvent& event) {
+            return event.kind == EvidenceKind::ProtocolViolation;
+        });
+    ASSERT_NE(violation, evidence.end());
+    EXPECT_EQ(std::get<ProtocolViolationEvidence>(violation->data)
+                  .opener_message_type, 0x3fffu);
+}
+
 TEST(Draft18SessionRequests, ExhaustedEvidencePreservesProtocolTerminalKinds) {
     PublisherSessionConfig config;
     config.maximum_evidence_count = 4;

@@ -711,11 +711,23 @@ public:
     void protocol_close(SessionTransition& transition,
                         std::optional<transport::StreamId> stream_id,
                         std::uint64_t code, const char* reason) {
+        std::optional<std::uint64_t> opener_type;
+        if (stream_id && peer_initiated(*stream_id) &&
+            !unidirectional(*stream_id) && !requests.contains(*stream_id)) {
+            const auto stream = streams.find(*stream_id);
+            if (stream != streams.end()) {
+                wire::Cursor cursor(stream->second.buffered);
+                const auto decoded = wire::read_vi64(cursor);
+                if (const auto* value = std::get_if<std::uint64_t>(&decoded)) {
+                    opener_type = *value;
+                }
+            }
+        }
         terminalize_all(transition);
         if (terminal()) return;
         auto bytes = reason_bytes(reason);
         close(transition, EvidenceKind::ProtocolViolation,
-              ProtocolViolationEvidence{stream_id, code, bytes}, code,
+              ProtocolViolationEvidence{stream_id, code, bytes, opener_type}, code,
               std::move(bytes));
     }
 

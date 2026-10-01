@@ -20,7 +20,8 @@ bool listed(const std::vector<std::string>& values, const std::string& value) {
 bool known_evidence_kind(std::string_view kind) {
     static const std::set<std::string_view> known{
         "transport_established", "local_setup_observed", "local_setup_sent",
-        "peer_setup_received", "setup_option_duplicate", "request_observed",
+        "peer_setup_received", "setup_option_duplicate", "peer_stream_classified",
+        "request_observed",
         "initial_response_observed",
         "response_violation", "protocol_violation", "object_observed",
         "peer_close", "peer_closed", "local_close", "harness_limit",

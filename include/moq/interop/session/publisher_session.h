@@ -197,6 +197,7 @@ struct ProtocolViolationEvidence {
     std::optional<transport::StreamId> stream_id;
     std::uint64_t application_error{0};
     std::vector<std::byte> reason;
+    std::optional<std::uint64_t> opener_message_type;
 };
 
 struct HarnessLimitEvidence {

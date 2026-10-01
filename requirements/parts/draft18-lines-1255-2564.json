@@ -448,7 +448,7 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "originate-publisher-request-streams-without-extensions"
+        "subscribe-to-publisher-track"
       ],
       "evaluators": [
         "request-stream-starts-with-allowed-request-type"

@@ -1,6 +1,7 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <stdexcept>
 
@@ -27,6 +28,8 @@ constexpr const char* kSetupMultiplicityEvaluator =
     "setup-option-types-unique-except-defined-repeatable-options";
 constexpr const char* kNoAuthorityEvaluator = "setup-omits-authority";
 constexpr const char* kNoPathEvaluator = "setup-omits-path";
+constexpr const char* kRequestOpenerEvaluator =
+    "request-stream-starts-with-allowed-request-type";
 
 enum class SetupMultiplicity { Valid, Invalid, Indeterminate };
 
@@ -53,6 +56,54 @@ const session::SetupEvidence* peer_setup(const ScenarioContext& context) {
             return setup;
     }
     return nullptr;
+}
+
+std::optional<OutcomeState> publisher_request_openers(
+    const ScenarioContext& context) {
+    constexpr std::array<std::uint64_t, 7> allowed{
+        0x0d, 0x03, 0x1d, 0x16, 0x06, 0x50, 0x51};
+    bool observed_opener = false;
+    bool unresolved_stream = false;
+    for (const auto& event : context.evidence) {
+        if (event.kind != session::EvidenceKind::PeerStreamClassified) continue;
+        const auto* stream = std::get_if<session::StreamEvidence>(&event.data);
+        if (!stream || stream->stream_kind != session::PeerStreamKind::Request) continue;
+        const bool valid_opener = std::any_of(
+            context.evidence.begin(), context.evidence.end(),
+            [stream](const session::EvidenceEvent& observed) {
+                const auto* request =
+                    std::get_if<session::RequestObservedEvidence>(&observed.data);
+                return observed.kind == session::EvidenceKind::RequestObserved &&
+                       request && request->initiator ==
+                                      session::RequestInitiator::Peer &&
+                       request->stream_id == stream->stream_id;
+            });
+        if (valid_opener) {
+            observed_opener = true;
+            continue;
+        }
+        const auto violation = std::find_if(
+            context.evidence.begin(), context.evidence.end(),
+            [stream](const session::EvidenceEvent& observed) {
+                const auto* value =
+                    std::get_if<session::ProtocolViolationEvidence>(&observed.data);
+                return observed.kind == session::EvidenceKind::ProtocolViolation &&
+                       value && value->stream_id == stream->stream_id &&
+                       value->opener_message_type.has_value();
+            });
+        if (violation != context.evidence.end()) {
+            const auto type = *std::get<session::ProtocolViolationEvidence>(
+                violation->data).opener_message_type;
+            if (std::find(allowed.begin(), allowed.end(), type) == allowed.end()) {
+                return OutcomeState::Fail;
+            }
+        }
+        unresolved_stream = true;
+    }
+    if (!observed_opener || unresolved_stream) return std::nullopt;
+    return context.complete && context.stimulus_delivered
+               ? std::optional<OutcomeState>{OutcomeState::Pass}
+               : std::nullopt;
 }
 
 std::optional<OutcomeState> exactly_one_response(
@@ -219,6 +270,19 @@ std::vector<Outcome> evaluate_draft18(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (requirement.id == "D18-3-3-MUST-NOT-001" &&
+                   std::find(requirement.scenarios.begin(),
+                             requirement.scenarios.end(), kSubscribeScenario) !=
+                       requirement.scenarios.end() &&
+                   std::find(requirement.evaluators.begin(),
+                             requirement.evaluators.end(),
+                             kRequestOpenerEvaluator) !=
+                       requirement.evaluators.end()) {
+            const auto* context = unique_context(scenarios, kSubscribeScenario);
+            if (context) {
+                state = publisher_request_openers(*context)
+                            .value_or(OutcomeState::NotRun);
+            }
         } else if (requirement.id == "D18-10-3-MUST-NOT-001" &&
                    std::find(requirement.scenarios.begin(),
                              requirement.scenarios.end(), kSubscribeScenario) !=
@@ -347,6 +411,9 @@ std::vector<Outcome> evaluate_draft18(
 
 std::vector<ExecutableBinding> draft18_executable_bindings() {
     return {
+        {18, "D18-3-3-MUST-NOT-001", kSubscribeScenario,
+         kRequestOpenerEvaluator,
+         {"peer_stream_classified", "request_observed"}},
         {18, "D18-10-3-MUST-NOT-001", kSubscribeScenario,
          kSetupMultiplicityEvaluator, {"peer_setup_received"}},
         {18, "D18-10-3-1-1-MUST-NOT-002", kSubscribeScenario,
