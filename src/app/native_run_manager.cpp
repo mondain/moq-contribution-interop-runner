@@ -110,6 +110,8 @@ const char* evidence_name(session::EvidenceKind kind) {
         return "local_setup_observed";
     case session::EvidenceKind::PeerSetupReceived:
         return "peer_setup_received";
+    case session::EvidenceKind::SetupOptionDuplicate:
+        return "setup_option_duplicate";
     case session::EvidenceKind::RequestObserved:
         return "request_observed";
     case session::EvidenceKind::InitialResponseObserved:
@@ -146,6 +148,26 @@ storage::EvidenceEvent stored_evidence(
     result.detail = "typed session evidence sequence " +
                     std::to_string(source.sequence) + " kind " +
                     std::to_string(static_cast<unsigned>(source.kind));
+    if (const auto* setup =
+            std::get_if<session::SetupEvidence>(&source.data)) {
+        result.detail = "draft-18 peer SETUP option types: ";
+        if (setup->setup.options.empty()) {
+            result.detail += "none";
+        } else {
+            for (std::size_t index = 0; index < setup->setup.options.size();
+                 ++index) {
+                if (index != 0) result.detail += ",";
+                result.detail += std::to_string(setup->setup.options[index].type);
+            }
+        }
+        result.stream_id = std::to_string(setup->stream_id);
+    } else if (const auto* duplicate =
+                   std::get_if<session::SetupOptionDuplicateEvidence>(
+                       &source.data)) {
+        result.detail = "draft-18 duplicate SETUP option type " +
+                        std::to_string(duplicate->option_type);
+        result.stream_id = std::to_string(duplicate->stream_id);
+    }
     result.scenario_id = scenario_id;
     if (const auto* request =
             std::get_if<session::RequestObservedEvidence>(&source.data)) {
@@ -408,7 +430,8 @@ public:
                     run_config.timeout - quiet, quiet);
             }
             scenarios::Draft18RunController controller(
-                listener, std::move(definition));
+                listener, std::move(definition),
+                run_config.transport == TransportKind::WebTransport);
             std::size_t recorded = 0;
             while (!worker->stop_requested) {
                 const auto now = scenarios::Clock::now();

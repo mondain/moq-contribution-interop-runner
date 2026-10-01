@@ -84,7 +84,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "observe-publisher-setup-options"
+        "observe-publisher-setup-options",
+        "subscribe-to-publisher-track"
       ],
       "evaluators": [
         "setup-option-types-unique-except-defined-repeatable-options"
@@ -146,7 +147,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "observe-webtransport-publisher-setup"
+        "observe-webtransport-publisher-setup",
+        "subscribe-to-publisher-track"
       ],
       "evaluators": [
         "setup-omits-authority"
@@ -288,7 +290,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "observe-webtransport-publisher-setup"
+        "observe-webtransport-publisher-setup",
+        "subscribe-to-publisher-track"
       ],
       "evaluators": [
         "setup-omits-path"

@@ -1300,6 +1300,34 @@ TEST(Draft18Session, CoalescedPostSetupGoawayIsObserved) {
               evidence.end());
 }
 
+TEST(Draft18Session, WebTransportRejectsPublisherAuthorityAndPathOptions) {
+    for (const auto& [peer_setup, expected_error] : {
+             std::pair{std::vector<std::byte>{
+                           std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+                           std::byte{0x03}, std::byte{0x05}, std::byte{0x01},
+                           std::byte{'x'}}, 0x19u},
+             std::pair{std::vector<std::byte>{
+                           std::byte{0xaf}, std::byte{0x00}, std::byte{0x00},
+                           std::byte{0x03}, std::byte{0x01}, std::byte{0x01},
+                           std::byte{'/'}}, 0x8u}}) {
+        PublisherSessionConfig config;
+        config.webtransport = true;
+        PublisherSession session(config);
+        establish_with_local_setup(session);
+        const auto transition = session.on_event(
+            StreamDataEvent{2, peer_setup, false});
+        const auto* close = close_action(transition);
+        ASSERT_NE(close, nullptr);
+        EXPECT_EQ(close->application_error, expected_error);
+        const auto evidence = session.take_evidence(32);
+        EXPECT_NE(std::find_if(evidence.begin(), evidence.end(),
+                               [](const auto& event) {
+                                   return event.kind ==
+                                       EvidenceKind::PeerSetupReceived;
+                               }), evidence.end());
+    }
+}
+
 TEST(Draft18Session, LocalStreamPurposesRequireExactPhysicalRoles) {
     PublisherSession session;
     session.on_event(established());

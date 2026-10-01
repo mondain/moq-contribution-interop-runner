@@ -207,7 +207,7 @@ bool publish_setup(unsigned port, unsigned draft,
                         expected_requirement_id.empty())
                         success = true;
                 }
-                if (draft == 18) {
+                if (draft == 18 && expected_requirement_id.empty()) {
                     success = false;
                     for (const auto& outcome : run.outcomes) {
                         if (outcome.requirement_id == "D18-5-1-MUST-001" &&
@@ -396,6 +396,68 @@ TEST(WebTransportRunApi, ScoresPublisherSetupOptionViolationsWithEvidence) {
         const std::array records{record};
         EXPECT_TRUE(requirements::audit_execution(
             *draft21, requirements::draft21_executable_bindings(), records).consistent());
+    }
+}
+
+TEST(WebTransportRunApi, ScoresDraft18PublisherSetupViolationsWithEvidence) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    for (const auto& [row, option, evidence] : {
+             std::tuple{"D18-10-3-MUST-NOT-001",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 4, 4, 1, 0, 2},
+                        "option types: 4,4"},
+             std::tuple{"D18-10-3-1-1-MUST-NOT-002",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 5, 1, 'x'},
+                        "option types: 5"},
+             std::tuple{"D18-10-3-1-2-MUST-NOT-002",
+                        std::vector<std::uint8_t>{0xaf, 0, 0, 3, 1, 1, '/'},
+                        "option types: 1"}}) {
+        const Json request{{"draft", 18}, {"transport", "webtransport"},
+                           {"mode", "observed"},
+                           {"scenarios", Json::array({"subscribe-to-publisher-track"})},
+                           {"timeout_ms", 2000},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                      {"name_hex", "78"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(),
+                                       "application/json");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 201) << response->body;
+        const auto body = Json::parse(response->body);
+        const auto id = body.at("run").at("id").get<std::string>();
+        const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+        ASSERT_TRUE(publish_setup(port, 18, store, id, std::nullopt, row,
+                                  option, requirements::OutcomeState::Fail));
+        const auto record = store->load(id);
+        ASSERT_EQ(record.state, storage::RunState::Finalized);
+        const auto received = std::find_if(record.events.begin(),
+            record.events.end(), [](const auto& event) {
+                return event.kind == "peer_setup_received";
+            });
+        ASSERT_NE(received, record.events.end());
+        EXPECT_NE(received->detail.find(evidence), std::string::npos);
+        if (row == std::string{"D18-10-3-MUST-NOT-001"}) {
+            const auto duplicate = std::find_if(record.events.begin(),
+                record.events.end(), [](const auto& event) {
+                    return event.kind == "setup_option_duplicate";
+                });
+            ASSERT_NE(duplicate, record.events.end());
+            EXPECT_NE(duplicate->detail.find("option type 4"),
+                      std::string::npos);
+        }
+        const std::array records{record};
+        EXPECT_TRUE(requirements::audit_execution(
+            *draft18, requirements::draft18_executable_bindings(), records).consistent());
     }
 }
 

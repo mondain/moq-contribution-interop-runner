@@ -324,5 +324,85 @@ TEST(Draft18Evaluators, DiscoveryResponsesMustBeUniqueAndCorrelated) {
     }
 }
 
+TEST(Draft18Evaluators, PublisherSetupOptionMultiplicityUsesObservedTypes) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(
+        source, root / "requirements/draft18.json");
+    constexpr const char* row = "D18-10-3-MUST-NOT-001";
+    ScenarioContext context{"subscribe-to-publisher-track", true, true,
+                            {subscribe_request(), subscribe_ok()}};
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+
+    const auto integer = [](std::uint64_t type) {
+        return wire::draft18::KeyValuePair{
+            type, wire::draft18::VarIntValue{1, {}}};
+    };
+    context.evidence.insert(context.evidence.begin(),
+        {0, session::EvidenceKind::PeerSetupReceived,
+         session::SetupEvidence{2, wire::draft18::SetupMessage{
+             {integer(4)}}}});
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Pass);
+    context.evidence.pop_back();
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+    context.evidence.push_back(subscribe_ok());
+    std::get<session::SetupEvidence>(context.evidence.front().data)
+        .setup.options = {integer(4), integer(4)};
+    context.complete = false;
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::Fail);
+    std::get<session::SetupEvidence>(context.evidence.front().data)
+        .setup.options = {integer(0x9d), integer(0x9d)};
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}), row).state,
+              OutcomeState::NotRun);
+}
+
+TEST(Draft18Evaluators, WebTransportPublisherSetupOmitsAuthorityAndPath) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(
+        18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(
+        source, root / "requirements/draft18.json");
+    constexpr const char* authority = "D18-10-3-1-1-MUST-NOT-002";
+    constexpr const char* path = "D18-10-3-1-2-MUST-NOT-002";
+    ScenarioContext context{"subscribe-to-publisher-track", true, true,
+                            {subscribe_request(), subscribe_ok()}};
+    context.webtransport = true;
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          authority).state, OutcomeState::NotRun);
+    context.evidence.insert(context.evidence.begin(),
+        {0, session::EvidenceKind::PeerSetupReceived,
+         session::SetupEvidence{2, wire::draft18::SetupMessage{}}});
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          authority).state, OutcomeState::Pass);
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          path).state, OutcomeState::Pass);
+    context.evidence.pop_back();
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          authority).state, OutcomeState::NotRun);
+    context.evidence.push_back(subscribe_ok());
+
+    auto& options = std::get<session::SetupEvidence>(context.evidence.front().data)
+                        .setup.options;
+    context.complete = false;
+    options = {{5, wire::draft18::ByteValue{{std::byte{'x'}}}}};
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          authority).state, OutcomeState::Fail);
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          path).state, OutcomeState::NotRun);
+    options = {{1, wire::draft18::ByteValue{{std::byte{'/'}}}}};
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          authority).state, OutcomeState::NotRun);
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          path).state, OutcomeState::Fail);
+    context.webtransport = false;
+    EXPECT_EQ(outcome_for(evaluate_draft18(checked, {&context, 1}),
+                          path).state, OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

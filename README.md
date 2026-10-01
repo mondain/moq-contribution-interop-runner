@@ -65,6 +65,13 @@ For the draft-18 duplicate-subscription check, set `scenarios` to
 track, and scores `D18-5-1-MUST-004` from the response code. If the first
 subscription is not established, that conditional requirement remains
 `NOT_RUN` rather than becoming a publisher failure.
+The same `subscribe-to-publisher-track` run inspects the publisher's SETUP
+option types for `D18-10-3-MUST-NOT-001`. It fails repeated known
+non-repeatable types, permits repeated AUTHORIZATION TOKEN options, and
+leaves repeated unknown extension types unscored. Over WebTransport it also
+scores the AUTHORITY and PATH prohibitions and closes with INVALID_AUTHORITY
+or INVALID_PATH if either forbidden option is received. Passing these SETUP
+rows requires a completed request/response exchange.
 
 For the draft-18 FETCH response check, use
 `["fetch-publisher-track-range"]`. The runner sends a standalone FETCH for
@@ -172,7 +179,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-5/175 draft-18 and 12/175 draft-21 applicable, testable MUST/MUST NOT rows
+8/175 draft-18 and 12/175 draft-21 applicable, testable MUST/MUST NOT rows
 have registered executable bindings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit

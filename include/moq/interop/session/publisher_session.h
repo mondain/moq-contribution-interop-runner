@@ -436,6 +436,7 @@ struct PublisherSessionConfig {
     std::size_t maximum_subscription_key_bytes{1u << 20};
     std::size_t maximum_auth_token_cache_bytes{1u << 20};
     wire::draft18::Limits wire_limits{};
+    bool webtransport{false};
 };
 
 class PublisherSession {

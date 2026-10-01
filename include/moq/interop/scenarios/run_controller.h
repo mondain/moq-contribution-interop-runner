@@ -16,7 +16,8 @@ struct ControllerSnapshot {
 class Draft18RunController {
 public:
     Draft18RunController(transport::SessionTransport& transport,
-                         ScenarioDefinition definition);
+                         ScenarioDefinition definition,
+                         bool webtransport = false);
 
     ControllerSnapshot poll(Clock::time_point now);
     [[nodiscard]] const requirements::ScenarioContext& context() const noexcept;

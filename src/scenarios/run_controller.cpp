@@ -18,11 +18,14 @@ bool final_status(ScenarioStatus status) {
 }  // namespace
 
 Draft18RunController::Draft18RunController(
-    transport::SessionTransport& transport, ScenarioDefinition definition)
+    transport::SessionTransport& transport, ScenarioDefinition definition,
+    bool webtransport)
     : transport_(transport),
+      session_(session::PublisherSessionConfig{.webtransport = webtransport}),
       dispatcher_(transport_, session_),
       engine_(definition) {
     context_.scenario_id = std::move(definition.id);
+    context_.webtransport = webtransport;
 }
 
 void Draft18RunController::fail_harness() {

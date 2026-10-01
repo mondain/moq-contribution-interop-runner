@@ -23,6 +23,37 @@ constexpr const char* kNamespaceResponseEvaluator =
     "exactly-one-namespace-subscription-response";
 constexpr const char* kTracksResponseEvaluator =
     "exactly-one-track-subscription-response";
+constexpr const char* kSetupMultiplicityEvaluator =
+    "setup-option-types-unique-except-defined-repeatable-options";
+constexpr const char* kNoAuthorityEvaluator = "setup-omits-authority";
+constexpr const char* kNoPathEvaluator = "setup-omits-path";
+
+enum class SetupMultiplicity { Valid, Invalid, Indeterminate };
+
+SetupMultiplicity setup_multiplicity(
+    const wire::draft18::SetupMessage& setup) {
+    bool unknown_duplicate = false;
+    for (std::size_t index = 1; index < setup.options.size(); ++index) {
+        const auto type = setup.options[index].type;
+        if (type != setup.options[index - 1].type || type == 3u) continue;
+        if (type == 1u || type == 4u || type == 5u || type == 7u) {
+            return SetupMultiplicity::Invalid;
+        }
+        // An unknown extension can define its own repetition rule.
+        unknown_duplicate = true;
+    }
+    return unknown_duplicate ? SetupMultiplicity::Indeterminate
+                             : SetupMultiplicity::Valid;
+}
+
+const session::SetupEvidence* peer_setup(const ScenarioContext& context) {
+    for (const auto& event : context.evidence) {
+        if (event.kind != session::EvidenceKind::PeerSetupReceived) continue;
+        if (const auto* setup = std::get_if<session::SetupEvidence>(&event.data))
+            return setup;
+    }
+    return nullptr;
+}
 
 std::optional<OutcomeState> exactly_one_response(
     const ScenarioContext& context, session::RequestKind kind) {
@@ -188,6 +219,58 @@ std::vector<Outcome> evaluate_draft18(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (requirement.id == "D18-10-3-MUST-NOT-001" &&
+                   std::find(requirement.scenarios.begin(),
+                             requirement.scenarios.end(), kSubscribeScenario) !=
+                       requirement.scenarios.end() &&
+                   std::find(requirement.evaluators.begin(),
+                             requirement.evaluators.end(),
+                             kSetupMultiplicityEvaluator) !=
+                       requirement.evaluators.end()) {
+            const auto* context = unique_context(scenarios, kSubscribeScenario);
+            if (context) {
+                const auto* setup = peer_setup(*context);
+                if (setup) {
+                    const auto multiplicity = setup_multiplicity(setup->setup);
+                    if (multiplicity == SetupMultiplicity::Invalid) {
+                        state = OutcomeState::Fail;
+                    } else if (multiplicity == SetupMultiplicity::Valid &&
+                               exactly_one_response(
+                                   *context, session::RequestKind::Subscribe) ==
+                                   OutcomeState::Pass) {
+                        state = OutcomeState::Pass;
+                    }
+                }
+            }
+        } else if (requirement.id == "D18-10-3-1-1-MUST-NOT-002" ||
+                   requirement.id == "D18-10-3-1-2-MUST-NOT-002") {
+            const bool authority =
+                requirement.id == "D18-10-3-1-1-MUST-NOT-002";
+            if (std::find(requirement.scenarios.begin(),
+                          requirement.scenarios.end(), kSubscribeScenario) !=
+                    requirement.scenarios.end() &&
+                std::find(requirement.evaluators.begin(),
+                          requirement.evaluators.end(),
+                          authority ? kNoAuthorityEvaluator : kNoPathEvaluator) !=
+                    requirement.evaluators.end()) {
+                const auto* context = unique_context(scenarios, kSubscribeScenario);
+                if (context && context->webtransport) {
+                    const auto* setup = peer_setup(*context);
+                    if (setup) {
+                        const auto type = authority ? 5u : 1u;
+                        const bool forbidden = std::any_of(
+                            setup->setup.options.begin(), setup->setup.options.end(),
+                            [type](const auto& option) {
+                                return option.type == type;
+                            });
+                        if (forbidden) state = OutcomeState::Fail;
+                        else if (exactly_one_response(
+                                     *context, session::RequestKind::Subscribe) ==
+                                 OutcomeState::Pass)
+                            state = OutcomeState::Pass;
+                    }
+                }
+            }
         } else if (requirement.testability == Testability::Testable &&
                    requirement.scenarios.size() == 1 &&
                    requirement.scenarios.front() ==
@@ -264,6 +347,12 @@ std::vector<Outcome> evaluate_draft18(
 
 std::vector<ExecutableBinding> draft18_executable_bindings() {
     return {
+        {18, "D18-10-3-MUST-NOT-001", kSubscribeScenario,
+         kSetupMultiplicityEvaluator, {"peer_setup_received"}},
+        {18, "D18-10-3-1-1-MUST-NOT-002", kSubscribeScenario,
+         kNoAuthorityEvaluator, {"peer_setup_received"}},
+        {18, "D18-10-3-1-2-MUST-NOT-002", kSubscribeScenario,
+         kNoPathEvaluator, {"peer_setup_received"}},
         {18, "D18-5-1-MUST-001", kSubscribeScenario, kResponseEvaluator,
          {"request_observed", "initial_response_observed"}},
         {18, "D18-5-1-MUST-004", kDuplicateScenario,

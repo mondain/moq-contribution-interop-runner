@@ -1972,6 +1972,26 @@ public:
                      SetupEvidence{stream_id, *setup});
                 if (terminal()) return;
                 inspect_setup_duplicates(transition, stream_id, *setup);
+                if (terminal()) return;
+                if (config.webtransport) {
+                    const auto has_option = [&](std::uint64_t type) {
+                        return std::any_of(setup->options.begin(),
+                                           setup->options.end(),
+                                           [type](const auto& option) {
+                                               return option.type == type;
+                                           });
+                    };
+                    if (has_option(5u)) {
+                        protocol_close(transition, stream_id, 0x19,
+                                       "AUTHORITY forbidden over WebTransport");
+                        return;
+                    }
+                    if (has_option(1u)) {
+                        protocol_close(transition, stream_id, 0x8,
+                                       "PATH forbidden over WebTransport");
+                        return;
+                    }
+                }
                 update_active(transition);
             } else if (!peer_setup_observed) {
                 protocol_close(transition, stream_id, kProtocolViolation,

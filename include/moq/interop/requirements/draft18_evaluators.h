@@ -18,6 +18,7 @@ struct ScenarioContext {
     // True only after the relay's stimulus was accepted by the transport.
     bool stimulus_delivered{false};
     std::vector<session::EvidenceEvent> evidence;
+    bool webtransport{false};
 };
 
 std::vector<Outcome> evaluate_draft18(
