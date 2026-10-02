@@ -561,7 +561,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-raw-probe-auto-accept-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe-auto-accept COMMAND moq-interop-raw-probe-auto-accept-tests)
 
-    add_executable(moq-interop-draft18-origination-tests tests/protocol/draft18_contribution_origination_test.cpp)
+    add_executable(moq-interop-draft18-origination-tests tests/protocol/draft18_contribution_origination_test.cpp
+        tests/protocol/draft18_contribution_empty_host_test.cpp)
     target_link_libraries(moq-interop-draft18-origination-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME draft18-origination COMMAND moq-interop-draft18-origination-tests)
 

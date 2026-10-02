@@ -12,7 +12,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 128> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 129> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -142,6 +142,7 @@ inline constexpr std::array<std::string_view, 128> kDraft18ExecutableScenarios{
     "finish-subscription-with-open-object-streams",
     "publish-track-with-mandatory-property",
     "publish-distinct-content-tracks-in-same-scope",
+    "connect-with-empty-host-moqt-uri",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{

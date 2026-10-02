@@ -39,6 +39,10 @@ std::optional<bool> evaluate_draft18_contribution_probe(
 // scenario, or an empty view (section 10.3.1.2).
 std::string_view draft18_contribution_connection_query(std::string_view id);
 
+// The scenario that names a moqt URI with an empty host (section 3.1.1). A
+// publisher that refuses to connect is the expected, unscored outcome.
+bool draft18_contribution_empty_host_scenario(std::string_view id);
+
 bool draft18_contribution_scenario(std::string_view id);
 bool draft18_contribution_requires_track(std::string_view id);
 bool draft18_contribution_fixture_valid(
