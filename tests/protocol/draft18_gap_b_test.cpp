@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 namespace moq::interop::scenarios {
 namespace {
@@ -43,8 +45,22 @@ Draft18GapAProbe profile(const std::string& requirement,
     return *found;
 }
 
+// The quiet windows of the probes read RawProbeClock (as in a live run), not the
+// controller's poll count, so the controller is polled against the real clock
+// at about the 1 ms cadence of a live run. Only probes that must wait out a
+// window or their deadline cost real time.
+RawProbeTranscript run_probe_in_real_time(ScriptedPublisher& publisher, RawProbeDefinition definition) {
+    RawProbeController controller(publisher, std::move(definition));
+    for (;;) {
+        const auto& transcript = controller.poll(RawProbeClock::now());
+        if (transcript.complete || transcript.harness_failed || transcript.timed_out) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return controller.transcript();
+}
+
 std::optional<bool> score(const Draft18GapAProbe& probe, ScriptedPublisher& publisher) {
-    const auto transcript = run_probe(publisher, probe.definition);
+    const auto transcript = run_probe_in_real_time(publisher, probe.definition);
     return evaluate_draft18_gap_a_probe(transcript, probe);
 }
 

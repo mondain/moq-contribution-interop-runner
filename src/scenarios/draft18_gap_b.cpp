@@ -1,4 +1,5 @@
 #include "draft18_gap_a_common.h"
+#include "draft18_probe_timing.h"
 
 #include <algorithm>
 #include <concepts>
@@ -325,25 +326,8 @@ constexpr std::uint64_t kRequestError = 0x05;
 constexpr std::uint64_t kPublishBlocked = 0x0f;
 constexpr std::uint64_t kCreditGrant = 8;
 
-// Becomes true once `seen` has held for `window` polls. The controller is
-// polled about once per millisecond, and counting polls (rather than reading a
-// clock) keeps the period identical under a simulated clock; losing `seen`
-// restarts the count.
-std::function<bool(const RawProbeTranscript&)> settled_after(
-    std::function<bool(const RawProbeTranscript&)> seen, std::chrono::milliseconds window) {
-    struct State { std::int64_t streak{0}; std::size_t events{0}; };
-    auto state = std::make_shared<State>();
-    return [seen = std::move(seen), window, state](const RawProbeTranscript& transcript) {
-        // A shorter event log means the definition serves a new session.
-        if (transcript.events.size() < state->events) state->streak = 0;
-        state->events = transcript.events.size();
-        if (!seen(transcript)) { state->streak = 0; return false; }
-        return ++state->streak >= window.count();
-    };
-}
-std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline) {
-    return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
-}
+using probe_timing::quiet_window;
+using probe_timing::settled_after;
 
 RawProbeDefinition no_credit_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
     auto definition = make_definition("subscribe-tracks-with-no-bidirectional-stream-credit",
