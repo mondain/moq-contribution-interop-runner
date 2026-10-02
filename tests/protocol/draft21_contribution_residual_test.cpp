@@ -300,10 +300,17 @@ TEST(ContributionResidual, ObjectsOfTwoSubgroupsNeverShareAStream) {
     // Subgroup ID given by the first Object (type 0x32) is equally fine.
     EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1})),
                                         cconcat({cvi(0x32), cvi(5), cvi(0), objects_with_ids({5, 6})})))), true);
-    // Objects from both Subgroups on one stream mix them.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})), {}))), false);
-    EXPECT_TRUE(probe.definition.response_ready(run(subgroup(5, 0, objects_with_ids({3, 6})), {}).partial()));
-    EXPECT_EQ(judge(probe, run(subgroup(5, 0, objects_with_ids({3, 6})), {}).finish()), false);
+    // Objects from both cells on one stream mix Subgroups when another stream proves the split.
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
+                                        subgroup(5, 0, objects_with_ids({8}), 1)))), false);
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
+                                        subgroup(5, 0, objects_with_ids({2}), 1)))), false);
+    // A compliant publisher whose Group 0 is a single Subgroup puts every Object on one
+    // stream; the wire cannot show a second Subgroup there, so nothing is proven.
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2, 3, 4, 5, 6, 7, 8, 9})), {}))),
+              std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})), {}))), std::nullopt);
+    EXPECT_EQ(judge(probe, run(subgroup(5, 0, objects_with_ids({3, 6})), {}).finish()), std::nullopt);
     // A single Subgroup never exercises the split.
     EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2})), {}))), std::nullopt);
     // Another Track Alias is not this subscription.

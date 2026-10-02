@@ -358,18 +358,28 @@ Spec mixed_subgroup_spec() {
             if (rejected(view, 0)) return {true, std::nullopt};
             const auto alias = alias_of(view, 0);
             if (!alias) return {view.close().has_value(), std::nullopt};
+            // A Subgroup stream carries a single Subgroup ID, so two cells on one stream
+            // are only a violation when something else shows the publisher puts them in
+            // different Subgroups (the cells are the fixture's assumption, not the wire's):
+            // a stream holding just one cell, or two distinct Subgroup IDs among streams.
             std::set<int> cells_seen;
+            std::set<std::uint64_t> subgroup_ids;
+            bool stream_with_both = false;
+            bool stream_with_one = false;
             for (const auto& stream : subgroup_streams(view, *alias)) {
                 std::set<int> cells;
                 for (const auto& object : stream.objects)
                     if (const auto cell = membership(object)) cells.insert(*cell);
-                // A stream names exactly one Subgroup; Objects of two Subgroups on it mix them.
-                if (cells.size() > 1) return {true, false};
+                if (cells.empty()) continue;
+                if (stream.subgroup_id) subgroup_ids.insert(*stream.subgroup_id);
+                (cells.size() > 1 ? stream_with_both : stream_with_one) = true;
                 cells_seen.insert(cells.begin(), cells.end());
             }
+            if (stream_with_both && (stream_with_one || subgroup_ids.size() > 1)) return {true, false};
             if (!view.window_ended()) return {false, std::nullopt};
-            // Both Subgroups must have been observed for the split to be exercised.
-            return {true, cells_seen.size() == 2 ? std::optional<bool>{true} : std::nullopt};
+            // Both Subgroups must have been observed, each on streams of its own, for the
+            // split to be exercised and kept.
+            return {true, cells_seen.size() == 2 && !stream_with_both ? std::optional<bool>{true} : std::nullopt};
         },
         true);
 }
