@@ -343,6 +343,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-native-quic-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
+
+    add_executable(moq-interop-draft21-gap-a-live-tests
+                   tests/integration/draft21_gap_a_live_test.cpp)
+    target_link_libraries(moq-interop-draft21-gap-a-live-tests PRIVATE
+        moq-interop-test-client moq-interop-runs moq-interop-http
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-gap-a-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft21-gap-a-live COMMAND moq-interop-draft21-gap-a-live-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
