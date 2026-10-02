@@ -56,6 +56,8 @@ void usage(std::ostream& output) {
               "  --invalid-auth-token TYPE:HEX  well-formed but invalid credential for a Token Type the publisher\n"
               "                          understands (D18-10-2-2-MUST-008, D21-8-9-MUST-270); unset leaves the row NOT_RUN\n"
               "  --expired-auth-token TYPE:HEX  expired credential, same contract (D18-10-2-2-MUST-010, D21-8-9-MUST-273)\n"
+              "  --publisher-no-fetch    declare, for runs that do not say otherwise, that the publisher\n"
+              "                          does not implement FETCH (a run's publisher_capabilities wins)\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -91,6 +93,7 @@ Options parse_options(int argc, char* argv[]) {
         else if (argument == "--publisher-port-start") options.native.port_start = parse_port(value(argument));
         else if (argument == "--publisher-port-end") options.native.port_end = parse_port(value(argument));
         else if (argument == "--publisher-origin") options.native.webtransport_allowed_origins.emplace_back(value(argument));
+        else if (argument == "--publisher-no-fetch") options.server.default_publisher_capabilities.fetch = false;
         else if (argument == "--require-publisher-origin") options.native.webtransport_require_origin = true;
         else if (argument == "--tls-cert") options.native.certificate_path = value(argument);
         else if (argument == "--tls-key") options.native.private_key_path = value(argument);

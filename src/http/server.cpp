@@ -1,5 +1,6 @@
 #include "moq/interop/http/server.h"
 #include "moq/interop/http/result_schema.h"
+#include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/scenarios/draft18_close.h"
 #include "moq/interop/scenarios/draft18_gap_a.h"
@@ -155,7 +156,8 @@ detail::ReportFilters report_filters(const httplib::Request& request) {
     return filters;
 }
 
-app::RunConfig parse_run_config(const httplib::Request& request) {
+app::RunConfig parse_run_config(const httplib::Request& request,
+                                const app::PublisherCapabilities& default_capabilities) {
     Json body;
     try {
         body = Json::parse(request.body);
@@ -252,12 +254,32 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
             if (!scenarios::discovery_overlap_namespace_valid(fields))
                 throw ApiError{400,"invalid_run_config","Discovery overlap namespace requires at most 31 fields and 4094 bytes, with a nonreserved first field."};
         }
+        // Declared capabilities: an explicit per-run value wins over the startup default.
+        app::PublisherCapabilities capabilities = default_capabilities;
+        if (body.contains("publisher_capabilities")) {
+            const auto& declared = body.at("publisher_capabilities");
+            if (!declared.is_object()) {
+                throw ApiError{400, "invalid_publisher_capabilities",
+                               "publisher_capabilities must be an object such as {\"fetch\": false}."};
+            }
+            for (const auto& [name, value] : declared.items()) {
+                if (name != "fetch") {
+                    throw ApiError{400, "invalid_publisher_capabilities",
+                                   "Unknown publisher capability; the only supported name is fetch."};
+                }
+                if (!value.is_boolean()) {
+                    throw ApiError{400, "invalid_publisher_capabilities",
+                                   "publisher_capabilities.fetch must be true or false."};
+                }
+                capabilities.fetch = value.get<bool>();
+            }
+        }
         return {draft == 18 ? app::DraftVersion::Draft18 : app::DraftVersion::Draft21,
                 transport == "native-quic" ? app::TransportKind::NativeQuic
                                              : app::TransportKind::WebTransport,
                 mode == "observed" ? app::RunMode::Observed : app::RunMode::Driven,
                 scenarios, std::chrono::milliseconds(timeout),
-                std::move(track_fixture)};
+                std::move(track_fixture), capabilities};
     } catch (const ApiError&) {
         throw;
     } catch (const Json::exception&) {
@@ -648,6 +670,10 @@ public:
                         append_profile(21, profile.definition.id, "webtransport");
                     }
                 }
+                for (auto& profile : profiles) {
+                    profile["requires_fetch"] = app::scenario_requires_fetch(
+                        profile.at("draft").get<unsigned>(), profile.at("scenario").get<std::string>());
+                }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
                     auto driven = profiles.at(index);
@@ -661,6 +687,8 @@ public:
                                          {"database", {{"ready", true}}},
                                          {"supported_drafts", {18, 21}},
                                          {"executable_profiles", std::move(profiles)},
+                                         {"publisher_capability_defaults",
+                                          {{"fetch", config.default_publisher_capabilities.fetch}}},
                                          {"validator", detail::build_json(build)}});
             });
         });
@@ -698,7 +726,7 @@ public:
         server.Post("/api/v1/runs", [this](const httplib::Request& request,
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
-                const auto requested = parse_run_config(request);
+                const auto requested = parse_run_config(request, config.default_publisher_capabilities);
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21;
                 if (std::any_of(requested.scenario_ids.begin(),requested.scenario_ids.end(),[&](const auto& id) {
@@ -711,6 +739,20 @@ public:
                     (runs && !runs->supports(requested.draft))) {
                     throw ApiError{422, "unsupported_run_config",
                                    "The requested scenario or mode is not executable."};
+                }
+                {
+                    // Every selected scenario needs a capability the publisher declared absent:
+                    // nothing could run, so name the first one and the capability.
+                    const auto draft = static_cast<unsigned>(requested.draft);
+                    if (std::all_of(requested.scenario_ids.begin(), requested.scenario_ids.end(), [&](const auto& id) {
+                            return app::scenario_skip_reason(draft, id, requested.publisher_capabilities).has_value();
+                        })) {
+                        const auto& id = requested.scenario_ids.front();
+                        throw ApiError{422, "scenario_requires_publisher_capability",
+                                       "Scenario " + id + " requires the publisher capability " +
+                                       std::string(app::scenario_required_capability(draft, id).value_or("unknown")) +
+                                       ", which this run declares the publisher does not implement."};
+                    }
                 }
                 if ((!requested.track_fixture && std::any_of(requested.scenario_ids.begin(),requested.scenario_ids.end(),[&](const auto& id) {
                         return app::scenario_requires_track(static_cast<unsigned>(requested.draft),id);
@@ -751,6 +793,10 @@ public:
                     throw ApiError{503, "publisher_ports_exhausted", "No publisher listener port is available."};
                 case app::RunStartStatus::ListenerError:
                     throw ApiError{503, "publisher_listener_unavailable", "The publisher listener could not start."};
+                case app::RunStartStatus::ScenarioRequiresCapability:
+                    throw ApiError{422, "scenario_requires_publisher_capability",
+                                   "Scenario " + started.scenario + " requires the publisher capability " +
+                                   started.capability + ", which this run declares the publisher does not implement."};
                 }
             });
         });

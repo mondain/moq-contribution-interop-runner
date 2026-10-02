@@ -143,6 +143,72 @@ TEST(ResultExport, TapMultipleScenariosCannotInjectDirectives) {
     EXPECT_EQ(std::count(tap.begin(), tap.end(), '\n'), 10);
 }
 
+// A run in which the publisher declared no FETCH: one FETCH scenario (skipped) and one
+// that is not. Rows: all-FETCH (not applicable), mixed (stays not run), independent (pass).
+requirements::RequirementCatalog fetch_catalog() {
+    const auto row = [](std::string id, requirements::Strength strength, std::vector<std::string> scenarios) {
+        return requirements::Requirement{std::move(id), strength, {"5.1", 20, 23, 1, 1}, "publisher",
+            "behavior", requirements::Applicability::Applicable, requirements::Testability::Testable,
+            std::move(scenarios), {"evaluator"}, "reason"};
+    };
+    return {18, "sha256-example", true, {
+        row("ROW-ALL-FETCH", requirements::Strength::Must, {"fetch-publisher-track-range"}),
+        row("ROW-MIXED", requirements::Strength::Must, {"fetch-publisher-track-range", "subscribe-to-publisher-track"}),
+        row("ROW-INDEPENDENT", requirements::Strength::Should, {"subscribe-to-publisher-track"})}};
+}
+
+storage::RunRecord no_fetch_run() {
+    auto value = run();
+    value.config.scenario_ids = {"fetch-publisher-track-range", "subscribe-to-publisher-track"};
+    value.config.publisher_capabilities.fetch = false;
+    value.outcomes = {{"ROW-ALL-FETCH", requirements::OutcomeState::NotApplicable},
+                      {"ROW-MIXED", requirements::OutcomeState::NotRun},
+                      {"ROW-INDEPENDENT", requirements::OutcomeState::Pass}};
+    value.score = requirements::score(fetch_catalog(), value.outcomes);
+    value.events.clear();
+    return value;
+}
+
+TEST(ResultExport, DeclaredNoFetchIsSelfDescribingInJson) {
+    const auto value = no_fetch_run();
+    ASSERT_EQ(value.score->verdict, requirements::RunVerdict::Incomplete);
+    // The all-FETCH row left the denominators; the mixed row did not.
+    EXPECT_EQ(value.score->required.possible, 10u);
+    EXPECT_EQ(value.score->weighted.possible, 13u);
+    const auto document = serialize_result(value, fetch_catalog());
+    EXPECT_FALSE(document.at("publisher_capabilities").at("fetch").get<bool>());
+    EXPECT_FALSE(document.at("run").at("config").at("publisher_capabilities").at("fetch").get<bool>());
+    ASSERT_EQ(document.at("skipped_scenarios").size(), 1u);
+    EXPECT_EQ(document.at("skipped_scenarios").at(0).at("scenario_id"), "fetch-publisher-track-range");
+    EXPECT_EQ(document.at("skipped_scenarios").at(0).at("reason"), "publisher declared no FETCH support");
+    const auto& rows = document.at("requirements");
+    EXPECT_EQ(rows.at(0).at("outcome"), "not_applicable");
+    EXPECT_NE(rows.at(0).at("not_applicable_reason").get<std::string>().find("publisher declared no FETCH support"),
+              std::string::npos);
+    EXPECT_EQ(rows.at(1).at("outcome"), "not_run");
+    EXPECT_TRUE(rows.at(1).at("not_applicable_reason").is_null());
+    EXPECT_EQ(rows.at(2).at("outcome"), "pass");
+    EXPECT_TRUE(rows.at(2).at("not_applicable_reason").is_null());
+}
+
+TEST(ResultExport, DefaultRunsReportCapableAndNoSkips) {
+    const auto document = serialize_result(run(), catalog());
+    EXPECT_TRUE(document.at("publisher_capabilities").at("fetch").get<bool>());
+    EXPECT_TRUE(document.at("skipped_scenarios").empty());
+    EXPECT_TRUE(document.at("requirements").at(0).at("not_applicable_reason").is_null());
+}
+
+TEST(ResultExport, TapSkipsFetchScenariosWithTheReason) {
+    const auto tap = serialize_tap14(no_fetch_run(), fetch_catalog());
+    EXPECT_EQ(tap.rfind("TAP version 14\n1..2\n# publisher_capabilities fetch=false", 0), 0u) << tap;
+    EXPECT_NE(tap.find("ok 1 - fetch-publisher-track-range # SKIP publisher declared no FETCH support\n"),
+              std::string::npos) << tap;
+    EXPECT_NE(tap.find("\"skip_reason\":\"publisher declared no FETCH support\""), std::string::npos);
+    EXPECT_NE(tap.find("\"result\":\"skip\""), std::string::npos);
+    // The scenario that did run is still judged on its own rows (mixed row not run).
+    EXPECT_NE(tap.find("not ok 2 - subscribe-to-publisher-track\n"), std::string::npos) << tap;
+}
+
 TEST(ResultExport, RejectsMismatchedCatalogDraft) {
     auto wrong = catalog();
     wrong.draft = 21;
