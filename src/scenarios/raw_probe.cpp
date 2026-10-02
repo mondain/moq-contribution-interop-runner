@@ -227,6 +227,7 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
         }) && !definition_.peer_request_ready) ||
         (definition_.acknowledge_publisher_namespace && definition_.acknowledge_publisher_namespace_draft21) ||
         ((definition_.acknowledge_publisher_namespace || definition_.acknowledge_publisher_namespace_draft21) &&
+         !definition_.acknowledge_skips_peer_target &&
          std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
              return write.channel == RawProbeChannel::PeerBidi;
          })) ||
@@ -345,6 +346,11 @@ void RawProbeController::send_auto_replies() {
         auto_accept_replied_.insert(id);
         transcript_.auto_replies.push_back({id, transcript_.events.size()});
     }
+}
+bool RawProbeController::acknowledgement_excluded(transport::StreamId id, std::span<const std::byte> request) const {
+    if (!definition_.acknowledge_skips_peer_target) return false;
+    return peer_request_stream_ == id ||
+           (definition_.peer_request_ready && definition_.peer_request_ready(request));
 }
 void RawProbeController::acknowledge_publisher_namespaces() {
     static const std::vector<std::byte> request_ok_18 = [] {
@@ -494,7 +500,8 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (candidate.size() + data->data.size() <= kMaximumSetupBytes) {
                     candidate.insert(candidate.end(), data->data.begin(), data->data.end());
                     if (definition_.acknowledge_publisher_namespace_draft21) {
-                        if (answerable_draft21_announcement(candidate)) acknowledgement_pending_.insert(data->stream_id);
+                        if (answerable_draft21_announcement(candidate) && !acknowledgement_excluded(data->stream_id, candidate))
+                            acknowledgement_pending_.insert(data->stream_id);
                     } else {
                     wire::Cursor cursor(candidate);
                     const auto decoded = wire::draft18::decode_message(wire::draft18::StreamRole::Request, cursor, {});
@@ -502,7 +509,8 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                     const auto* announce = message ? std::get_if<wire::draft18::PublishNamespaceMessage>(message) : nullptr;
                     if (announce && announce->parameters.empty() && !announce->track_namespace.fields.empty() &&
                         !(announce->track_namespace.fields.front().size() == 1 &&
-                          announce->track_namespace.fields.front().front() == std::byte{'.'}))
+                          announce->track_namespace.fields.front().front() == std::byte{'.'}) &&
+                        !acknowledgement_excluded(data->stream_id, candidate))
                         acknowledgement_pending_.insert(data->stream_id);
                     }
                 }
@@ -607,6 +615,22 @@ bool auto_replies_valid(const RawProbeTranscript& transcript, const RawProbeDefi
 }
 }  // namespace
 
+namespace {
+// A parameter-free PUBLISH_NAMESPACE for "media", the shape the default answer acts on.
+std::vector<std::byte> sample_announcement(unsigned draft) {
+    if (draft == 21) {
+        static const unsigned char frame[] = {0x06, 0x00, 0x09, 0x00, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a', 0x00};
+        std::vector<std::byte> result;
+        for (const auto byte : frame) result.push_back(static_cast<std::byte>(byte));
+        return result;
+    }
+    wire::ByteWriter output(64);
+    wire::draft18::encode_message(wire::draft18::PublishNamespaceMessage{
+        0, wire::draft18::TrackNamespace{{{std::byte{'m'}, std::byte{'e'}, std::byte{'d'}, std::byte{'i'}, std::byte{'a'}}}}, {}}, output);
+    return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+}
+}  // namespace
+
 std::span<const NamespaceAnswerOptOut> namespace_answer_opt_outs() {
     static const std::vector<NamespaceAnswerOptOut> table = {
         // Empty on purpose. Every scenario whose subject is the publisher's reaction
@@ -629,10 +653,15 @@ DefaultNamespaceAnswer apply_default_namespace_answer(RawProbeDefinition& defini
     if (definition.acknowledge_publisher_namespace || definition.acknowledge_publisher_namespace_draft21 ||
         definition.auto_accept_ready)
         return DefaultNamespaceAnswer::OwnMechanism;
-    if (definition.peer_request_ready ||
-        std::any_of(definition.writes.begin(), definition.writes.end(),
-                    [](const auto& write) { return write.channel == RawProbeChannel::PeerBidi; }))
-        return DefaultNamespaceAnswer::TargetsRequest;
+    const bool peer_writes = std::any_of(definition.writes.begin(), definition.writes.end(),
+        [](const auto& write) { return write.channel == RawProbeChannel::PeerBidi; });
+    if (peer_writes || definition.peer_request_ready) {
+        // Safe only when the stimulus targets some other publisher request (a PUBLISH, a
+        // TRACK_STATUS): then an announcement is answered beside it, never on its stream.
+        if (!definition.peer_request_ready || definition.peer_request_ready(sample_announcement(draft)))
+            return DefaultNamespaceAnswer::TargetsRequest;
+        definition.acknowledge_skips_peer_target = true;
+    }
     (draft == 18 ? definition.acknowledge_publisher_namespace
                  : definition.acknowledge_publisher_namespace_draft21) = true;
     return DefaultNamespaceAnswer::Applied;

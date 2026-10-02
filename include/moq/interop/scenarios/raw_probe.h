@@ -111,6 +111,11 @@ struct RawProbeDefinition {
     // REQUEST_OK 0x7, draft 21 Sections 4.2 and 9.3). Exclusive with the draft 18
     // flag; recorded in RawProbeTranscript::acknowledgements, not in `auto_replies`.
     bool acknowledge_publisher_namespace_draft21{false};
+    // Lets either acknowledgement coexist with PeerBidi writes: a request stream that
+    // `peer_request_ready` selects (or the stimulus already targets) is never
+    // acknowledged. Set by apply_default_namespace_answer only for a definition whose
+    // `peer_request_ready` does not accept a PUBLISH_NAMESPACE.
+    bool acknowledge_skips_peer_target{false};
     // The scenario is about how the publisher behaves when its announcement is
     // unanswered, answered differently, or when no bidirectional stream is spare,
     // so the default acknowledgement (apply_default_namespace_answer) must not run.
@@ -225,7 +230,7 @@ enum class DefaultNamespaceAnswer {
     Applied,
     OptedOut,        // no_default_namespace_answer, or listed in namespace_answer_opt_outs()
     OwnMechanism,    // acknowledge_publisher_namespace* or auto_accept_* already set
-    TargetsRequest,  // PeerBidi writes or peer_request_ready address publisher requests
+    TargetsRequest,  // peer_request_ready (or PeerBidi writes) would select a PUBLISH_NAMESPACE
     UnsupportedDraft,
 };
 // A subscriber must answer a publisher's PUBLISH_NAMESPACE (draft 18 Section
@@ -272,6 +277,7 @@ private:
     std::set<transport::StreamId> acknowledgement_pending_;
     std::set<transport::StreamId> acknowledged_;
     void acknowledge_publisher_namespaces();
+    bool acknowledgement_excluded(transport::StreamId id, std::span<const std::byte> request) const;
     std::optional<RawProbeClock::time_point> delivered_at_;
     std::optional<RawProbeClock::time_point> started_at_;
     std::size_t next_write_{0};

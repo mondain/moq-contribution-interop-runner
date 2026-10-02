@@ -180,35 +180,65 @@ TEST(DefaultNamespaceAnswer, EnumeratedOptOutsAreRealScenariosWithReasons) {
     }
 }
 
-// The probes that write their own response to the publisher's request (a rejection,
-// a redirect, a malformed REQUEST_OK, an unknown error code) are never given the
-// default answer: the publisher's reaction to that one response is the subject.
-TEST(DefaultNamespaceAnswer, ProbesThatAnswerThePublishersRequestThemselvesAreNotAcknowledged) {
-    std::size_t checked = 0;
-    const auto expect_skipped = [&](RawProbeDefinition definition, unsigned draft) {
-        const bool writes_response = std::any_of(definition.writes.begin(), definition.writes.end(),
+// A probe whose own response goes to a publisher PUBLISH (or TRACK_STATUS) is answered
+// beside it: the announcement is acknowledged, the targeted stream never is. A probe
+// whose response goes to the PUBLISH_NAMESPACE itself (a rejection, a redirect, a
+// malformed REQUEST_OK, an unknown error code) is never given the default answer.
+TEST(DefaultNamespaceAnswer, AcknowledgesBesideAProbeTargetingAnotherRequest) {
+    for (const unsigned draft : {18u, 21u}) {
+        auto def = plain("beside");
+        // Targets any request that is not a PUBLISH_NAMESPACE: here one starting with 0x1d/0x1.
+        def.peer_request_ready = [draft](std::span<const std::byte> input) {
+            return !input.empty() && input[0] == std::byte{draft == 21 ? 0x1d : 0x1};
+        };
+        def.writes.push_back({RawProbeChannel::PeerBidi, bytes_of({9}), false});
+        ASSERT_EQ(apply_default_namespace_answer(def, draft), DefaultNamespaceAnswer::Applied);
+        EXPECT_TRUE(def.acknowledge_skips_peer_target);
+        const Bytes target = draft == 21 ? bytes_of({0x1d, 0, 1, 0}) : bytes_of({0x1, 0, 1, 0});
+        const auto result = feed(def, {{0, draft == 21 ? announce21() : announce18(0)}, {4, target}});
+        EXPECT_EQ(result.output.count(0), 1u);          // the announcement was answered
+        EXPECT_EQ(result.output.count(4) ? result.output.at(4) : Bytes{}, result.output.count(4) ? bytes_of({9}) : Bytes{});
+        ASSERT_EQ(result.transcript.acknowledgements.size(), 1u);
+        EXPECT_EQ(result.transcript.acknowledgements.front().stream_id, 0u);
+    }
+}
+
+TEST(DefaultNamespaceAnswer, ProbesThatAnswerThePublishersAnnouncementThemselvesAreNotAcknowledged) {
+    std::size_t skipped = 0, beside = 0;
+    const auto check = [&](RawProbeDefinition definition, unsigned draft) {
+        const bool peer_writes = std::any_of(definition.writes.begin(), definition.writes.end(),
             [](const auto& write) { return write.channel == RawProbeChannel::PeerBidi; });
-        if (!writes_response) return;
+        if (!peer_writes) return;
         const auto decision = apply_default_namespace_answer(definition, draft);
-        // Draft 21 contribution probes carry their own auto_accept_* mechanism (which
-        // skips the stream the response targets); every other one is skipped outright.
-        EXPECT_NE(decision, DefaultNamespaceAnswer::Applied) << definition.id;
-        EXPECT_FALSE(definition.acknowledge_publisher_namespace_draft21 && !definition.auto_accept_ready)
-            << definition.id;
-        if (decision == DefaultNamespaceAnswer::TargetsRequest)
-            EXPECT_FALSE(definition.acknowledge_publisher_namespace) << definition.id;
-        ++checked;
+        if (decision == DefaultNamespaceAnswer::Applied) {
+            ++beside;
+            EXPECT_TRUE(definition.acknowledge_skips_peer_target) << definition.id;
+            EXPECT_EQ(definition.id.find("namespace"), std::string::npos) << definition.id;
+        } else {
+            ++skipped;
+            EXPECT_FALSE(definition.acknowledge_publisher_namespace_draft21 && !definition.auto_accept_ready) << definition.id;
+            if (decision == DefaultNamespaceAnswer::TargetsRequest)
+                EXPECT_FALSE(definition.acknowledge_publisher_namespace) << definition.id;
+        }
     };
-    for (auto& probe : draft18_peer_close_probes()) expect_skipped(std::move(probe.definition), 18);
-    for (auto& probe : draft21_peer_close_probes()) expect_skipped(std::move(probe.definition), 21);
-    for (auto& probe : draft18_contribution_probes()) expect_skipped(std::move(probe.definition), 18);
-    for (auto& probe : draft21_contribution_probes()) expect_skipped(std::move(probe.definition), 21);
-    EXPECT_GT(checked, 10u);
+    for (auto& probe : draft18_peer_close_probes()) check(std::move(probe.definition), 18);
+    for (auto& probe : draft21_peer_close_probes()) check(std::move(probe.definition), 21);
+    for (auto& probe : draft18_contribution_probes()) check(std::move(probe.definition), 18);
+    for (auto& probe : draft21_contribution_probes()) check(std::move(probe.definition), 21);
+    EXPECT_GT(skipped, 5u);
+    EXPECT_GT(beside, 0u);
+    // The namespace-targeting probes named in the audit are skipped, not answered.
+    for (auto& probe : draft18_peer_close_probes())
+        if (probe.definition.id.find("publish-namespace") != std::string::npos)
+            EXPECT_EQ(apply_default_namespace_answer(probe.definition, 18), DefaultNamespaceAnswer::TargetsRequest);
+    for (auto& probe : draft21_peer_close_probes())
+        if (probe.definition.id.find("publish-namespace") != std::string::npos)
+            EXPECT_EQ(apply_default_namespace_answer(probe.definition, 21), DefaultNamespaceAnswer::TargetsRequest);
     bool unknown_error = false;
     for (auto& probe : draft18_contribution_probes())
         if (probe.definition.id == "publisher-request-rejected-with-unknown-error") {
             unknown_error = true;
-            EXPECT_NE(apply_default_namespace_answer(probe.definition, 18), DefaultNamespaceAnswer::Applied);
+            EXPECT_EQ(apply_default_namespace_answer(probe.definition, 18), DefaultNamespaceAnswer::TargetsRequest);
         }
     EXPECT_TRUE(unknown_error);
 }
