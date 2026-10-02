@@ -101,10 +101,87 @@ suite, because they need the external publisher:
 `tests/e2e/draft18-native-moqxr.sh` and the WebTransport smoke scripts start a
 loopback runner with temporary TLS material and need `openssl`, `curl` and `jq`.
 
+## Findings from a full scenario sweep against moqxr 0.4.1
+
+On 2026-10-02 every driven scenario was run against `openmoq-publisher 0.4.1
+(commit 9bda5c9)` on both transports (about 760 runs). Neither the runner nor
+moqxr was presumed correct: each failing row was decoded by hand against the
+checked-in draft text and classified as a publisher deviation, a runner defect
+(fixed), a draft ambiguity, or a harness artifact. The classifications below
+describe this build only.
+
+Two harness artifacts explained most of the first sweep's failures and run-level
+errors, and are now fixed:
+
+- moqxr announces its namespace with PUBLISH_NAMESPACE and waits for a reply
+  before it reads any other stream. The raw probes now answer a publisher's
+  parameter-free PUBLISH_NAMESPACE by default (see
+  [scenario-reference.md](scenario-reference.md)), so the publisher stays alive
+  until the stimulus arrives. Before this, a timeout close with code 0 was scored
+  against the publisher.
+- In its default push mode moqxr follows the announcement with its own PUBLISH
+  requests, which the runner-as-subscriber probes do not answer. The bundled
+  adapter runs moqxr with `--forward 0 --paced` for those probes.
+
+Effect on the sweep (rows with at least one scored result): draft 18 went from 34
+passing and 49 failing rows to 57 and 22; draft 21 from 29 passing and 41 failing
+to 42 and 26, with no passing row lost. Runs ending in a run-level error fell from
+225 to about 70; the remaining ones are scenarios whose stimulus moqxr cannot
+serve (it implements no FETCH, only serves namespace `media`, does not advertise
+`MAX_REQUEST_UPDATES` or a token cache size, and answers the runner's own
+unanswered PUBLISH requests by exiting).
+
+### Deviations from the drafts confirmed with wire evidence
+
+| Behavior of moqxr 0.4.1 | Draft requirement | Rows |
+|---|---|---|
+| Closes the session when a SETUP repeats an unknown option | Receivers MUST allow duplicates of unknown Setup Options (draft 18 lines 3541-3548; draft 21 lines 3478-3481) | D18-10-3-MUST-003, D18-14-MUST-001, D18-14-MUST-008, D18-14-MUST-NOT-001, D18-15-4-MUST-001, D21-13-MUST-593, D21-13-MUST-NOT-594 |
+| Answers a malformed namespace or track name (zero-length field, 33 fields, over 4096 bytes) with REQUEST_ERROR and closes with code 0 | Close the session with PROTOCOL_VIOLATION (draft 18 lines 997-1022; draft 21 section 8.7) | D18-2-4-1-MUST-002 to -005, D21-8-7-MUST-251 to -254 |
+| Uses REQUEST_ERROR code 0x02 for "does not exist" | DOES_NOT_EXIST is 0x10; 0x02 is TIMEOUT (draft 18 lines 6848 and 6860; draft 21 lines 7657 and 7677) | D18-3-2-1-MUST-002, D18-3-2-2-MUST-001, D18-3-2-2-MUST-002, D21-2-4-2-MUST-031, D21-6-5-MUST-170 to -172 |
+| SUBSCRIBE_NAMESPACE has no 32-field limit, although SUBSCRIBE_TRACKS does | Reject a prefix with more than 32 fields (draft 18 lines 4787-4788; draft 21 lines 4512-4513) | D18-10-18-MUST-001, D21-9-15-MUST-383 |
+| Treats the AUTHORIZATION TOKEN parameter as opaque and accepts it | Reject malformed tokens and cache overflow (draft 18 lines 3160-3161 and 3221; draft 21 lines 3262-3263 and 3319) | D18-10-2-2-MUST-005, D18-10-2-2-MUST-011, D21-8-9-MUST-267, D21-8-9-MUST-277 |
+| Accepts a second SUBSCRIBE to the same track | DUPLICATE_SUBSCRIPTION (draft 18 lines 1979-1982) | D18-5-1-MUST-004 |
+| A REQUEST_ERROR redirect with a non-empty track name is not rejected | PROTOCOL_VIOLATION (draft 18 lines 3835-3836; draft 21 lines 3797-3798) | D18-10-6-1-MUST-005, D21-9-4-1-MUST-341 |
+| As a client it accepts AUTHORITY or PATH in a server SETUP | Close with INVALID_AUTHORITY or INVALID_PATH (draft 21 lines 3490-3510) | D21-9-1-1-MUST-293, D21-9-1-1-MUST-294, D21-9-1-2-MUST-300, D21-9-1-2-MUST-301 |
+| Skips nested FILL_PARAMETERS contents and does not validate them | PROTOCOL_VIOLATION for invalid group order, an overflowing filter, or forbidden nested parameters (draft 21 lines 4956-5187) | D21-9-20-9-MUST-429, D21-9-20-10-MUST-432, D21-9-20-16-MUST-447 |
+| REQUEST_UPDATE_OK carries no LARGEST_OBJECT | Include LARGEST_OBJECT (draft 21 lines 5243-5246) | D21-9-20-18-MUST-456 |
+| Rejects a Range Filter with code 0x1 (UNAUTHORIZED) when MAX_FILTER_RANGES is unadvertised, which means zero | INVALID_FILTER (draft 21 lines 1226 and 3602-3607) | D21-3-3-2-MUST-065, D21-9-1-6-MUST-315 |
+| Ignores control-stream GOAWAY frames (logged as unhandled) | Duplicate or oversized GOAWAY, and a 1-byte GOAWAY body, require PROTOCOL_VIOLATION (draft 21 lines 3440 and 3679-3709) | D21-9-2-MUST-327, D21-9-2-MUST-331, D21-9-MUST-285 |
+| Accepts Track Properties in a REQUEST_OK and a responder-side REQUEST_UPDATE | PROTOCOL_VIOLATION (draft 21 lines 3763-3764 and 3854) | D21-9-3-MUST-337, D21-9-5-MUST-344 |
+
+Some of these currently score as `not_run` instead of `fail` because moqxr stays
+silent where the draft requires a close (for example the GOAWAY rows, the
+server-SETUP rows and the token rows). Silence alone is not proof of a violation,
+so the runner leaves them unscored; the evidence above comes from probes that
+followed the violating input with a valid request and observed that moqxr kept
+serving. A liveness check that scores this automatically has not been implemented.
+
+### Not adjudicated or not scoreable
+
+- Scored FAIL but not yet adjudicated: `D18-10-18-MUST-003`, `D18-10-18-MUST-004`,
+  `D18-10-19-MUST-004`, `D18-2-2-MUST-001`, `D21-9-15-MUST-385`, `D21-8-5-MUST-248`.
+- `D21-9-20-19-MUST-460` still scores FAIL because the scenario
+  `d21-discovery-update-invalid-forward` sends SUBSCRIBE_TRACKS with the default
+  FORWARD, so moqxr publishes its catalog and gives up before reading the update.
+  This is a runner-side defect that is not yet fixed.
+- `D18-10-12-2-MUST-004` is ambiguous: moqxr implements no FETCH and answers every
+  FETCH with REQUEST_ERROR 0x1 and a close, and the draft's MUST arguably applies
+  only to publishers that implement FETCH.
+- `D18-11-3-1-MUST-002` and `-003` (datagram types) pass over native QUIC and
+  stay unscored over WebTransport, because moqxr validates publisher datagrams
+  only on the native path and so never closes on WebTransport.
+- Token rows (`D18-10-2-2-MUST-008` and `-010`, `D21-8-9-MUST-270` and `-273`)
+  need an operator-supplied credential of a token type the publisher
+  understands. moqxr's help lists `--auth-profile`, `--auth-token-file` and
+  `--auth-token-type`, so these may be runnable with a real credential; that has
+  not been tried.
+
 ## Limitations recorded for moqxr
 
-These were recorded on 2026-10-01 against `0.3.26-dev+g478d6c0.dirty` and have not
-been re-checked against 0.4.1. They describe why certain rows stay `not_run`
+These were recorded on 2026-10-01 against `0.3.26-dev+g478d6c0.dirty`. Parts of
+them were re-observed against 0.4.1 (no `MAX_FILTER_RANGES`, GOAWAY on the control
+stream not followed, no FETCH support, no PUBLISH_STATE_NOTIFY or padding); the
+rest have not been re-checked. They describe why certain rows stay `not_run`
 with that build; they do not describe MoQT behavior.
 
 - It has no TRACK_STATUS support (a TRACK_STATUS with FIN ended the session with
