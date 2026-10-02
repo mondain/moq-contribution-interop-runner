@@ -102,6 +102,7 @@ RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::millise
     definition.deadline = deadline;
     definition.setup_bytes = frame(0x2f00, {});
     definition.peer_setup_ready = peer_setup;
+    definition.acknowledge_publisher_namespace = true;
     auto payload = bytes({1,1,1,'n',1,'x',0});
     RawProbeChannel channel = RawProbeChannel::NewBidi;
     std::uint64_t type = 3;

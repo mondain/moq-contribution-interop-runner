@@ -513,6 +513,15 @@ TEST(Draft18PeerCloseEvaluators, ActualOpeningRequestAndAcceptedResponseAreRequi
 }
 
 }  // namespace
+// A publisher that announces its namespace first waits for the acknowledgement (section 10.15)
+// before it reads other streams, so a close stimulus is never processed without it.
+TEST(Draft18CloseEvaluators, TheRunnerAcknowledgesThePublishersNamespaceAnnouncement) {
+    for (const auto& profile : scenarios::draft18_close_profiles()) {
+        const auto definition = scenarios::draft18_close_probe(profile.scenario_id, std::chrono::milliseconds(10));
+        EXPECT_TRUE(definition.acknowledge_publisher_namespace) << profile.scenario_id;
+    }
+}
+
 TEST(Draft18CloseEvaluators, RequireExactDeliveredTranscriptAndApplicationCloseCode) {
     const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
     const auto source = load_draft_source(18,root / "docs",root / "requirements/draft-digests.json");

@@ -62,7 +62,15 @@ std::optional<bool> invalid_property_found_after_unknown_ones(const RawProbeTran
     return std::nullopt;
 }
 
+// A publisher whose announcement was refused has nothing left to publish and may end the
+// session with NO_ERROR (section 3.5). That orderly close is the same whether the code is
+// known or not, so it does not show the unknown code closed the session; any error close
+// still does.
 std::optional<bool> unknown_error_not_fatal(const RawProbeTranscript& transcript, bool) {
+    const auto close = peer_close(transcript);
+    if (close && close->space == transport::CloseErrorSpace::Application &&
+        close->code == kCloseNoError && write_reply(transcript, 1).messages.empty())
+        return std::nullopt;
     return session_survived(transcript, 1);
 }
 std::optional<bool> unknown_reset_code_not_fatal(const RawProbeTranscript& transcript, bool) {

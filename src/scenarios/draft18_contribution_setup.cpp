@@ -67,9 +67,13 @@ RawProbeDefinition observe_setup(const char* id, std::chrono::milliseconds deadl
 // typed reply shows the session survived the SETUP.
 RawProbeDefinition setup_then_request(const char* id, d18::KeyValuePairs options,
                                       Bytes request, std::chrono::milliseconds deadline) {
-    return {id, setup_message(std::move(options)),
+    RawProbeDefinition definition{id, setup_message(std::move(options)),
             {{RawProbeChannel::NewBidi, std::move(request), false}}, true, setup_ready,
             deadline, first_response_or_close(0), {}};
+    // A publisher that announces its namespace first waits for the acknowledgement
+    // before it reads other requests (section 10.15); the answer is not the stimulus.
+    definition.acknowledge_publisher_namespace = true;
+    return definition;
 }
 
 // A typed REQUEST_OK or REQUEST_ERROR proves the publisher kept processing

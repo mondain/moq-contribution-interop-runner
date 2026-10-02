@@ -11,6 +11,12 @@ std::vector<std::byte> literal(std::initializer_list<unsigned> values) {
     for (auto value : values) result.push_back(static_cast<std::byte>(value));
     return result;
 }
+// A publisher that announces its namespace first waits for the acknowledgement (section 10.15)
+// before it reads other requests, so the stimulus is never answered without it.
+TEST(Draft18RequestProfiles, TheRunnerAcknowledgesThePublishersNamespaceAnnouncement) {
+    for (const auto& profile : draft18_request_profiles(std::chrono::milliseconds(37)))
+        EXPECT_TRUE(profile.definition.acknowledge_publisher_namespace) << profile.definition.id;
+}
 TEST(Draft18RequestProfiles, RequiredReceiverErrorsHaveIndependentRequestBytes) {
     const auto profiles = draft18_request_profiles(std::chrono::milliseconds(37));
     const std::map<std::string,std::vector<std::byte>> requests{

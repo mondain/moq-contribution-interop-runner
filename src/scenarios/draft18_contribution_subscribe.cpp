@@ -386,14 +386,17 @@ std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseco
 
     for (const auto& [requirement, evaluator] : {
              std::pair{"D18-14-MUST-007", "unknown-auth-token-type-does-not-close-session"},
-             std::pair{"D18-14-MUST-NOT-001", "unknown-extensible-value-alone-does-not-close-session"}})
-        add(requirement, evaluator,
-            definition("subscribe-unknown-auth-token-type",
+             std::pair{"D18-14-MUST-NOT-001", "unknown-extensible-value-alone-does-not-close-session"}}) {
+        auto unknown_type = definition("subscribe-unknown-auth-token-type",
                        {bidi(subscribe_request(fixture, kSubscribeId,
                             {{0x03, d18::Token{d18::TokenAliasType::UseValue, std::nullopt,
                                                kUnknownTokenType, text("opaque")}}}))},
-                       first_response_or_close(0), deadline),
-            unknown_token_type_not_fatal);
+                       first_response_or_close(0), deadline);
+        // A publisher that announces its namespace first waits for the acknowledgement
+        // before it reads other requests (section 10.15); the answer is not the stimulus.
+        unknown_type.acknowledge_publisher_namespace = true;
+        add(requirement, evaluator, std::move(unknown_type), unknown_token_type_not_fatal);
+    }
     return result;
 }
 

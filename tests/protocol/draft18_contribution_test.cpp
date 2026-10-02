@@ -32,6 +32,20 @@ TEST(Draft18ContributionRegistry, NamesEveryScenarioOfTheFirstBatch) {
 
 // Section 10.3: the sender of SETUP must not repeat a Setup Option Type
 // unless its definition permits multiple instances; only AUTHORIZATION TOKEN does.
+// A publisher that announces its namespace first waits for the acknowledgement (section 10.15)
+// before it reads other requests; the answer is not part of any stimulus.
+TEST(Draft18ContributionSetup, TheRunnerAcknowledgesThePublishersNamespaceAnnouncement) {
+    std::size_t checked = 0;
+    for (const auto& p : draft18_contribution_probes()) {
+        if (p.definition.id != "setup-unknown-grease-options-and-duplicates" &&
+            p.definition.id != "receive-setup-with-duplicate-unknown-options" &&
+            p.definition.id != "subscribe-unknown-auth-token-type") continue;
+        EXPECT_TRUE(p.definition.acknowledge_publisher_namespace) << p.definition.id;
+        ++checked;
+    }
+    EXPECT_GT(checked, 0u);
+}
+
 TEST(Draft18ContributionSetup, ObservesPublisherSetupOptionRepetition) {
     const auto probes = draft18_contribution_probes();
     const auto& p = probe(probes, "observe-publisher-setup-options", "D18-10-3-MUST-NOT-001");

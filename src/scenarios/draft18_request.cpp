@@ -38,6 +38,9 @@ RequestProbeProfile profile(std::string requirement, std::string scenario,
     definition.setup_bytes = bytes({0xaf,0,0,0});
     definition.writes.push_back({RawProbeChannel::NewBidi,std::move(framed),false});
     definition.peer_setup_ready = setup_ready;
+    // A publisher that announces its namespace first waits for the acknowledgement
+    // before it reads other requests (section 10.15); the answer is not the stimulus.
+    definition.acknowledge_publisher_namespace = true;
     definition.deadline = deadline;
     definition.response_ready = request_probe_response_ready;
     return {18,std::move(requirement),std::move(evaluator),expected_error,false,std::move(definition)};
