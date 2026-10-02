@@ -182,6 +182,13 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
         (definition_.acknowledge_publisher_namespace &&
          std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
              return write.channel == RawProbeChannel::PeerBidi;
+         })) ||
+        // The courtesy answers on the same publisher-opened request streams a
+        // PeerBidi write targets, so the two would interleave bytes on one stream.
+        ((definition_.courtesy.publish != RawProbePublishResponse::Ignore ||
+          definition_.courtesy.update != RawProbeUpdateResponse::Ignore) &&
+         std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
+             return write.channel == RawProbeChannel::PeerBidi;
          })))
         throw std::invalid_argument("invalid raw probe definition");
     transcript_.scenario_id = definition_.id;

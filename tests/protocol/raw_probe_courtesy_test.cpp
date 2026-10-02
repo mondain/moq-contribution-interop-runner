@@ -229,6 +229,21 @@ TEST(RawProbeCourtesy, AnswersUpdatesInOrderAndHoldsAliasUsesBack) {
     EXPECT_EQ(plain.transport.writes[4].data, oks(2));
 }
 
+TEST(RawProbeCourtesy, CannotBeCombinedWithWritesToThePublisherRequestStream) {
+    Transport transport;
+    auto both = definition(RawProbeCourtesy{});
+    both.courtesy.publish = RawProbePublishResponse::Accept;
+    both.peer_request_ready = [](std::span<const std::byte>) { return true; };
+    both.writes.push_back({RawProbeChannel::PeerBidi, bytes({1}), false});
+    EXPECT_THROW(RawProbeController(transport, both), std::invalid_argument);
+    // Either alone is fine.
+    both.courtesy = RawProbeCourtesy{};
+    EXPECT_NO_THROW(RawProbeController(transport, both));
+    auto courtesy_only = definition(RawProbeCourtesy{});
+    courtesy_only.courtesy.update = RawProbeUpdateResponse::Accept;
+    EXPECT_NO_THROW(RawProbeController(transport, courtesy_only));
+}
+
 TEST(RawProbeCourtesy, AHostilePublisherFloodingFramesStaysBounded) {
     RawProbeCourtesy accept;
     accept.publish = RawProbePublishResponse::Accept;
