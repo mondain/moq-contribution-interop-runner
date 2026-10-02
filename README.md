@@ -209,7 +209,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-76/175 draft-18 and 76/175 draft-21 applicable, testable MUST/MUST NOT rows
+76/175 draft-18 and 110/175 draft-21 applicable, testable MUST/MUST NOT rows
 have executable bindings for every named scenario and evaluator. Partially
 registered families remain incomplete. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
@@ -318,6 +318,106 @@ Configured runs record the chosen code in evidence and expose
 `scoring_profile: "compatibility"` in JSON and a compatibility label in the
 HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
 establish a standards assignment. A different response code fails the probe.
+
+### Draft-21 completeness-gap scenarios (slice A)
+
+These scenarios close required MUST/MUST NOT rows whose scenario and evaluator
+the catalog named but the runner did not yet execute. Unless noted, the
+fixture contract is the existing one: the configured track is published by the
+publisher under test and retains Group 7 from its first Object, including
+Object 9. A row passes only on direct wire evidence; missing prerequisites stay
+`NOT_RUN`.
+
+Announcement-controller scenarios (one per run, like
+`d21-publisher-request-stream-placement`):
+
+- Aliases of the placement run for `D21-6-3-MUST-NOT-141`
+  (`d21-publisher-request-stream-openers`), `D21-9-1-MUST-NOT-289`
+  (`d21-publisher-setup-option-multiplicity`), and the WebTransport SETUP rows
+  `D21-9-1-1-MUST-NOT-292` / `D21-9-1-2-MUST-NOT-299`
+  (`d21-webtransport-publisher-setup`, WebTransport only). The server-option
+  probes also run as `d21-webtransport-server-sends-authority` / `-path`
+  (WebTransport only) for `D21-9-1-1-MUST-294` and `D21-9-1-2-MUST-301`.
+- `d21-native-publisher-uri-options`, `d21-native-publisher-uri-query` and
+  `d21-native-publisher-empty-query` (native QUIC only) compare the publisher's
+  SETUP AUTHORITY and PATH with the moqt URI a driven publisher is handed
+  (`moqt://host:port/moq`, `/moq?run=1`, `/moq?`). They score
+  `D21-9-1-1-MUST-296`, `D21-9-1-2-MUST-303` and `-304` only in driven mode,
+  where the runner knows the URI. `d21-native-quic-required-setup-options` and
+  `d21-webtransport-required-setup-options` score `D21-6-3-2-MUST-150` (AUTHORITY
+  and PATH required for a native moqt client; no option required over
+  WebTransport, where a forbidden option is left to its own rows).
+- Reserved-namespace attempts: the configured track namespace is what the
+  publisher is told to publish, and the run validates it (`.` for the three
+  `d21-attempt-single-period-*` scenarios, a longer period-prefixed field other
+  than `.session` for `d21-attempt-unregistered-period-namespace-publication`,
+  `.session` for the two `d21-application-*-under-session` scenarios). A
+  forbidden PUBLISH or PUBLISH_NAMESPACE fails the row. A pass requires both
+  SETUPs exchanged and the session still alive when the whole timeout elapsed
+  without such a publication; a publisher that never connects or closes early is
+  `NOT_RUN`. The runner rejects a PUBLISH under `.` with `DOES_NOT_EXIST`.
+  Rows: `D21-2-4-2-MUST-NOT-026/028/029/030`, `D21-6-5-MUST-NOT-166/167`.
+- `d21-publisher-key-value-type-deltas` (`D21-8-3-MUST-NOT-230`) fails when the
+  publisher's SETUP, PUBLISH parameters or Track Properties overflow the 64-bit
+  type space; `d21-publisher-emitted-namespace-fields` (`D21-8-7-MUST-250`)
+  fails on an empty namespace field. Both pass only with a decoded PUBLISH.
+  `d21-publisher-namespace-routing-announcement` (`D21-7-5-MUST-206`) passes on
+  an explicit PUBLISH_NAMESPACE for the configured namespace and is never a
+  failure, because the wire cannot show that routing was requested.
+
+Raw probe scenarios (the runner subscribes or fetches as a server):
+
+- `d21-publisher-request-response-before-fin` (`D21-6-4-2-2-MUST-157`),
+  `d21-established-subscription-publisher-fin` (`-158`) and
+  `d21-request-stream-terminal-message-order` (`-NOT-156`). The last two send a
+  REQUEST_UPDATE with an unregistered token Alias, which fails and obliges the
+  publisher to end the subscription; PUBLISH_DONE must precede the FIN. The
+  draft does not end a subscription when the Location filter is exhausted, so
+  PUBLISH_DONE cannot be provoked any other way. No FIN means `NOT_RUN`.
+- `d21-original-publisher-opens-new-subgroup` (`D21-2-2-MUST-020`) subscribes
+  from Group 7, Object 0 and requires FIRST_OBJECT on the first stream (by stream
+  ID) of each Subgroup of Group 7. `d21-publish-track-with-mandatory-property`
+  (`D21-3-6-MUST-070`) fails when an Object carries a property in 0x4000-0x7FFF.
+- `d21-subscribe-bounded-location-range` and
+  `d21-update-subscription-location-range` (`D21-3-3-1-MUST-NOT-057`) observe the
+  whole timeout. The update scenario subscribes with FORWARD=0 and sets FORWARD=1
+  and the Group 7, Object 9 filter in one acknowledged REQUEST_UPDATE, so every
+  Object seen was sent under the new filter. Both contexts must run in one run.
+- `d21-subscribe-single-subgroup` and `d21-subgroup-restart-after-reset`
+  (`D21-2-2-MUST-NOT-018`): a Subgroup may use a second stream only after a
+  premature reset or when Objects are forced out of ID order. The restart
+  scenario raises the Start Location while a Subgroup stream is open and needs
+  an observed reset, so it is `NOT_RUN` for publishers that finish the stream first.
+- `d21-discover-original-publisher-namespaces` (`D21-4-2-MUST-089`) uses an
+  empty-prefix SUBSCRIBE_NAMESPACE; `d21-control-stream-lifetime`
+  (`D21-6-3-MUST-NOT-146`) fails on a FIN or reset of the publisher's control
+  stream before a response arrives; the two datagram scenarios
+  (`D21-6-2-MUST-139`, one per transport) pass on a negotiated QUIC DATAGRAM
+  connection and fail when the listener had to refuse the publisher for lacking it.
+- Authorization token Alias probes send sequenced TRACK_STATUS requests and
+  need the publisher to advertise MAX_AUTH_TOKEN_CACHE_SIZE room. Alias state is
+  inferred by comparing responses with a control request that names a never
+  registered Alias, because `UNKNOWN_AUTH_TOKEN_ALIAS` has no REQUEST_ERROR code;
+  `--unknown-auth-token-alias-compat-code` makes it exact. Scenarios:
+  `d21-token-delete-and-reuse` (`D21-8-9-MUST-264`),
+  `d21-token-register-alias-lifetime` (`-265`), `d21-request-deleted-token-alias`
+  (`-269`, needs the compatibility code), the two
+  `d21-register-token-on-*` scenarios (`-271`) and
+  `d21-setup-register-use-value-fallback` (`D21-9-1-4-MUST-308`).
+
+Not executable at the protocol boundary, so left unbound: `D21-2-2-MUST-NOT-017`
+(a stream header names exactly one Subgroup, so mixing is invisible without
+fixture-defined Subgroup membership), `D21-2-5-MUST-032`,
+`D21-3-1-2-MUST-NOT-048` (need two different published tracks),
+`D21-3-1-MUST-041` (alias sharing is the publisher's choice, so both named
+contexts cannot be forced), `D21-3-1-1-MUST-NOT-047` (cross-stream arrival order
+cannot attribute an Object to post-rejection production),
+`D21-3-3-3-MUST-066` (needs known Object properties), `D21-3-4-1-MUST-067/068/069`
+(fill streams cannot be held open or forced to fail), `D21-4-1-MUST-NOT-084`,
+`D21-5-2-MUST-130`, `D21-6-2-MUST-140` (absence of a session is
+indistinguishable from a failed connection), `D21-8-9-MUST-270/273` (need a
+configured credential type) and `D21-8-9-MUST-NOT-281` (the publisher must be
+driven to retire tokens).
 
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
 stored execution evidence. The JSON output gains `execution_audit` with
