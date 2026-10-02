@@ -12,7 +12,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 118> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 128> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -131,6 +131,17 @@ inline constexpr std::array<std::string_view, 118> kDraft18ExecutableScenarios{
     "redeliver-previously-observed-object-in-later-subscription",
     "receive-subscribe-namespace-denied-by-configured-authorization-policy",
     "receive-subscribe-tracks-denied-by-configured-authorization-policy",
+    // Draft-18 slice A: publisher-originated behavior (draft18_contribution_origination.cpp).
+    "publish-under-unregistered-period-prefixed-namespace",
+    "originate-publisher-operations-under-single-period-namespace",
+    "publish-track-under-single-period-namespace",
+    "publish-namespace-under-single-period-namespace",
+    "application-publish-track-in-session-namespace",
+    "application-publish-namespace-in-session-namespace",
+    "publish-key-value-type-boundary",
+    "finish-subscription-with-open-object-streams",
+    "publish-track-with-mandatory-property",
+    "publish-distinct-content-tracks-in-same-scope",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -364,7 +375,7 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 // Draft-18 publisher-contribution probes whose first write names the fixture.
-inline constexpr std::array<std::string_view, 26> kDraft18ContributionTrackScenarios{
+inline constexpr std::array<std::string_view, 29> kDraft18ContributionTrackScenarios{
     "accept-subscribe-for-known-publisher-track",
     "accept-forward-one-subscribe-then-publish-matching-object",
     "receive-one-request-update-on-established-publisher-request",
@@ -391,6 +402,9 @@ inline constexpr std::array<std::string_view, 26> kDraft18ContributionTrackScena
     "redeliver-previously-observed-object-in-later-subscription",
     "receive-subscribe-namespace-denied-by-configured-authorization-policy",
     "receive-subscribe-tracks-denied-by-configured-authorization-policy",
+    "finish-subscription-with-open-object-streams",
+    "publish-track-with-mandatory-property",
+    "publish-distinct-content-tracks-in-same-scope",
 };
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
