@@ -1005,6 +1005,125 @@ TEST(WebTransportRunApi, OccupiedPortDoesNotCreateRunAndStopReleasesIt) {
     ::close(rebound);
 }
 
+// ---- Replacement-session port budget -------------------------------------------------
+
+constexpr const char* kReplacementScenario = "d21-publisher-goaway-alternate-uri";
+
+bool udp_port_is_free(unsigned port) {
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) return false;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(static_cast<std::uint16_t>(port));
+    const bool bound = ::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+    ::close(fd);
+    return bound;
+}
+
+// Two adjacent UDP ports that are free right now.
+std::uint16_t adjacent_free_ports() {
+    for (unsigned port = 41000 + static_cast<unsigned>(::getpid() % 2000) * 8; port < 60000; port += 2)
+        if (udp_port_is_free(port) && udp_port_is_free(port + 1)) return static_cast<std::uint16_t>(port);
+    return 0;
+}
+
+struct ReplacementFixture {
+    std::shared_ptr<storage::SqliteRunStore> store;
+    std::unique_ptr<app::NativeRunManager> manager;
+    std::uint16_t first{0};
+    std::uint16_t last{0};
+};
+
+ReplacementFixture replacement_fixture(unsigned span, std::size_t maximum_runs) {
+    ReplacementFixture fixture;
+    fixture.first = adjacent_free_ports();
+    fixture.last = static_cast<std::uint16_t>(fixture.first + span - 1);
+    fixture.store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    fixture.manager = std::make_unique<app::NativeRunManager>(catalog(18), catalog(21), fixture.store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = fixture.first, .port_end = fixture.last, .maximum_active_runs = maximum_runs,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    return fixture;
+}
+
+app::RunConfig replacement_run(std::chrono::milliseconds timeout = std::chrono::seconds{20}) {
+    return app::RunConfig{app::DraftVersion::Draft21, app::TransportKind::WebTransport,
+        app::RunMode::Observed, {kReplacementScenario}, timeout, app::TrackFixture{{"n"}, "x"}};
+}
+
+app::RunConfig plain_run() {
+    return app::RunConfig{app::DraftVersion::Draft18, app::TransportKind::WebTransport,
+        app::RunMode::Observed, {"subscribe-to-publisher-track"}, std::chrono::seconds{20},
+        app::TrackFixture{{"n"}, "x"}};
+}
+
+TEST(NativeRunManagerReplacement, HoldsBothPortsOfATwoPortRangeAndReleasesThemAfterwards) {
+    auto fixture = replacement_fixture(2, 2);
+    ASSERT_NE(fixture.first, 0);
+    const auto started = fixture.manager->start(replacement_run());
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    EXPECT_EQ(started.endpoint.port, fixture.first);
+    // The run's second port is already spoken for: no unrelated run can take it.
+    EXPECT_EQ(fixture.manager->start(plain_run()).status, app::RunStartStatus::PortExhausted);
+    EXPECT_EQ(fixture.manager->start(replacement_run()).status, app::RunStartStatus::PortExhausted);
+    EXPECT_TRUE(fixture.manager->stop(started.id));
+    EXPECT_TRUE(udp_port_is_free(fixture.first));
+    EXPECT_TRUE(udp_port_is_free(fixture.last));
+    // Both ports are reusable: a second replacement run starts on the same range.
+    const auto again = fixture.manager->start(replacement_run());
+    ASSERT_EQ(again.status, app::RunStartStatus::Started);
+    EXPECT_TRUE(fixture.manager->stop(again.id));
+}
+
+TEST(NativeRunManagerReplacement, RejectsAReplacementRunInAOnePortRangeButStillStartsOthers) {
+    auto fixture = replacement_fixture(1, 1);
+    ASSERT_NE(fixture.first, 0);
+    EXPECT_EQ(fixture.manager->start(replacement_run()).status, app::RunStartStatus::PortExhausted);
+    EXPECT_EQ(fixture.store->list({1, 0}).total, 0u);
+    const auto plain = fixture.manager->start(plain_run());
+    ASSERT_EQ(plain.status, app::RunStartStatus::Started);
+    EXPECT_TRUE(fixture.manager->stop(plain.id));
+}
+
+TEST(NativeRunManagerReplacement, ARunWhoseSecondListenerFailsEndsAsAnErrorAndLeaksNeitherPort) {
+    auto fixture = replacement_fixture(2, 2);
+    ASSERT_NE(fixture.first, 0);
+    // Something else holds the replacement port, so creating its listener throws inside the run.
+    const int blocker = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(blocker, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(fixture.last);
+    ASSERT_EQ(::bind(blocker, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    const auto started = fixture.manager->start(replacement_run());
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    // No publisher connects; the run fails on its own when the second listener cannot bind.
+    auto run_is_finalized = [&] {
+        const auto run = fixture.store->load(started.id);
+        return run.state == storage::RunState::Finalized;
+    };
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{15};
+    while (!run_is_finalized() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    ASSERT_TRUE(run_is_finalized());
+    const auto finished = fixture.store->load(started.id);
+    ASSERT_TRUE(finished.score);
+    EXPECT_EQ(finished.score->verdict, requirements::RunVerdict::Error);
+    ::close(blocker);
+    // Neither the run's port nor the reserved replacement port is still counted: both
+    // allow a fresh replacement run once the finished one is reaped.
+    const auto again = fixture.manager->start(replacement_run());
+    ASSERT_EQ(again.status, app::RunStartStatus::Started);
+    EXPECT_TRUE(fixture.manager->stop(again.id));
+    EXPECT_TRUE(udp_port_is_free(fixture.first));
+    EXPECT_TRUE(udp_port_is_free(fixture.last));
+}
+
 TEST(WebTransportRunApi, DrivenPublisherExitIsDiagnosticOnly) {
     const app::BuildInfo build{"test", "test", {}};
     auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);

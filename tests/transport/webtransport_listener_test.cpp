@@ -15,6 +15,7 @@
 #include <array>
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <cstring>
 #include <filesystem>
 #include <string_view>
@@ -85,12 +86,27 @@ int client_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
     return 0;
 }
 
+// What a test body sees once the CONNECT is accepted: the server listener, the
+// client connection, and a step() that moves packets both ways and collects the
+// server's events.
+struct LiveSession {
+    WebTransportListener* listener = nullptr;
+    picoquic_cnx_t* cnx = nullptr;
+    h3zero_callback_ctx_t* h3 = nullptr;
+    h3zero_stream_ctx_t* control = nullptr;
+    std::function<void()> step;
+    std::vector<TransportEvent> events;
+};
+
 void exercise_connect(const char* token, const char* offered,
                       const char* origin, bool expected_accept,
                       const char* application_protocol = "moqt-21",
                       bool scheme_http = false,
-                      bool require_origin = false) {
+                      bool require_origin = false,
+                      const std::function<void(WebTransportListenerConfig&)>& tune = {},
+                      const std::function<void(LiveSession&)>& body = {}) {
     auto settings = config();
+    if (tune) tune(settings);
     settings.application_protocol = application_protocol;
     settings.require_origin = require_origin;
     auto created = WebTransportListener::create(std::move(settings));
@@ -328,6 +344,42 @@ void exercise_connect(const char* token, const char* offered,
         }
         EXPECT_TRUE(reply_received);
     }
+    if (expected_accept && state.accepted && body) {
+        LiveSession live;
+        live.listener = created.listener.get();
+        live.cnx = cnx;
+        live.h3 = h3;
+        live.control = control;
+        live.step = [&] {
+            for (int packet = 0; packet < 8; ++packet) {
+                sockaddr_storage destination{};
+                sockaddr_storage source{};
+                picoquic_connection_id_t log_id{};
+                picoquic_cnx_t* last = nullptr;
+                std::size_t length = 0;
+                int interface_index = 0;
+                if (picoquic_prepare_next_packet(quic, picoquic_current_time(), outgoing.data(),
+                        outgoing.size(), &length, &destination, &source, &interface_index,
+                        &log_id, &last) != 0 || length == 0) break;
+                (void)::sendto(socket_fd, outgoing.data(), length, 0,
+                               reinterpret_cast<sockaddr*>(&destination), sizeof(server_address));
+            }
+            for (auto& event : created.listener->poll(64)) live.events.push_back(std::move(event));
+            for (int packet = 0; packet < 8; ++packet) {
+                sockaddr_in peer{};
+                socklen_t peer_size = sizeof(peer);
+                const auto length = ::recvfrom(socket_fd, incoming.data(), incoming.size(), 0,
+                                               reinterpret_cast<sockaddr*>(&peer), &peer_size);
+                if (length < 0) break;
+                auto local = client_address;
+                (void)picoquic_incoming_packet(quic, incoming.data(), static_cast<std::size_t>(length),
+                    reinterpret_cast<sockaddr*>(&peer), reinterpret_cast<sockaddr*>(&local), 0, 0,
+                    picoquic_current_time());
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        };
+        body(live);
+    }
     h3zero_callback_delete_context(cnx, h3);
     picoquic_free(quic);
     ::close(socket_fd);
@@ -370,6 +422,109 @@ TEST(WebTransportListener, AcceptsNonBrowserClientWithoutOrigin) {
 TEST(WebTransportListener, RejectsMissingOriginWhenPolicyRequiresIt) {
     exercise_connect("webtransport-h3", "\"moqt-21\"", nullptr,
                      false, "moqt-21", false, true);
+}
+
+// Bytes the listener reports for a client WebTransport unidirectional stream that
+// writes 1000 bytes against a 100 byte stream window.
+std::size_t received_on_wt_uni_stream(bool hold_credit) {
+    std::size_t received = 0;
+    exercise_connect("webtransport-h3", "\"moqt-21\"", "https://publisher.test", true, "moqt-21",
+        false, false,
+        [&](WebTransportListenerConfig& settings) {
+            settings.quic.initial_max_stream_data_uni = 100;
+            settings.quic.hold_uni_stream_credit = hold_credit;
+            settings.quic.initial_max_streams_uni = 16;
+        },
+        [&](LiveSession& live) {
+            auto* stream = picowt_create_local_stream(live.cnx, 0, live.h3, live.control->stream_id);
+            ASSERT_NE(stream, nullptr);
+            const std::vector<std::uint8_t> payload(1000, 'x');
+            ASSERT_EQ(picoquic_add_to_stream_with_ctx(live.cnx, stream->stream_id, payload.data(),
+                                                      payload.size(), 1, stream), 0);
+            const auto stream_id = stream->stream_id;  // the context is freed once the stream ends
+            for (int step = 0; step < 600; ++step) {
+                live.step();
+                for (const auto& event : live.events)
+                    if (const auto* data = std::get_if<StreamDataEvent>(&event))
+                        if (data->stream_id == stream_id) received += data->data.size();
+                live.events.clear();
+            }
+        });
+    return received;
+}
+
+TEST(WebTransportListener, HeldUniStreamCreditStopsAPeerStreamAtTheInitialWindow) {
+    const auto held = received_on_wt_uni_stream(true);
+    const auto released = received_on_wt_uni_stream(false);
+    EXPECT_GT(held, 0u);
+    EXPECT_LE(held, 100u);
+    EXPECT_EQ(released, 1000u);
+}
+
+TEST(WebTransportListener, GrantedStreamCreditRaisesThePeerLimitsAndLetsItOpenStreams) {
+    exercise_connect("webtransport-h3", "\"moqt-21\"", "https://publisher.test", true, "moqt-21",
+        false, false,
+        [](WebTransportListenerConfig& settings) {
+            settings.quic.initial_max_streams_bidi = 2;  // the CONNECT stream and the harness data stream
+            settings.quic.initial_max_streams_uni = 3;   // only the three HTTP/3 streams fit
+        },
+        [](LiveSession& live) {
+            for (int step = 0; step < 50; ++step) live.step();
+            const auto bidi_before = live.cnx->max_streams_bidir_remote;
+            const auto uni_before = live.cnx->max_streams_unidir_remote;
+            EXPECT_EQ(live.listener->grant_peer_streams(true, 4).status, TransportStatus::Success);
+            EXPECT_EQ(live.listener->grant_peer_streams(false, 4).status, TransportStatus::Success);
+            for (int step = 0; step < 300 && (live.cnx->max_streams_bidir_remote < bidi_before + 4 ||
+                                              live.cnx->max_streams_unidir_remote < uni_before + 4);
+                 ++step) live.step();
+            EXPECT_EQ(live.cnx->max_streams_bidir_remote, bidi_before + 4);
+            EXPECT_EQ(live.cnx->max_streams_unidir_remote, uni_before + 4);
+            // The raised credit is usable: a new bidirectional stream reaches the listener.
+            auto* stream = picowt_create_local_stream(live.cnx, 1, live.h3, live.control->stream_id);
+            ASSERT_NE(stream, nullptr);
+            const std::array<std::uint8_t, 3> payload{'m', 'o', 'q'};
+            ASSERT_EQ(picoquic_add_to_stream_with_ctx(live.cnx, stream->stream_id, payload.data(),
+                                                      payload.size(), 1, stream), 0);
+            const auto stream_id = stream->stream_id;  // the context is freed once the stream ends
+            bool delivered = false;
+            for (int step = 0; step < 600 && !delivered; ++step) {
+                live.step();
+                for (const auto& event : live.events)
+                    if (const auto* data = std::get_if<StreamDataEvent>(&event))
+                        delivered = delivered || (data->stream_id == stream_id && data->fin);
+            }
+            EXPECT_TRUE(delivered);
+        });
+}
+
+TEST(WebTransportListener, InboundDropHidesPeerStreamsUntilReenabled) {
+    exercise_connect("webtransport-h3", "\"moqt-21\"", "https://publisher.test", true, "moqt-21",
+        false, false, {},
+        [](LiveSession& live) {
+            const auto send = [&](std::uint8_t tag) {
+                auto* stream = picowt_create_local_stream(live.cnx, 1, live.h3, live.control->stream_id);
+                EXPECT_NE(stream, nullptr);
+                if (stream == nullptr) return std::uint64_t{0};
+                EXPECT_EQ(picoquic_add_to_stream_with_ctx(live.cnx, stream->stream_id, &tag, 1, 1, stream), 0);
+                return stream->stream_id;
+            };
+            const auto seen = [&](std::uint64_t id) {
+                for (const auto& event : live.events)
+                    if (const auto* data = std::get_if<StreamDataEvent>(&event))
+                        if (data->stream_id == id) return true;
+                return false;
+            };
+            EXPECT_EQ(live.listener->set_inbound_drop(true).status, TransportStatus::Success);
+            live.events.clear();
+            const auto dropped = send(1);
+            for (int step = 0; step < 300; ++step) live.step();
+            EXPECT_FALSE(seen(dropped));
+            EXPECT_EQ(live.listener->set_inbound_drop(false).status, TransportStatus::Success);
+            const auto kept = send(2);
+            for (int step = 0; step < 300 && !seen(kept); ++step) live.step();
+            EXPECT_TRUE(seen(kept));
+            EXPECT_FALSE(seen(dropped));
+        });
 }
 
 }  // namespace

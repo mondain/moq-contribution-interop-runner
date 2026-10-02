@@ -37,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <set>
 #include <memory>
 #include <string>
 #include <utility>
@@ -415,6 +416,72 @@ std::size_t received_on_peer_uni_stream(bool hold_credit) {
 TEST(NativeQuicLive, HeldUniStreamCreditStopsAPeerStreamAtTheInitialWindow) {
     EXPECT_EQ(received_on_peer_uni_stream(true), 100u);
     EXPECT_EQ(received_on_peer_uni_stream(false), 1000u);
+}
+
+// Bidirectional and unidirectional stream credit raised mid-connection through
+// grant_peer_streams lets a peer that was held at its first stream open more.
+TEST(NativeQuicLive, GrantedStreamCreditLetsThePeerOpenMoreStreams) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.initial_max_streams_bidi = 1;
+    config.initial_max_streams_uni = 1;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port, .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    std::set<StreamId> received;
+    const auto drain = [&] {
+        for (const auto& event : created.listener->poll(64))
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) received.insert(stream->stream_id);
+    };
+    ASSERT_TRUE(pump_until(*client, [&] { drain(); return client->established(); }));
+    const auto payload = bytes({1});
+    // Stream 0 (bidi) and 2 (uni) are the first of each kind; the second is over the limit.
+    ASSERT_TRUE(client->send_stream(0, payload, true));
+    ASSERT_TRUE(client->send_stream(2, payload, true));
+    EXPECT_EQ(client->try_send_stream(4, payload, true).status, test::ClientStreamSendStatus::WouldBlock);
+    EXPECT_EQ(client->try_send_stream(6, payload, true).status, test::ClientStreamSendStatus::WouldBlock);
+
+    EXPECT_EQ(created.listener->grant_peer_streams(true, 2).status, TransportStatus::Success);
+    EXPECT_EQ(created.listener->grant_peer_streams(false, 2).status, TransportStatus::Success);
+    bool bidi_sent = false;
+    bool uni_sent = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        drain();
+        if (!bidi_sent) bidi_sent = client->try_send_stream(4, payload, true).status == test::ClientStreamSendStatus::Success;
+        if (!uni_sent) uni_sent = client->try_send_stream(6, payload, true).status == test::ClientStreamSendStatus::Success;
+        return bidi_sent && uni_sent;
+    }));
+    ASSERT_TRUE(pump_until(*client, [&] { drain(); return received.contains(4) && received.contains(6); }));
+    // The grant of two covers a third stream of each kind and no more.
+    EXPECT_TRUE(client->send_stream(8, payload, true));
+    EXPECT_TRUE(client->send_stream(10, payload, true));
+    EXPECT_EQ(client->try_send_stream(12, payload, true).status, test::ClientStreamSendStatus::WouldBlock);
+    EXPECT_EQ(client->try_send_stream(14, payload, true).status, test::ClientStreamSendStatus::WouldBlock);
+}
+
+TEST(NativeQuicLive, InboundDropHidesPeerStreamsUntilReenabled) {
+    TestPemFiles pem;
+    auto created = NativeQuicListener::create(live_config(pem));
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port, .alpn = expected_alpn()});
+    ASSERT_NE(client, nullptr);
+    std::set<StreamId> received;
+    const auto drain = [&] {
+        for (const auto& event : created.listener->poll(64))
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) received.insert(stream->stream_id);
+    };
+    ASSERT_TRUE(pump_until(*client, [&] { drain(); return client->established(); }));
+    ASSERT_EQ(created.listener->set_inbound_drop(true).status, TransportStatus::Success);
+    ASSERT_TRUE(client->send_stream(0, bytes({1}), true));
+    (void)pump_until(*client, [&] { drain(); return received.contains(0); }, std::chrono::milliseconds{400});
+    EXPECT_FALSE(received.contains(0));
+    ASSERT_EQ(created.listener->set_inbound_drop(false).status, TransportStatus::Success);
+    ASSERT_TRUE(client->send_stream(4, bytes({2}), true));
+    EXPECT_TRUE(pump_until(*client, [&] { drain(); return received.contains(4); }));
+    EXPECT_FALSE(received.contains(0));
 }
 
 TEST(NativeQuicLive, Draft18ControllerCompletesSubscribeResponseOverQuic) {

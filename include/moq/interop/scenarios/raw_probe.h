@@ -125,6 +125,15 @@ struct RawProbeDefinition {
     bool offer_replacement_session{false};
     // Called by the run with the replacement listener's URI so a definition
     // can embed it in its writes (used with offer_replacement_session).
+    // Two mechanisms carry that URI, for different shapes of definition.
+    // This callback rewrites fixed bytes before the controller exists (draft
+    // 21: the GOAWAY is a static frame, and the evaluator re-applies it to a
+    // rebuilt definition from the recorded transcript URI).
+    // RawProbeGateInput::replacement_uri, read by prepare_bytes when the write
+    // is due, serves draft 18, whose GOAWAY also carries a Request ID computed
+    // from the request streams the publisher has opened so far, which only the
+    // live events can supply. Unifying them would mean giving every fixed-bytes
+    // definition a prepare_bytes closure, so both are kept.
     std::function<void(RawProbeDefinition&, const std::string&)> bind_alternate_uri{};
     // Opt-in courtesy responses to requests the publisher opens on its own request
     // streams. They are not part of the scored stimulus and are never transcript
