@@ -406,9 +406,19 @@ public:
     // Path of the replacement session's URI, distinct from the primary "/moq".
     static constexpr std::string_view kReplacementPath = "/moq-next";
 
+    struct Tuning {
+        std::optional<std::uint64_t> peer_bidi_streams;
+        std::optional<std::uint64_t> peer_uni_streams;
+        std::string_view path;
+    };
+    static Tuning tuning_of(const scenarios::RawProbeDefinition& definition) {
+        return {definition.initial_peer_bidi_streams, definition.initial_peer_uni_streams, {}};
+    }
+
     ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
-                                   std::optional<std::uint64_t> peer_bidi_streams = std::nullopt,
-                                   std::string_view path = {}) const {
+                                   Tuning tuning = {}) const {
+        const auto& peer_bidi_streams = tuning.peer_bidi_streams;
+        const auto path = tuning.path;
         transport::NativeQuicListenerConfig quic;
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
@@ -417,6 +427,11 @@ public:
         if (peer_bidi_streams)
             quic.initial_max_streams_bidi = *peer_bidi_streams +
                 (run_config.transport == TransportKind::WebTransport ? 1u : 0u);
+        // The MOQT control stream, plus HTTP/3 control and two QPACK streams
+        // under WebTransport, come out of the unidirectional credit.
+        if (tuning.peer_uni_streams)
+            quic.initial_max_streams_uni = *tuning.peer_uni_streams +
+                (run_config.transport == TransportKind::WebTransport ? 4u : 1u);
         quic.certificate_path = config.certificate_path;
         quic.private_key_path = config.private_key_path;
         const std::string protocol = run_config.draft == DraftVersion::Draft21 ? "moqt-21" : "moqt-18";
@@ -603,7 +618,6 @@ public:
                 current_id = definitions[index].id;
                 worker->context_ordinal = index + 1;
                 worker->connection_id.clear();
-                const auto tuned = definitions[index].initial_peer_bidi_streams;
                 // The first context's listener already carries its tuning (start()).
                 if (index != 0) {
                     // Cleanup events belong outside the frozen proof of the preceding context.
@@ -616,7 +630,7 @@ public:
                     } while (scenarios::RawProbeClock::now() < cleanup_deadline);
                     listener.reset();
                     if (worker->stop_requested) break;
-                    auto replacement = create_listener(run_config, worker->endpoint.port, tuned);
+                    auto replacement = create_listener(run_config, worker->endpoint.port, tuning_of(definitions[index]));
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
                         throw std::runtime_error("raw context listener could not rebind reserved run port");
                     listener = std::move(replacement.listener);
@@ -758,7 +772,7 @@ public:
                 reserved_ports.insert(port);
                 replacement_port = port;
             }
-            auto created = create_listener(run_config, port, std::nullopt, kReplacementPath);
+            auto created = create_listener(run_config, port, Tuning{std::nullopt, std::nullopt, kReplacementPath});
             if (!created.listener) {
                 if (replacement_port) { std::lock_guard lock(mutex); reserved_ports.erase(*replacement_port); }
                 throw std::runtime_error("replacement session listener could not be created");
@@ -1327,7 +1341,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             static_cast<std::uint16_t>(impl_->config.port_start + attempt);
         if (port != 0 && impl_->reserved_ports.contains(port)) continue;
         auto created = impl_->create_listener(config, port,
-            definitions.empty() ? std::nullopt : definitions.front().initial_peer_bidi_streams);
+            definitions.empty() ? Impl::Tuning{} : Impl::tuning_of(definitions.front()));
         if (created.listener) {
             if (impl_->reserved_ports.contains(created.endpoint.port)) continue;
             endpoint = created.endpoint;

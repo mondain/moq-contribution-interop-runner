@@ -85,6 +85,11 @@ public:
         (bidirectional ? granted_bidi_ : granted_uni_) += additional;
         return {transport::TransportStatus::Success, 0, {}};
     }
+    transport::OperationResult set_inbound_drop(bool enabled) override {
+        inbound_dropped_ = enabled;
+        ++inbound_drop_changes_;
+        return {transport::TransportStatus::Success, 0, {}};
+    }
     transport::OperationResult close(std::uint64_t, std::span<const std::byte>) override {
         return {transport::TransportStatus::Success, 0, {}};
     }
@@ -124,6 +129,8 @@ public:
     bool answered(const std::string& key) const { return answered_.contains(key); }
     void mark(const std::string& key) { answered_.insert(key); }
 
+    bool inbound_dropped() const { return inbound_dropped_; }
+    int inbound_drop_changes() const { return inbound_drop_changes_; }
     std::uint64_t granted_bidi() const { return granted_bidi_; }
     std::uint64_t granted_uni() const { return granted_uni_; }
     std::size_t datagram_payload{1200};
@@ -131,6 +138,8 @@ public:
 private:
     Bytes peer_setup_;
     Reaction reaction_;
+    bool inbound_dropped_{false};
+    int inbound_drop_changes_{0};
     std::uint64_t granted_bidi_{0};
     std::uint64_t granted_uni_{0};
     bool started_{false};

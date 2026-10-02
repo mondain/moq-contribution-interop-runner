@@ -34,8 +34,9 @@ Bytes vi(std::uint64_t value) {
     return {writer.bytes().begin(), writer.bytes().end()};
 }
 
-Draft18GapAProbe profile(const std::string& requirement) {
-    auto profiles = draft18_gap_a_probes(std::chrono::milliseconds(200), {bytes_of("n")}, bytes_of("t"));
+Draft18GapAProbe profile(const std::string& requirement,
+                         std::chrono::milliseconds deadline = std::chrono::milliseconds(200)) {
+    auto profiles = draft18_gap_a_probes(deadline, {bytes_of("n")}, bytes_of("t"));
     const auto found = std::find_if(profiles.begin(), profiles.end(),
         [&](const auto& candidate) { return candidate.requirement_id == requirement; });
     if (found == profiles.end()) throw std::runtime_error("missing profile " + requirement);
@@ -318,6 +319,76 @@ TEST(Draft18GapB, PublishMustNotFollowPublishBlockedForTheSameTrack) {
         });
     }), std::optional<bool>{false});
     EXPECT_EQ(run([](ScriptedPublisher&) {}), std::optional<bool>{true});
+}
+
+// Section 8: delivery timeout resets. A violation cannot be proven on the wire,
+// so these probes only ever score a pass.
+TEST(Draft18GapB, ExpiredSubgroupObjectIsScoredOnlyByADeliveryTimeoutReset) {
+    const auto probe = profile("D18-8-MUST-003", std::chrono::milliseconds(2000));
+    EXPECT_EQ(probe.definition.id, "subgroup-object-expires-before-transport-handoff");
+    EXPECT_EQ(probe.evaluator_id, "subgroup-reset-delivery-timeout");
+    // No unidirectional credit beyond the control stream, then credit after a delay.
+    EXPECT_EQ(probe.definition.initial_peer_uni_streams, std::optional<std::uint64_t>{0});
+    ASSERT_EQ(probe.definition.writes.size(), 2u);
+    EXPECT_EQ(probe.definition.writes[1].channel, RawProbeChannel::UniCredit);
+    EXPECT_GT(probe.definition.writes[1].delay_after_previous.count(), 0);
+    wire::Cursor cursor(probe.definition.writes[0].bytes);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto subscribe = std::get<d18::SubscribeMessage>(std::get<d18::Message>(decoded));
+    // OBJECT_DELIVERY_TIMEOUT only, so a DELIVERY_TIMEOUT reset cannot come from the subgroup timer.
+    ASSERT_EQ(subscribe.parameters.size(), 2u);
+    EXPECT_EQ(subscribe.parameters[0].type, 0x02u);
+    EXPECT_EQ(subscribe.parameters[1].type, 0x10u);
+    const auto run = [&](std::optional<std::uint64_t> code, bool only_before_credit = false) {
+        ScriptedPublisher peer(setup(), [=](ScriptedPublisher& p) {
+            answer(p, 1, "ok", encode_draft18(d18::SubscribeOkMessage{4, {}, {}}));
+            if (code && only_before_credit) once(p, "early", [&] { p.peer_reset(6, *code); });
+            if (code && !only_before_credit && p.granted_uni() > 0) once(p, "late", [&] { p.peer_reset(6, *code); });
+        });
+        const auto result = score(probe, peer);
+        EXPECT_EQ(peer.granted_uni(), 8u);
+        return result;
+    };
+    EXPECT_EQ(run(2), std::optional<bool>{true});
+    // Another reset code proves nothing about the object timeout.
+    EXPECT_EQ(run(1), std::nullopt);
+    EXPECT_EQ(run(std::nullopt), std::nullopt);
+    // A reset that preceded the credit grant is not an answer to it.
+    EXPECT_EQ(run(2, true), std::nullopt);
+}
+
+TEST(Draft18GapB, UnacknowledgedSubgroupStreamIsScoredByItsReset) {
+    const auto probe = profile("D18-8-MUST-006", std::chrono::milliseconds(2000));
+    EXPECT_EQ(probe.definition.id, "withhold-subgroup-acknowledgements-after-application-completion");
+    EXPECT_EQ(probe.evaluator_id, "uncommitted-subgroup-stream-reset-after-timeout");
+    ASSERT_EQ(probe.definition.writes.size(), 3u);
+    EXPECT_EQ(probe.definition.writes[1].channel, RawProbeChannel::DropInbound);
+    EXPECT_EQ(probe.definition.writes[2].channel, RawProbeChannel::ResumeInbound);
+    EXPECT_GT(probe.definition.writes[2].delay_after_previous.count(), 0);
+    wire::Cursor cursor(probe.definition.writes[0].bytes);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto subscribe = std::get<d18::SubscribeMessage>(std::get<d18::Message>(decoded));
+    ASSERT_EQ(subscribe.parameters.size(), 2u);
+    EXPECT_EQ(subscribe.parameters[0].type, 0x06u);  // SUBGROUP_DELIVERY_TIMEOUT
+    const auto run = [&](std::optional<std::uint64_t> code) {
+        ScriptedPublisher peer(setup(), [=](ScriptedPublisher& p) {
+            // The publisher's reset reaches the runner only once the path resumes.
+            if (code && p.inbound_drop_changes() == 2 && !p.inbound_dropped())
+                once(p, "reset", [&] { p.peer_reset(6, *code); });
+        });
+        const auto result = score(probe, peer);
+        EXPECT_FALSE(peer.inbound_dropped());
+        EXPECT_EQ(peer.inbound_drop_changes(), 2);
+        return result;
+    };
+    EXPECT_EQ(run(2), std::optional<bool>{true});
+    EXPECT_EQ(run(7), std::optional<bool>{true});
+    EXPECT_EQ(run(std::nullopt), std::nullopt);
+    // The control stream's own reset is not a subgroup stream reset.
+    ScriptedPublisher control_reset(setup(), [](ScriptedPublisher& p) {
+        if (p.inbound_drop_changes() == 2) once(p, "reset", [&] { p.peer_reset(2, 2); });
+    });
+    EXPECT_EQ(score(probe, control_reset), std::nullopt);
 }
 
 // Section 10.4: the client MUST use the GOAWAY New Session URI.

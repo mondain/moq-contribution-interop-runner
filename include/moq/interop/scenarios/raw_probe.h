@@ -15,10 +15,13 @@
 namespace moq::interop::scenarios {
 
 using RawProbeClock = std::chrono::steady_clock;
-// Credit is a stream-credit step rather than a stream: it raises the peer's
-// bidirectional stream limit by `application_error` (reused as the count) and
-// carries no bytes.
-enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi, Credit };
+// Credit, UniCredit, DropInbound and ResumeInbound are transport steps rather
+// than streams and carry no bytes. Credit and UniCredit raise the peer's
+// bidirectional or unidirectional stream limit by `application_error` (reused
+// as the count). DropInbound discards everything the peer sends from then on
+// (nothing is acknowledged) and ResumeInbound ends that.
+enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi, Credit, UniCredit,
+                             DropInbound, ResumeInbound };
 enum class RawProbeOperation { Write, StopSending };
 struct RawProbeGateInput;
 struct RawProbeWrite {
@@ -37,6 +40,9 @@ struct RawProbeWrite {
     // Returns no value while awaiting evidence. The first nonempty result is
     // frozen before opening a stream, and regenerated from its prefix in proof.
     std::function<std::optional<std::vector<std::byte>>(const RawProbeGateInput&)> prepare_bytes{};
+    // The write waits until this long after the previous write (or SETUP, for
+    // the first) was accepted; the proof checks the recorded acceptance times.
+    std::chrono::milliseconds delay_after_previous{0};
 };
 struct RawProbeTranscript;
 struct RawProbeDefinition {
@@ -56,6 +62,10 @@ struct RawProbeDefinition {
     // Initial QUIC credit for peer-initiated bidirectional streams. The
     // harness adds the WebTransport CONNECT stream where it applies.
     std::optional<std::uint64_t> initial_peer_bidi_streams{};
+    // Initial credit for peer-initiated unidirectional streams beyond those the
+    // session itself needs (MOQT control stream; WebTransport adds its three
+    // HTTP/3 streams).
+    std::optional<std::uint64_t> initial_peer_uni_streams{};
     // The harness runs a second listener whose URI a write can name (through
     // RawProbeGateInput::replacement_uri) and records what connects to it in
     // RawProbeTranscript::replacement_events. Used for GOAWAY migration.
@@ -71,6 +81,8 @@ struct RawProbeAcceptedWrite {
     // STOP acceptance is distinct from successful zero-byte writes.
     bool operation_accepted{false};
     std::optional<std::size_t> prepared_event_count{};
+    // When the controller accepted the write, on the polling clock.
+    std::optional<RawProbeClock::time_point> accepted_at{};
 };
 struct RawProbeGateInput {
     std::span<const RawProbeAcceptedWrite> prior_writes;

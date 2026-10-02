@@ -179,6 +179,52 @@ TEST(Draft18GapBNative, OtherTrackAfterCreditRestoredPasses) {
     EXPECT_EQ(harness.outcome(run.started.id, "D18-6-1-MUST-NOT-001"), requirements::OutcomeState::Pass);
 }
 
+// Section 8: a subgroup stream reset is the only wire trace of an enforced timeout.
+TEST(Draft18GapBNative, ExpiredObjectIsScoredByADeliveryTimeoutResetAfterCredit) {
+    Harness harness;
+    const auto started = harness.manager.start(harness.config("subgroup-object-expires-before-transport-handoff", true));
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = harness.connect(started);
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(client->send_stream(2, literal({0xaf, 0, 0, 0}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto request = client->stream(1);
+        return request && !request->data.empty();
+    }));
+    ASSERT_TRUE(client->send_stream(1, encoded(d18::SubscribeOkMessage{4, {}, {}}), false));
+    // The runner leaves the publisher no unidirectional stream for its subgroup.
+    EXPECT_EQ(client->try_send_stream(6, literal({0x14}), false).status,
+              transport::test::ClientStreamSendStatus::WouldBlock);
+    // Credit arrives only after the timeout window; the publisher then resets.
+    ASSERT_TRUE(pump_until(*client, [&] {
+        return client->try_send_stream(6, literal({0x14}), false).status ==
+               transport::test::ClientStreamSendStatus::Success;
+    }));
+    ASSERT_TRUE(client->reset_stream(6, 2));
+    ASSERT_TRUE(harness.finalized(*client, started.id));
+    EXPECT_EQ(harness.outcome(started.id, "D18-8-MUST-003"), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft18GapBNative, ResetThatSurvivesTheWithheldPathScoresTheSubgroupTimeout) {
+    Harness harness;
+    const auto started = harness.manager.start(
+        harness.config("withhold-subgroup-acknowledgements-after-application-completion", true));
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = harness.connect(started);
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(client->send_stream(2, literal({0xaf, 0, 0, 0}), false));
+    ASSERT_TRUE(pump_until(*client, [&] {
+        const auto request = client->stream(1);
+        return request && !request->data.empty();
+    }));
+    // The publisher sends the subgroup, then resets it as its timer fires; the
+    // runner discards both until the path resumes.
+    ASSERT_TRUE(client->send_stream(6, literal({0x14, 4, 7, 0, 0, 1, 'p'}), false));
+    ASSERT_TRUE(client->reset_stream(6, 2));
+    ASSERT_TRUE(harness.finalized(*client, started.id));
+    EXPECT_EQ(harness.outcome(started.id, "D18-8-MUST-006"), requirements::OutcomeState::Pass);
+}
+
 // Reads the New Session URI of the runner's control-stream GOAWAY.
 std::optional<std::string> goaway_uri(transport::test::PicoquicTestClient& client) {
     const auto control = client.stream(3);

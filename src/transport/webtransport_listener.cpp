@@ -84,6 +84,7 @@ struct WebTransportListener::Impl {
     picohttp_server_parameters_t parameters{};
     picoquic_quic_t* quic = nullptr;
     picoquic_cnx_t* session_connection = nullptr;
+    bool drop_inbound = false;
     std::unique_ptr<WebTransportSession> session;
     picowt_capsule_t capsule{};
     int socket_fd = -1;
@@ -263,6 +264,7 @@ struct WebTransportListener::Impl {
                 break;
             }
             if (length == 0) continue;
+            if (drop_inbound) continue;
             auto local = local_address;
             (void)picoquic_incoming_packet(quic, receive.data(),
                     static_cast<std::size_t>(length),
@@ -447,6 +449,10 @@ OperationResult WebTransportListener::grant_peer_streams(bool bidirectional,
                                                          std::uint64_t additional) {
     return impl_->session ? impl_->session->grant_peer_streams(bidirectional, additional) :
                             OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
+}
+OperationResult WebTransportListener::set_inbound_drop(bool enabled) {
+    impl_->drop_inbound = enabled;
+    return {TransportStatus::Success, 0, std::nullopt};
 }
 OperationResult WebTransportListener::close(std::uint64_t error,
                                              std::span<const std::byte> reason) {

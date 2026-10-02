@@ -559,6 +559,111 @@ Observation goaway_uri_observe(const RawProbeTranscript& transcript, const Fixtu
     return observation;
 }
 
+// ---- Section 8: delivery timeouts -------------------------------------------------
+// The publisher's reset is the only wire trace of an enforced timeout: how old
+// an Object was when the publisher handed it to its transport, or when its
+// subgroup became fully acknowledged, is internal to the publisher and a
+// publisher that kept the data is indistinguishable from one that only handed
+// it over late. These probes therefore score a reset (PASS) and otherwise leave
+// the row unscored; they never score a violation.
+constexpr std::uint64_t kDeliveryTimeout = 0x2;  // Stream reset code, Section 11.4.3
+constexpr std::uint64_t kObjectDeliveryTimeoutParameter = 0x02;
+constexpr std::uint64_t kSubgroupDeliveryTimeoutParameter = 0x06;
+
+// The delivery timeout the probes ask for, and the window (four timeouts) for
+// which the runner withholds credit or the path. Fixed rather than scaled to the
+// run deadline: the stimulus must be reproducible when the transcript is proven.
+constexpr std::chrono::milliseconds kDeliveryTimeoutValue{100};
+constexpr std::chrono::milliseconds kWithholdWindow = 4 * kDeliveryTimeoutValue;
+std::chrono::milliseconds delivery_timeout(std::chrono::milliseconds) { return kDeliveryTimeoutValue; }
+
+// Stream reset events on peer unidirectional streams other than the control
+// stream, at or after `marker`.
+struct StreamReset {
+    transport::StreamId stream;
+    std::optional<std::uint64_t> code;
+};
+std::vector<StreamReset> data_stream_resets(const RawProbeTranscript& transcript, std::size_t marker) {
+    std::vector<StreamReset> result;
+    const auto streams = collect_streams(transcript.events);
+    if (!streams) return result;
+    const auto control = peer_control(*streams);
+    for (std::size_t index = marker; index < transcript.events.size(); ++index) {
+        const auto* reset = std::get_if<transport::PeerResetEvent>(&transcript.events[index]);
+        if (!reset || !is_peer_uni(reset->stream_id) || (control && control->stream_id == reset->stream_id))
+            continue;
+        result.push_back({reset->stream_id, reset->application_error});
+    }
+    return result;
+}
+
+d18::Parameters timeout_subscription(std::uint64_t parameter, std::chrono::milliseconds timeout) {
+    d18::Parameters parameters{{parameter, d18::VarIntParameterValue{
+        static_cast<std::uint64_t>(timeout.count())}}, forward_parameter(1)};
+    return parameters;
+}
+
+// withhold-subgroup-acknowledgements-after-application-completion (Section 8,
+// draft lines 2512-2523): nothing the publisher sends reaches the runner, so no
+// stream is ever fully acknowledged. Once the publisher finished the subgroup
+// and its SUBGROUP_DELIVERY_TIMEOUT passed it must reset the stream even though
+// all data and the FIN were sent; the reset arrives when the path resumes.
+RawProbeDefinition withheld_acks_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("withhold-subgroup-acknowledgements-after-application-completion",
+        setup_frame(), deadline);
+    definition.acknowledge_publisher_namespace = true;
+    const auto timeout = delivery_timeout(deadline);
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi, subscribe_request(1, fixture,
+        timeout_subscription(kSubgroupDeliveryTimeoutParameter, timeout))));
+    definition.writes.push_back(make_write(RawProbeChannel::DropInbound, {}));
+    auto resume = make_write(RawProbeChannel::ResumeInbound, {});
+    resume.delay_after_previous = kWithholdWindow;
+    definition.writes.push_back(std::move(resume));
+    return definition;
+}
+
+Observation withheld_acks_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 3 || !transcript.writes[2].delivery_event_count) return observation;
+    // Any reset code qualifies: this occurrence does not mandate one.
+    if (!data_stream_resets(transcript, *transcript.writes[2].delivery_event_count).empty()) {
+        observation.ready = true;
+        observation.result = true;
+    }
+    return observation;
+}
+
+// subgroup-object-expires-before-transport-handoff (Section 8, draft lines
+// 2488-2496): the publisher has no stream credit for a subgroup, so the Object
+// waits past its OBJECT_DELIVERY_TIMEOUT before credit is granted. Only a
+// subgroup stream reset with DELIVERY_TIMEOUT proves the timeout was enforced.
+RawProbeDefinition expired_object_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("subgroup-object-expires-before-transport-handoff", setup_frame(), deadline);
+    definition.acknowledge_publisher_namespace = true;
+    definition.initial_peer_uni_streams = 0;
+    const auto timeout = delivery_timeout(deadline);
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi, subscribe_request(1, fixture,
+        timeout_subscription(kObjectDeliveryTimeoutParameter, timeout))));
+    auto grant = make_write(RawProbeChannel::UniCredit, {});
+    grant.application_error = kCreditGrant;
+    grant.delay_after_previous = kWithholdWindow;
+    definition.writes.push_back(std::move(grant));
+    return definition;
+}
+
+Observation expired_object_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 2 || !transcript.writes[1].delivery_event_count) return observation;
+    for (const auto& reset : data_stream_resets(transcript, *transcript.writes[1].delivery_event_count)) {
+        if (reset.code == kDeliveryTimeout) {
+            observation.ready = true;
+            observation.result = true;
+            return observation;
+        }
+    }
+    return observation;
+}
+
 }  // namespace
 
 std::vector<Entry> entries() {
@@ -576,6 +681,12 @@ std::vector<Entry> entries() {
     result.push_back({"D18-10-2-2-MUST-NOT-002", "withhold-use-alias-response-while-publisher-retires-token",
         "token-delete-not-sent-before-all-use-alias-responses", false, false, std::nullopt,
         retire_token_definition, retire_token_observe});
+    result.push_back({"D18-8-MUST-003", "subgroup-object-expires-before-transport-handoff",
+        "subgroup-reset-delivery-timeout", true, false, FirstWrite::Subscribe,
+        expired_object_definition, expired_object_observe});
+    result.push_back({"D18-8-MUST-006", "withhold-subgroup-acknowledgements-after-application-completion",
+        "uncommitted-subgroup-stream-reset-after-timeout", true, false, FirstWrite::Subscribe,
+        withheld_acks_definition, withheld_acks_observe});
     result.push_back({"D18-10-4-MUST-004", "receive-control-goaway-with-new-session-uri",
         "publisher-reconnects-to-provided-goaway-uri", false, false, std::nullopt,
         goaway_uri_definition, goaway_uri_observe});

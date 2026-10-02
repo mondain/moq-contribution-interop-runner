@@ -75,6 +75,7 @@ struct NativeQuicListener::Impl {
     std::unordered_set<StreamId> finished_streams;
     std::string close_reason;
     bool closing = false;
+    bool drop_inbound = false;
 
     std::size_t queued_stream_bytes() const {
         auto* active = connection.connection();
@@ -137,6 +138,7 @@ struct NativeQuicListener::Impl {
                 break;
             }
             if (length == 0) continue;
+            if (drop_inbound) continue;
             auto local = local_address;
             picoquic_incoming_packet(
                 quic, receive.data(), static_cast<std::size_t>(length),
@@ -437,6 +439,11 @@ OperationResult NativeQuicListener::grant_peer_streams(bool bidirectional,
     const auto status = impl_->connection.application_status();
     if (status != TransportStatus::Success) return {status, 0, std::nullopt};
     return detail::grant_peer_streams(impl_->connection.connection(), bidirectional, additional);
+}
+OperationResult NativeQuicListener::set_inbound_drop(bool enabled) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    impl_->drop_inbound = enabled;
+    return {TransportStatus::Success, 0, std::nullopt};
 }
 OperationResult NativeQuicListener::close(
     std::uint64_t application_error, std::span<const std::byte> reason) {

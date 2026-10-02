@@ -124,6 +124,14 @@ public:
         (void)additional;
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
+
+    // While enabled, every UDP datagram received from the peer is discarded
+    // unread, as a lossy path would: nothing is acknowledged and the peer's
+    // packets are retransmitted later. Outgoing packets are unaffected.
+    virtual OperationResult set_inbound_drop(bool enabled) {
+        (void)enabled;
+        return {TransportStatus::InvalidState, 0, std::nullopt};
+    }
 };
 
 }  // namespace moq::interop::transport
