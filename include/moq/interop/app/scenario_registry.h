@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -247,6 +248,51 @@ inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
 // Draft-18 gap-A probes extend the core list; they are all raw probes.
 inline constexpr auto kDraft18AllExecutableScenarios =
     concat_scenarios(kDraft18ExecutableScenarios, kDraft18GapAScenarios);
+// Draft-21 contribution profiles (src/scenarios/draft21_contribution_*.cpp).
+// Kept apart from the list above; a unit test keeps it equal to the profile
+// sources, and executable_scenarios(21) exposes both lists as one.
+inline constexpr std::string_view kDraft21ContributionScenarios[]{
+    "d21-setup-register-exceeds-token-cache",
+    "d21-setup-register-default-zero-cache",
+    "d21-grease-setup-options",
+    "d21-grease-request-error",
+    "d21-single-request-update-response",
+    "d21-coalesced-successful-update-responses",
+    "d21-coalesced-failed-update-response",
+    "d21-request-update-overrun",
+    "d21-request-update-independent-streams",
+    "d21-request-update-unlimited",
+    "d21-successful-subscribe-response",
+    "d21-fetch-start-beyond-largest-object",
+    "d21-fetch-track-with-no-published-objects",
+    "d21-namespace-discovery-withdrawal-order",
+    "d21-publisher-parameter-serialization",
+    "d21-publisher-parameter-negotiation",
+    "d21-publisher-parameter-multiplicity",
+    "d21-inbound-padding-stream",
+    "d21-inbound-padding-datagram",
+    "d21-successful-subscribe-object-delivery",
+    "d21-successful-subscribe-forward-zero",
+    "d21-subscribe-parameters-preserve-payload",
+    "d21-fetch-parameters-preserve-payload",
+    "d21-prior-group-gap-repeat",
+    "d21-prior-group-gap-singleton",
+    "d21-prior-object-gap-repeat",
+    "d21-prior-object-gap-singleton",
+    "d21-subscription-forwarding-preference",
+    "d21-fetch-datagram-preference",
+    "d21-object-datagram-flags",
+    "d21-subgroup-header-flags",
+    "d21-complete-subgroup-fin",
+    "d21-subgroup-start-location-fin",
+    "d21-subgroup-premature-close-reset",
+};
+
+inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {
+    return draft == 21 &&
+        std::find(std::begin(kDraft21ContributionScenarios), std::end(kDraft21ContributionScenarios),
+                  scenario) != std::end(kDraft21ContributionScenarios);
+}
 
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     if (draft == 18) return kDraft18AllExecutableScenarios;
@@ -259,6 +305,8 @@ inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
                        kDraft21GapAnnouncementScenarios.end());
             all.insert(all.end(), kDraft21GapRawScenarios.begin(),
                        kDraft21GapRawScenarios.end());
+            all.insert(all.end(), std::begin(kDraft21ContributionScenarios),
+                       std::end(kDraft21ContributionScenarios));
             return all;
         }();
         return combined;
@@ -352,6 +400,7 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (draft == 18 && std::find(kDraft18ContributionTrackScenarios.begin(),
                                  kDraft18ContributionTrackScenarios.end(),
                                  scenario) != kDraft18ContributionTrackScenarios.end()) return true;
+    if (draft21_contribution_scenario(draft, scenario)) return true;
     if (immutable_repeat_scenario(draft,scenario) || object_repeat_scenario(draft,scenario)) return true;
     if (fetch_first_object_scenario(draft,scenario) || fetch_group_order_scenario(draft,scenario)) return true;
     if (subscriber_notify_scenario(draft,scenario) ||

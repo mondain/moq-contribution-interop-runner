@@ -15,6 +15,7 @@
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/request_goaway.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 
 #include <algorithm>
 #include <map>
@@ -246,6 +247,17 @@ std::optional<RawResult> raw_result(
             includes(row.scenarios, profile.definition.id.c_str()) &&
             includes(row.evaluators, profile.evaluator_id.c_str())) {
             const auto result = scenarios::evaluate_subscription_cancel_probe(transcript, profile);
+            if (result) return RawResult{*result, profile.evaluator_id};
+            return std::nullopt;
+        }
+    }
+    // Contribution profiles: evaluated against their own canonical stimulus.
+    static const auto contribution = scenarios::draft21_contribution_probes();
+    for (const auto& profile : contribution) {
+        if (row.id == profile.requirement_id && transcript.scenario_id == profile.definition.id &&
+            includes(row.scenarios, profile.definition.id.c_str()) &&
+            includes(row.evaluators, profile.evaluator_id.c_str())) {
+            const auto result = scenarios::evaluate_draft21_contribution_probe(transcript, profile);
             if (result) return RawResult{*result, profile.evaluator_id};
             return std::nullopt;
         }
@@ -523,6 +535,12 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
     }
     // Slice A completeness-gap bindings (draft21_gap_a.cpp).
     for (auto& binding : draft21_gap_a_bindings()) bindings.push_back(std::move(binding));
+    for (const auto& profile : scenarios::draft21_contribution_probes()) {
+        // A peer close is read when present but is not required evidence: most
+        // contexts pass because the session stays open.
+        bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
     return bindings;
 }
 

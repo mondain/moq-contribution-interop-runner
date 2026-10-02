@@ -223,7 +223,11 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18_gap_a_discovery.cpp
     src/scenarios/draft18_gap_a_object.cpp
     src/scenarios/draft21_gap_a.cpp
-    src/scenarios/draft21_gap_a_token.cpp)
+    src/scenarios/draft21_gap_a_token.cpp
+    src/scenarios/draft21_contribution.cpp
+    src/scenarios/draft21_contribution_support.cpp
+    src/scenarios/draft21_contribution_session.cpp
+    src/scenarios/draft21_contribution_objects.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -996,6 +1000,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft21-catalog-part-07-tests PRIVATE
                           moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft21-catalog-part-07 COMMAND moq-interop-draft21-catalog-part-07-tests)
+    # Draft-21 contribution profiles (session and object behavior).
+    add_executable(moq-interop-draft21-contribution-tests
+        tests/protocol/draft21_contribution_test.cpp
+        tests/protocol/draft21_contribution_objects_test.cpp)
+    target_link_libraries(moq-interop-draft21-contribution-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-contribution-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME draft21-contribution COMMAND moq-interop-draft21-contribution-tests)
 endif()
 
 if(MOQ_INTEROP_BUILD_FUZZERS)

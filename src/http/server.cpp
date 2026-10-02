@@ -19,6 +19,7 @@
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
 #include "moq/interop/scenarios/draft21_request.h"
 #include "moq/interop/scenarios/draft21_response.h"
@@ -637,6 +638,14 @@ public:
                 for (const auto id : app::kDraft21GapAnnouncementScenarios) {
                     if (!app::gap_webtransport_only_scenario(id)) append_profile(21, id, "native-quic");
                     if (!app::gap_native_only_scenario(id)) append_profile(21, id, "webtransport");
+                }
+                {
+                    std::set<std::string> seen;
+                    for (const auto& profile : scenarios::draft21_contribution_probes()) {
+                        if (!seen.insert(profile.definition.id).second) continue;
+                        append_profile(21, profile.definition.id, "native-quic");
+                        append_profile(21, profile.definition.id, "webtransport");
+                    }
                 }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
