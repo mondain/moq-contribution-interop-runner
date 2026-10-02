@@ -622,6 +622,8 @@ Spec skipped_publish_spec() {
         [](const Fixture& fixture) {
             auto definition = residual_definition();
             definition.listener_limits.max_streams_bidi = 1;
+            // The stream limit can leave a publisher waiting for credit until it gives up.
+            definition.publisher_exit_is_evidence = true;
             definition.peer_request_ready = [](auto input) {
                 wire::Cursor cursor(input);
                 return std::holds_alternative<wire::draft21::PublishMessage>(wire::draft21::decode_publish(cursor));
@@ -1198,6 +1200,8 @@ Spec invalid_token_spec() {
         {{"D21-8-9-MUST-270", "d21-invalid-token-message-error"}},
         [](const Fixture& fixture) {
             auto definition = residual_definition();
+            // A publisher that cannot serve the request may give up; that is what it did.
+            definition.publisher_exit_is_evidence = true;
             // USE_VALUE (Alias Type 3): Token Type and Value, no Alias.
             if (fixture.credentials.invalid)
                 definition.writes.push_back(request_write(token_status(1, fixture,
@@ -1242,6 +1246,8 @@ Spec expired_token_alias_spec() {
         {{"D21-8-9-MUST-273", "d21-expired-token-alias-retained-until-delete"}},
         [](const Fixture& fixture) {
             auto definition = residual_definition();
+            // A publisher that cannot serve the requests may give up; that is what it did.
+            definition.publisher_exit_is_evidence = true;
             if (!fixture.credentials.expired) return definition;
             const auto& credential = *fixture.credentials.expired;
             definition.writes.push_back(request_write(token_status(1, fixture,
