@@ -631,6 +631,17 @@ validator.
 When another publisher supports draft 18 or 21, it can implement the same driver
 contract without changes to protocol or evaluator code.
 
+## Implementation Status
+
+As of 2026-10-01, executable bindings exist for 151 of 175 draft-18 and 141 of
+175 draft-21 applicable, testable MUST/MUST NOT rows. The static completeness
+gate therefore still fails for both drafts, and optional-row coverage is 1/90
+and 1/97. Remaining required rows need stimuli the runner cannot induce
+(publisher-initiated messages, transport credit control, configured
+credentials) or observations the protocol boundary does not expose; each is
+reported with a draft citation and reason by `moq-interop-audit`. A binding is
+a static gate, not proof of publisher behavior.
+
 ## Delivery Milestones
 
 ### 1. Protocol corpus and application foundation
