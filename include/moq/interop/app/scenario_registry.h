@@ -7,7 +7,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 109> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 119> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -118,6 +118,15 @@ inline constexpr std::array<std::string_view, 109> kDraft18ExecutableScenarios{
     "connect-publisher-to-native-uri-with-authority",
     "connect-publisher-to-native-uri-with-path",
     "connect-publisher-to-native-uri-with-query",
+    "cancel-subscription-before-next-subgroup-object-is-produced",
+    "advance-start-location-while-subgroup-remains-incomplete",
+    "pause-forwarding-with-an-unsent-subgroup-object",
+    "publisher-terminates-subgroup-before-final-object-production",
+    "fetch-object-previously-observed-as-datagram",
+    "publish-two-simultaneous-tracks",
+    "redeliver-previously-observed-object-in-later-subscription",
+    "receive-subscribe-namespace-denied-by-configured-authorization-policy",
+    "receive-subscribe-tracks-denied-by-configured-authorization-policy",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -288,7 +297,7 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 // Draft-18 publisher-contribution probes whose first write names the fixture.
-inline constexpr std::array<std::string_view, 17> kDraft18ContributionTrackScenarios{
+inline constexpr std::array<std::string_view, 26> kDraft18ContributionTrackScenarios{
     "accept-subscribe-for-known-publisher-track",
     "accept-forward-one-subscribe-then-publish-matching-object",
     "receive-one-request-update-on-established-publisher-request",
@@ -306,6 +315,15 @@ inline constexpr std::array<std::string_view, 17> kDraft18ContributionTrackScena
     "publish-object-with-prior-object-id-gap",
     "publish-end-of-group-and-end-of-track-status-objects",
     "publish-complete-finite-subgroup-with-start-location-filter",
+    "cancel-subscription-before-next-subgroup-object-is-produced",
+    "advance-start-location-while-subgroup-remains-incomplete",
+    "pause-forwarding-with-an-unsent-subgroup-object",
+    "publisher-terminates-subgroup-before-final-object-production",
+    "fetch-object-previously-observed-as-datagram",
+    "publish-two-simultaneous-tracks",
+    "redeliver-previously-observed-object-in-later-subscription",
+    "receive-subscribe-namespace-denied-by-configured-authorization-policy",
+    "receive-subscribe-tracks-denied-by-configured-authorization-policy",
 };
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {

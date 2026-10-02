@@ -274,6 +274,8 @@ struct DataStream {
     bool reset{false};
     std::optional<std::uint64_t> reset_code;
     std::size_t first_event{0};
+    // Index of the first event that ended the stream (FIN or reset).
+    std::optional<std::size_t> closed_event;
 };
 inline std::map<transport::StreamId, DataStream> peer_data_streams(const RawProbeTranscript& transcript) {
     std::map<transport::StreamId, DataStream> result;
@@ -286,16 +288,26 @@ inline std::map<transport::StreamId, DataStream> peer_data_streams(const RawProb
             auto [it, inserted] = result.try_emplace(data->stream_id);
             if (inserted) it->second.first_event = i;
             it->second.bytes.insert(it->second.bytes.end(), data->data.begin(), data->data.end());
+            if (data->fin && !it->second.closed_event) it->second.closed_event = i;
             it->second.fin = it->second.fin || data->fin;
         } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&event)) {
             if ((reset->stream_id & 3u) != 2u) continue;
             auto [it, inserted] = result.try_emplace(reset->stream_id);
             if (inserted) it->second.first_event = i;
+            if (!it->second.closed_event) it->second.closed_event = i;
             it->second.reset = true;
             it->second.reset_code = reset->application_error;
         }
     }
     return result;
+}
+
+// A transcript view of what a gate or byte preparer may inspect.
+inline RawProbeTranscript view_of(const RawProbeGateInput& input) {
+    RawProbeTranscript view;
+    view.events.assign(input.events.begin(), input.events.end());
+    view.writes.assign(input.prior_writes.begin(), input.prior_writes.end());
+    return view;
 }
 
 // Request builders. The runner is the MOQT server, so its Request IDs are odd.
@@ -349,6 +361,80 @@ inline Reply gate_reply(const RawProbeGateInput& input, std::size_t write_index)
     RawProbeTranscript view;
     view.events.assign(input.events.begin(), input.events.end());
     return stream_reply(view, *write.stream_id, *write.delivery_event_count);
+}
+
+struct SubgroupStream {
+    transport::StreamId id{0};
+    d18::SubgroupHeader header{};
+    std::vector<d18::ObjectEvent> objects;
+    bool fin{false};
+    bool reset{false};
+    bool malformed{false};
+    std::size_t first_event{0};
+    std::optional<std::size_t> closed_event;
+};
+
+inline std::optional<std::uint64_t> subscription_alias(const RawProbeTranscript& transcript,
+                                                       std::size_t subscribe_write = 0) {
+    const auto reply = write_reply(transcript, subscribe_write);
+    if (const auto* ok = subscribe_ok(reply)) return ok->track_alias;
+    return std::nullopt;
+}
+
+// Subgroup streams of the subscription's Track Alias, decoded from the
+// bytes seen before any terminal transport event.
+inline std::vector<SubgroupStream> subscription_streams(const RawProbeTranscript& transcript, std::uint64_t alias) {
+    std::vector<SubgroupStream> result;
+    for (const auto& [id, stream] : peer_data_streams(transcript)) {
+        d18::SubgroupDecoder decoder;
+        const auto pushed = decoder.push(stream.bytes, stream.fin);
+        if (!pushed.header || pushed.header->track_alias != alias) continue;
+        SubgroupStream entry;
+        entry.id = id;
+        entry.header = *pushed.header;
+        entry.objects = pushed.objects;
+        entry.fin = stream.fin;
+        entry.reset = stream.reset;
+        entry.first_event = stream.first_event;
+        entry.closed_event = stream.closed_event;
+        entry.malformed = pushed.error.has_value();
+        result.push_back(std::move(entry));
+    }
+    return result;
+}
+
+
+inline std::vector<d18::ObjectEvent> subscription_datagrams(const RawProbeTranscript& transcript, std::uint64_t alias) {
+    std::vector<d18::ObjectEvent> result;
+    for (const auto& event : transcript.events) {
+        if (terminal(event)) break;
+        const auto* datagram = std::get_if<transport::DatagramEvent>(&event);
+        if (!datagram) continue;
+        const auto decoded = d18::decode_datagram(datagram->data, {});
+        if (const auto* object = std::get_if<d18::ObjectEvent>(&decoded))
+            if (object->track_alias == alias) result.push_back(*object);
+    }
+    return result;
+}
+
+// Every Object delivered under `alias`, streams first and then datagrams.
+inline std::vector<d18::ObjectEvent> alias_objects(const RawProbeTranscript& transcript, std::uint64_t alias) {
+    std::vector<d18::ObjectEvent> result;
+    for (const auto& stream : subscription_streams(transcript, alias))
+        result.insert(result.end(), stream.objects.begin(), stream.objects.end());
+    const auto datagrams = subscription_datagrams(transcript, alias);
+    result.insert(result.end(), datagrams.begin(), datagrams.end());
+    return result;
+}
+
+inline constexpr std::uint64_t kStatusEndOfGroup = 0x3;
+inline constexpr std::uint64_t kStatusEndOfTrack = 0x4;
+// A subgroup that delivered its final Object (End of Group or End of Track)
+// is complete: section 11.4.3 then requires a FIN rather than a reset.
+inline bool delivered_final_object(const SubgroupStream& stream) {
+    return !stream.malformed && !stream.objects.empty() && stream.objects.back().status &&
+           (*stream.objects.back().status == kStatusEndOfGroup ||
+            *stream.objects.back().status == kStatusEndOfTrack);
 }
 
 // Becomes true once `seen` has held for `window`. The first sighting is
@@ -410,5 +496,7 @@ std::vector<Draft18ContributionProbe> publisher_initiated_probes(std::chrono::mi
 std::vector<Draft18ContributionProbe> object_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 std::vector<Draft18ContributionProbe> goaway_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadline);
+std::vector<Draft18ContributionProbe> closure_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
+std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 
 }  // namespace moq::interop::scenarios::contribution

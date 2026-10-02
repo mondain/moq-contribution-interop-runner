@@ -18,6 +18,8 @@ std::optional<Fixture> fixture_from_transcript(const RawProbeTranscript& transcr
         return Fixture{subscribe->track_namespace.fields, subscribe->track_name.bytes};
     if (const auto* discovery = std::get_if<d18::SubscribeNamespaceMessage>(message))
         return Fixture{discovery->track_namespace_prefix.fields, {std::byte{'x'}}};
+    if (const auto* tracks = std::get_if<d18::SubscribeTracksMessage>(message))
+        return Fixture{tracks->track_namespace_prefix.fields, {std::byte{'x'}}};
     if (const auto* fetch = std::get_if<d18::FetchMessage>(message))
         if (const auto* standalone = std::get_if<d18::StandaloneFetch>(&fetch->fetch))
             return Fixture{standalone->track_namespace.fields, standalone->track_name.bytes};
@@ -42,6 +44,8 @@ std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     append(contribution::object_probes(deadline, fixture));
     append(contribution::goaway_probes(deadline));
     append(contribution::uri_probes(deadline));
+    append(contribution::closure_probes(deadline, fixture));
+    append(contribution::exchange_probes(deadline, fixture));
     return result;
 }
 

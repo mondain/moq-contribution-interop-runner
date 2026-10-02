@@ -8,56 +8,6 @@ constexpr std::uint64_t kPaddingStreamType = 0x132B3E28;
 constexpr std::uint64_t kPropertyImmutable = 0x0B;
 constexpr std::uint64_t kPropertyPriorGroupIdGap = 0x3C;
 constexpr std::uint64_t kPropertyPriorObjectIdGap = 0x3E;
-constexpr std::uint64_t kStatusEndOfGroup = 0x3;
-constexpr std::uint64_t kStatusEndOfTrack = 0x4;
-
-struct SubgroupStream {
-    transport::StreamId id{0};
-    d18::SubgroupHeader header{};
-    std::vector<d18::ObjectEvent> objects;
-    bool fin{false};
-    bool reset{false};
-    bool malformed{false};
-};
-
-std::optional<std::uint64_t> subscription_alias(const RawProbeTranscript& transcript) {
-    const auto reply = write_reply(transcript, 0);
-    if (const auto* ok = subscribe_ok(reply)) return ok->track_alias;
-    return std::nullopt;
-}
-
-// Subgroup streams of the subscription's Track Alias, decoded from the
-// bytes seen before any terminal transport event.
-std::vector<SubgroupStream> subscription_streams(const RawProbeTranscript& transcript, std::uint64_t alias) {
-    std::vector<SubgroupStream> result;
-    for (const auto& [id, stream] : peer_data_streams(transcript)) {
-        d18::SubgroupDecoder decoder;
-        const auto pushed = decoder.push(stream.bytes, stream.fin);
-        if (!pushed.header || pushed.header->track_alias != alias) continue;
-        SubgroupStream entry;
-        entry.id = id;
-        entry.header = *pushed.header;
-        entry.objects = pushed.objects;
-        entry.fin = stream.fin;
-        entry.reset = stream.reset;
-        entry.malformed = pushed.error.has_value();
-        result.push_back(std::move(entry));
-    }
-    return result;
-}
-
-std::vector<d18::ObjectEvent> subscription_datagrams(const RawProbeTranscript& transcript, std::uint64_t alias) {
-    std::vector<d18::ObjectEvent> result;
-    for (const auto& event : transcript.events) {
-        if (terminal(event)) break;
-        const auto* datagram = std::get_if<transport::DatagramEvent>(&event);
-        if (!datagram) continue;
-        const auto decoded = d18::decode_datagram(datagram->data, {});
-        if (const auto* object = std::get_if<d18::ObjectEvent>(&decoded))
-            if (object->track_alias == alias) result.push_back(*object);
-    }
-    return result;
-}
 
 std::vector<d18::ObjectEvent> subscription_objects(const RawProbeTranscript& transcript) {
     std::vector<d18::ObjectEvent> result;
@@ -130,13 +80,6 @@ bool status_object_seen(const RawProbeTranscript& transcript) {
     return false;
 }
 
-// A subgroup that delivered its final Object (End of Group or End of Track)
-// is complete: section 11.4.3 then requires a FIN rather than a reset.
-bool delivered_final_object(const SubgroupStream& stream) {
-    return !stream.malformed && !stream.objects.empty() && stream.objects.back().status &&
-           (*stream.objects.back().status == kStatusEndOfGroup ||
-            *stream.objects.back().status == kStatusEndOfTrack);
-}
 std::optional<bool> complete_subgroup_closed_with_fin(const RawProbeTranscript& transcript, bool) {
     if (!bounded(transcript)) return std::nullopt;
     const auto alias = subscription_alias(transcript);

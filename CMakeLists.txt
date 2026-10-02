@@ -225,7 +225,9 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution_publisher.cpp
     src/scenarios/draft18_contribution_objects.cpp
     src/scenarios/draft18_contribution_goaway.cpp
-    src/scenarios/draft18_contribution_uri.cpp)
+    src/scenarios/draft18_contribution_uri.cpp
+    src/scenarios/draft18_contribution_closure.cpp
+    src/scenarios/draft18_contribution_exchange.cpp)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -499,7 +501,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
         tests/protocol/draft18_contribution_publisher_test.cpp
         tests/protocol/draft18_contribution_objects_test.cpp
         tests/protocol/draft18_contribution_goaway_test.cpp
-        tests/protocol/draft18_contribution_uri_test.cpp)
+        tests/protocol/draft18_contribution_uri_test.cpp
+        tests/protocol/draft18_contribution_closure_test.cpp
+        tests/protocol/draft18_contribution_exchange_test.cpp)
     target_link_libraries(moq-interop-draft18-contribution-tests PRIVATE moq-interop-scenarios
         moq-interop-requirements moq-interop-draft18-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-draft18-contribution-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
