@@ -508,7 +508,15 @@ public:
             if (std::none_of(profiles.begin(), profiles.end(), [id](const auto& profile) {
                     return profile.scenario_id == id;
                 })) return std::nullopt;
-            return scenarios::draft18_close_probe(id, run_config.timeout);
+            std::vector<std::vector<std::byte>> close_namespace;
+            std::vector<std::byte> close_name;
+            if (run_config.track_fixture) {
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    close_namespace.push_back(bytes_of(field));
+                close_name = bytes_of(run_config.track_fixture->track_name);
+            }
+            return scenarios::draft18_close_probe(id, run_config.timeout, std::move(close_namespace),
+                                                  std::move(close_name));
         }
         if (auto value = find(scenarios::draft21_response_probes(run_config.timeout))) return value;
         if (auto value = find(scenarios::draft21_peer_close_probes(run_config.timeout))) return value;

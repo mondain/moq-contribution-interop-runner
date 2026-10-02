@@ -570,6 +570,32 @@ TEST(Draft18CloseEvaluators, RequireExactDeliveredTranscriptAndApplicationCloseC
     }
 }
 
+TEST(Draft18CloseEvaluators, DuplicateRequestIdScoresTheStimulusThatNamedTheConfiguredTrack) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18,root / "docs",root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(source,root / "requirements/draft18.json");
+    const auto definition = scenarios::draft18_close_probe(
+        "receive-duplicate-request-id-across-request-streams",std::chrono::milliseconds(10),
+        {test::probe_bytes({'m','e','d','i','a'})},test::probe_bytes({'v','i','d','e','_','1'}));
+    auto transcript = test::raw_probe_transcript(definition);
+    transcript.events.push_back(transport::PeerCloseEvent{transport::CloseErrorSpace::Application,4,{}});
+    transcript.complete = transcript.stimulus_delivered = true;
+    ScenarioContext context;
+    context.scenario_id = definition.id;
+    context.complete = context.stimulus_delivered = true;
+    context.raw_probe = transcript;
+    const auto evaluate = [&] {
+        return outcome_for(evaluate_draft18(catalog,std::span(&context,1)),"D18-10-1-MUST-002").state;
+    };
+    EXPECT_EQ(evaluate(),OutcomeState::Pass);
+    std::get<transport::PeerCloseEvent>(context.raw_probe->events.back()).error_code = 0;
+    EXPECT_EQ(evaluate(),OutcomeState::Fail);
+    // A stimulus that is not the duplicate-ID SUBSCRIBE is still rejected.
+    context.raw_probe = transcript;
+    context.raw_probe->writes[1].write.bytes.back() = std::byte{1};
+    EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+}
+
 TEST(Draft18RequestEvaluators, CatalogRowsRequireMatchingResponseAfterDelivery) {
     const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
     const auto source = load_draft_source(18, root / "docs", root / "requirements/draft-digests.json");

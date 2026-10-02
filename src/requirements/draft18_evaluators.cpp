@@ -474,7 +474,8 @@ std::vector<Outcome> evaluate_draft18(
                     if ((profile.webtransport_only && !context.webtransport) ||
                         (profile.native_only && context.webtransport)) return std::nullopt;
                     return scenarios::evaluate_raw_probe_close(*context.raw_probe,
-                        scenarios::draft18_close_probe(profile.scenario_id,std::chrono::milliseconds(1)),profile.expected_close);
+                        scenarios::draft18_close_probe_for(profile.scenario_id,*context.raw_probe,
+                            std::chrono::milliseconds(1)),profile.expected_close);
                 });
         } else if (requirement.id == "D18-3-3-MUST-NOT-001" &&
                    std::find(requirement.scenarios.begin(),
