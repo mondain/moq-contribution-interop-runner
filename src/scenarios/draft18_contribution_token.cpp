@@ -56,6 +56,11 @@ Outcome outcome_of(const Reply& reply) {
 // Section 10.2.2: "The receiver of a message containing a well-formed Token structure
 // but otherwise invalid AUTHORIZATION TOKEN parameter MUST reject that message with an
 // MALFORMED_AUTH_TOKEN error."
+// The draft leaves the validity of a Token Value to its Token Type (section 10.2.2), so
+// REQUEST_OK is a violation only if the credential really is invalid for a Token Type the
+// publisher implements. The runner cannot check that: it is the operator's attestation
+// (--invalid-auth-token). A publisher with no validation for the type, or none at all,
+// accepting the request is then the operator's mis-attestation, not evidence by itself.
 std::optional<bool> invalid_token_rejected_as_malformed(const RawProbeTranscript& transcript, bool) {
     if (transcript.writes.empty() || !bounded(transcript)) return std::nullopt;  // no credential configured
     const auto outcome = outcome_of(write_reply(transcript, 0));

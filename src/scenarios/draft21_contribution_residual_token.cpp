@@ -242,6 +242,9 @@ Spec invalid_token_spec() {
             if (frames.empty()) return {view.close().has_value(), std::nullopt};
             // "The receiver of a message containing a well-formed Token structure that is
             // otherwise invalid MUST reject that message with an MALFORMED_AUTH_TOKEN error."
+            // REQUEST_OK is a violation only if the credential really is invalid for a Token Type
+            // the publisher implements; the runner cannot check that, so the verdict rests on the
+            // operator's attestation (--invalid-auth-token), as for draft 18.
             if (frames.front().type == kRequestOk) return {true, false};
             const auto code = request_error_code(frames);
             if (!code) return {true, std::nullopt};

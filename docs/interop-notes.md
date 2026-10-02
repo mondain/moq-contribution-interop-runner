@@ -172,9 +172,20 @@ serving. A liveness check that scores this automatically has not been implemente
   only on the native path and so never closes on WebTransport.
 - Token rows (`D18-10-2-2-MUST-008` and `-010`, `D21-8-9-MUST-270` and `-273`)
   need an operator-supplied credential of a token type the publisher
-  understands. moqxr's help lists `--auth-profile`, `--auth-token-file` and
-  `--auth-token-type`, so these may be runnable with a real credential; that has
-  not been tried.
+  understands, and moqxr 0.4.1 understands none. Its `--auth-profile`,
+  `--auth-token-file`, `--auth-token-type` and `--auth-dpop-*` options only make
+  moqxr present credentials as a client. For tokens it receives, it checks the
+  Token structure (Alias Type and field framing) and then ignores Token Type and
+  Value; it keeps no token cache and has no validation configuration. Run with
+  `--invalid-auth-token 16:deadbeef --expired-auth-token 16:cafebabe` (16 is the
+  type its docs use): `D18-10-2-2-MUST-008` scored FAIL because moqxr answered
+  REQUEST_OK to a SUBSCRIBE_NAMESPACE carrying the credential, but that is not
+  evidence of a violation, since the attestation that the publisher understands
+  the type is false. `D18-10-2-2-MUST-010` stayed `not_run` (the registration was
+  accepted, so the credential was not expired for the publisher). In the
+  draft 21 rows moqxr never answered the TRACK_STATUS and the session ended
+  (`-270` and `-273` stayed `not_run`). Do not supply these credentials for moqxr:
+  the four rows are not scoreable against it and are reported as `not_run`.
 
 ## Limitations recorded for moqxr
 
