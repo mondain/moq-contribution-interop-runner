@@ -229,5 +229,37 @@ TEST(RawProbeCourtesy, AnswersUpdatesInOrderAndHoldsAliasUsesBack) {
     EXPECT_EQ(plain.transport.writes[4].data, oks(2));
 }
 
+TEST(RawProbeCourtesy, AHostilePublisherFloodingFramesStaysBounded) {
+    RawProbeCourtesy accept;
+    accept.publish = RawProbePublishResponse::Accept;
+    accept.update = RawProbeUpdateResponse::Accept;
+    // One stream carrying thousands of minimal frames.
+    Harness single(accept);
+    single.feed(data(4, publish(2)));
+    Bytes flood;
+    for (int index = 0; index < 5000; ++index) {
+        const auto one = request_update();
+        flood.insert(flood.end(), one.begin(), one.end());
+    }
+    single.feed(data(4, flood));
+    const auto& transcript = single.poll();
+    EXPECT_LE(transcript.courtesy_writes.size(), 256u);
+    EXPECT_LE(single.transport.writes[4].data.size(), 256u * kOk.size());
+    EXPECT_FALSE(transcript.harness_failed);
+
+    // Many streams, each under its own per-stream bound, share one budget.
+    Harness many(accept);
+    for (transport::StreamId stream = 0; stream < 64 * 4; stream += 4) {
+        many.feed(data(stream, publish(2)));
+        Bytes updates;
+        for (int index = 0; index < 100; ++index) {
+            const auto one = request_update();
+            updates.insert(updates.end(), one.begin(), one.end());
+        }
+        many.feed(data(stream, updates));
+    }
+    EXPECT_LE(many.poll().courtesy_writes.size(), 256u);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

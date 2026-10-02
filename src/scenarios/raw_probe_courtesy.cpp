@@ -95,6 +95,10 @@ void PublisherCourtesy::on_event(const transport::TransportEvent& event) {
 
 void PublisherCourtesy::enqueue(Stream& stream, Bytes bytes, bool fin, RawProbeCourtesyKind kind,
                                 RawProbeClock::time_point release) {
+    // A hostile publisher can send tiny frames without end; past the budget
+    // the runner stops volunteering responses.
+    if (responses_enqueued_ >= kMaximumResponses) return;
+    ++responses_enqueued_;
     // Responses on one request stream leave in order, so a held one holds the rest.
     if (!stream.queue.empty()) release = std::max(release, stream.queue.back().release);
     Response response;
@@ -108,6 +112,11 @@ void PublisherCourtesy::enqueue(Stream& stream, Bytes bytes, bool fin, RawProbeC
 void PublisherCourtesy::parse(transport::StreamId id, Stream& stream) {
     static const Bytes ok{std::byte{7}, std::byte{0}, std::byte{1}, std::byte{0}};
     while (stream.consumed < stream.bytes.size()) {
+        if (frames_parsed_ >= kMaximumFrames) {
+            // Nothing past the frame budget is parsed or answered.
+            stream.consumed = stream.bytes.size();
+            return;
+        }
         wire::Cursor cursor(std::span<const std::byte>(stream.bytes).subspan(stream.consumed));
         const auto type = vi(cursor);
         if (!type) return;
@@ -121,6 +130,7 @@ void PublisherCourtesy::parse(transport::StreamId id, Stream& stream) {
         if (!span) return;
         const Bytes frame_body(span->begin(), span->end());
         stream.consumed += cursor.offset();
+        ++frames_parsed_;
         const bool first = stream.frames++ == 0;
 
         bool alias_use = false;

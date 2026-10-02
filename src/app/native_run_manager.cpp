@@ -949,6 +949,8 @@ public:
         append_write(transcript.setup);
         for (const auto& write : transcript.writes) append_write(write);
         store->append_events(worker->id,std::span(&stimulus,1));
+        std::vector<storage::EvidenceEvent> courtesy_events;
+        courtesy_events.reserve(transcript.courtesy_writes.size());
         for (const auto& courtesy : transcript.courtesy_writes) {
             // Responses the runner volunteered to requests the publisher opened;
             // they are context for the transcript, not part of the stimulus proof.
@@ -961,8 +963,9 @@ public:
             else if (courtesy.kind == scenarios::RawProbeCourtesyKind::UpdateOk) kind = "update_ok";
             event.detail = std::string("courtesy=") + kind + " accepted_event_count=" +
                 std::to_string(courtesy.event_count) + " ordinal=" + std::to_string(worker->context_ordinal);
-            store->append_events(worker->id, std::span(&event, 1));
+            courtesy_events.push_back(std::move(event));
         }
+        if (!courtesy_events.empty()) store->append_events(worker->id, courtesy_events);
         if (run_config.draft == DraftVersion::Draft18 &&
             scenarios::draft18_contribution_scenario(transcript.scenario_id)) {
             storage::EvidenceEvent uri = stimulus;

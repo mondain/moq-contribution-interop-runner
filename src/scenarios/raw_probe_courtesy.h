@@ -54,6 +54,12 @@ private:
                  RawProbeClock::time_point release);
     void note_alias(std::uint64_t alias);
 
+    // Per-controller budgets on frames parsed and responses queued.
+    static constexpr std::size_t kMaximumFrames = 256;
+    static constexpr std::size_t kMaximumResponses = 256;
+    std::size_t frames_parsed_{0};
+    std::size_t responses_enqueued_{0};
+
     RawProbeCourtesy policy_;
     std::map<transport::StreamId, Stream> streams_;
     std::map<transport::StreamId, std::vector<std::byte>> data_prefixes_;
