@@ -221,6 +221,37 @@ delivery ordering, and the peer's close code and error space.
   (`D21-9-2-MUST-318`) are publisher-initiated.
 - The replacement-session scenarios are covered under "Ports and listeners".
 
+### Close probes and the liveness follow-up
+
+Most `receive-*` and `d21-*` probes send input after which the draft says the
+publisher MUST close the session (or MUST close with a given code). A publisher
+that closes with the required code passes. A publisher that stays silent used to
+leave the row `NOT_RUN`, because silence alone does not show that the publisher
+saw the input. For the scenarios listed in `src/scenarios/raw_probe_liveness.cpp`
+(control-stream GOAWAY, malformed server SETUP including AUTHORITY and PATH,
+malformed requests and parameters, the duplicate GOAWAY on one request stream) the
+runner now sends one more thing: after the input was fully written and the
+publisher's SETUP seen, it waits 500 ms, opens a new request stream and sends a
+valid, parameter-free SUBSCRIBE for the `track` fixture (Request ID 7). If the
+publisher answers it with a well-formed SUBSCRIBE_OK, and does not close the
+session at any point up to 500 ms after that answer, the publisher demonstrably
+kept serving instead of closing and the row is `FAIL`.
+
+The follow-up never produces a pass. Any close of the session ends the claim and
+the existing close rules apply unchanged. A REQUEST_ERROR, a reset or no answer
+leaves the row `NOT_RUN`: a refusal proves the session is open but can be a
+conforming reaction (a publisher may refuse new requests after a GOAWAY, or may
+not have the track). The follow-up is recorded as a separate
+`raw_probe_liveness_followup` event; the stimulus bytes and their proof are
+unchanged. Without a `track` the follow-up is not sent.
+
+Not covered, deliberately: probes that send a datagram (a lost datagram is
+indistinguishable from an ignored one), rows that only say SHOULD, the duplicate
+Request ID rows (the first request may be refused before its ID is recorded),
+Subgroup header probes (a publisher with no subscription may not parse data
+streams), multi-step probes gated on an earlier response, and probes where the
+runner answers a request the publisher opened.
+
 ### Namespaces, reserved names and publisher announcements
 
 - `d21-publisher-request-stream-placement` accepts the publisher's PUBLISH for the
