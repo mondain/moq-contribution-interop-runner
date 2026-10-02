@@ -1,5 +1,6 @@
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
+#include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/wire/draft21/setup.h"
 #include "moq/interop/wire/draft21/publish.h"
 #include "moq/interop/wire/draft21/location_filter.h"
@@ -511,7 +512,10 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     };
     result.back().definition.writes.push_back(std::move(notify));
 
-    for (auto& probe : result) probe.definition.deadline = deadline;
+    for (auto& probe : result) {
+        probe.definition.deadline = deadline;
+        apply_liveness_policy(probe.definition, 21);
+    }
 
     return result;
 }

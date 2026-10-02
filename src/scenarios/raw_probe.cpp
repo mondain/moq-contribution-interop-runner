@@ -1,6 +1,7 @@
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/draft18/messages.h"
 #include "moq/interop/wire/draft21/request_ok.h"
+#include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "raw_probe_courtesy.h"
 #include <algorithm>
 #include <stdexcept>
@@ -239,6 +240,15 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
              return write.channel == RawProbeChannel::PeerBidi;
          })))
         throw std::invalid_argument("invalid raw probe definition");
+    if (definition_.liveness) {
+        const auto& policy = *definition_.liveness;
+        // An unbound policy (no request yet) is allowed: it simply never sends.
+        if ((policy.draft != 18 && policy.draft != 21) || policy.delay.count() < 0 ||
+            policy.delay.count() > 60000 || policy.grace.count() < 0 || policy.grace.count() > 60000 ||
+            !liveness_definition_eligible(definition_) ||
+            (!policy.request.empty() && !liveness_request_valid(policy)))
+            throw std::invalid_argument("invalid raw probe liveness follow-up");
+    }
     transcript_.scenario_id = definition_.id;
     const auto& courtesy = definition_.courtesy;
     if (courtesy.publish != RawProbePublishResponse::Ignore ||
@@ -572,13 +582,17 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         for (const auto& write : courtesy_->step(transport_, now, transcript_.events.size()))
             transcript_.courtesy_writes.push_back(write);
     if (!transcript_.harness_failed && !session_closed_) send();
+    step_liveness(now);
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {
         transcript_.complete = true;
         return transcript_;
     }
     const auto timeout_start = delivered_at_.value_or(*started_at_);
-    if (!transcript_.complete && now - timeout_start >= definition_.deadline)
+    // A follow-up needs its delay and grace on top of the time to react.
+    const auto follow_up = definition_.liveness && !definition_.liveness->request.empty()
+        ? definition_.liveness->delay + definition_.liveness->grace : std::chrono::milliseconds{0};
+    if (!transcript_.complete && now - timeout_start >= definition_.deadline + follow_up)
         transcript_.timed_out = true;
     return transcript_;
 }
@@ -819,6 +833,63 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
     return setup_before(transcript,definition,*transcript.delivery_event_count);
 }
 
+bool raw_probe_liveness_proven(const RawProbeTranscript& transcript,
+                              const RawProbeDefinition& definition) {
+    if (!definition.liveness || !transcript.liveness || !liveness_definition_eligible(definition) ||
+        !raw_probe_stimulus_valid(transcript, definition)) return false;
+    const auto& policy = *definition.liveness;
+    const auto& record = *transcript.liveness;
+    const auto& write = record.write;
+    // The follow-up is the policy's own request, exactly as a SUBSCRIBE for some track.
+    RawProbeLiveness sent = policy;
+    sent.request = write.write.bytes;
+    if (!liveness_request_valid(sent) || (!policy.request.empty() && policy.request != write.write.bytes) ||
+        write.write.channel != RawProbeChannel::NewBidi || write.write.fin ||
+        write.write.operation != RawProbeOperation::Write || write.write.reuse_write_stream ||
+        write.write.peer_response_ready || write.write.evidence_ready || write.write.prepare_bytes ||
+        write.write.select_peer_stream || write.write.delay_after_previous.count() != 0 ||
+        !write.stream_id || (*write.stream_id & 3u) != 1u || write.accepted != write.write.bytes.size() ||
+        write.fin_accepted || write.operation_accepted || write.prepared_event_count ||
+        !write.delivery_event_count || !write.accepted_at || !record.anchor_at ||
+        !record.answered_at || !record.settled_at) return false;
+    // A fresh stream, used for nothing else.
+    if (*write.stream_id == transcript.setup.stream_id) return false;
+    for (const auto& earlier : transcript.writes)
+        if (earlier.stream_id == write.stream_id) return false;
+    const auto stimulus_end = *transcript.delivery_event_count;
+    if (record.anchor_event_count < stimulus_end || record.anchor_event_count > transcript.events.size() ||
+        *write.delivery_event_count < record.anchor_event_count ||
+        *write.delivery_event_count > transcript.events.size()) return false;
+    // The publisher's SETUP had arrived when the delay started.
+    bool connection = false;
+    bool setup = false;
+    std::map<transport::StreamId, std::vector<std::byte>> candidates;
+    for (std::size_t i = 0; i < record.anchor_event_count && !setup; ++i) {
+        const auto& event = transcript.events[i];
+        if (std::holds_alternative<transport::ConnectionEstablishedEvent>(event)) connection = true;
+        if (const auto* data = std::get_if<transport::StreamDataEvent>(&event);
+            data && connection && (data->stream_id & 3u) == 2u) {
+            auto& candidate = candidates[data->stream_id];
+            candidate.insert(candidate.end(), data->data.begin(), data->data.end());
+            setup = definition.peer_setup_ready && definition.peer_setup_ready(candidate);
+        }
+    }
+    if (!setup) return false;
+    // Delay measured from the later of the stimulus and the SETUP; grace after the answer.
+    auto last_stimulus = transcript.setup.accepted_at;
+    for (const auto& earlier : transcript.writes)
+        if (earlier.accepted_at && (!last_stimulus || *earlier.accepted_at > *last_stimulus))
+            last_stimulus = earlier.accepted_at;
+    if (!last_stimulus || *record.anchor_at < *last_stimulus ||
+        *write.accepted_at - *record.anchor_at < policy.delay ||
+        *record.answered_at < *write.accepted_at ||
+        *record.settled_at - *record.answered_at < policy.grace) return false;
+    // No close of any kind, and a SUBSCRIBE_OK on the follow-up stream.
+    for (const auto& event : transcript.events)
+        if (std::holds_alternative<transport::PeerCloseEvent>(event)) return false;
+    return liveness_answer(transcript, policy.draft) == LivenessAnswer::Serving;
+}
+
 std::optional<bool> evaluate_raw_probe_close(const RawProbeTranscript& transcript,
                                            const RawProbeDefinition& definition,
                                            std::optional<std::uint64_t> expected_close) {
@@ -829,6 +900,9 @@ std::optional<bool> evaluate_raw_probe_close(const RawProbeTranscript& transcrip
             return !expected_close || close->error_code == *expected_close;
         }
     }
+    // No close. The publisher stayed silent (unscored) unless it demonstrably kept
+    // serving a request made after input that required it to close.
+    if (raw_probe_liveness_proven(transcript, definition)) return false;
     return std::nullopt;
 }
 }  // namespace moq::interop::scenarios

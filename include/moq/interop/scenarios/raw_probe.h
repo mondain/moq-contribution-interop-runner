@@ -83,6 +83,27 @@ struct RawProbeCourtesyWrite {
     std::size_t event_count{0};
     RawProbeCourtesyKind kind{RawProbeCourtesyKind::PublishOk};
 };
+// A valid follow-up request sent after the stimulus, to show that the publisher
+// kept serving. See src/scenarios/raw_probe_liveness.cpp for the soundness
+// argument, which restricts where this may be enabled. It is never part of the
+// stimulus: it is recorded separately (RawProbeTranscript::liveness) and
+// validated separately (raw_probe_liveness_proven).
+struct RawProbeLiveness {
+    // Selects how the answer is recognised (18 or 21).
+    unsigned draft{0};
+    // The follow-up goes out this long after the stimulus was fully accepted and
+    // the publisher's SETUP was seen, so the publisher has had time to act on it.
+    std::chrono::milliseconds delay{500};
+    // The probe stays open this long after the answer, so a close that trails
+    // the answer is still observed (and then no failure is claimed).
+    std::chrono::milliseconds grace{500};
+    // Request ID of the follow-up: odd (a server-side request), above every
+    // Request ID any opted-in stimulus uses.
+    std::uint64_t request_id{7};
+    // A complete SUBSCRIBE for the configured track fixture. Empty until bound;
+    // an unbound definition never sends a follow-up and so never scores one.
+    std::vector<std::byte> request;
+};
 struct RawProbeDefinition {
     std::string id;
     std::vector<std::byte> setup_bytes;
@@ -158,6 +179,8 @@ struct RawProbeDefinition {
     // The scenario withholds or rejects what the publisher asked for, so a publisher
     // that then exits with an error is part of what was observed, not a broken run.
     bool publisher_exit_is_evidence{false};
+    // Opt-in liveness follow-up (see RawProbeLiveness).
+    std::optional<RawProbeLiveness> liveness{};
 };
 struct RawProbeAutoReply {
     transport::StreamId stream_id{0};
@@ -190,8 +213,23 @@ struct RawProbeAcknowledgement {
     // Transport events observed when the answer was fully accepted.
     std::size_t event_count{0};
 };
+// The liveness follow-up as the controller sent it.
+struct RawProbeLivenessRecord {
+    // The follow-up request on a stream opened after the stimulus.
+    RawProbeAcceptedWrite write;
+    // The instant the delay was measured from, and the transport event count then:
+    // the later of the stimulus being fully accepted and the publisher's SETUP
+    // being seen.
+    std::optional<RawProbeClock::time_point> anchor_at;
+    std::size_t anchor_event_count{0};
+    // First poll that saw a well-formed SUBSCRIBE_OK on the follow-up stream, and
+    // the poll that ended the grace period after it.
+    std::optional<RawProbeClock::time_point> answered_at;
+    std::optional<RawProbeClock::time_point> settled_at;
+};
 struct RawProbeTranscript {
     std::string scenario_id;
+    std::optional<RawProbeLivenessRecord> liveness;
     std::vector<RawProbeAcknowledgement> acknowledgements;
     RawProbeAcceptedWrite setup;
     std::vector<RawProbeAcceptedWrite> writes;
@@ -239,6 +277,11 @@ enum class DefaultNamespaceAnswer {
 DefaultNamespaceAnswer apply_default_namespace_answer(RawProbeDefinition& definition, unsigned draft);
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
+// True only when the definition opted into a liveness follow-up and the
+// transcript proves, on wire evidence, that the publisher answered it with a
+// SUBSCRIBE_OK and never closed the session. Never true after a peer close.
+bool raw_probe_liveness_proven(const RawProbeTranscript& transcript,
+                              const RawProbeDefinition& definition);
 std::optional<bool> evaluate_raw_probe_close(
     const RawProbeTranscript& transcript, const RawProbeDefinition& definition,
     std::optional<std::uint64_t> expected_close);
@@ -276,8 +319,11 @@ private:
     std::map<transport::StreamId, std::vector<std::byte>> acknowledgement_candidates_;
     std::set<transport::StreamId> acknowledgement_pending_;
     std::set<transport::StreamId> acknowledged_;
+    void step_liveness(RawProbeClock::time_point now);
     void acknowledge_publisher_namespaces();
     bool acknowledgement_excluded(transport::StreamId id, std::span<const std::byte> request) const;
+    std::optional<RawProbeClock::time_point> peer_setup_at_;
+    bool liveness_abandoned_{false};
     std::optional<RawProbeClock::time_point> delivered_at_;
     std::optional<RawProbeClock::time_point> started_at_;
     std::size_t next_write_{0};

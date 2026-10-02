@@ -25,6 +25,7 @@
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/scenarios/request_goaway.h"
+#include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
 #include "moq/interop/scenarios/draft21_request.h"
@@ -471,6 +472,13 @@ public:
         auto definition = resolve_raw_probe_definition(run_config, id);
         if (definition)
             scenarios::apply_default_namespace_answer(*definition, static_cast<unsigned>(run_config.draft));
+        // A definition that opted into a liveness follow-up asks for the track fixture.
+        if (definition && definition->liveness && run_config.track_fixture) {
+            std::vector<std::vector<std::byte>> name_space;
+            for (const auto& field : run_config.track_fixture->namespace_fields)
+                name_space.push_back(bytes_of(field));
+            scenarios::bind_liveness_track(*definition, name_space, bytes_of(run_config.track_fixture->track_name));
+        }
         return definition;
     }
 
@@ -967,6 +975,20 @@ public:
         append_write(transcript.setup);
         for (const auto& write : transcript.writes) append_write(write);
         store->append_events(worker->id,std::span(&stimulus,1));
+        if (transcript.liveness) {
+            // The follow-up is recorded beside the stimulus, never as part of it.
+            storage::EvidenceEvent follow_up = stimulus;
+            follow_up.kind = "raw_probe_liveness_followup";
+            follow_up.detail = "ordinal=" + std::to_string(worker->context_ordinal) +
+                " stream=" + (transcript.liveness->write.stream_id ? std::to_string(*transcript.liveness->write.stream_id) : "none") +
+                " accepted=" + std::to_string(transcript.liveness->write.accepted) +
+                " accepted_event_count=" + (transcript.liveness->write.delivery_event_count
+                    ? std::to_string(*transcript.liveness->write.delivery_event_count) : "none") +
+                " anchor_event_count=" + std::to_string(transcript.liveness->anchor_event_count) +
+                " answered=" + (transcript.liveness->answered_at ? "true" : "false") +
+                " bytes=" + hex_bytes(transcript.liveness->write.write.bytes);
+            store->append_events(worker->id,std::span(&follow_up,1));
+        }
         std::vector<storage::EvidenceEvent> courtesy_events;
         courtesy_events.reserve(transcript.courtesy_writes.size());
         for (const auto& courtesy : transcript.courtesy_writes) {
