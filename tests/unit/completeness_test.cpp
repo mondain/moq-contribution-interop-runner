@@ -138,7 +138,7 @@ TEST(CompletenessTest, ReportsRequiredRowCompletionForBothDrafts) {
         EXPECT_EQ(report.required_total, expected_required);
         // Both drafts reach required-row completion: every required row has a binding, so
         // losing a binding (or a scenario registration) fails here.
-        EXPECT_EQ(report.required_total, draft == 18 ? 171u : 174u);
+        EXPECT_EQ(report.required_total, draft == 18 ? 173u : 174u);
         EXPECT_EQ(report.required_covered, report.required_total);
         EXPECT_TRUE(report.complete());
         const auto blocking = static_cast<std::size_t>(std::count_if(

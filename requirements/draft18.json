@@ -5356,10 +5356,14 @@
       "actor": "endpoint",
       "summary": "Reject a structurally well-formed but otherwise invalid AUTHORIZATION TOKEN parameter with MALFORMED_AUTH_TOKEN.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Whether a structurally well-formed token is otherwise invalid (draft lines 3168-3169) depends on the semantics of its Token Type, and draft 18 defines no token type: Table 12 (lines 6580-6588) lists only reserved type 0 and the greasing codes, and lines 3153-3155 leave type 0 to out-of-band negotiation. The invalidity precondition is therefore not a protocol-level fact the runner can establish, even with a cooperating publisher, so a REQUEST_ERROR code or an acceptance cannot be attributed to a token being invalid."
+      "testability": "Testable",
+      "scenarios": [
+        "receive-well-formed-token-with-invalid-known-type-value"
+      ],
+      "evaluators": [
+        "request-error-malformed-auth-token"
+      ],
+      "rationale": "Testable only with an operator-supplied credential: draft 18 defines no Token Type (Table 12, lines 6580-6588; type 0 is negotiated out of band, lines 3153-3155), so the runner cannot mint an invalid token itself. With --invalid-auth-token TYPE:HEX naming a Token Type the publisher under test understands, the scenario sends that credential as a well-formed USE_VALUE Token and requires a REQUEST_ERROR of MALFORMED_AUTH_TOKEN (0x4); acceptance or any other error code fails. Without the credential, NOT_SUPPORTED (the Type is not understood), silence or a close, the row stays NOT_RUN."
     },
     {
       "id": "D18-10-2-2-MUST-009",
@@ -5414,10 +5418,14 @@
       "actor": "endpoint",
       "summary": "Retain a registered Alias after detecting token expiration until the sender deletes it.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Token expiration (draft lines 3198-3202) is defined by the Token Type's own payload and clock, and draft 18 defines no token type (Table 12, lines 6580-6588; type 0 is negotiated out of band, lines 3153-3155). The runner can neither mint a token that expires at a known time nor learn when the receiver detects expiry, and the retained alias is internal state; the only wire trace, EXPIRED_AUTH_TOKEN on a later USE_ALIAS, cannot be tied to the retained alias without the type's expiry semantics, even with a cooperating publisher."
+      "testability": "Testable",
+      "scenarios": [
+        "register-token-expire-then-use-alias-before-delete"
+      ],
+      "evaluators": [
+        "expired-alias-rejected-as-expired-not-unknown"
+      ],
+      "rationale": "Testable only with an operator-supplied credential: draft 18 defines no Token Type (Table 12, lines 6580-6588; type 0 is negotiated out of band, lines 3153-3155), so the runner cannot mint an expired token itself. With --expired-auth-token TYPE:HEX naming a Token Type the publisher under test understands, the scenario registers it under an Alias (the registration must itself fail with EXPIRED_AUTH_TOKEN, 0x5, which shows the credential is expired), then sends USE_ALIAS, which must fail with EXPIRED_AUTH_TOKEN rather than an unknown-alias error, and registers the Alias again, which must close the Session with DUPLICATE_AUTH_TOKEN_ALIAS while the Alias is retained. Without the credential, a publisher that does not register or does not treat the credential as expired, silence or a timeout, the row stays NOT_RUN."
     },
     {
       "id": "D18-10-2-2-MAY-003",

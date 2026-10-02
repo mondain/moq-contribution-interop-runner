@@ -2,6 +2,7 @@
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/storage/run_store.h"
+#include "moq/interop/wire/draft18/messages.h"
 #include "support/picoquic_client.h"
 
 #include <gtest/gtest.h>
@@ -140,6 +141,113 @@ TEST(Draft18ContributionLive, RunsSetupUriAndSurvivalContextsThroughTheRunManage
                event.detail.find("connection_uri=moqt://127.0.0.1:" + std::to_string(port) + "/moq?interop=1") !=
                    std::string::npos;
     }));
+}
+
+Bytes request_error(std::uint64_t code) {
+    wire::ByteWriter out(64);
+    EXPECT_TRUE(wire::draft18::encode_message(
+        wire::draft18::RequestErrorMessage{code, 0, {}, std::nullopt}, out).has_value());
+    return {out.bytes().begin(), out.bytes().end()};
+}
+
+struct TokenRun {
+    std::shared_ptr<storage::SqliteRunStore> store;
+    storage::RunRecord record;
+};
+
+// Plays a publisher that answers the section 10.2.2 token scenarios with `script`,
+// run through the real run manager with the operator's credentials configured.
+template <class Script>
+TokenRun run_token_scenario(const std::string& scenario, bool with_credentials, Script script) {
+    const auto draft18 = load_catalog(18);
+    const auto draft21 = load_catalog(21);
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    app::NativeRunManagerConfig config{.bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+         .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+         .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+         .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"};
+    if (with_credentials) {
+        config.invalid_auth_token = scenarios::Draft21TokenCredential{4, text("bad")};
+        config.expired_auth_token = scenarios::Draft21TokenCredential{4, text("old")};
+    }
+    app::NativeRunManager manager(draft18, draft21, store, config);
+    const auto started = manager.start({app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {scenario}, std::chrono::milliseconds(1500),
+        app::TrackFixture{{"n"}, "t"}});
+    EXPECT_EQ(started.status, app::RunStartStatus::Started);
+    if (started.status != app::RunStartStatus::Started) return {store, {}};
+    EXPECT_TRUE(wait_for([&] { return context_ready(store->load(started.id), scenario, 1); }));
+    auto client = Client::create({.port = started.endpoint.port, .alpn = text("moqt-18")});
+    EXPECT_NE(client, nullptr);
+    if (!client) return {store, {}};
+    EXPECT_TRUE(pump_until(*client, [&] { const auto s = client->stream(3); return s && s->data.size() >= 4; }));
+    EXPECT_TRUE(client->send_stream(2, bytes({0xaf, 0, 0, 0}), false));
+    script(*client);
+    EXPECT_TRUE(wait_for([&] {
+        client->pump();
+        return store->load(started.id).state == storage::RunState::Finalized;
+    }, std::chrono::seconds(5)));
+    return {store, store->load(started.id)};
+}
+
+bool answered_on(Client& client, std::uint64_t stream, std::uint64_t code) {
+    if (!pump_until(client, [&] { const auto s = client.stream(stream); return s && !s->data.empty(); })) return false;
+    return client.send_stream(stream, request_error(code), true);
+}
+
+TEST(Draft18ContributionLive, InvalidTokenScoresOnlyWithAConfiguredCredential) {
+    const std::string scenario = "receive-well-formed-token-with-invalid-known-type-value";
+    // MALFORMED_AUTH_TOKEN passes; any other rejection fails.
+    for (const auto& [code, expected] : {std::pair{std::uint64_t{0x4}, requirements::OutcomeState::Pass},
+                                         std::pair{std::uint64_t{0x1}, requirements::OutcomeState::Fail},
+                                         std::pair{std::uint64_t{0x3}, requirements::OutcomeState::NotRun}}) {
+        SCOPED_TRACE(code);
+        const auto result = run_token_scenario(scenario, true, [&](Client& client) {
+            EXPECT_TRUE(answered_on(client, 1, code));
+        });
+        ASSERT_EQ(result.record.state, storage::RunState::Finalized);
+        EXPECT_EQ(outcome_of(result.record, "D18-10-2-2-MUST-008"), expected);
+        EXPECT_EQ(outcome_of(result.record, "D18-10-2-2-MUST-010"), requirements::OutcomeState::NotRun);
+    }
+    // Without the credential the runner sends nothing: the publisher sees no request and the row is unscored.
+    const auto without = run_token_scenario(scenario, false, [](Client& client) {
+        for (int i = 0; i < 50; ++i) { client.pump(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        EXPECT_FALSE(client.stream(1).has_value() && !client.stream(1)->data.empty());
+    });
+    ASSERT_EQ(without.record.state, storage::RunState::Finalized);
+    EXPECT_EQ(outcome_of(without.record, "D18-10-2-2-MUST-008"), requirements::OutcomeState::NotRun);
+}
+
+TEST(Draft18ContributionLive, ExpiredTokenAliasPassesWhenRetainedAndFailsWhenForgotten) {
+    const std::string scenario = "register-token-expire-then-use-alias-before-delete";
+    // Retained: both requests fail as expired and registering the Alias again ends the Session
+    // with DUPLICATE_AUTH_TOKEN_ALIAS (0x14).
+    const auto retained = run_token_scenario(scenario, true, [](Client& client) {
+        EXPECT_TRUE(answered_on(client, 1, 0x5));
+        EXPECT_TRUE(answered_on(client, 5, 0x5));
+        ASSERT_TRUE(pump_until(client, [&] { const auto s = client.stream(9); return s && !s->data.empty(); }));
+        EXPECT_TRUE(client.close(0x14, {}));
+    });
+    ASSERT_EQ(retained.record.state, storage::RunState::Finalized);
+    EXPECT_EQ(outcome_of(retained.record, "D18-10-2-2-MUST-010"), requirements::OutcomeState::Pass);
+    EXPECT_EQ(outcome_of(retained.record, "D18-10-2-2-MUST-008"), requirements::OutcomeState::NotRun);
+    // Forgotten: the USE_ALIAS fails with something other than EXPIRED_AUTH_TOKEN.
+    const auto forgotten = run_token_scenario(scenario, true, [](Client& client) {
+        EXPECT_TRUE(answered_on(client, 1, 0x5));
+        EXPECT_TRUE(answered_on(client, 5, 0x1));
+        ASSERT_TRUE(pump_until(client, [&] { const auto s = client.stream(9); return s && !s->data.empty(); }));
+        EXPECT_TRUE(answered_on(client, 9, 0x5));
+    });
+    ASSERT_EQ(forgotten.record.state, storage::RunState::Finalized);
+    EXPECT_EQ(outcome_of(forgotten.record, "D18-10-2-2-MUST-010"), requirements::OutcomeState::Fail);
+    // A registration that is not rejected as expired leaves the credential unproven.
+    const auto unproven = run_token_scenario(scenario, true, [](Client& client) {
+        EXPECT_TRUE(answered_on(client, 1, 0x3));
+        EXPECT_TRUE(answered_on(client, 5, 0x3));
+        EXPECT_TRUE(answered_on(client, 9, 0x3));
+    });
+    ASSERT_EQ(unproven.record.state, storage::RunState::Finalized);
+    EXPECT_EQ(outcome_of(unproven.record, "D18-10-2-2-MUST-010"), requirements::OutcomeState::NotRun);
 }
 
 }  // namespace
