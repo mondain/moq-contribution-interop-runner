@@ -207,11 +207,13 @@ static completeness gate. Add `--format json` for sorted per-requirement finding
 draft digest and source revision, executable coverage counts, and residual
 `not_testable`/`not_applicable` rows with reasons and draft citations. Exit
 status 0 means the source and required evaluator/scenario/evidence registry
-checks pass; status 1 means the draft is not yet executable-complete, which
-is expected for the current narrow profiles. As of this checkpoint, only
-160/172 draft-18 and 141/175 draft-21 applicable, testable MUST/MUST NOT rows
-have executable bindings for every named scenario and evaluator. Partially
-registered families remain incomplete. A registered binding is a static gate,
+checks pass; status 1 means the draft is not yet executable-complete. As of
+this checkpoint every applicable, testable MUST/MUST NOT row has an executable
+binding for its named scenarios and evaluators: 171/171 for draft 18 and
+174/174 for draft 21, so the static gate passes for both. Five rows were
+reclassified `not_testable` with draft citations (four in draft 18, one in
+draft 21); optional SHOULD/MAY rows remain largely unbound (1/90 and 1/97) and
+appear as non-blocking findings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
 Raw runs collect independent sessions before evaluating the full catalog once.
 Every named context remains required; outcomes from separate runs are not merged.
@@ -666,8 +668,8 @@ current source revision. Native tests, focused ASan/UBSan tests, and bounded
 libFuzzer smoke tests run in either mode. The manually dispatched `Draft release
 audit` workflow builds a pinned moqxr checkout and source-matched image, retains
 the same evidence, and fails until every required stage and static gate passes.
-The gate is intentionally failing now because both draft catalogs still lack
-many evaluators. Local audits require Clang with libFuzzer and `timeout`.
+The required-row static gate now passes for both drafts; the release audit still
+fails until every required stage, including live matrix stages, passes. Local audits require Clang with libFuzzer and `timeout`.
 
 To launch a publisher automatically, configure a trusted executable adapter
 at runner startup and set the run request's `mode` to `"driven"`. The runner

@@ -633,14 +633,17 @@ contract without changes to protocol or evaluator code.
 
 ## Implementation Status
 
-As of 2026-10-01, executable bindings exist for 160 of 172 draft-18 and 141 of
-175 draft-21 applicable, testable MUST/MUST NOT rows. The static completeness
-gate therefore still fails for both drafts, and optional-row coverage is 1/90
-and 1/97. Remaining required rows need stimuli the runner cannot induce
-(publisher-initiated messages, transport credit control, configured
-credentials) or observations the protocol boundary does not expose; each is
-reported with a draft citation and reason by `moq-interop-audit`. A binding is
-a static gate, not proof of publisher behavior.
+As of 2026-10-01, every applicable, testable MUST/MUST NOT row has an
+executable scenario and evaluator binding: 171 of 171 for draft 18 and 174 of
+174 for draft 21. Five rows were reclassified `not_testable` because the
+behavior cannot be observed or expressed on the wire even from a cooperating
+publisher; each carries a draft citation in the catalog. The static
+completeness gate therefore passes for both drafts. Optional-row coverage is
+1/90 and 1/97 and appears as non-blocking findings. A binding is a static
+gate, not proof of publisher behavior: many scenarios can only pass on
+positive wire evidence and stay `NOT_RUN` when the publisher never produces
+the behavior. Live results against `moqxr` are reported per row and are never
+used to define expected behavior.
 
 ## Delivery Milestones
 

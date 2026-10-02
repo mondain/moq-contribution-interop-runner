@@ -1,6 +1,6 @@
 # Draft Completeness Audit Implementation Plan
 
-Status (2026-10-01): Tasks 1 and 4 done. Tasks 2-3 are partly delivered (execution audit, release matrix) but the static gate still fails (113 draft-18 and 130 draft-21 findings), so they stay unchecked.
+Status (2026-10-01): Tasks 1 and 4 done. Tasks 2-3 are partly delivered (execution audit, release matrix) and the required-row static gate now passes for both drafts (optional rows remain non-blocking findings), so they stay unchecked.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
