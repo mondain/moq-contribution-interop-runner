@@ -209,9 +209,9 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete. As of
 this checkpoint every applicable, testable MUST/MUST NOT row has an executable
-binding for its named scenarios and evaluators: 171/171 for draft 18 and
-174/174 for draft 21, so the static gate passes for both. Five rows were
-reclassified `not_testable` with draft citations (four in draft 18, one in
+binding for its named scenarios and evaluators: 173/173 for draft 18 and
+174/174 for draft 21, so the static gate passes for both. Three rows were
+reclassified `not_testable` with draft citations (two in draft 18, one in
 draft 21); optional SHOULD/MAY rows remain largely unbound (1/90 and 1/97) and
 appear as non-blocking findings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
@@ -413,10 +413,30 @@ precondition or an undecodable reset code leave the row `NOT_RUN`.
   not failed (`D18-10-4-MUST-004`). A runner started with a single publisher port
   rejects this scenario with `PortExhausted`; give it two.
 
-Three rows are reclassified `not_testable` with their draft citations:
-`D18-8-MUST-004` (datagram age runs from an internal application event),
-`D18-10-2-2-MUST-008` and `D18-10-2-2-MUST-010` (draft 18 defines no token type,
-so token invalidity and expiry are not wire facts).
+One row is reclassified `not_testable` with its draft citation:
+`D18-8-MUST-004` (datagram age runs from an internal application event).
+
+`D18-10-2-2-MUST-008` and `D18-10-2-2-MUST-010` stay `testable` but score only
+with an operator-supplied credential, because draft 18 defines no Token Type
+(Table 12; type 0 is negotiated out of band). A passing static gate therefore
+does not mean these two rows score by default: without the credential the
+scenario sends nothing and the row is `NOT_RUN`.
+
+- `receive-well-formed-token-with-invalid-known-type-value`
+  (`D18-10-2-2-MUST-008`) needs `--invalid-auth-token TYPE:HEX`. The runner sends
+  the credential as a USE_VALUE AUTHORIZATION TOKEN on a SUBSCRIBE_NAMESPACE for
+  the fixture namespace and passes on REQUEST_ERROR `MALFORMED_AUTH_TOKEN` (0x4).
+  Acceptance or any other error code fails; `NOT_SUPPORTED` (Token Type not
+  understood), silence or a close leave the row `NOT_RUN`.
+- `register-token-expire-then-use-alias-before-delete` (`D18-10-2-2-MUST-010`)
+  needs `--expired-auth-token TYPE:HEX`. The runner registers it under Alias 1,
+  which must itself fail with `EXPIRED_AUTH_TOKEN` (0x5) to show the credential
+  is expired, then sends USE_ALIAS, which must fail with `EXPIRED_AUTH_TOKEN`
+  (any other error, the `--unknown-auth-token-alias-compat-code` code, or
+  acceptance fails), then registers Alias 1 again, which must close the Session
+  with `DUPLICATE_AUTH_TOKEN_ALIAS` (0x14) while the Alias is retained.
+  A publisher that does not register, treats the credential as valid, stays
+  silent or times out leaves the row `NOT_RUN`.
 
 ### Draft-21 completeness-gap scenarios (slice A)
 

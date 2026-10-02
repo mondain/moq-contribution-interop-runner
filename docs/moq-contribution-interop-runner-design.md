@@ -634,8 +634,8 @@ contract without changes to protocol or evaluator code.
 ## Implementation Status
 
 As of 2026-10-01, every applicable, testable MUST/MUST NOT row has an
-executable scenario and evaluator binding: 171 of 171 for draft 18 and 174 of
-174 for draft 21. Five rows were reclassified `not_testable` because the
+executable scenario and evaluator binding: 173 of 173 for draft 18 and 174 of
+174 for draft 21. Three rows were reclassified `not_testable` because the
 behavior cannot be observed or expressed on the wire even from a cooperating
 publisher; each carries a draft citation in the catalog. The static
 completeness gate therefore passes for both drafts. Optional-row coverage is
@@ -643,7 +643,9 @@ completeness gate therefore passes for both drafts. Optional-row coverage is
 gate, not proof of publisher behavior: many scenarios can only pass on
 positive wire evidence and stay `NOT_RUN` when the publisher never produces
 the behavior. Live results against `moqxr` are reported per row and are never
-used to define expected behavior.
+used to define expected behavior. `D18-10-2-2-MUST-008` and `-010` (and their
+draft-21 twins) score only with an operator-supplied credential
+(`--invalid-auth-token`, `--expired-auth-token`) and are `NOT_RUN` otherwise.
 
 ## Delivery Milestones
 
