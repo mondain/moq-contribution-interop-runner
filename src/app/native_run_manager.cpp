@@ -26,6 +26,7 @@
 #include "moq/interop/scenarios/draft21_request.h"
 #include "moq/interop/scenarios/draft21_response.h"
 #include "moq/interop/scenarios/draft21_announcement.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/scenarios/run_controller.h"
 #include "moq/interop/transport/webtransport_listener.h"
 
@@ -799,6 +800,18 @@ public:
             const auto found = std::find_if(profiles.begin(),profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown request GOAWAY probe");
+            return std::move(found->definition);
+        }
+        if (draft21_contribution_scenario(static_cast<unsigned>(run_config.draft), id)) {
+            if (!run_config.track_fixture) throw std::invalid_argument("track probe requires a track fixture");
+            std::vector<std::vector<std::byte>> contribution_namespace;
+            for (const auto& field : run_config.track_fixture->namespace_fields)
+                contribution_namespace.push_back(bytes_of(field));
+            auto profiles = scenarios::draft21_contribution_probes(run_config.timeout,
+                std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name));
+            const auto found = std::find_if(profiles.begin(), profiles.end(),
+                [&](const auto& profile) { return profile.definition.id == id; });
+            if (found == profiles.end()) throw std::invalid_argument("unknown contribution probe");
             return std::move(found->definition);
         }
         const bool fetch = id == "cancel-fetch-request-with-open-data-stream" ||

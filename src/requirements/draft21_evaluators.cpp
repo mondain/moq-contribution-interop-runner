@@ -14,6 +14,7 @@
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/request_goaway.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 
 #include <algorithm>
 #include <map>
@@ -245,6 +246,17 @@ std::optional<RawResult> raw_result(
             includes(row.scenarios, profile.definition.id.c_str()) &&
             includes(row.evaluators, profile.evaluator_id.c_str())) {
             const auto result = scenarios::evaluate_subscription_cancel_probe(transcript, profile);
+            if (result) return RawResult{*result, profile.evaluator_id};
+            return std::nullopt;
+        }
+    }
+    // Contribution profiles: evaluated against their own canonical stimulus.
+    static const auto contribution = scenarios::draft21_contribution_probes();
+    for (const auto& profile : contribution) {
+        if (row.id == profile.requirement_id && transcript.scenario_id == profile.definition.id &&
+            includes(row.scenarios, profile.definition.id.c_str()) &&
+            includes(row.evaluators, profile.evaluator_id.c_str())) {
+            const auto result = scenarios::evaluate_draft21_contribution_probe(transcript, profile);
             if (result) return RawResult{*result, profile.evaluator_id};
             return std::nullopt;
         }
@@ -517,6 +529,15 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
     for (const auto& profile : scenarios::draft21_subscription_cancel_probes()) {
         bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft21_contribution_probes()) {
+        // These rows read the peer's session close as part of their evidence.
+        const bool close_evidence = profile.requirement_id == "D21-9-1-4-MUST-NOT-307" ||
+            profile.requirement_id == "D21-9-1-7-MUST-317";
+        std::vector<std::string> evidence{"raw_probe_stimulus", "raw_probe_transport_event"};
+        if (close_evidence) evidence.push_back("peer_close");
+        bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                            std::move(evidence)});
     }
     return bindings;
 }

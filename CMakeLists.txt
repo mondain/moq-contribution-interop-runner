@@ -215,7 +215,11 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_peer_close.cpp
     src/scenarios/draft21_close.cpp
     src/scenarios/draft18_close.cpp
-    src/scenarios/draft21_announcement.cpp)
+    src/scenarios/draft21_announcement.cpp
+    src/scenarios/draft21_contribution.cpp
+    src/scenarios/draft21_contribution_support.cpp
+    src/scenarios/draft21_contribution_session.cpp
+    src/scenarios/draft21_contribution_objects.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -885,6 +889,14 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-draft21-catalog-part-07-tests PRIVATE
                           moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft21-catalog-part-07 COMMAND moq-interop-draft21-catalog-part-07-tests)
+    # Draft-21 contribution profiles (session and object behavior).
+    add_executable(moq-interop-draft21-contribution-tests
+        tests/protocol/draft21_contribution_test.cpp)
+    target_link_libraries(moq-interop-draft21-contribution-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-contribution-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME draft21-contribution COMMAND moq-interop-draft21-contribution-tests)
 endif()
 
 if(MOQ_INTEROP_BUILD_FUZZERS)
