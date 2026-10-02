@@ -216,7 +216,8 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_close.cpp
     src/scenarios/draft18_close.cpp
     src/scenarios/draft21_announcement.cpp
-    src/scenarios/draft21_gap_a.cpp)
+    src/scenarios/draft21_gap_a.cpp
+    src/scenarios/draft21_gap_a_token.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -572,6 +573,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-scenarios moq-interop-requirements
         moq-interop-draft21-evaluators GTest::gtest_main)
     add_test(NAME draft21-gap-a-probe COMMAND moq-interop-draft21-gap-a-probe-tests)
+
+    add_executable(moq-interop-draft21-gap-a-token-tests
+                   tests/protocol/draft21_gap_a_token_test.cpp)
+    target_compile_definitions(moq-interop-draft21-gap-a-token-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-gap-a-token-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators
+        GTest::gtest_main)
+    add_test(NAME draft21-gap-a-token COMMAND moq-interop-draft21-gap-a-token-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

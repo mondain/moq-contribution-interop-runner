@@ -547,6 +547,7 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
     const auto immutable_profiles = scenarios::draft21_immutable_repeat_probes();
     const auto object_profiles = scenarios::draft21_object_repeat_probes();
     const auto gap_a_probes = scenarios::draft21_gap_a_probes();
+    const auto gap_a_token_probes = scenarios::draft21_gap_a_token_probes();
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
     for (const auto& row : catalog.requirements) {
@@ -565,7 +566,7 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
                 auto result = raw_result(row, transcript, closes, requests, peers, responses, fetches, cancellations, fetch_responses, request_responses, ranges, overlaps, first_fetches, group_orders, goaways, immutable_profiles, object_profiles);
                 if (!result) {
                     // Slice A raw probes (draft21_gap_a.cpp).
-                    if (const auto gap = draft21_gap_a_raw_result(row, transcript, gap_a_probes))
+                    if (const auto gap = draft21_gap_a_raw_result(row, transcript, gap_a_probes, gap_a_token_probes))
                         result = RawResult{gap->passed, gap->evaluator};
                 }
                 if (!result) continue;

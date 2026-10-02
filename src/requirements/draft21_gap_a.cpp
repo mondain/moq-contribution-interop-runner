@@ -244,7 +244,16 @@ bool draft21_gap_a_scenarios_are_alternatives(const Requirement& row) {
 
 std::optional<Draft21GapARawResult> draft21_gap_a_raw_result(
     const Requirement& row, const scenarios::RawProbeTranscript& transcript,
-    const std::vector<scenarios::Draft21GapProbe>& probes) {
+    const std::vector<scenarios::Draft21GapProbe>& probes,
+    const std::vector<scenarios::Draft21TokenProbe>& token_probes) {
+    for (const auto& probe : token_probes) {
+        if (row.id != probe.requirement_id || transcript.scenario_id != probe.definition.id ||
+            !listed(row.scenarios, probe.definition.id) || !listed(row.evaluators, probe.evaluator_id))
+            continue;
+        const auto verdict = scenarios::evaluate_draft21_gap_a_token_probe(transcript, probe);
+        if (!verdict) return std::nullopt;
+        return Draft21GapARawResult{*verdict, probe.evaluator_id};
+    }
     for (const auto& probe : probes) {
         if (row.id != probe.requirement_id || transcript.scenario_id != probe.definition.id ||
             !listed(row.scenarios, probe.definition.id) || !listed(row.evaluators, probe.evaluator_id))
@@ -315,6 +324,9 @@ std::vector<ExecutableBinding> draft21_gap_a_bindings() {
          {"peer_setup_received", "namespace_observed", "namespace_response_delivered"}},
     };
     for (const auto& probe : scenarios::draft21_gap_a_probes())
+        bindings.push_back({21, probe.requirement_id, probe.definition.id, probe.evaluator_id,
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    for (const auto& probe : scenarios::draft21_gap_a_token_probes())
         bindings.push_back({21, probe.requirement_id, probe.definition.id, probe.evaluator_id,
                             {"raw_probe_stimulus", "raw_probe_transport_event"}});
     return bindings;

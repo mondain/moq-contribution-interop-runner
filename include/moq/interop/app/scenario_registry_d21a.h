@@ -37,7 +37,7 @@ inline constexpr std::array<std::string_view, 19> kDraft21GapAnnouncementScenari
 };
 
 // Scenarios that execute as raw probe contexts.
-inline constexpr std::array<std::string_view, 11> kDraft21GapRawScenarios{
+inline constexpr std::array<std::string_view, 17> kDraft21GapRawScenarios{
     "d21-publisher-request-response-before-fin",
     "d21-established-subscription-publisher-fin",
     "d21-request-stream-terminal-message-order",
@@ -49,6 +49,12 @@ inline constexpr std::array<std::string_view, 11> kDraft21GapRawScenarios{
     "d21-webtransport-h3-datagram-support",
     "d21-subscribe-bounded-location-range",
     "d21-update-subscription-location-range",
+    "d21-token-delete-and-reuse",
+    "d21-token-register-alias-lifetime",
+    "d21-request-deleted-token-alias",
+    "d21-register-token-on-unauthorized-request",
+    "d21-register-token-on-other-request-error",
+    "d21-setup-register-use-value-fallback",
 };
 
 inline bool gap_raw_scenario(unsigned draft, std::string_view scenario) {

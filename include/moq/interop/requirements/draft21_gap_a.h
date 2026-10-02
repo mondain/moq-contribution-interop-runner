@@ -9,6 +9,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft21_announcement.h"
 #include "moq/interop/scenarios/draft21_gap_a.h"
+#include "moq/interop/scenarios/draft21_gap_a_token.h"
 
 #include <optional>
 #include <string>
@@ -36,6 +37,7 @@ struct Draft21GapARawResult {
 // Evaluates one raw probe transcript for a slice A row, if the row owns it.
 std::optional<Draft21GapARawResult> draft21_gap_a_raw_result(
     const Requirement& row, const scenarios::RawProbeTranscript& transcript,
-    const std::vector<scenarios::Draft21GapProbe>& probes);
+    const std::vector<scenarios::Draft21GapProbe>& probes,
+    const std::vector<scenarios::Draft21TokenProbe>& token_probes);
 
 }  // namespace moq::interop::requirements

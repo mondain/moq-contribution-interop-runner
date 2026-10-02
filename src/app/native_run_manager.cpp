@@ -19,6 +19,7 @@
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/fetch_group_order.h"
 #include "moq/interop/scenarios/draft21_gap_a.h"
+#include "moq/interop/scenarios/draft21_gap_a_token.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/request_goaway.h"
@@ -863,8 +864,14 @@ public:
             if (found == profiles.end()) throw std::invalid_argument("unknown track probe");
             return std::move(found->definition);
         };
-        if (gap_a) return execute(scenarios::draft21_gap_a_probes(run_config.timeout, name_space,
-            bytes_of(run_config.track_fixture->track_name)));
+        if (gap_a) {
+            const auto name = bytes_of(run_config.track_fixture->track_name);
+            auto probes = scenarios::draft21_gap_a_probes(run_config.timeout, name_space, name);
+            const auto found = std::find_if(probes.begin(), probes.end(),
+                [&](const auto& profile) { return profile.definition.id == id; });
+            if (found != probes.end()) return std::move(found->definition);
+            return execute(scenarios::draft21_gap_a_token_probes(run_config.timeout, name_space, name));
+        }
         if (immutable_repeat) return execute(run_config.draft == DraftVersion::Draft18
             ? scenarios::draft18_immutable_repeat_probes(run_config.timeout, name_space,
                 bytes_of(run_config.track_fixture->track_name))
