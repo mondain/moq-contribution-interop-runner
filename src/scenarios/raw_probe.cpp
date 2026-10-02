@@ -24,6 +24,10 @@ bool valid_stages(const RawProbeDefinition& definition) {
             return false;
         if (write.operation != RawProbeOperation::Write && write.operation != RawProbeOperation::StopSending)
             return false;
+        if (write.channel == RawProbeChannel::Credit &&
+            (!write.bytes.empty() || write.fin || write.prepare_bytes || write.reuse_write_stream ||
+             write.operation != RawProbeOperation::Write || write.application_error == 0 ||
+             write.application_error > (std::uint64_t{1} << 40))) return false;
         if (write.operation == RawProbeOperation::StopSending &&
             (!write.reuse_write_stream || !write.bytes.empty() || write.fin ||
              write.application_error >= (std::uint64_t{1} << 62))) return false;
@@ -123,7 +127,8 @@ bool setup_before(const RawProbeTranscript& transcript, const RawProbeDefinition
     return connection && setup;
 }
 bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expected) {
-    return (expected.channel == RawProbeChannel::Datagram ? !observed.stream_id : observed.stream_id.has_value()) &&
+    return ((expected.channel == RawProbeChannel::Datagram || expected.channel == RawProbeChannel::Credit)
+                ? !observed.stream_id : observed.stream_id.has_value()) &&
            observed.write.channel == expected.channel &&
            observed.write.bytes == expected.bytes && observed.write.fin == expected.fin &&
            observed.write.reuse_write_stream == expected.reuse_write_stream &&
@@ -161,6 +166,13 @@ void RawProbeController::fail() {
     transcript_.complete = false;
 }
 bool RawProbeController::flush(RawProbeAcceptedWrite& pending) {
+    if (pending.write.channel == RawProbeChannel::Credit) {
+        if (pending.stream_id || !pending.write.bytes.empty() || pending.write.fin) { fail(); return false; }
+        const auto result = transport_.grant_peer_streams(true, pending.write.application_error);
+        if (result.status == transport::TransportStatus::WouldBlock) return false;
+        if (result.status != transport::TransportStatus::Success) { fail(); return false; }
+        return true;
+    }
     if (pending.write.channel == RawProbeChannel::Datagram) {
         if (pending.stream_id || pending.write.fin || pending.write.bytes.empty() ||
             pending.write.bytes.size() > transcript_.max_datagram_payload) { fail(); return false; }
@@ -452,6 +464,8 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
             if (definition.writes[i].peer_response_ready &&
                 response_gate(transcript,*write.stream_id,*previous.delivery_event_count,gate_marker,
                     definition.writes[i].peer_response_ready) != GateState::Ready) return false;
+        } else if (write.write.channel == RawProbeChannel::Credit) {
+            if (write.stream_id || write.write.fin || !write.write.bytes.empty()) return false;
         } else if (write.write.channel == RawProbeChannel::Datagram) {
             if (write.write.fin || write.write.bytes.empty() ||
                 write.write.bytes.size() > datagram_capacity ||

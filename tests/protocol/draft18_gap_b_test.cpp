@@ -249,6 +249,77 @@ TEST(Draft18GapB, DeleteMustWaitForEveryUseAliasResponse) {
     EXPECT_EQ(plain.sent(0), nullptr);
 }
 
+// Section 6.1: SUBSCRIBE_TRACKS response and PUBLISH_BLOCKED ordering.
+Bytes blocked(std::vector<Bytes> suffix, const std::string& name) {
+    return encode_draft18(d18::PublishBlockedMessage{d18::TrackNamespace{std::move(suffix)},
+        d18::TrackName{bytes_of(name)}});
+}
+
+TEST(Draft18GapB, SubscribeTracksResponseMustPrecedePublishBlocked) {
+    const auto probe = profile("D18-6-1-MUST-004");
+    EXPECT_EQ(probe.definition.id, "subscribe-tracks-with-no-bidirectional-stream-credit");
+    EXPECT_EQ(probe.evaluator_id, "track-subscription-response-precedes-publish-blocked");
+    // The peer's only bidirectional stream is spent on its own announcement.
+    ASSERT_TRUE(probe.definition.initial_peer_bidi_streams.has_value());
+    EXPECT_EQ(*probe.definition.initial_peer_bidi_streams, 1u);
+    EXPECT_TRUE(probe.definition.acknowledge_publisher_namespace);
+    ASSERT_EQ(probe.definition.writes.size(), 1u);
+    ScriptedPublisher in_order(setup(), [](ScriptedPublisher& peer) {
+        answer(peer, 1, "a", concat({ok(), blocked({}, "t")}));
+    });
+    EXPECT_EQ(score(probe, in_order), std::optional<bool>{true});
+    ScriptedPublisher rejected(setup(), [](ScriptedPublisher& peer) { answer(peer, 1, "a", error(0x10), true); });
+    EXPECT_EQ(score(probe, rejected), std::optional<bool>{true});
+    ScriptedPublisher blocked_first(setup(), [](ScriptedPublisher& peer) {
+        answer(peer, 1, "a", concat({blocked({}, "t"), ok()}));
+    });
+    EXPECT_EQ(score(probe, blocked_first), std::optional<bool>{false});
+    ScriptedPublisher fragmented(setup(), [](ScriptedPublisher& peer) {
+        const auto frame = ok();
+        if (peer.sent(1) && !peer.answered("a")) { peer.mark("a"); peer.data(1, Bytes(frame.begin(), frame.begin() + 2)); }
+        else if (peer.answered("a") && !peer.answered("b")) { peer.mark("b"); peer.data(1, Bytes(frame.begin() + 2, frame.end())); }
+    });
+    EXPECT_EQ(score(probe, fragmented), std::optional<bool>{true});
+    ScriptedPublisher silent(setup());
+    EXPECT_EQ(score(probe, silent), std::nullopt);
+}
+
+// Section 6.1: no PUBLISH for a Track after PUBLISH_BLOCKED, even once the
+// runner restores bidirectional credit.
+TEST(Draft18GapB, PublishMustNotFollowPublishBlockedForTheSameTrack) {
+    const auto probe = profile("D18-6-1-MUST-NOT-001");
+    EXPECT_EQ(probe.definition.id, "restore-bidi-stream-credit-after-publish-blocked");
+    EXPECT_EQ(probe.evaluator_id, "no-publish-for-blocked-track-after-credit-restored");
+    ASSERT_EQ(probe.definition.writes.size(), 2u);
+    EXPECT_EQ(probe.definition.writes[1].channel, RawProbeChannel::Credit);
+    EXPECT_EQ(probe.definition.initial_peer_bidi_streams, std::optional<std::uint64_t>{1});
+    const auto run = [&](std::function<void(ScriptedPublisher&)> after_credit, bool send_blocked = true) {
+        ScriptedPublisher peer(setup(), [=](ScriptedPublisher& p) {
+            if (p.sent(1) && !p.answered("tracks")) {
+                p.mark("tracks");
+                p.data(1, send_blocked ? concat({ok(), blocked({bytes_of("sub")}, "t")}) : ok());
+            }
+            if (p.granted_bidi() > 0) after_credit(p);
+        });
+        const auto result = score(probe, peer);
+        EXPECT_EQ(peer.granted_bidi() > 0, send_blocked);
+        return result;
+    };
+    // The credit is only restored once PUBLISH_BLOCKED has arrived.
+    EXPECT_EQ(run([](ScriptedPublisher&) {}, false), std::nullopt);
+    // A different Track may be published; the blocked one is not.
+    EXPECT_EQ(run([](ScriptedPublisher& p) {
+        once(p, "p", [&] { p.data(0, publish(2)); });  // namespace {n}, track "t": not the blocked one
+    }), std::optional<bool>{true});
+    EXPECT_EQ(run([](ScriptedPublisher& p) {
+        once(p, "p", [&] {
+            p.data(0, encode_draft18(d18::PublishMessage{2, d18::TrackNamespace{{bytes_of("n"), bytes_of("sub")}},
+                d18::TrackName{bytes_of("t")}, 9, {}, {}}));
+        });
+    }), std::optional<bool>{false});
+    EXPECT_EQ(run([](ScriptedPublisher&) {}), std::optional<bool>{true});
+}
+
 // The controller answers the publisher's PUBLISH_NAMESPACE so that it proceeds.
 TEST(Draft18GapB, PublisherNamespaceIsAcknowledgedWithoutBecomingStimulus) {
     const auto probe = profile("D18-10-MUST-004");

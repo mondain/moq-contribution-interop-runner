@@ -113,6 +113,17 @@ public:
     virtual OperationResult close(std::uint64_t application_error,
                                   std::span<const std::byte> reason) = 0;
     virtual std::vector<TransportEvent> poll(std::size_t max_events) = 0;
+
+    // Raises the number of additional peer-initiated streams (bidirectional or
+    // unidirectional) the peer may open, by sending a QUIC MAX_STREAMS frame.
+    // A harness primitive for stream-credit scenarios; transports that cannot
+    // do it keep this default.
+    virtual OperationResult grant_peer_streams(bool bidirectional,
+                                               std::uint64_t additional) {
+        (void)bidirectional;
+        (void)additional;
+        return {TransportStatus::InvalidState, 0, std::nullopt};
+    }
 };
 
 }  // namespace moq::interop::transport

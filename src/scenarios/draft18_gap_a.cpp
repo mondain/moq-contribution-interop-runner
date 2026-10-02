@@ -26,9 +26,12 @@ RawProbeDefinition build(const Entry& entry, const Fixture& fixture,
                          std::chrono::milliseconds deadline) {
     auto definition = entry.build(fixture, deadline);
     const auto observe = entry.observe;
-    definition.response_ready = [observe, fixture](const RawProbeTranscript& transcript) {
-        return observe(transcript, fixture).ready;
-    };
+    // An entry whose evidence needs a quiet period supplies its own readiness.
+    if (!definition.response_ready) {
+        definition.response_ready = [observe, fixture](const RawProbeTranscript& transcript) {
+            return observe(transcript, fixture).ready;
+        };
+    }
     return definition;
 }
 }  // namespace

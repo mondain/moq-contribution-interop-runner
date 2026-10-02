@@ -1,4 +1,5 @@
 #include "transport/webtransport_session.h"
+#include "picoquic_connection_internal.h"
 
 #include <pico_webtransport.h>
 #include <picoquic_internal.h>
@@ -265,6 +266,12 @@ OperationResult WebTransportSession::stop_sending(StreamId stream_id,
                                   static_cast<std::uint32_t>(application_error))) != 0)
         return failed();
     return {TransportStatus::Success, 0, std::nullopt};
+}
+
+OperationResult WebTransportSession::grant_peer_streams(bool bidirectional,
+                                                        std::uint64_t additional) {
+    if (detached_ || connection_ == nullptr) return unavailable();
+    return detail::grant_peer_streams(connection_, bidirectional, additional);
 }
 
 OperationResult WebTransportSession::send_datagram(

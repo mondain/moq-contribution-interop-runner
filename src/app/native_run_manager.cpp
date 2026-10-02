@@ -403,10 +403,16 @@ public:
         std::optional<transport::NativeQuicListenerError> error;
     };
 
-    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port) const {
+    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
+                                   std::optional<std::uint64_t> peer_bidi_streams = std::nullopt) const {
         transport::NativeQuicListenerConfig quic;
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
+        // A stream-credit scenario starts the peer with only this many
+        // bidirectional streams; WebTransport spends one on its CONNECT.
+        if (peer_bidi_streams)
+            quic.initial_max_streams_bidi = *peer_bidi_streams +
+                (run_config.transport == TransportKind::WebTransport ? 1u : 0u);
         quic.certificate_path = config.certificate_path;
         quic.private_key_path = config.private_key_path;
         const std::string protocol = run_config.draft == DraftVersion::Draft21 ? "moqt-21" : "moqt-18";
@@ -592,6 +598,8 @@ public:
                 current_id = definitions[index].id;
                 worker->context_ordinal = index + 1;
                 worker->connection_id.clear();
+                const auto tuned = definitions[index].initial_peer_bidi_streams;
+                // The first context's listener already carries its tuning (start()).
                 if (index != 0) {
                     // Cleanup events belong outside the frozen proof of the preceding context.
                     listener->close(0, {});
@@ -603,7 +611,7 @@ public:
                     } while (scenarios::RawProbeClock::now() < cleanup_deadline);
                     listener.reset();
                     if (worker->stop_requested) break;
-                    auto replacement = create_listener(run_config, worker->endpoint.port);
+                    auto replacement = create_listener(run_config, worker->endpoint.port, tuned);
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
                         throw std::runtime_error("raw context listener could not rebind reserved run port");
                     listener = std::move(replacement.listener);
@@ -1250,7 +1258,8 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         const auto port = ephemeral ? std::uint16_t{0} :
             static_cast<std::uint16_t>(impl_->config.port_start + attempt);
         if (port != 0 && impl_->reserved_ports.contains(port)) continue;
-        auto created = impl_->create_listener(config, port);
+        auto created = impl_->create_listener(config, port,
+            definitions.empty() ? std::nullopt : definitions.front().initial_peer_bidi_streams);
         if (created.listener) {
             if (impl_->reserved_ports.contains(created.endpoint.port)) continue;
             endpoint = created.endpoint;

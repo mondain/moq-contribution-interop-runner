@@ -443,6 +443,11 @@ OperationResult WebTransportListener::send_datagram(std::span<const std::byte> d
     return impl_->session ? impl_->session->send_datagram(data) :
                             OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
 }
+OperationResult WebTransportListener::grant_peer_streams(bool bidirectional,
+                                                         std::uint64_t additional) {
+    return impl_->session ? impl_->session->grant_peer_streams(bidirectional, additional) :
+                            OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
+}
 OperationResult WebTransportListener::close(std::uint64_t error,
                                              std::span<const std::byte> reason) {
     return impl_->session ? impl_->session->close(error, reason) :

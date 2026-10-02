@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <concepts>
+#include <functional>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <string_view>
 
@@ -304,6 +307,171 @@ Observation retire_token_observe(const RawProbeTranscript& transcript, const Fix
     return observation;
 }
 
+// ---- Section 6.1: SUBSCRIBE_TRACKS with no bidirectional stream credit ---------
+// The runner grants the peer a single bidirectional stream, which a publisher
+// that announces its namespace spends on PUBLISH_NAMESPACE (the runner answers
+// it, as a subscriber must, and keeps the stream open). No credit is left for
+// PUBLISH, so a publisher with matching tracks reports PUBLISH_BLOCKED on the
+// SUBSCRIBE_TRACKS response stream (draft lines 2223-2233). A credit of zero
+// would leave a publisher that announces first unable to start at all.
+constexpr std::uint64_t kRequestOk = 0x07;
+constexpr std::uint64_t kRequestError = 0x05;
+constexpr std::uint64_t kPublishBlocked = 0x0f;
+constexpr std::uint64_t kCreditGrant = 8;
+
+// Becomes true once `seen` has held for `window` polls. The controller is
+// polled about once per millisecond, and counting polls (rather than reading a
+// clock) keeps the period identical under a simulated clock; losing `seen`
+// restarts the count.
+std::function<bool(const RawProbeTranscript&)> settled_after(
+    std::function<bool(const RawProbeTranscript&)> seen, std::chrono::milliseconds window) {
+    struct State { std::int64_t streak{0}; std::size_t events{0}; };
+    auto state = std::make_shared<State>();
+    return [seen = std::move(seen), window, state](const RawProbeTranscript& transcript) {
+        // A shorter event log means the definition serves a new session.
+        if (transcript.events.size() < state->events) state->streak = 0;
+        state->events = transcript.events.size();
+        if (!seen(transcript)) { state->streak = 0; return false; }
+        return ++state->streak >= window.count();
+    };
+}
+std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline) {
+    return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
+}
+
+RawProbeDefinition no_credit_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("subscribe-tracks-with-no-bidirectional-stream-credit",
+        setup_frame(), deadline);
+    definition.initial_peer_bidi_streams = 1; definition.acknowledge_publisher_namespace = true;
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi,
+        subscribe_tracks_request(1, fixture.track_namespace, {forward_parameter(1)})));
+    return definition;
+}
+
+Observation no_credit_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 1) return observation;
+    const auto streams = collect_streams(transcript.events);
+    if (!streams) return observation;
+    const auto* stream = local_stream(*streams, transcript.writes[0]);
+    if (!stream) return observation;
+    const auto split = split_frames(stream->bytes);
+    if (split.malformed || split.frames.empty()) return observation;
+    // Section 6.1: the first message on the response stream is the single
+    // REQUEST_OK or REQUEST_ERROR, whatever PUBLISH_BLOCKED follows.
+    observation.ready = true;
+    observation.result = split.frames.front().type == kRequestOk ||
+                         split.frames.front().type == kRequestError;
+    return observation;
+}
+
+// ---- restore-bidi-stream-credit-after-publish-blocked --------------------------
+// Section 6.1: once PUBLISH_BLOCKED was sent for a Track, the publisher MUST
+// NOT send PUBLISH for it. After the publisher blocked, the runner restores
+// bidirectional credit while SUBSCRIBE_TRACKS stays active, so a publisher that
+// then opens PUBLISH for the blocked Track breaks the rule.
+struct Blocked {
+    Namespace track_namespace;
+    Bytes track_name;
+    std::size_t event{0};
+};
+
+// Index of the event on which each complete frame of `stream` finished.
+std::vector<std::size_t> frame_events(std::span<const transport::TransportEvent> events,
+                                      transport::StreamId stream) {
+    std::vector<std::size_t> result;
+    Bytes bytes;
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto* data = std::get_if<transport::StreamDataEvent>(&events[index]);
+        if (!data || data->stream_id != stream) continue;
+        bytes.insert(bytes.end(), data->data.begin(), data->data.end());
+        const auto split = split_frames(bytes);
+        while (result.size() < split.frames.size()) result.push_back(index);
+    }
+    return result;
+}
+
+std::optional<Blocked> publish_blocked(std::span<const transport::TransportEvent> events,
+                                       const Streams& streams, const RawProbeAcceptedWrite& write,
+                                       const Namespace& prefix) {
+    const auto* stream = local_stream(streams, write);
+    if (!stream) return std::nullopt;
+    const auto split = split_frames(stream->bytes);
+    if (split.malformed) return std::nullopt;
+    const auto completed = frame_events(events, *write.stream_id);
+    for (std::size_t index = 0; index < split.frames.size() && index < completed.size(); ++index) {
+        if (split.frames[index].type != kPublishBlocked) continue;
+        const auto message = decode_frame(stream->bytes, split.frames[index]);
+        const auto* blocked = message ? std::get_if<d18::PublishBlockedMessage>(&*message) : nullptr;
+        if (!blocked) continue;
+        Blocked result{prefix, blocked->track_name.bytes, completed[index]};
+        for (const auto& field : blocked->track_namespace_suffix.fields) result.track_namespace.push_back(field);
+        return result;
+    }
+    return std::nullopt;
+}
+
+Namespace prefix_of(const RawProbeAcceptedWrite& write) {
+    wire::Cursor cursor(write.write.bytes);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    const auto* tracks = message ? std::get_if<d18::SubscribeTracksMessage>(message) : nullptr;
+    return tracks ? tracks->track_namespace_prefix.fields : Namespace{};
+}
+
+Observation restore_credit_observe(const RawProbeTranscript& transcript, const Fixture& fixture);
+
+RawProbeDefinition restore_credit_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("restore-bidi-stream-credit-after-publish-blocked", setup_frame(), deadline);
+    definition.initial_peer_bidi_streams = 1; definition.acknowledge_publisher_namespace = true;
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi,
+        subscribe_tracks_request(1, fixture.track_namespace, {forward_parameter(1)})));
+    auto credit = make_write(RawProbeChannel::Credit, {});
+    credit.application_error = kCreditGrant;
+    credit.evidence_ready = [](const RawProbeGateInput& input) {
+        if (input.prior_writes.empty()) return false;
+        const auto streams = collect_streams(input.events);
+        return streams && publish_blocked(input.events, *streams, input.prior_writes[0],
+                                          prefix_of(input.prior_writes[0])).has_value();
+    };
+    definition.writes.push_back(std::move(credit));
+    // A violation ends the context at once; otherwise the publisher gets a
+    // quiet period after the credit was granted to open the forbidden PUBLISH.
+    auto settled = settled_after([](const RawProbeTranscript& transcript) {
+        return transcript.writes.size() == 2 && transcript.writes[1].delivery_event_count.has_value();
+    }, quiet_window(deadline));
+    definition.response_ready = [settled, fixture](const RawProbeTranscript& transcript) {
+        const auto observed = restore_credit_observe(transcript, fixture);
+        return observed.result == false || settled(transcript);
+    };
+    return definition;
+}
+
+Observation restore_credit_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 2 || !transcript.writes[1].delivery_event_count) return observation;
+    const auto streams = collect_streams(transcript.events);
+    if (!streams) return observation;
+    const auto blocked = publish_blocked(transcript.events, *streams, transcript.writes[0],
+                                         prefix_of(transcript.writes[0]));
+    if (!blocked) return observation;
+    for (const auto& [id, stream] : *streams) {
+        if (!is_peer_bidi(id) || stream.first_event < blocked->event) continue;
+        const auto split = split_frames(stream.bytes);
+        if (split.malformed || split.frames.empty() || split.frames.front().type != kPublish) continue;
+        const auto message = decode_frame(stream.bytes, split.frames.front());
+        const auto* publish = message ? std::get_if<d18::PublishMessage>(&*message) : nullptr;
+        if (publish && publish->track_namespace.fields == blocked->track_namespace &&
+            publish->track_name.bytes == blocked->track_name) {
+            observation.ready = true;
+            observation.result = false;
+            return observation;
+        }
+    }
+    observation.result = true;
+    return observation;
+}
+
 }  // namespace
 
 std::vector<Entry> entries() {
@@ -321,6 +489,12 @@ std::vector<Entry> entries() {
     result.push_back({"D18-10-2-2-MUST-NOT-002", "withhold-use-alias-response-while-publisher-retires-token",
         "token-delete-not-sent-before-all-use-alias-responses", false, false, std::nullopt,
         retire_token_definition, retire_token_observe});
+    result.push_back({"D18-6-1-MUST-004", "subscribe-tracks-with-no-bidirectional-stream-credit",
+        "track-subscription-response-precedes-publish-blocked", true, false, FirstWrite::Prefix,
+        no_credit_definition, no_credit_observe});
+    result.push_back({"D18-6-1-MUST-NOT-001", "restore-bidi-stream-credit-after-publish-blocked",
+        "no-publish-for-blocked-track-after-credit-restored", true, false, FirstWrite::Prefix,
+        restore_credit_definition, restore_credit_observe});
     return result;
 }
 

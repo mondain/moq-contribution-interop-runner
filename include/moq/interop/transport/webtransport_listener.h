@@ -52,6 +52,8 @@ public:
     OperationResult close(std::uint64_t application_error,
                           std::span<const std::byte> reason) override;
     std::vector<TransportEvent> poll(std::size_t max_events) override;
+    OperationResult grant_peer_streams(bool bidirectional,
+                                       std::uint64_t additional) override;
 
 private:
     explicit WebTransportListener(std::unique_ptr<Impl> impl);

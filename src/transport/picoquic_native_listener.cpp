@@ -431,6 +431,13 @@ OperationResult NativeQuicListener::send_datagram(
     }
     return {TransportStatus::Success, data.size(), std::nullopt};
 }
+OperationResult NativeQuicListener::grant_peer_streams(bool bidirectional,
+                                                      std::uint64_t additional) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
+    return detail::grant_peer_streams(impl_->connection.connection(), bidirectional, additional);
+}
 OperationResult NativeQuicListener::close(
     std::uint64_t application_error, std::span<const std::byte> reason) {
     if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};

@@ -14,7 +14,10 @@
 namespace moq::interop::scenarios {
 
 using RawProbeClock = std::chrono::steady_clock;
-enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi };
+// Credit is a stream-credit step rather than a stream: it raises the peer's
+// bidirectional stream limit by `application_error` (reused as the count) and
+// carries no bytes.
+enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi, Credit };
 enum class RawProbeOperation { Write, StopSending };
 struct RawProbeGateInput;
 struct RawProbeWrite {
@@ -49,6 +52,9 @@ struct RawProbeDefinition {
     // Section 10.15). The answers are recorded in the transcript, are not part
     // of the stimulus, and cannot be combined with PeerBidi writes.
     bool acknowledge_publisher_namespace{false};
+    // Initial QUIC credit for peer-initiated bidirectional streams. The
+    // harness adds the WebTransport CONNECT stream where it applies.
+    std::optional<std::uint64_t> initial_peer_bidi_streams{};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
