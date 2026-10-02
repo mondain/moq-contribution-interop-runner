@@ -115,6 +115,11 @@ public:
     std::optional<transport::StreamId> write_stream_id(std::size_t index) const;
     // Transport event count at which write `index` was fully accepted.
     std::optional<std::size_t> write_event(std::size_t index) const;
+    // The bytes the runner wrote for transcript write `index` (empty if absent).
+    std::span<const std::byte> write_bytes(std::size_t index) const {
+        return index < writes_.size() ? std::span<const std::byte>(writes_[index].write.bytes)
+                                      : std::span<const std::byte>{};
+    }
     // True when the observation window of a `Spec::window` scenario is over: the
     // context timed out or the peer ended the session, so no further evidence
     // can arrive. Always false for scenarios that must finish on evidence.

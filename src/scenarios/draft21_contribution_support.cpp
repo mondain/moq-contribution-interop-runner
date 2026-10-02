@@ -146,7 +146,7 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> request) {
     if (request.size() > 65546) return std::nullopt;
     wire::Cursor cursor(request);
     const auto type = read_vi(cursor);
-    if (!type || (*type != 0x3 && *type != 0x16 && *type != 0xd && *type != 0x50)) return std::nullopt;
+    if (!type || (*type != 0x3 && *type != 0x16 && *type != 0xd && *type != 0x50 && *type != 0x51)) return std::nullopt;
     const auto length = read_n(cursor, 2);
     if (!length) return std::nullopt;
     const auto size = (static_cast<std::size_t>(std::to_integer<unsigned>((*length)[0])) << 8u) |
@@ -166,7 +166,7 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> request) {
         total += value->size();
         fixture.track_namespace.emplace_back(value->begin(), value->end());
     }
-    if (*type == 0x50) {
+    if (*type == 0x50 || *type == 0x51) {
         // Discovery names no track; any ordinary track name completes the fixture.
         fixture.track_name = bytes_of({'x'});
     } else {

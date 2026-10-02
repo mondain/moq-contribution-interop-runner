@@ -70,7 +70,8 @@ TEST(ContributionResidual, RegistryAndBindingsCoverTheNewScenarios) {
     for (const char* scenario :
          {"d21-overlapping-subscriptions-shared-alias", "d21-overlapping-subscriptions-distinct-aliases",
           "d21-forward-location-and-range-filter-conjunction", "d21-subscribe-multiple-subgroups",
-          "d21-fill-fails-before-first-object", "d21-cancel-subscription-with-concurrent-fill-streams"}) {
+          "d21-fill-fails-before-first-object", "d21-cancel-subscription-with-concurrent-fill-streams",
+          "d21-subscribe-tracks-publish-skipped-then-capacity-recovers"}) {
         EXPECT_TRUE(app::draft21_contribution_scenario(21, scenario)) << scenario;
         EXPECT_TRUE(app::raw_probe_scenario(21, scenario)) << scenario;
         EXPECT_NO_THROW(find_probe(probes(), scenario)) << scenario;
@@ -457,6 +458,75 @@ TEST(ContributionResidual, EveryOpenFillMustBeResetAfterCancellation) {
     finished.event(transport::PeerResetEvent{kData1, 0});
     finished.reply(kData2, cbytes({0x1c, 7, 1, 128, 1, 'c'}), true);
     EXPECT_EQ(judge(probe, windowed(finished)), std::nullopt);
+}
+
+// ---- Section 4.1 lines 1536-1545: PUBLISH_SKIPPED is not undone by a later PUBLISH ----------
+Bytes publish_for(const Bytes& name, std::uint64_t request_id = 0) {
+    return cframe(0x1d, cconcat({cvi(request_id), cbytes({1, 1, 'n'}), cvi(name.size()), name, cbytes({5, 0})}));
+}
+Bytes publish_skipped(const Bytes& name) {
+    return cframe(0xf, cconcat({cbytes({1, 1, 'n'}), cvi(name.size()), name}));
+}
+
+TEST(ContributionResidual, SkippedPublishStimulusLimitsStreamsThenRejectsTheFirstPublish) {
+    const auto& probe = find_probe(probes(), "d21-subscribe-tracks-publish-skipped-then-capacity-recovers");
+    EXPECT_EQ(probe.requirement_id, "D21-4-1-MUST-NOT-084");
+    EXPECT_EQ(probe.definition.listener_limits.max_streams_bidi, std::optional<std::uint64_t>{1});
+    ASSERT_EQ(probe.definition.writes.size(), 2u);
+    // SUBSCRIBE_TRACKS (0x51), Request ID 1, empty namespace prefix, no parameters.
+    EXPECT_EQ(probe.definition.writes[0].bytes, cbytes({0x51, 0, 3, 1, 0, 0}));
+    // REQUEST_ERROR UNINTERESTED (0x20) on the publisher's stream, then FIN.
+    EXPECT_EQ(probe.definition.writes[1].channel, RawProbeChannel::PeerBidi);
+    EXPECT_EQ(probe.definition.writes[1].bytes, cbytes({5, 0, 3, 0x20, 0, 0}));
+    EXPECT_TRUE(probe.definition.writes[1].fin);
+    EXPECT_TRUE(probe.definition.peer_request_ready(publish_for(cbytes({'a'}))));
+    EXPECT_FALSE(probe.definition.peer_request_ready(cbytes({0x1d, 0, 8})));
+}
+
+ContributionRun skipped_run(const Draft21ContributionProbe& probe) {
+    ContributionRun run(probe);
+    run.deliver(0);
+    run.reply(run.stream_of(0), cconcat({request_ok(), publish_skipped(cbytes({'s'}))}));
+    // The one PUBLISH the publisher could open, for another track, which the runner rejects.
+    run.reply(0, publish_for(cbytes({'t'})));
+    run.deliver(1);
+    return run;
+}
+
+TEST(ContributionResidual, SkippedTrackMustNotBePublishedLater) {
+    const auto& probe = find_probe(probes(), "d21-subscribe-tracks-publish-skipped-then-capacity-recovers");
+    // Nothing further for the skipped track: the capacity hand-back is exercised and passes.
+    EXPECT_EQ(judge(probe, windowed(skipped_run(probe))), true);
+    // A PUBLISH for the skipped track after PUBLISH_SKIPPED breaks the rule.
+    auto late = skipped_run(probe);
+    late.reply(4, publish_for(cbytes({'s'}), 2));
+    EXPECT_EQ(judge(probe, windowed(late)), false);
+    EXPECT_TRUE(probe.definition.response_ready(late.partial()));
+    // Before the window ends the absence is not proven; the violation needs no window.
+    EXPECT_EQ(judge(probe, skipped_run(probe).finish()), std::nullopt);
+    EXPECT_EQ(judge(probe, late.finish()), false);
+    // A PUBLISH for a different track is permitted.
+    auto other = skipped_run(probe);
+    other.reply(4, publish_for(cbytes({'u'}), 2));
+    EXPECT_EQ(judge(probe, windowed(other)), true);
+    // A track published before it was skipped is not a later PUBLISH.
+    ContributionRun before(probe);
+    before.deliver(0);
+    before.reply(0, publish_for(cbytes({'s'})));
+    before.reply(before.stream_of(0), cconcat({request_ok(), publish_skipped(cbytes({'s'}))}));
+    before.deliver(1);
+    EXPECT_EQ(judge(probe, windowed(before)), true);
+    // No PUBLISH_SKIPPED at all means the capacity limit never bit.
+    ContributionRun silent(probe);
+    silent.deliver(0);
+    silent.reply(silent.stream_of(0), request_ok());
+    EXPECT_FALSE(probe.definition.response_ready(silent.partial()));
+    // A rejected SUBSCRIBE_TRACKS ends the context unscored.
+    ContributionRun rejected(probe);
+    rejected.deliver(0);
+    rejected.reply(rejected.stream_of(0), request_error(0x30), true);
+    EXPECT_TRUE(probe.definition.response_ready(rejected.partial()));
+    EXPECT_EQ(judge(probe, rejected.finish()), std::nullopt);
 }
 
 }  // namespace

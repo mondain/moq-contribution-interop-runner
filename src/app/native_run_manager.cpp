@@ -403,8 +403,14 @@ public:
         std::optional<transport::NativeQuicListenerError> error;
     };
 
-    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port) const {
+    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
+                                   const scenarios::RawProbeListenerLimits& limits = {}) const {
         transport::NativeQuicListenerConfig quic;
+        // WebTransport spends one publisher-opened bidirectional stream on its
+        // extended CONNECT, which is not a MOQT request stream.
+        if (limits.max_streams_bidi)
+            quic.initial_max_streams_bidi = *limits.max_streams_bidi +
+                (run_config.transport == TransportKind::WebTransport ? 1 : 0);
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
         quic.certificate_path = config.certificate_path;
@@ -601,7 +607,7 @@ public:
                 current_id = definitions[index].id;
                 worker->context_ordinal = index + 1;
                 worker->connection_id.clear();
-                if (index != 0) {
+                if (index != 0 || definitions[index].listener_limits.max_streams_bidi) {
                     // Cleanup events belong outside the frozen proof of the preceding context.
                     listener->close(0, {});
                     const auto cleanup_deadline = scenarios::RawProbeClock::now() + 20ms;
@@ -612,7 +618,8 @@ public:
                     } while (scenarios::RawProbeClock::now() < cleanup_deadline);
                     listener.reset();
                     if (worker->stop_requested) break;
-                    auto replacement = create_listener(run_config, worker->endpoint.port);
+                    auto replacement = create_listener(run_config, worker->endpoint.port,
+                                                       definitions[index].listener_limits);
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
                         throw std::runtime_error("raw context listener could not rebind reserved run port");
                     listener = std::move(replacement.listener);

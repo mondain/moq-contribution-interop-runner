@@ -15,6 +15,8 @@
 
 #include "draft21_contribution_support.h"
 
+#include "moq/interop/wire/draft21/publish.h"
+
 #include <map>
 #include <set>
 
@@ -24,6 +26,9 @@ namespace {
 constexpr std::uint64_t kTargetGroup = 0;
 constexpr std::uint64_t kTargetObject = 1;
 constexpr std::uint64_t kFetchHeaderType = 0x5;
+constexpr std::uint64_t kPublish = 0x1d;
+constexpr std::uint64_t kPublishSkipped = 0xf;
+constexpr std::uint64_t kSubscribeTracks = 0x51;
 
 // ---- helpers ---------------------------------------------------------------
 Bytes location_pair(std::uint64_t group, std::uint64_t object) {
@@ -513,6 +518,128 @@ Spec cancelled_fill_spec() {
         true);
 }
 
+// ---- Section 4.1 lines 1536-1545: PUBLISH_SKIPPED -----------------------------------
+// SUBSCRIBE_TRACKS (0x51, Section 9.18) for the fixture namespace, with the
+// publisher allowed one request stream: it can open one PUBLISH, and must say
+// PUBLISH_SKIPPED (0xF, Section 9.19) on the SUBSCRIBE_TRACKS response stream for
+// any other track it cannot start. The runner then rejects the one PUBLISH and
+// closes that stream, handing the publisher capacity again, and watches whether a
+// skipped track is published afterwards. "The Publisher MUST NOT send a PUBLISH
+// for a Track for a given SUBSCRIBE_TRACKS after PUBLISH_SKIPPED has been sent."
+struct TrackName {
+    Namespace track_namespace;
+    Bytes name;
+    bool operator==(const TrackName& other) const {
+        return track_namespace == other.track_namespace && name == other.name;
+    }
+};
+
+std::optional<Namespace> read_namespace(wire::Cursor& cursor) {
+    const auto count = read_vi(cursor);
+    if (!count || *count > 32) return std::nullopt;
+    Namespace result;
+    for (std::uint64_t index = 0; index < *count; ++index) {
+        const auto length = read_vi(cursor);
+        const auto field = length ? read_n(cursor, static_cast<std::size_t>(*length)) : std::nullopt;
+        if (!field || field->empty()) return std::nullopt;
+        result.emplace_back(field->begin(), field->end());
+    }
+    return result;
+}
+
+struct SkippedTrack {
+    TrackName track;
+    std::size_t event{0};
+};
+
+// PUBLISH_SKIPPED messages on the SUBSCRIBE_TRACKS response stream (write 0); the
+// suffix extends the prefix the request carried.
+std::vector<SkippedTrack> skipped_tracks(const View& view, const Namespace& prefix) {
+    std::vector<SkippedTrack> result;
+    for (const auto& frame : view.write_frames(0)) {
+        if (frame.type != kPublishSkipped) continue;
+        wire::Cursor body(frame.body);
+        auto suffix = read_namespace(body);
+        const auto length = suffix ? read_vi(body) : std::nullopt;
+        const auto name = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
+        if (!suffix || !name) continue;
+        TrackName track{prefix, Bytes(name->begin(), name->end())};
+        track.track_namespace.insert(track.track_namespace.end(), suffix->begin(), suffix->end());
+        result.push_back({std::move(track), frame.event});
+    }
+    return result;
+}
+
+// Tracks the publisher announced with PUBLISH on a request stream it opened.
+struct PublishedTrack {
+    TrackName track;
+    std::size_t event{0};
+};
+
+std::vector<PublishedTrack> published_tracks(const View& view) {
+    std::vector<PublishedTrack> result;
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 0u) continue;
+        const auto frames = view.frames(record);
+        if (frames.empty() || frames.front().type != kPublish) continue;
+        wire::Cursor body(frames.front().body);
+        if (!read_vi(body)) continue;
+        auto name_space = read_namespace(body);
+        const auto length = name_space ? read_vi(body) : std::nullopt;
+        const auto name = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
+        if (!name_space || !name) continue;
+        result.push_back({{std::move(*name_space), Bytes(name->begin(), name->end())}, record.first_event});
+    }
+    return result;
+}
+
+Spec skipped_publish_spec() {
+    return spec("d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
+        {{"D21-4-1-MUST-NOT-084", "d21-skipped-publish-not-later-sent-for-same-attempt"}},
+        [](const Fixture& fixture) {
+            auto definition = residual_definition();
+            definition.listener_limits.max_streams_bidi = 1;
+            definition.peer_request_ready = [](auto input) {
+                wire::Cursor cursor(input);
+                return std::holds_alternative<wire::draft21::PublishMessage>(wire::draft21::decode_publish(cursor));
+            };
+            Bytes body;
+            put_vi(body, 1);
+            put_namespace(body, fixture.track_namespace);
+            put_vi(body, 0);
+            definition.writes.push_back(request_write(frame(kSubscribeTracks, body)));
+            // REQUEST_ERROR UNINTERESTED (0x20, Section 12.3) with no retry and no reason,
+            // then FIN: the request is over and its stream is returned to the publisher.
+            Bytes error;
+            put_vi(error, 0x20);
+            put_vi(error, 0);
+            put_vi(error, 0);
+            RawProbeWrite reject{RawProbeChannel::PeerBidi, frame(kRequestError, error), true};
+            reject.evidence_ready = [namespace_fields = fixture.track_namespace](const RawProbeGateInput& input) {
+                const View view(input.prior_writes, input.events);
+                return view.valid() && !skipped_tracks(view, namespace_fields).empty();
+            };
+            definition.writes.push_back(std::move(reject));
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            const auto frames = view.write_frames(0);
+            if (!frames.empty() && frames.front().type == kRequestError) return {true, std::nullopt};
+            // The prefix is the namespace of the SUBSCRIBE_TRACKS this context sent.
+            const auto request = recover_fixture(view.write_bytes(0));
+            if (!request) return {view.close().has_value(), std::nullopt};
+            const auto skipped = skipped_tracks(view, request->track_namespace);
+            const auto published = published_tracks(view);
+            for (const auto& skip : skipped)
+                for (const auto& publish : published)
+                    if (publish.track == skip.track && publish.event > skip.event) return {true, false};
+            if (!view.window_ended()) return {false, std::nullopt};
+            // Pass needs a track that was skipped and the capacity hand-back to have happened.
+            return {true, !skipped.empty() && view.write_event(1) ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
 }  // namespace
 
 std::vector<Spec> residual_specs() {
@@ -523,6 +650,7 @@ std::vector<Spec> residual_specs() {
     result.push_back(mixed_subgroup_spec());
     result.push_back(failed_fill_spec());
     result.push_back(cancelled_fill_spec());
+    result.push_back(skipped_publish_spec());
     return result;
 }
 

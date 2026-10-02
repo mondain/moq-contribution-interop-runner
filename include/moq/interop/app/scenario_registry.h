@@ -292,6 +292,7 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-subscribe-multiple-subgroups",
     "d21-fill-fails-before-first-object",
     "d21-cancel-subscription-with-concurrent-fill-streams",
+    "d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

@@ -36,6 +36,12 @@ struct RawProbeWrite {
     std::function<std::optional<std::vector<std::byte>>(const RawProbeGateInput&)> prepare_bytes{};
 };
 struct RawProbeTranscript;
+// Transport credit the runner advertises for the context, so a scenario can
+// bound what the publisher may open. Unset values keep the listener defaults.
+struct RawProbeListenerLimits {
+    // Publisher-opened bidirectional streams available to MOQT request streams.
+    std::optional<std::uint64_t> max_streams_bidi{};
+};
 struct RawProbeDefinition {
     std::string id;
     std::vector<std::byte> setup_bytes;
@@ -51,6 +57,7 @@ struct RawProbeDefinition {
     // to carry on serving requests would. Acknowledgements are never recorded as
     // transcript writes and are listed in `acknowledged_namespace_streams`.
     bool acknowledge_publisher_namespaces{false};
+    RawProbeListenerLimits listener_limits{};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
