@@ -62,7 +62,9 @@ fi
 # Raw-probe contexts act as the subscriber: the runner sends the requests and
 # moqxr must serve them. Only its await-subscribe mode (--forward 0) does that
 # without a PUBLISH of its own, and --paced keeps Subgroup streams open between
-# Objects so cancellation and update probes have an open stream to act on.
+# Objects so cancellation and update probes have an open stream to act on. Its
+# own timeout outlasts the context so an idle publisher is stopped by the runner
+# rather than exiting with a failure status first.
 # This chooses moqxr CLI options; it never changes what a scenario expects.
 if [[ "$draft" == 21 && "$transport" == webtransport ]]; then
     case $(jq -r '.scenario_id' "$request_file") in
@@ -73,7 +75,7 @@ if [[ "$draft" == 21 && "$transport" == webtransport ]]; then
         d21-publisher-goaway-alternate-uri)
             args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
                   --namespace media --draft "$draft" --forward 0 --paced
-                  --timeout "$timeout_seconds" --ca "$ca_cert")
+                  --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
             ;;
     esac
 fi
