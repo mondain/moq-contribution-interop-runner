@@ -9,6 +9,7 @@
 #include <span>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -55,6 +56,10 @@ struct RawProbeDefinition {
     // Initial QUIC credit for peer-initiated bidirectional streams. The
     // harness adds the WebTransport CONNECT stream where it applies.
     std::optional<std::uint64_t> initial_peer_bidi_streams{};
+    // The harness runs a second listener whose URI a write can name (through
+    // RawProbeGateInput::replacement_uri) and records what connects to it in
+    // RawProbeTranscript::replacement_events. Used for GOAWAY migration.
+    bool offer_replacement_session{false};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
@@ -70,6 +75,9 @@ struct RawProbeAcceptedWrite {
 struct RawProbeGateInput {
     std::span<const RawProbeAcceptedWrite> prior_writes;
     std::span<const transport::TransportEvent> events;
+    // The runner's replacement-session URI (see offer_replacement_session);
+    // empty when the definition offers none.
+    std::string_view replacement_uri{};
 };
 // A REQUEST_OK the controller wrote on a publisher-opened request stream.
 struct RawProbeAcknowledgement {
@@ -94,6 +102,10 @@ struct RawProbeTranscript {
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
+    // Set when the definition offers a replacement session: its URI and the
+    // transport events of whatever connected there.
+    std::optional<std::string> replacement_uri{};
+    std::vector<transport::TransportEvent> replacement_events;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -103,14 +115,20 @@ std::optional<bool> evaluate_raw_probe_close(
 
 class RawProbeController {
 public:
+    // `replacement` is the second listener of a replacement-session definition.
     RawProbeController(transport::SessionTransport& transport,
-                       RawProbeDefinition definition);
+                       RawProbeDefinition definition,
+                       transport::SessionTransport* replacement = nullptr,
+                       std::string replacement_uri = {});
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
 private:
     bool flush(RawProbeAcceptedWrite& write);
     void fail();
     transport::SessionTransport& transport_;
+    transport::SessionTransport* replacement_;
+    bool replacement_setup_sent_{false};
+    bool session_closed_{false};
     RawProbeDefinition definition_;
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;

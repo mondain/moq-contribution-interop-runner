@@ -65,7 +65,8 @@ bool stream_continues(const RawProbeTranscript& transcript, transport::StreamId 
 enum class GateState { Pending, Ready, Cancelled, LimitExceeded };
 GateState evidence_gate(std::span<const RawProbeAcceptedWrite> prior_writes,
                         std::span<const transport::TransportEvent> events,
-                        const std::function<bool(const RawProbeGateInput&)>& ready) {
+                        const std::function<bool(const RawProbeGateInput&)>& ready,
+                        std::string_view replacement_uri = {}) {
     if (events.size() > kMaximumEvents) return GateState::LimitExceeded;
     std::size_t bytes = 0;
     const auto fits = [&](std::size_t size) {
@@ -87,7 +88,7 @@ GateState evidence_gate(std::span<const RawProbeAcceptedWrite> prior_writes,
             if (!fits(close->reason.size())) return GateState::LimitExceeded;
         }
     }
-    return ready({prior_writes,events}) ? GateState::Ready : GateState::Pending;
+    return ready({prior_writes,events,replacement_uri}) ? GateState::Ready : GateState::Pending;
 }
 GateState response_gate(const RawProbeTranscript& transcript, transport::StreamId id,
                         std::size_t begin, std::size_t end,
@@ -143,8 +144,14 @@ bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expect
 }
 }
 RawProbeController::RawProbeController(transport::SessionTransport& transport,
-                                     RawProbeDefinition definition)
-    : transport_(transport), definition_(std::move(definition)) {
+                                     RawProbeDefinition definition,
+                                     transport::SessionTransport* replacement,
+                                     std::string replacement_uri)
+    : transport_(transport), replacement_(replacement), definition_(std::move(definition)) {
+    if (definition_.offer_replacement_session != (replacement != nullptr && !replacement_uri.empty()) ||
+        (replacement == nullptr) != replacement_uri.empty())
+        throw std::invalid_argument("invalid raw probe replacement session");
+    if (!replacement_uri.empty()) transcript_.replacement_uri = std::move(replacement_uri);
     if (definition_.id.empty() || definition_.setup_bytes.empty() ||
         definition_.deadline.count() <= 0 || !valid_stages(definition_) ||
         (definition_.start_after_peer_setup && !definition_.peer_setup_ready) ||
@@ -292,7 +299,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                        peer_request_stream_ && !stream_continues(transcript_,*peer_request_stream_,transcript_.events.size())) return;
             if (pending.write.evidence_ready && !pending.prepared_event_count) {
                 const auto gate = evidence_gate(std::span<const RawProbeAcceptedWrite>(transcript_.writes).first(next_write_),
-                    transcript_.events,pending.write.evidence_ready);
+                    transcript_.events,pending.write.evidence_ready,transcript_.replacement_uri.value_or(""));
                 if (gate == GateState::LimitExceeded) fail();
                 if (gate != GateState::Ready) return;
             }
@@ -303,7 +310,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (evidence_gate(prior,transcript_.events,[](const auto&){return true;}) != GateState::Ready) {
                     fail(); return;
                 }
-                auto bytes = pending.write.prepare_bytes({prior,transcript_.events});
+                auto bytes = pending.write.prepare_bytes({prior,transcript_.events,transcript_.replacement_uri.value_or("")});
                 if (!bytes) return;
                 if (bytes->empty() || bytes->size() > kMaximumSetupBytes) { fail(); return; }
                 pending.write.bytes = std::move(*bytes);
@@ -319,7 +326,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             delivered_at_ = now;
         }
     };
-    for (auto& event : transport_.poll(256)) {
+    for (auto& event : session_closed_ ? std::vector<transport::TransportEvent>{} : transport_.poll(256)) {
         if (transcript_.events.size() >= kMaximumEvents) { fail(); break; }
         transcript_.events.push_back(std::move(event));
         const auto& observed = transcript_.events.back();
@@ -375,6 +382,13 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         } else if (std::holds_alternative<transport::PeerCloseEvent>(observed)) {
             transcript_.complete = transcript_.stimulus_delivered;
             if (!transcript_.complete) transcript_.timed_out = true;
+            // A publisher that migrates may close the old session first; the
+            // replacement session is still awaited until it settles or times out.
+            if (replacement_ && transcript_.complete && !transcript_.timed_out) {
+                transcript_.complete = false;
+                session_closed_ = true;
+                break;
+            }
             return transcript_;
         } else if (std::holds_alternative<transport::LocalCloseEvent>(observed) ||
                    std::holds_alternative<transport::IdleTimeoutEvent>(observed)) {
@@ -385,9 +399,24 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             fail(); break;
         }
     }
+    if (replacement_ && !transcript_.harness_failed) {
+        for (auto& event : replacement_->poll(256)) {
+            if (transcript_.replacement_events.size() >= kMaximumEvents) { fail(); break; }
+            transcript_.replacement_events.push_back(std::move(event));
+            // The replacement session gets the same SETUP as the first one.
+            if (!replacement_setup_sent_ &&
+                std::holds_alternative<transport::ConnectionEstablishedEvent>(transcript_.replacement_events.back())) {
+                replacement_setup_sent_ = true;
+                const auto opened = replacement_->open_uni();
+                if (opened.status == transport::TransportStatus::Success)
+                    replacement_->write(opened.stream_id, definition_.setup_bytes, false);
+            }
+        }
+    }
     // All events in this batch were already observed before any new writes.
-    if (!transcript_.harness_failed && transcript_.transport_established) acknowledge_publisher_namespaces();
-    if (!transcript_.harness_failed) send();
+    if (!transcript_.harness_failed && !session_closed_ && transcript_.transport_established)
+        acknowledge_publisher_namespaces();
+    if (!transcript_.harness_failed && !session_closed_) send();
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {
         transcript_.complete = true;
@@ -404,6 +433,7 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition) {
     if (!valid_stages(definition) || transcript.events.size() > kMaximumEvents ||
         transcript.scenario_id != definition.id || !transcript.complete ||
+        transcript.replacement_uri.has_value() != definition.offer_replacement_session ||
         transcript.harness_failed || transcript.timed_out || !transcript.stimulus_delivered ||
         !transcript.delivery_event_count || *transcript.delivery_event_count > transcript.events.size() ||
         transcript.setup.prepared_event_count ||
@@ -509,11 +539,11 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
         if (definition.writes[i].evidence_ready &&
             evidence_gate(std::span<const RawProbeAcceptedWrite>(transcript.writes).first(i),
                 std::span<const transport::TransportEvent>(transcript.events).first(gate_marker),
-                definition.writes[i].evidence_ready) != GateState::Ready) return false;
+                definition.writes[i].evidence_ready, transcript.replacement_uri.value_or("")) != GateState::Ready) return false;
         if (expected.prepare_bytes) {
             const auto prior = std::span<const RawProbeAcceptedWrite>(transcript.writes).first(i);
             const auto events = std::span<const transport::TransportEvent>(transcript.events).first(gate_marker);
-            const auto bytes = expected.prepare_bytes({prior,events});
+            const auto bytes = expected.prepare_bytes({prior,events,transcript.replacement_uri.value_or("")});
             if (!bytes || bytes->empty() || bytes->size() > kMaximumSetupBytes) return false;
             expected.bytes = *bytes;
             if (!accepted(write,expected)) return false;

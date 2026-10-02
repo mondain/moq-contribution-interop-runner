@@ -179,5 +179,70 @@ TEST(Draft18GapBNative, OtherTrackAfterCreditRestoredPasses) {
     EXPECT_EQ(harness.outcome(run.started.id, "D18-6-1-MUST-NOT-001"), requirements::OutcomeState::Pass);
 }
 
+// Reads the New Session URI of the runner's control-stream GOAWAY.
+std::optional<std::string> goaway_uri(transport::test::PicoquicTestClient& client) {
+    const auto control = client.stream(3);
+    if (!control || control->data.size() <= 4) return std::nullopt;
+    wire::Cursor cursor(std::span<const std::byte>(control->data).subspan(4));
+    const auto decoded = d18::decode_message(d18::StreamRole::Control, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    const auto* goaway = message ? std::get_if<d18::GoawayMessage>(message) : nullptr;
+    if (!goaway) return std::nullopt;
+    return std::string(reinterpret_cast<const char*>(goaway->new_session_uri.data()),
+                       goaway->new_session_uri.size());
+}
+
+TEST(Draft18GapBNative, PublisherMigratesToTheGoawayUri) {
+    for (const bool use_offered_path : {true, false}) {
+        Harness harness;
+        const auto started = harness.manager.start(harness.config("receive-control-goaway-with-new-session-uri", false));
+        ASSERT_EQ(started.status, app::RunStartStatus::Started);
+        auto client = harness.connect(started);
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(client->send_stream(2, literal({0xaf, 0, 0, 0}), false));
+        std::optional<std::string> uri;
+        ASSERT_TRUE(pump_until(*client, [&] { uri = goaway_uri(*client); return uri.has_value(); }));
+        // moqt://127.0.0.1:<port>/moq-next names a second, live listener.
+        ASSERT_EQ(uri->rfind("moqt://127.0.0.1:", 0), 0u) << *uri;
+        const auto colon = uri->rfind(':');
+        const auto slash = uri->find('/', colon);
+        const auto port = static_cast<std::uint16_t>(std::stoul(uri->substr(colon + 1, slash - colon - 1)));
+        const auto path = uri->substr(slash);
+        EXPECT_EQ(path, "/moq-next");
+        EXPECT_NE(port, started.endpoint.port);
+        auto replacement = transport::test::PicoquicTestClient::create({.port = port, .alpn = alpn()});
+        ASSERT_NE(replacement, nullptr);
+        const std::string stated_path = use_offered_path ? path : "/moq";
+        const std::string authority = "127.0.0.1:" + std::to_string(port);
+        d18::KeyValuePairs options{{1, d18::ByteValue{Bytes(reinterpret_cast<const std::byte*>(stated_path.data()),
+                                       reinterpret_cast<const std::byte*>(stated_path.data()) + stated_path.size())}},
+                                   {5, d18::ByteValue{Bytes(reinterpret_cast<const std::byte*>(authority.data()),
+                                       reinterpret_cast<const std::byte*>(authority.data()) + authority.size())}}};
+        ASSERT_TRUE(pump_until(*replacement, [&] { return replacement->established(); }));
+        ASSERT_TRUE(replacement->send_stream(2, encoded(d18::SetupMessage{options}), false));
+        // The runner answers the replacement session with its own SETUP.
+        ASSERT_TRUE(pump_until(*replacement, [&] {
+            const auto setup = replacement->stream(3);
+            return setup && setup->data.size() >= 4;
+        }));
+        ASSERT_TRUE(harness.finalized(*replacement, started.id));
+        EXPECT_EQ(harness.outcome(started.id, "D18-10-4-MUST-004"),
+                  use_offered_path ? requirements::OutcomeState::Pass : requirements::OutcomeState::Fail);
+    }
+}
+
+TEST(Draft18GapBNative, NoMigrationLeavesTheGoawayUriRowUnscored) {
+    Harness harness;
+    auto config = harness.config("receive-control-goaway-with-new-session-uri", false);
+    config.timeout = std::chrono::milliseconds(600);
+    const auto started = harness.manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = harness.connect(started);
+    ASSERT_NE(client, nullptr);
+    ASSERT_TRUE(client->send_stream(2, literal({0xaf, 0, 0, 0}), false));
+    ASSERT_TRUE(harness.finalized(*client, started.id));
+    EXPECT_EQ(harness.outcome(started.id, "D18-10-4-MUST-004"), requirements::OutcomeState::NotRun);
+}
+
 }  // namespace
 }  // namespace moq::interop

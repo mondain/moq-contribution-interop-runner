@@ -320,6 +320,62 @@ TEST(Draft18GapB, PublishMustNotFollowPublishBlockedForTheSameTrack) {
     EXPECT_EQ(run([](ScriptedPublisher&) {}), std::optional<bool>{true});
 }
 
+// Section 10.4: the client MUST use the GOAWAY New Session URI.
+TEST(Draft18GapB, ReplacementSessionMustUseTheGoawayUri) {
+    const auto probe = profile("D18-10-4-MUST-004");
+    EXPECT_EQ(probe.definition.id, "receive-control-goaway-with-new-session-uri");
+    EXPECT_EQ(probe.evaluator_id, "publisher-reconnects-to-provided-goaway-uri");
+    EXPECT_TRUE(probe.definition.offer_replacement_session);
+    const std::string uri = "moqt://127.0.0.1:4444/moq-next";
+    const auto setup_with = [](const std::string& path, const std::string& authority) {
+        d18::KeyValuePairs options;
+        if (!path.empty()) options.push_back({1, d18::ByteValue{bytes_of(path)}});
+        if (!authority.empty()) options.push_back({5, d18::ByteValue{bytes_of(authority)}});
+        return encode_draft18(d18::SetupMessage{options});
+    };
+    const auto run = [&](std::optional<Bytes> replacement_setup, bool close_first = false,
+                         const std::string& offered = "moqt://127.0.0.1:4444/moq-next") {
+        ScriptedPublisher first(setup(), [close_first](ScriptedPublisher& peer) {
+            if (close_first && peer.sent(3) && !peer.answered("close")) {
+                peer.mark("close");
+                peer.close_session(0);
+            }
+        });
+        ScriptedPublisher second(replacement_setup ? *replacement_setup : Bytes{});
+        const auto transcript = run_probe(first, probe.definition, &second, offered);
+        // The GOAWAY goes out on the runner's control stream with the offered URI.
+        const auto* control = first.sent(3);
+        EXPECT_NE(control, nullptr);
+        if (control) {
+            wire::Cursor cursor(std::span<const std::byte>(control->bytes).subspan(4));
+            const auto decoded = d18::decode_message(d18::StreamRole::Control, cursor, {});
+            const auto* message = std::get_if<d18::Message>(&decoded);
+            const auto* goaway = message ? std::get_if<d18::GoawayMessage>(message) : nullptr;
+            EXPECT_NE(goaway, nullptr);
+            if (goaway) {
+                EXPECT_EQ(std::string(reinterpret_cast<const char*>(goaway->new_session_uri.data()),
+                                      goaway->new_session_uri.size()), offered);
+                EXPECT_EQ(goaway->timeout, 0u);
+                EXPECT_EQ(goaway->request_id, std::optional<std::uint64_t>{0});
+            }
+        }
+        return evaluate_draft18_gap_a_probe(transcript, [&] {
+            auto copy = probe;
+            return copy;
+        }());
+    };
+    EXPECT_EQ(run(setup_with("/moq-next", "127.0.0.1:4444")), std::optional<bool>{true});
+    // The old session may close first; the replacement is still awaited.
+    EXPECT_EQ(run(setup_with("/moq-next", "127.0.0.1:4444"), true), std::optional<bool>{true});
+    // WebTransport SETUP carries neither option: arrival at the URI is the evidence.
+    EXPECT_EQ(run(setup_with("", "")), std::optional<bool>{true});
+    // Reaching the offered endpoint but stating another path or authority.
+    EXPECT_EQ(run(setup_with("/moq", "127.0.0.1:4444")), std::optional<bool>{false});
+    EXPECT_EQ(run(setup_with("/moq-next", "127.0.0.1:4443")), std::optional<bool>{false});
+    // No migration at all: the client was not obliged to open a new session.
+    EXPECT_EQ(run(std::nullopt), std::nullopt);
+}
+
 // The controller answers the publisher's PUBLISH_NAMESPACE so that it proceeds.
 TEST(Draft18GapB, PublisherNamespaceIsAcknowledgedWithoutBecomingStimulus) {
     const auto probe = profile("D18-10-MUST-004");

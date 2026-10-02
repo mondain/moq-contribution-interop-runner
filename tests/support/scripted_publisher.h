@@ -143,8 +143,11 @@ private:
 
 // Runs a probe to completion or its deadline on a deterministic clock.
 inline scenarios::RawProbeTranscript run_probe(ScriptedPublisher& publisher,
-                                              scenarios::RawProbeDefinition definition) {
-    scenarios::RawProbeController controller(publisher, std::move(definition));
+                                              scenarios::RawProbeDefinition definition,
+                                              ScriptedPublisher* replacement = nullptr,
+                                              std::string replacement_uri = {}) {
+    scenarios::RawProbeController controller(publisher, std::move(definition), replacement,
+                                             std::move(replacement_uri));
     auto now = scenarios::RawProbeClock::now();
     for (int step = 0; step < 4000; ++step) {
         const auto& transcript = controller.poll(now);

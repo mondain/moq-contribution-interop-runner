@@ -472,6 +472,93 @@ Observation restore_credit_observe(const RawProbeTranscript& transcript, const F
     return observation;
 }
 
+// ---- receive-control-goaway-with-new-session-uri -------------------------------
+// Section 10.4: a client that receives a GOAWAY New Session URI MUST use it for
+// the new session. The runner sends the control GOAWAY naming a second listener
+// and records what connects there. A publisher that does not migrate is not in
+// violation, so only an arriving connection is scored: native QUIC publishers
+// state PATH and AUTHORITY in SETUP (Section 3.2), which must name the URI.
+struct ParsedUri {
+    std::string authority;
+    std::string path;
+};
+
+std::optional<ParsedUri> parse_uri(std::string_view uri) {
+    const auto scheme = uri.find("://");
+    if (scheme == std::string_view::npos) return std::nullopt;
+    const auto rest = uri.substr(scheme + 3);
+    const auto slash = rest.find('/');
+    if (slash == std::string_view::npos) return ParsedUri{std::string(rest), "/"};
+    return ParsedUri{std::string(rest.substr(0, slash)), std::string(rest.substr(slash))};
+}
+
+RawProbeDefinition goaway_uri_definition(const Fixture&, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("receive-control-goaway-with-new-session-uri", setup_frame(), deadline);
+    definition.offer_replacement_session = true;
+    definition.acknowledge_publisher_namespace = true;
+    RawProbeWrite goaway;
+    goaway.channel = RawProbeChannel::Control;
+    goaway.prepare_bytes = [](const RawProbeGateInput& input) -> std::optional<Bytes> {
+        if (input.replacement_uri.empty()) return std::nullopt;
+        Bytes uri;
+        for (const auto character : input.replacement_uri) uri.push_back(static_cast<std::byte>(character));
+        // The control-stream Request ID is the smallest peer Request ID that was
+        // not or might not have been processed: one past each request stream the
+        // publisher opened so far (publisher IDs are even, Section 10.1).
+        std::set<transport::StreamId> opened;
+        for (const auto& event : input.events)
+            if (const auto* data = std::get_if<transport::StreamDataEvent>(&event))
+                if (is_peer_bidi(data->stream_id)) opened.insert(data->stream_id);
+        // Timeout 0: no specific deadline, migrate as quickly as possible.
+        return encode(d18::GoawayMessage{std::move(uri), 0, std::uint64_t{2} * opened.size()});
+    };
+    definition.writes.push_back(std::move(goaway));
+    return definition;
+}
+
+bool replacement_established(const RawProbeTranscript& transcript) {
+    return std::any_of(transcript.replacement_events.begin(), transcript.replacement_events.end(),
+        [](const auto& event) { return std::holds_alternative<transport::ConnectionEstablishedEvent>(event); });
+}
+
+std::optional<Bytes> option_value(const d18::KeyValuePairs& options, std::uint64_t type) {
+    for (const auto& option : options)
+        if (option.type == type)
+            if (const auto* bytes = std::get_if<d18::ByteValue>(&option.value)) return bytes->bytes;
+    return std::nullopt;
+}
+
+Observation goaway_uri_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 1 || !replacement_established(transcript)) return observation;
+    wire::Cursor cursor(transcript.writes[0].write.bytes);
+    const auto decoded = d18::decode_message(d18::StreamRole::Control, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    const auto* goaway = message ? std::get_if<d18::GoawayMessage>(message) : nullptr;
+    if (!goaway) return observation;
+    const auto uri = parse_uri(std::string_view(reinterpret_cast<const char*>(goaway->new_session_uri.data()),
+                                                goaway->new_session_uri.size()));
+    if (!uri) return observation;
+    observation.ready = true;
+    const auto streams = collect_streams(transcript.replacement_events);
+    const auto control = streams ? peer_control(*streams) : std::nullopt;
+    if (!control) {
+        // Connected to the named endpoint (and path, where the transport
+        // carries it in its request) but no SETUP was seen yet.
+        observation.ready = false;
+        return observation;
+    }
+    const auto path = option_value(control->setup.options, 1);
+    const auto authority = option_value(control->setup.options, 5);
+    const auto text = [](const Bytes& bytes) {
+        return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    };
+    // WebTransport SETUP omits both options; the connection itself used the URI.
+    if (!path && !authority) { observation.result = true; return observation; }
+    observation.result = (!path || text(*path) == uri->path) && (!authority || text(*authority) == uri->authority);
+    return observation;
+}
+
 }  // namespace
 
 std::vector<Entry> entries() {
@@ -489,6 +576,9 @@ std::vector<Entry> entries() {
     result.push_back({"D18-10-2-2-MUST-NOT-002", "withhold-use-alias-response-while-publisher-retires-token",
         "token-delete-not-sent-before-all-use-alias-responses", false, false, std::nullopt,
         retire_token_definition, retire_token_observe});
+    result.push_back({"D18-10-4-MUST-004", "receive-control-goaway-with-new-session-uri",
+        "publisher-reconnects-to-provided-goaway-uri", false, false, std::nullopt,
+        goaway_uri_definition, goaway_uri_observe});
     result.push_back({"D18-6-1-MUST-004", "subscribe-tracks-with-no-bidirectional-stream-credit",
         "track-subscription-response-precedes-publish-blocked", true, false, FirstWrite::Prefix,
         no_credit_definition, no_credit_observe});
