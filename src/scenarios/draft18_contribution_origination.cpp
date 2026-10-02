@@ -12,7 +12,6 @@ namespace {
 
 constexpr std::uint64_t kSubscribeId = 1;
 constexpr std::uint64_t kAcceptedRequests = 8;
-constexpr std::uint64_t kPropertyImmutable = 0x0B;
 // Section 2.5.1: Mandatory Track Property types.
 constexpr std::uint64_t kMandatoryFirst = 0x4000;
 constexpr std::uint64_t kMandatoryLast = 0x7FFF;
@@ -354,19 +353,14 @@ std::optional<bool> streams_closed_before_publish_done(const RawProbeTranscript&
 
 // Section 2.5.1: a Mandatory Track Property is malformed as an Object Property.
 // Object Properties are searched together with those nested in the Immutable
-// Properties Property (section 12.7).
+// Properties Property (section 12.7), one level deep: a nested Immutable
+// Properties Property is itself malformed, so it is never followed.
 bool has_mandatory_property(const d18::KeyValuePairs& properties) {
-    for (const auto& property : properties) {
-        if (property.type >= kMandatoryFirst && property.type <= kMandatoryLast) return true;
-        if (property.type != kPropertyImmutable) continue;
-        const auto* nested = std::get_if<d18::ByteValue>(&property.value);
-        if (!nested) continue;
-        wire::Cursor cursor(nested->bytes);
-        const auto decoded = d18::decode_key_value_pairs(cursor, nested->bytes.size(), {});
-        if (const auto* inner = std::get_if<d18::KeyValuePairs>(&decoded))
-            if (has_mandatory_property(*inner)) return true;
-    }
-    return false;
+    bool found = false;
+    for_each_object_property(properties, [&](const auto& property) {
+        if (property.type >= kMandatoryFirst && property.type <= kMandatoryLast) found = true;
+    });
+    return found;
 }
 
 std::vector<d18::ObjectEvent> subscribed_objects(const RawProbeTranscript& transcript) {

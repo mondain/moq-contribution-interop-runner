@@ -437,6 +437,28 @@ inline bool delivered_final_object(const SubgroupStream& stream) {
             *stream.objects.back().status == kStatusEndOfTrack);
 }
 
+// Section 12.7: Immutable Properties (type 0x0B) carries a Key-Value-Pair list
+// that may not itself contain Immutable Properties, so one decoded level is the
+// whole search space. Nested containers in a peer's payload stay opaque, which
+// keeps the work linear in the payload instead of following the nesting.
+inline constexpr std::uint64_t kPropertyImmutable = 0x0B;
+
+// Calls `visit` for every mutable Property and every Property found directly
+// inside an Immutable Properties container.
+template <typename Visit>
+void for_each_object_property(const d18::KeyValuePairs& properties, Visit&& visit) {
+    for (const auto& property : properties) {
+        visit(property);
+        if (property.type != kPropertyImmutable) continue;
+        const auto* nested = std::get_if<d18::ByteValue>(&property.value);
+        if (!nested) continue;
+        wire::Cursor cursor(nested->bytes);
+        const auto decoded = d18::decode_key_value_pairs(cursor, nested->bytes.size(), {});
+        if (const auto* inner = std::get_if<d18::KeyValuePairs>(&decoded))
+            for (const auto& entry : *inner) visit(entry);
+    }
+}
+
 // Becomes true once `seen` has held for `window`. The first sighting is
 // forgotten whenever `seen` is false, so a definition reused for a new
 // session starts its window afresh.
