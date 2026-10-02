@@ -189,7 +189,7 @@ TEST(DefaultNamespaceAnswer, AcknowledgesBesideAProbeTargetingAnotherRequest) {
         auto def = plain("beside");
         // Targets any request that is not a PUBLISH_NAMESPACE: here one starting with 0x1d/0x1.
         def.peer_request_ready = [draft](std::span<const std::byte> input) {
-            return !input.empty() && input[0] == std::byte{draft == 21 ? 0x1d : 0x1};
+            return !input.empty() && input[0] == static_cast<std::byte>(draft == 21 ? 0x1d : 0x1);
         };
         def.writes.push_back({RawProbeChannel::PeerBidi, bytes_of({9}), false});
         ASSERT_EQ(apply_default_namespace_answer(def, draft), DefaultNamespaceAnswer::Applied);
