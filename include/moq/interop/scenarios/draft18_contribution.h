@@ -21,10 +21,14 @@ struct Draft18TokenCredential {
 };
 // invalid: well-formed but not acceptable to the publisher (D18-10-2-2-MUST-008).
 // expired: acceptable in form but already past its lifetime (D18-10-2-2-MUST-010).
-// A scenario whose credential is absent sends nothing and stays unscored.
+// A token scenario whose credential is absent sends nothing and stays unscored.
 struct Draft18TokenCredentials {
     std::optional<Draft18TokenCredential> invalid;
     std::optional<Draft18TokenCredential> expired;
+    // Token Type 0 value the publisher's authorization policy refuses
+    // (D18-10-18-MUST-004, D18-10-19-MUST-004). Without it the publisher may
+    // legitimately grant every request, so those rows stay unscored.
+    std::optional<std::string> denied;
 };
 
 // Draft-18 publisher-contribution probes. Each probe is a raw-probe

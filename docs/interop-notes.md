@@ -141,6 +141,9 @@ unanswered PUBLISH requests by exiting).
 | SUBSCRIBE_NAMESPACE has no 32-field limit, although SUBSCRIBE_TRACKS does | Reject a prefix with more than 32 fields (draft 18 lines 4787-4788; draft 21 lines 4512-4513) | D18-10-18-MUST-001, D21-9-15-MUST-383 |
 | Treats the AUTHORIZATION TOKEN parameter as opaque and accepts it | Reject malformed tokens and cache overflow (draft 18 lines 3160-3161 and 3221; draft 21 lines 3262-3263 and 3319) | D18-10-2-2-MUST-005, D18-10-2-2-MUST-011, D21-8-9-MUST-267, D21-8-9-MUST-277 |
 | Accepts a second SUBSCRIBE to the same track | DUPLICATE_SUBSCRIPTION (draft 18 lines 1979-1982) | D18-5-1-MUST-004 |
+| Accepts an identical, an empty (ancestor) and a second SUBSCRIBE_NAMESPACE prefix with REQUEST_OK; only a descendant prefix got REQUEST_ERROR 0x02 | REQUEST_ERROR PREFIX_OVERLAP (0x30) for a prefix sharing a common prefix with an established SUBSCRIBE_NAMESPACE (draft 18 lines 4803-4807; draft 21 lines 4528-4532) | D18-10-18-MUST-003, D21-9-15-MUST-385 |
+| Never sets the FIRST_OBJECT bit (0x40); its subgroup streams open with type 0x38 | The Original Publisher MUST set FIRST_OBJECT when it opens a new Subgroup (draft 18 lines 901-905 and 5303-5305) | D18-2-2-MUST-001 |
+| Takes a REQUEST_ERROR with a 1025-byte Reason Phrase as an ordinary failure, prints it and closes with application code 0 | Close the session with PROTOCOL_VIOLATION when the reason phrase length exceeds 1024 (draft 21 lines 3030-3034) | D21-8-5-MUST-248 |
 | A REQUEST_ERROR redirect with a non-empty track name is not rejected | PROTOCOL_VIOLATION (draft 18 lines 3835-3836; draft 21 lines 3797-3798) | D18-10-6-1-MUST-005, D21-9-4-1-MUST-341 |
 | As a client it accepts AUTHORITY or PATH in a server SETUP | Close with INVALID_AUTHORITY or INVALID_PATH (draft 21 lines 3490-3510) | D21-9-1-1-MUST-293, D21-9-1-1-MUST-294, D21-9-1-2-MUST-300, D21-9-1-2-MUST-301 |
 | Skips nested FILL_PARAMETERS contents and does not validate them | PROTOCOL_VIOLATION for invalid group order, an overflowing filter, or forbidden nested parameters (draft 21 lines 4956-5187) | D21-9-20-9-MUST-429, D21-9-20-10-MUST-432, D21-9-20-16-MUST-447 |
@@ -158,8 +161,11 @@ serving. A liveness check that scores this automatically has not been implemente
 
 ### Not adjudicated or not scoreable
 
-- Scored FAIL but not yet adjudicated: `D18-10-18-MUST-003`, `D18-10-18-MUST-004`,
-  `D18-10-19-MUST-004`, `D18-2-2-MUST-001`, `D21-9-15-MUST-385`, `D21-8-5-MUST-248`.
+- `D18-10-18-MUST-004` and `D18-10-19-MUST-004` (authorization of a discovery request)
+  score only when `--denied-authorization-token` names a credential the publisher's
+  policy refuses; moqxr has no policy that refuses a token, so they stay unscored
+  for it. They previously scored FAIL on the unproven assumption that the publisher
+  denied the built-in `interop-denied` value.
 - `D21-9-20-19-MUST-460` still scores FAIL because the scenario
   `d21-discovery-update-invalid-forward` sends SUBSCRIBE_TRACKS with the default
   FORWARD, so moqxr publishes its catalog and gives up before reading the update.

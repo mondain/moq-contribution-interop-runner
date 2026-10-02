@@ -1028,6 +1028,7 @@ public:
             if (config.expired_auth_token)
                 token_credentials.expired = scenarios::Draft18TokenCredential{
                     config.expired_auth_token->token_type, config.expired_auth_token->value};
+            token_credentials.denied = config.denied_authorization_token;
             auto contributions = scenarios::draft18_contribution_probes(
                 run_config.timeout, contribution_namespace, contribution_name, std::move(token_credentials));
             const auto found = std::find_if(contributions.begin(), contributions.end(),

@@ -195,12 +195,45 @@ TEST(Draft18ContributionExchange, UnauthorizedNamespaceSubscriptionsAreNotAccept
                 v.when("setup", true, [&] { v.data(2, setup_with({})); });
                 v.when("reply", v.sent(1), [&] { v.data(1, bytes); });
             });
-            return evaluate_draft18_contribution_probe(transcript, p);
+            auto configured = transcript;
+            configured.denied_authorization_token = "interop-denied";
+            return evaluate_draft18_contribution_probe(configured, p);
         };
         EXPECT_EQ(reply(error(0x1)), std::optional<bool>{true});
         EXPECT_EQ(reply(error(0x3)), std::optional<bool>{true});
         EXPECT_EQ(reply(ok()), std::optional<bool>{false});
         EXPECT_EQ(reply(subscribe_ok()), std::nullopt);
+    }
+}
+
+// Without --denied-authorization-token the publisher may legitimately grant the request, so a
+// REQUEST_OK proves nothing; with it, the configured value is what is sent and judged.
+TEST(Draft18ContributionExchange, UnauthorizedSubscriptionsAreUnscoredWithoutAConfiguredDenial) {
+    for (const auto* scenario : {"receive-subscribe-namespace-denied-by-configured-authorization-policy",
+                                 "receive-subscribe-tracks-denied-by-configured-authorization-policy"}) {
+        SCOPED_TRACE(scenario);
+        const auto all = probes();
+        const auto* found = static_cast<const Draft18ContributionProbe*>(nullptr);
+        for (const auto& p : all) if (p.definition.id == scenario) found = &p;
+        ASSERT_NE(found, nullptr);
+        const auto transcript = drive_probe(found->definition, [&](PeerView& v) {
+            v.when("setup", true, [&] { v.data(2, setup_with({})); });
+            v.when("reply", v.sent(1), [&] { v.data(1, ok()); });
+        });
+        EXPECT_EQ(evaluate_draft18_contribution_probe(transcript, *found), std::nullopt);
+        auto custom = transcript;
+        custom.denied_authorization_token = "other";
+        EXPECT_EQ(evaluate_draft18_contribution_probe(custom, *found), std::nullopt);  // stimulus carried the default value
+        Draft18TokenCredentials credentials;
+        credentials.denied = "other";
+        const auto rebuilt = draft18_contribution_probes(milliseconds{60}, {text("n")}, text("t"), credentials);
+        for (const auto& p : rebuilt) if (p.definition.id == scenario) found = &p;
+        auto driven = drive_probe(found->definition, [&](PeerView& v) {
+            v.when("setup", true, [&] { v.data(2, setup_with({})); });
+            v.when("reply", v.sent(1), [&] { v.data(1, ok()); });
+        });
+        driven.denied_authorization_token = "other";
+        EXPECT_EQ(evaluate_draft18_contribution_probe(driven, *found), std::optional<bool>{false});
     }
 }
 

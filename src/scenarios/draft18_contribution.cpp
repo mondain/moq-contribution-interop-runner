@@ -45,7 +45,7 @@ std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     append(contribution::goaway_probes(deadline));
     append(contribution::uri_probes(deadline));
     append(contribution::closure_probes(deadline, fixture));
-    append(contribution::exchange_probes(deadline, fixture));
+    append(contribution::exchange_probes(deadline, fixture, credentials.denied));
     append(contribution::origination_probes(deadline, fixture));
     append(contribution::token_probes(deadline, fixture, credentials));
     return result;
@@ -92,7 +92,11 @@ std::optional<bool> evaluate_draft18_contribution_probe(
     }
     const auto candidates = draft18_contribution_probes(
         profile.definition.deadline, fixture.track_namespace, fixture.track_name,
-        contribution::token_credentials(transcript));
+        [&] {
+            auto credentials = contribution::token_credentials(transcript);
+            credentials.denied = transcript.denied_authorization_token;
+            return credentials;
+        }());
     const auto expected = std::find_if(candidates.begin(), candidates.end(), [&](const auto& c) {
         return c.requirement_id == profile.requirement_id &&
                c.evaluator_id == profile.evaluator_id &&
