@@ -5418,14 +5418,10 @@
       "actor": "endpoint",
       "summary": "Retain a registered Alias after detecting token expiration until the sender deletes it.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "register-token-expire-then-use-alias-before-delete"
-      ],
-      "evaluators": [
-        "expired-alias-rejected-as-expired-not-unknown"
-      ],
-      "rationale": "With a controllable token lifetime, a later USE_ALIAS must produce EXPIRED_AUTH_TOKEN instead of forgetting the alias. Expiration leaves its accounted cache size unchanged; the publisher's stored bytes need not be inspected."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Token expiration (draft lines 3198-3202) is defined by the Token Type's own payload and clock, and draft 18 defines no token type (Table 12, lines 6580-6588; type 0 is negotiated out of band, lines 3153-3155). The runner can neither mint a token that expires at a known time nor learn when the receiver detects expiry, and the retained alias is internal state; the only wire trace, EXPIRED_AUTH_TOKEN on a later USE_ALIAS, cannot be tied to the retained alias without the type's expiry semantics, even with a cooperating publisher."
     },
     {
       "id": "D18-10-2-2-MAY-003",
