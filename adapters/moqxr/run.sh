@@ -125,7 +125,45 @@ if [[ "$draft" == 21 ]]; then
         d21-successful-subscribe-forward-zero | d21-token-delete-and-reuse | \
         d21-token-duplicate-registration | d21-token-register-alias-lifetime | \
         d21-track-prefix-update-overlap | d21-track-property-filter-odd-property-type | \
-        d21-update-subscription-location-range)
+        d21-update-subscription-location-range | \
+        d21-control-stream-lifetime | \
+        d21-duplicate-control-goaway | \
+        d21-duplicate-request-id-across-streams | \
+        d21-fill-timeout-outside-fill-or-fetch | \
+        d21-forward-value-255 | \
+        d21-forward-value-two | \
+        d21-goaway-uri-length-boundary | \
+        d21-group-order-above-two | \
+        d21-group-order-zero | \
+        d21-inbound-padding-datagram | \
+        d21-inbound-padding-stream | \
+        d21-include-properties-value-255 | \
+        d21-include-properties-value-two | \
+        d21-invalid-bidirectional-request-stream-opener | \
+        d21-location-filter-end-group-overflow | \
+        d21-message-body-length-mismatch | \
+        d21-parameter-invalid-message-scope | \
+        d21-parameter-type-delta-overflow | \
+        d21-publish-established-subscriber-sends-publish-state-notify | \
+        d21-publish-namespace-ok-with-track-properties | \
+        d21-publish-request-error-oversized-reason | \
+        d21-publish-update-ok-with-track-properties | \
+        d21-publisher-request-response-before-fin | \
+        d21-range-filter-default-zero-limit | \
+        d21-range-filter-with-zero-negotiated-limit | \
+        d21-request-id-wrong-sender-parity | \
+        d21-request-message-truncated-at-fin | \
+        d21-request-unknown-token-alias | \
+        d21-responder-update-on-publish-namespace | \
+        d21-setup-known-key-value-malformed-value | \
+        d21-subgroup-header-flags | \
+        d21-subscribe-parameters-preserve-payload | \
+        d21-subscribe-tracks-prefix-too-many-fields | \
+        d21-subscriber-sends-publish-state-notify | \
+        d21-successful-subscribe-response | \
+        d21-unexpected-duplicate-message-parameter | \
+        d21-unknown-message-parameter | \
+        d21-update-on-track-status)
             args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
                   --namespace media --draft "$draft" --forward 0 --paced
                   --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
