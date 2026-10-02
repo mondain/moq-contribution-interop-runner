@@ -1,1002 +1,134 @@
 # moq-contribution-interop-runner
 
-Publisher-focused MoQT interoperability runner. The checked-in draft text in
-`docs/` is the protocol authority. The requirement inventories cover drafts 18
-and 21. The draft-18 scenarios subscribe to a configured track,
-optionally subscribe again to verify rejection with `DUPLICATE_SUBSCRIPTION`,
-or issue a standalone FETCH and check for exactly one response. Draft-21
-profiles accept a publisher's PUBLISH for a
-configured track and send an empty REQUEST_OK. These observed-mode scenarios
-can run over native QUIC or WebTransport. The remaining publisher requirements
-are cataloged but not executable yet.
-Requests for unsupported scenarios return HTTP 422; they are never silently
-scored as conformant.
+A relay-side validator for Media over QUIC Transport (MoQT) contribution
+publishers. It presents itself to a publisher as the receiving end of a relay,
+drives controlled interactions (subscribing, fetching, sending malformed or
+unusual input), records what the publisher puts on the wire, and scores that
+evidence against the publisher-applicable requirements of
+`draft-ietf-moq-transport-18` and `draft-ietf-moq-transport-21`.
 
-Build on Linux with `cmake -S . -B build`, then
-`cmake --build build -j4` and `ctest --test-dir build --output-on-failure`.
-The runner and local native test peers use pinned picoquic and picotls.
-Native draft-18/21 process tests and evaluator integration tests are included
-in the default test build. The pinned picoquic revision accepts Retry tokens
-for 120 seconds; the native listener rejects other configured lifetimes.
-Runtime options are listed by `build/moq-interop-runner --help`.
+- Both drafts, scored independently; native QUIC and WebTransport.
+- Runs as a plain process or as a Docker container.
+- Results are served over HTTP as JSON, TAP 14 and an HTML report, and stored in
+  SQLite.
+- Two ways to connect a publisher: start it yourself pointed at the runner
+  (observed mode), or let the runner launch it through an adapter you provide
+  (driven mode).
+- The checked-in draft texts in `docs/` are the protocol authority. No
+  implementation, including the example publishers used for testing, defines
+  expected behavior.
 
-To run the executable scenario, provide a PEM certificate and private key:
+The runner does not forward objects to subscribers and does not validate media
+payloads; payload bytes are opaque.
+
+## Status
+
+- Every applicable, testable MUST/MUST NOT row of each draft has a bound scenario
+  and evaluator: 173 of 173 for draft 18 and 173 of 173 for draft 21 (check with
+  `build/moq-interop-audit --draft 18` and `--draft 21`).
+- Optional SHOULD/MAY coverage is low: 1 of 90 rows for draft 18 and 1 of 97 for
+  draft 21.
+- A binding is not proof that a publisher passed. Most scenarios pass only on
+  positive wire evidence, and a publisher that never produces the behavior leaves
+  the row `NOT_RUN`. `incomplete` is the normal verdict of a run that selects a
+  few scenarios.
+- Some rows score only with operator-supplied fixtures, such as token
+  credentials (`--invalid-auth-token`, `--expired-auth-token`,
+  `--denied-authorization-token`); without them they stay `NOT_RUN`.
+- Rows that cannot be observed on the wire are classified `not_testable` (or
+  `not_applicable`) with a reason and a draft citation, and are excluded from
+  scores.
+- The HTTP API has no authentication. Keep it on a trusted network.
+
+## Quick start
+
+Requirements: Linux, CMake 3.24+, a C++20 compiler, OpenSSL and SQLite3
+development packages, `git`, `perl`, `pkg-config`; the first configure downloads
+pinned dependencies. Details are in [docs/building-and-running.md](docs/building-and-running.md).
 
 ```sh
+cmake -S . -B build
+cmake --build build -j4
+
+# Test certificate with a subject alternative name for loopback.
+mkdir -p work
+openssl req -x509 -newkey rsa:2048 -nodes -keyout work/key.pem -out work/cert.pem \
+  -subj /CN=localhost -days 7 -addext subjectAltName=DNS:localhost,IP:127.0.0.1
+
 build/moq-interop-runner --bind 127.0.0.1 --port 8080 \
-  --publisher-bind 127.0.0.1 --publisher-port-start 4443 \
-  --publisher-port-end 4452 --tls-cert cert.pem --tls-key key.pem
+  --publisher-bind 127.0.0.1 --publisher-advertise 127.0.0.1 \
+  --publisher-port-start 4443 --publisher-port-end 4452 \
+  --tls-cert "$PWD/work/cert.pem" --tls-key "$PWD/work/key.pem"
 ```
 
-Without both TLS files, the HTTP inventory and stored-result endpoints remain
-available, but POST `/api/v1/runs` returns HTTP 503 for executable scenarios.
-The certificate must be trusted by the publisher being tested. The service
-binds one UDP port per active run, up to the configured port range. It does not
-forward to subscribers. A WebTransport client that sends `Origin` must use an
-origin explicitly listed with repeatable `--publisher-origin https://host`
-options. Non-browser clients may omit `Origin`; use
-`--require-publisher-origin` to require it. The client must negotiate HTTP/3,
-QUIC/H3 DATAGRAM, RESET_STREAM_AT, and the current WebTransport settings and
-extended CONNECT profile; legacy WebTransport settings or protocol tokens are
-rejected before MOQT bytes are scored.
-
-The HTTP run configuration accepts an optional opaque-byte track fixture:
-
-```json
-{
-  "draft": 18,
-  "transport": "native-quic",
-  "mode": "observed",
-  "scenarios": ["subscribe-to-publisher-track"],
-  "timeout_ms": 1000,
-  "track": {"namespace_hex": ["6e"], "name_hex": "78"}
-}
-```
-
-Receiver-error probes are listed by `/healthz` alongside the publication
-scenarios. In observed mode these probes accept a run request without `track`;
-for example, use `receive-forward-outside-zero-one` for draft 18 or
-`d21-forward-value-two` for draft 21. Each context sends one isolated malformed
-stimulus and scores the publisher's application close. Exact close codes are
-checked where the draft prescribes them. Transport closes, local closes,
-partial writes, missing SETUP, unsupported datagrams, and timeouts remain
-`NOT_RUN`. Datagram probes require observed negotiated payload capacity and
-complete atomic transport acceptance. The stored evidence includes received
-stream bytes, submitted bytes and accepted lengths, delivery ordering, and the
-peer close code and error space. Driven mode still requires the publisher's
-track fixture. Request-error probes such as `request-track-in-single-period-namespace`
-(draft 18) and `d21-request-single-period-namespace` (draft 21) instead wait for
-an actual response on the matching request stream and verify its error code.
-Optional filter and token-cache probes require an observed peer SETUP advertising
-sufficient support for their stimulus; unmet prerequisites remain `NOT_RUN`.
-
-Raw probes can select up to 100 distinct scenario IDs in one run. The runner
-executes them in the supplied order, using a fresh session for each context and
-keeping the same publisher endpoint. `timeout_ms` applies to each context.
-For example, a draft-21 GOAWAY run selects
-`["d21-duplicate-request-goaway", "d21-goaway-on-distinct-request-streams"]`.
-Requirements needing multiple contexts are scored after collection finishes;
-an absent or incomplete context cannot supply a pass.
-
-In observed mode, read `/api/v1/runs/{id}/events` and reconnect to the same
-endpoint when `context_ready` names the next scenario. Open a fresh QUIC or
-WebTransport session each time. Coordinate the publisher connections for that
-run; observed mode does not authenticate the publisher's identity. Driven mode
-starts the configured publisher process for each context and retains separate
-request and process logs. Cancellation and process or listener failures preserve
-collected evidence and prevent a complete successful run.
-
-The original typed publication scenarios still accept one scenario per run;
-combining them with raw probes returns HTTP 422.
-
-For the draft-18 duplicate-subscription check, set `scenarios` to
-`["subscribe-again-to-established-publisher-track"]`. The runner waits for
-`SUBSCRIBE_OK` to the first request, sends a second SUBSCRIBE for the identical
-track, and scores `D18-5-1-MUST-004` from the response code. If the first
-subscription is not established, that conditional requirement remains
-`NOT_RUN` rather than becoming a publisher failure.
-The same `subscribe-to-publisher-track` run inspects the publisher's SETUP
-option types for `D18-10-3-MUST-NOT-001`. It fails repeated known
-non-repeatable types, permits repeated AUTHORIZATION TOKEN options, and
-leaves repeated unknown extension types unscored. Over WebTransport it also
-scores the AUTHORITY and PATH prohibitions and closes with INVALID_AUTHORITY
-or INVALID_PATH if either forbidden option is received. Passing these SETUP
-rows requires a completed request/response exchange.
-
-For the draft-18 FETCH response check, use
-`["fetch-publisher-track-range"]`. The runner sends a standalone FETCH for
-the configured track from Location `{0, 0}` to `{0, 1}` and scores
-`D18-5-2-MUST-001` when exactly one `FETCH_OK` or `REQUEST_ERROR` is
-observed. The track fixture names the request target; it does not assert that
-the publisher has already published an Object. This profile does not score
-the response code, range validity, or FETCH object delivery.
-
-For draft-18 discovery response checks, use
-`["subscribe-namespace-at-publisher"]` or
-`["subscribe-tracks-at-publisher"]`. The runner sends the corresponding
-request with the configured track namespace as its prefix and scores
-`D18-6-1-MUST-001` or `D18-6-1-MUST-003` when exactly one `REQUEST_OK` or
-`REQUEST_ERROR` is observed. The short post-response observation window
-detects duplicate replies; these profiles do not yet score the separate
-first-response ordering requirements or subsequent namespace/track updates.
-
-For draft 21, set `draft` to `21` and select exactly one of
-`d21-publisher-request-stream-placement`, `d21-setup-unknown-options`,
-`d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`, or
-`d21-server-sends-path` in `scenarios`; the native endpoint advertises ALPN
-`moqt-21`, while WebTransport uses ALPN `h3` and selects `moqt-21` through
-`WT-Available-Protocols` / `WT-Protocol`.
-The two unknown-option SETUP profiles send the draft-21 reserved GREASE option
-type `0x9D` once or twice, then require a valid PUBLISH and REQUEST_OK before
-scoring receiver requirements `D21-9-1-MUST-287`, `-288`, and (for duplicates)
-`-290` as passes. A close or timeout without that exchange stays `NOT_RUN`,
-not a publisher failure. The draft-21 runner waits for both SETUP messages, including when
-PUBLISH arrives before SETUP completes, and records the observed PUBLISH and
-REQUEST_OK. This is a publisher-announcement test, not a subscriber-serving
-relay or a full draft-21 conformance test. Unexercised catalog lines remain
-`NOT_RUN`, so a valid run against the full catalog remains incomplete. An
-invalid first message on a publisher-opened request stream is recorded and
-fails `D21-6-3-MUST-NOT-141`; a different permitted but unsupported opener is
-not reported as a publisher failure.
-The same publisher-announcement run inspects the publisher's SETUP option
-types for `D21-9-1-MUST-NOT-289`. It fails repeated known non-repeatable
-types, allows repeated AUTHORIZATION TOKEN options, and leaves repeated
-unknown extension types unscored because their sender multiplicity rule is
-not known to this runner. A pass requires a completed PUBLISH exchange.
-
-The AUTHORITY and PATH profiles deliberately send an otherwise well-formed
-server SETUP with one role-forbidden option. They score
-`D21-9-1-1-MUST-293` or `D21-9-1-2-MUST-300` only after the local SETUP and
-the publisher client's application close are observed. The expected close codes
-are `INVALID_AUTHORITY` (`0x19`) and `INVALID_PATH` (`0x8`); a different
-application close code fails the selected requirement, while an unobserved or
-transport-level close remains `NOT_RUN`. A completed publication after the
-forbidden option, without the required close, also fails the requirement.
-Over WebTransport, the same probes additionally score the transport-specific
-`D21-9-1-1-MUST-294` or `D21-9-1-2-MUST-301`. Native-QUIC runs leave those
-WebTransport-only rows `NOT_RUN`.
-
-`namespace_hex` is an ordered array of 0–32 nonempty hex-encoded namespace
-fields; `name_hex` is the possibly empty hex-encoded Track Name. The decoded
-full name is limited to 4,096 bytes. Hex encoding preserves arbitrary bytes,
-including NUL, without imposing a text canonicalization on publishers.
-
-Create a run with `curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
-  -H 'Content-Type: application/json' -d @run.json`, where `run.json` contains
-the JSON above. HTTP 201 returns the run ID and `publisher_endpoint` with
-`address`, `port`, and ALPN. For WebTransport, change `transport` to
-`"webtransport"` in the run request; the endpoint also returns an HTTPS `url`,
-`path`, and exact `moqt-18` or `moqt-21` `protocol`. Give that URL to a
-WebTransport publisher. Native publishers connect to the returned UDP address
-and port with the draft ALPN. Then retrieve `GET /api/v1/runs/{id}` or
-`GET /api/v1/runs/{id}/events`. `GET /results` is the HTML summary, and
-`GET /results/{id}` is the server-rendered requirement-by-requirement report.
-`GET /results/{id}.json` exports every catalog row and its evidence;
-`GET /results/{id}.tap` exports scenario-level TAP 14 diagnostics. The HTML
-report supports `strength`, `outcome`, `section`, and `scenario` filters.
-`GET /results/completeness.json` downloads the validator's live completeness
-inventory; the `/results` page summarizes the same data by draft and transport.
-Each draft entry identifies its source digest and validator revision, catalog
-row count, registered required/optional evaluator coverage, static findings,
-and classified `not_testable`/`not_applicable`/informative rows with reasons
-and draft section/line citations. Each transport entry reports run count,
-scored outcome rows, distinct requirements with an evidence-backed pass/fail
-observation, execution-audit consistency, and cited `not_run` rows. A pass/fail
-observation is not itself proof of conformance: inspect the execution findings
-and the individual run's evidence before making a conformance claim. An empty
-transport has zero observed coverage and all applicable, testable rows remain
-`not_run`. This HTTP inventory reflects the currently stored runs; the release
-audit artifact below additionally records exact verification commands, draft
-digests, publisher binary/fixture hashes, and stage results.
-`GET /api/v1/requirements?draft=18` or `draft=21` lists catalog entries.
-`GET /healthz` distinguishes the two inventoried drafts from the narrow
-executable profiles and whether their listeners are configured.
-`POST /api/v1/runs/{id}/stop` ends an active run and finalizes it as incomplete;
-it does not count the interrupted interaction as a publisher failure.
-Scoring distinguishes required MUST/MUST NOT, weighted recommendations, and
-coverage; unexecuted requirements remain visible rather than counting as
-passes. MUST/MUST NOT carry weight 10, SHOULD/SHOULD NOT weight 3, and MAY
-weight 1. A failed required row yields a `fail` verdict; otherwise any
-unexecuted applicable, testable row yields `incomplete`. The required score,
-weighted score, and coverage have separate numerators and denominators in
-the result exports. An incomplete or harness-failed run is not a publisher
-failure.
-
-Run `build/moq-interop-audit --draft 18` or `--draft 21` to inspect the
-static completeness gate. Add `--format json` for sorted per-requirement findings,
-draft digest and source revision, executable coverage counts, and residual
-`not_testable`/`not_applicable` rows with reasons and draft citations. Exit
-status 0 means the source and required evaluator/scenario/evidence registry
-checks pass; status 1 means the draft is not yet executable-complete. As of
-this checkpoint every applicable, testable MUST/MUST NOT row has an executable
-binding for its named scenarios and evaluators: 173/173 for draft 18 and
-173/173 for draft 21, so the static gate passes for both. Four rows were
-reclassified `not_testable` with draft citations (two in draft 18, two in
-draft 21); optional SHOULD/MAY rows remain largely unbound (1/90 and 1/97) and
-appear as non-blocking findings. A registered binding is a static gate,
-not proof that a publisher passed it; run results still require live evidence.
-Raw runs collect independent sessions before evaluating the full catalog once.
-Every named context remains required; outcomes from separate runs are not merged.
-
-FETCH group-order profiles decode complete Objects on each associated FETCH stream.
-Draft-18 executes both explicit orders in one scenario; draft-21 uses ascending,
-descending, and default ascending scenarios. A pass needs a typed FETCH_OK,
-at least two distinct groups, and a complete stream. Missing named contexts
-remain unscored. Draft-18 uses its exclusive end bound and whole-end-group
-special case; draft-21 uses its inclusive end bound.
-
-Draft-21 notification probes establish a namespace or FETCH request with a
-valid typed response, then send PUBLISH_STATE_NOTIFY on that request stream.
-They check for an application PROTOCOL_VIOLATION close. FETCH probes require a
-configured track fixture; saved evidence retains the opening, notification,
-response bytes, acceptance markers, and peer close code.
-Subscriber-direction notification probes cover both SUBSCRIBE and PUBLISH
-established subscriptions with configured track fixtures. Both contexts are
-required for the complete requirement result.
-
-Request GOAWAY probes wait for typed establishment before sending two GOAWAY
-messages on one request stream. The draft-21 control sends one on each of two
-independent request streams and requires a typed response on a fresh request;
-silence alone does not prove success.
-
-Discovery overlap profiles for both drafts establish active typed discovery
-subscriptions before testing exact, ancestor, and descendant common prefixes.
-Prefix updates establish A and a disjoint B whose first namespace field differs,
-then update B to A on B's actual request stream using a fresh Request ID.
-Draft-21 also executes both request types together to prove their independent
-overlap spaces; each requirement scores its own type. These profiles require a
-track fixture, use only its namespace, and allow at most 31 nonempty fields and
-4,094 namespace bytes so the descendant and disjoint controls remain valid.
-An empty configured namespace selects the canonical `(a)` fixture. A complete
-REQUEST_ERROR with PREFIX_OVERLAP (`0x30`) passes; a typed wrong error or OK fails,
-and missing establishment or incomplete/late response evidence stays NOT_RUN.
-
-FETCH first-object profiles for both drafts require a configured track containing
-Group 7, Object 9. They request exactly that point (draft-18 uses exclusive end
-7/10; draft-21 uses inclusive end 7/9). A typed FETCH_OK and one associated
-FETCH stream prove the first ordinary Object. Missing Group or Object ID flags
-fail only the corresponding requirement. Complete typed data at 7/9 passes;
-empty responses, range markers, other locations, and incomplete evidence remain
-NOT_RUN. Object bytes may arrive before FETCH_OK.
-
-Draft-18 gap-A probes close further required rows with one raw context each.
-Their verdicts rest only on observed bytes: silence, early closes by the runner,
-and missing prerequisites stay `NOT_RUN`, never a failure.
-- Setup and session: `receive-setup-with-unknown-option` sends the GREASE
-  option `0x9D` and requires a typed SUBSCRIBE_OK/REQUEST_ERROR instead of a
-  PROTOCOL_VIOLATION close (`D18-10-3-MUST-001`).
-  `complete-publisher-requests-while-session-remains-open` finishes a
-  TRACK_STATUS and fails if the publisher's control stream is FINed or reset
-  (`D18-3-3-MUST-NOT-002`). `establish-moqt-with-datagram-capable-peer` passes
-  on an established session with datagram capacity; the listener closes
-  non-negotiating peers before any MOQT evidence exists (`D18-3-1-MUST-001`).
-  `native-quic-publisher-client-setup-from-moqt-uri` requires AUTHORITY and
-  PATH options in a native-QUIC client's SETUP and is unsupported over
-  WebTransport (`D18-3-2-MUST-001`).
-- Token aliases (`D18-10-2-2-MUST-001/002/009`) send REGISTER only when the
-  publisher's SETUP advertises `MAX_AUTH_TOKEN_CACHE_SIZE` for the 20-byte
-  entry, then DELETE/USE_ALIAS on later TRACK_STATUS requests after each
-  response. The unknown-alias case needs the compatibility code described below;
-  a rejected registering request uses a track the publisher cannot have.
-- Discovery and placement: SUBSCRIBE_NAMESPACE response ordering
-  (`D18-6-1-MUST-002`), NAMESPACE for exact then proper-prefix subscriptions
-  (`D18-6-2-MUST-001`, the first stream is finished before the second prefix to
-  avoid PREFIX_OVERLAP), non-empty namespace fields and first-message placement
-  of PUBLISH (`D18-2-4-1-MUST-001`, `D18-10-MUST-002`) after SUBSCRIBE_TRACKS
-  (sent with FORWARD 0 so no Objects flow),
-  a SUBSCRIBE crossing a still-pending PUBLISH rejected with
-  DUPLICATE_SUBSCRIPTION (`D18-5-1-MUST-005`), and passively observed
-  PUBLISH_NAMESPACE placement and explicitness (`D18-10-MUST-005`,
-  `D18-9-5-MUST-003`).
-- Objects: with the Group 7/Object 9 fixture, two FETCHes compare payload bytes
-  (`D18-2-1-MUST-NOT-001`) and LARGEST_OBJECT must appear in SUBSCRIBE_OK,
-  PUBLISH, REQUEST_UPDATE_OK and TRACK_STATUS_OK once a FETCH delivered that
-  Object (`D18-10-2-11-MUST-001..004`). NextGroupStart subscriptions check the
-  FIRST_OBJECT bit and Subgroup stream uniqueness after a Group rollover
-  (`D18-2-2-MUST-001`, `D18-2-2-MUST-NOT-002`). A SUBSCRIBE for an absent track
-  must deliver no objects (`D18-5-1-1-MUST-NOT-002`); an AbsoluteRange for the
-  Group after the TRACK_STATUS Largest Object must deliver nothing outside it
-  (`D18-5-1-2-MUST-NOT-001`); a joining FETCH after a Forward 0 to 1 update must end at the
-  REQUEST_UPDATE_OK Largest Object once TRACK_STATUS shows the track advanced;
-  the subscription uses a far-future AbsoluteStart so no Object bytes accumulate
-  (`D18-5-1-MUST-003`). Parameter-block probes pass only when the publisher's
-  TRACK_STATUS_OK or PUBLISH carries several parameters and fail on a repeated
-  or overflowing Type Delta (`D18-10-2-MUST-001`, `D18-10-2-MUST-NOT-001`).
-
-Draft-21 FETCH response-count profiles cover accepted and rejected requests.
-They require a valid typed reply on the actual request stream and collect
-through peer FIN before passing a singleton. Two replies fail immediately;
-missing FIN or reset-only closure remains NOT_RUN. Each named context is
-required for the full catalogue row to pass, so a run exercising only one
-context remains incomplete.
-
-Draft-21 SUBSCRIBE, SUBSCRIBE_NAMESPACE, and SUBSCRIBE_TRACKS response-count
-profiles likewise require accepted and rejected contexts. Discovery additionally
-requires REQUEST_OK or REQUEST_ERROR to be the first message on the response
-stream. Later namespace notifications do not count as additional replies.
-Redirect errors for discovery require an empty Track Name. These profiles use
-the configured track namespace as the discovery prefix; discovery permits a
-valid prefix even when the Track Name is unsuitable for SUBSCRIBE.
-
-Draft-21 Range Filter limit probes prepare their request from the publisher's
-actual MAX_FILTER_RANGES advertisement. They send exactly one Range over the
-limit across distinct filter keys, or one Range when the limit defaults to
-zero. Capacities too large for a bounded request remain NOT_RUN. Duplicate-key
-update probes wait for a valid SUBSCRIBE_OK before updating the same stream.
-Saved evidence records the prefix used to prepare each payload, its actual
-bytes, and its acceptance marker.
-
-Established update probes record when each write was accepted and wait for
-the complete peer update on that request's actual stream. Missing, early,
-truncated, or unrelated updates cannot establish a passing result.
-
-FETCH cleanup probes require a configured track fixture and an actual open
-FETCH data stream. Cancellation sends FIN on the request's sending direction
-before STOP_SENDING on its receiving direction. Request and data resets are
-scored independently. A failed update requires a valid REQUEST_ERROR and a
-reset of its associated data stream. FIN-only results remain NOT_RUN because
-transport timing cannot establish a missing reset.
-Saved evidence includes actual stream IDs, reset/stop error codes, and accepted
-operation markers.
-
-SUBSCRIBE cancellation probes wait for a valid SUBSCRIBE_OK and at least two
-open associated subgroup streams before sending STOP_SENDING. Passing requires
-actual resets of the request stream and all observed associated open streams,
-including reordered late subgroup headers. Ambiguous FIN or alias ownership
-results remain NOT_RUN.
-
-Draft-21 server update probes likewise wait for a fully decoded successful
-response before reusing the request stream. The duplicate update ID probe
-waits for the first update's acknowledgment before repeating its ID, so
-outstanding update credits cannot explain the required close.
-Draft-21 failed-update probes require an actual complete `REQUEST_ERROR`
-before checking subscription `PUBLISH_DONE` with `UPDATE_FAILED`, or discovery
-request closure. They verify accepted local FIN and peer FIN or RESET on the
-same request stream; `STOP_SENDING` and a RESET after session closure do not
-prove the peer's sending direction closed. Cleanup is conditional on rejection
-and does not assume an authorization-alias error code.
-
-Unknown authorization alias probes preserve the draft's missing REQUEST_ERROR
-assignment. Without a mapping, a structurally valid rejection remains `NOT_RUN`.
-To test a deployed mapping explicitly, start the runner with
-`--unknown-auth-token-alias-compat-code 0x17` (decimal values also work).
-Configured runs record the chosen code in evidence and expose
-`scoring_profile: "compatibility"` in JSON and a compatibility label in the
-HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
-establish a standards assignment. A different response code fails the probe.
-
-### Draft-18 completeness-gap scenarios (slice B)
-
-These raw probes (`src/scenarios/draft18_gap_b.cpp`) close nine more required
-rows. As elsewhere, only observed bytes decide a verdict; silence, a missing
-precondition or an undecodable reset code leave the row `NOT_RUN`.
-
-- `publisher-queries-track-status-before-resuming-publication` passively requires
-  every publisher TRACK_STATUS to be the first message of a new bidirectional
-  stream (`D18-10-MUST-004`); a publisher that never queries stays `NOT_RUN`.
-- `publish-with-and-without-parameter-extension-negotiation` sends SUBSCRIBE and
-  TRACK_STATUS with a SETUP that negotiates no extension and fails on a message
-  parameter the draft does not define (`D18-10-2-MUST-003`); at least one
-  parameter must actually be sent for a pass.
-  `retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters`
-  fetches Group 7/Object 9 twice and subscribes to it with different priority
-  and group order, and compares payload bytes (`D18-10-2-MUST-NOT-002`).
-- `withhold-use-alias-response-while-publisher-retires-token` answers only the
-  publisher's registering request and fails if a DELETE arrives while a
-  USE_ALIAS message of that alias is unanswered (`D18-10-2-2-MUST-NOT-002`).
-- Stream credit: `subscribe-tracks-with-no-bidirectional-stream-credit` grants the
-  publisher a single bidirectional stream (spent on its PUBLISH_NAMESPACE, which
-  the runner answers) and requires REQUEST_OK or REQUEST_ERROR to be first on
-  the SUBSCRIBE_TRACKS stream (`D18-6-1-MUST-004`).
-  `restore-bidi-stream-credit-after-publish-blocked` then sends a real
-  MAX_STREAMS frame and fails if the publisher opens PUBLISH for the blocked
-  Track (`D18-6-1-MUST-NOT-001`). The probe steps are `RawProbeChannel::Credit`
-  and `UniCredit` on top of `SessionTransport::grant_peer_streams`.
-- Delivery timeouts: `subgroup-object-expires-before-transport-handoff` leaves the
-  publisher without a unidirectional stream for 400 ms against an
-  OBJECT_DELIVERY_TIMEOUT of 100 ms and passes only on a stream reset with
-  DELIVERY_TIMEOUT (`D18-8-MUST-003`).
-  `withhold-subgroup-acknowledgements-after-application-completion` discards
-  every inbound packet for 400 ms (`SessionTransport::set_inbound_drop`, so
-  nothing is acknowledged) against a SUBGROUP_DELIVERY_TIMEOUT of 100 ms and
-  passes on a subgroup stream reset once the path resumes (`D18-8-MUST-006`).
-  Neither can score a failure: the age of an Object at hand-off is internal to
-  the publisher, and a publisher that kept the data cannot be told from one that
-  handed it over late. Over WebTransport a reset whose wire code is not a
-  WebTransport application error code is reported as unavailable, so only a
-  mapped DELIVERY_TIMEOUT counts for `D18-8-MUST-003`.
-- `receive-control-goaway-with-new-session-uri` sends a control GOAWAY naming a
-  second listener (`<scheme>://<host>:<second port>/moq-next`, a free port from
-  the publisher port range or an ephemeral one) and records what connects there.
-  A native-QUIC SETUP must state that PATH and AUTHORITY; a WebTransport
-  connection to the URI is sufficient. A publisher that does not migrate is
-  not failed (`D18-10-4-MUST-004`). A runner started with a single publisher port
-  rejects this scenario with `PortExhausted`; give it two.
-
-One row is reclassified `not_testable` with its draft citation:
-`D18-8-MUST-004` (datagram age runs from an internal application event).
-
-`D18-10-2-2-MUST-008` and `D18-10-2-2-MUST-010` stay `testable` but score only
-with an operator-supplied credential, because draft 18 defines no Token Type
-(Table 12; type 0 is negotiated out of band). A passing static gate therefore
-does not mean these two rows score by default: without the credential the
-scenario sends nothing and the row is `NOT_RUN`.
-
-- `receive-well-formed-token-with-invalid-known-type-value`
-  (`D18-10-2-2-MUST-008`) needs `--invalid-auth-token TYPE:HEX`. The runner sends
-  the credential as a USE_VALUE AUTHORIZATION TOKEN on a SUBSCRIBE_NAMESPACE for
-  the fixture namespace and passes on REQUEST_ERROR `MALFORMED_AUTH_TOKEN` (0x4).
-  Acceptance or any other error code fails; `NOT_SUPPORTED` (Token Type not
-  understood), silence or a close leave the row `NOT_RUN`.
-- `register-token-expire-then-use-alias-before-delete` (`D18-10-2-2-MUST-010`)
-  needs `--expired-auth-token TYPE:HEX`. The runner registers it under Alias 1,
-  which must itself fail with `EXPIRED_AUTH_TOKEN` (0x5) to show the credential
-  is expired, then sends USE_ALIAS, which must fail with `EXPIRED_AUTH_TOKEN`
-  (any other error, the `--unknown-auth-token-alias-compat-code` code, or
-  acceptance fails), then registers Alias 1 again, which must close the Session
-  with `DUPLICATE_AUTH_TOKEN_ALIAS` (0x14) while the Alias is retained.
-  A publisher that does not register, treats the credential as valid, stays
-  silent or times out leaves the row `NOT_RUN`.
-
-### Draft-21 completeness-gap scenarios (slice A)
-
-These scenarios close required MUST/MUST NOT rows whose scenario and evaluator
-the catalog named but the runner did not yet execute. Unless noted, the
-fixture contract is the existing one: the configured track is published by the
-publisher under test and retains Group 7 from its first Object, including
-Object 9. A row passes only on direct wire evidence; missing prerequisites stay
-`NOT_RUN`.
-
-Announcement-controller scenarios (one per run, like
-`d21-publisher-request-stream-placement`):
-
-- Aliases of the placement run for `D21-6-3-MUST-NOT-141`
-  (`d21-publisher-request-stream-openers`), `D21-9-1-MUST-NOT-289`
-  (`d21-publisher-setup-option-multiplicity`), and the WebTransport SETUP rows
-  `D21-9-1-1-MUST-NOT-292` / `D21-9-1-2-MUST-NOT-299`
-  (`d21-webtransport-publisher-setup`, WebTransport only). The server-option
-  probes also run as `d21-webtransport-server-sends-authority` / `-path`
-  (WebTransport only) for `D21-9-1-1-MUST-294` and `D21-9-1-2-MUST-301`.
-- `d21-native-publisher-uri-options`, `d21-native-publisher-uri-query` and
-  `d21-native-publisher-empty-query` (native QUIC only) compare the publisher's
-  SETUP AUTHORITY and PATH with the moqt URI a driven publisher is handed
-  (`moqt://host:port/moq`, `/moq?run=1`, `/moq?`). They score
-  `D21-9-1-1-MUST-296`, `D21-9-1-2-MUST-303` and `-304` only in driven mode,
-  where the runner knows the URI. `d21-native-quic-required-setup-options` and
-  `d21-webtransport-required-setup-options` score `D21-6-3-2-MUST-150` (AUTHORITY
-  and PATH required for a native moqt client; no option required over
-  WebTransport, where a forbidden option is left to its own rows).
-- Reserved-namespace attempts: the configured track namespace is what the
-  publisher is told to publish, and the run validates it (`.` for the three
-  `d21-attempt-single-period-*` scenarios, a longer period-prefixed field other
-  than `.session` for `d21-attempt-unregistered-period-namespace-publication`,
-  `.session` for the two `d21-application-*-under-session` scenarios). A
-  forbidden PUBLISH or PUBLISH_NAMESPACE fails the row. A pass requires both
-  SETUPs exchanged and the session still alive when the whole timeout elapsed
-  without such a publication; a publisher that never connects or closes early is
-  `NOT_RUN`. The runner rejects a PUBLISH under `.` with `DOES_NOT_EXIST`.
-  Rows: `D21-2-4-2-MUST-NOT-026/028/029/030`, `D21-6-5-MUST-NOT-166/167`.
-- `d21-publisher-key-value-type-deltas` (`D21-8-3-MUST-NOT-230`) fails when the
-  publisher's SETUP, PUBLISH parameters or Track Properties overflow the 64-bit
-  type space; `d21-publisher-emitted-namespace-fields` (`D21-8-7-MUST-250`)
-  fails on an empty namespace field. Both pass only with a decoded PUBLISH.
-  `d21-publisher-namespace-routing-announcement` (`D21-7-5-MUST-206`) passes on
-  an explicit PUBLISH_NAMESPACE for the configured namespace and is never a
-  failure, because the wire cannot show that routing was requested.
-
-Raw probe scenarios (the runner subscribes or fetches as a server):
-
-- `d21-publisher-request-response-before-fin` (`D21-6-4-2-2-MUST-157`),
-  `d21-established-subscription-publisher-fin` (`-158`) and
-  `d21-request-stream-terminal-message-order` (`-NOT-156`). The last two send a
-  REQUEST_UPDATE with an unregistered token Alias, which fails and obliges the
-  publisher to end the subscription; PUBLISH_DONE must precede the FIN. The
-  draft does not end a subscription when the Location filter is exhausted, so
-  PUBLISH_DONE cannot be provoked any other way. No FIN means `NOT_RUN`.
-- `d21-original-publisher-opens-new-subgroup` (`D21-2-2-MUST-020`) subscribes
-  from Group 7, Object 0 and requires FIRST_OBJECT on the first stream (by stream
-  ID) of each Subgroup of Group 7. `d21-publish-track-with-mandatory-property`
-  (`D21-3-6-MUST-070`) fails when an Object carries a property in 0x4000-0x7FFF.
-- `d21-subscribe-bounded-location-range` and
-  `d21-update-subscription-location-range` (`D21-3-3-1-MUST-NOT-057`) observe the
-  whole timeout. The update scenario subscribes with FORWARD=0 and sets FORWARD=1
-  and the Group 7, Object 9 filter in one acknowledged REQUEST_UPDATE, so every
-  Object seen was sent under the new filter. Both contexts must run in one run.
-- `d21-subscribe-single-subgroup` and `d21-subgroup-restart-after-reset`
-  (`D21-2-2-MUST-NOT-018`): a Subgroup may use a second stream only after a
-  premature reset or when Objects are forced out of ID order. The restart
-  scenario raises the Start Location while a Subgroup stream is open and needs
-  an observed reset, so it is `NOT_RUN` for publishers that finish the stream first.
-- `d21-discover-original-publisher-namespaces` (`D21-4-2-MUST-089`) uses an
-  empty-prefix SUBSCRIBE_NAMESPACE; `d21-control-stream-lifetime`
-  (`D21-6-3-MUST-NOT-146`) fails on a FIN or reset of the publisher's control
-  stream before a response arrives; the two datagram scenarios
-  (`D21-6-2-MUST-139`, one per transport) pass on a negotiated QUIC DATAGRAM
-  connection and fail when the listener had to refuse the publisher for lacking it.
-- Authorization token Alias probes send sequenced TRACK_STATUS requests and
-  need the publisher to advertise MAX_AUTH_TOKEN_CACHE_SIZE room. Alias state is
-  inferred by comparing responses with a control request that names a never
-  registered Alias, because `UNKNOWN_AUTH_TOKEN_ALIAS` has no REQUEST_ERROR code;
-  `--unknown-auth-token-alias-compat-code` makes it exact. Scenarios:
-  `d21-token-delete-and-reuse` (`D21-8-9-MUST-264`),
-  `d21-token-register-alias-lifetime` (`-265`), `d21-request-deleted-token-alias`
-  (`-269`, needs the compatibility code), the two
-  `d21-register-token-on-*` scenarios (`-271`) and
-  `d21-setup-register-use-value-fallback` (`D21-9-1-4-MUST-308`).
-
-Slice B's own probes could not induce the following rows (the remaining-rows profiles below close most of them; `D21-6-2-MUST-140` is scored from transport evidence): `D21-2-5-MUST-032`,
-`D21-3-1-2-MUST-NOT-048` (need two different published tracks),
-`D21-3-1-MUST-041` (alias sharing is the publisher's choice, so both named
-contexts cannot be forced), `D21-3-1-1-MUST-NOT-047` (cross-stream arrival order
-cannot attribute an Object to post-rejection production),
-`D21-3-3-3-MUST-066` (needs known Object properties), `D21-3-4-1-MUST-067/068/069`
-(fill streams cannot be held open or forced to fail), `D21-4-1-MUST-NOT-084`,
-`D21-5-2-MUST-130`, `D21-6-2-MUST-140` (absence of a session is
-indistinguishable from a failed connection), `D21-8-9-MUST-270/273` (need a
-configured credential type) and `D21-8-9-MUST-NOT-281` (the publisher must be
-driven to retire tokens).
-
-### Draft-21 remaining-rows profiles
-
-These raw-probe scenarios close the last required rows of slice A that the
-slice-A probes above could not induce. They live in
-`src/scenarios/draft21_contribution_residual.cpp` and are listed in
-`kDraft21ContributionScenarios`. Fixture contract: unlike the Group 7 contract
-above, the configured track holds Groups 0 and 1, each with Objects 0 and 1
-(the shape of one GOP per Group); the Subgroup row alone needs a Group 0 whose
-Objects 0-4 and 5-9 form two Subgroups. Contexts that sit behind a publisher's
-own requests have the runner acknowledge a `PUBLISH_NAMESPACE` through the shared
-`auto_accept_*` mechanism of the draft-21 base definition, and answer `PUBLISH` and
-`REQUEST_UPDATE` through `RawProbeCourtesy` (a volunteered response, never a stimulus
-write). Every courtesy answer is recorded, with the transport event count at which it
-completed, in the transcript and in `raw_probe_courtesy_write` evidence.
-
-Runner-subscribes scenarios:
-
-- `d21-overlapping-subscriptions-shared-alias` / `-distinct-aliases`
-  (`D21-3-1-MUST-041`): two subscriptions ask for exactly Object {0,1}; the
-  publisher chooses the Track Aliases, so the context whose alias assignment
-  occurred is the one scored and the row passes on either.
-- `d21-forward-location-and-range-filter-conjunction` (`D21-3-3-3-MUST-066`): a
-  `FORWARD=0` subscription must stay silent, and a `FORWARD=1` subscription with
-  a Location filter {0,0}-{1,0} (and an `OBJECTID_FILTER` for Object 1 when the
-  publisher advertises `MAX_FILTER_RANGES`) may only receive Objects passing all.
-- `d21-fill-fails-before-first-object` (`D21-3-4-1-MUST-068/069`) and
-  `d21-cancel-subscription-with-concurrent-fill-streams` (`-067`): a plain
-  subscription first makes the track live, then a second subscription (and for
-  067 a `REQUEST_UPDATE`) carries `FILL_PARAMETERS`. A fill failure scores only
-  when the fill stream's `FETCH_HEADER` reached the runner and was followed by a
-  reset with no Object: a stack that resets before the header is sent exposes
-  nothing but the reset, which proves neither row. The 067 context holds stream
-  credit so fills stay open until the subscription is cancelled with
-  `STOP_SENDING`.
-- `d21-subscribe-tracks-publish-skipped-then-capacity-recovers`
-  (`D21-4-1-MUST-NOT-084`): the runner allows one publisher-opened request
-  stream, waits for `PUBLISH_SKIPPED`, rejects the one `PUBLISH` and closes its
-  stream, and fails the row if a skipped track is published afterwards.
-- `d21-subgroup-completion-withheld-acknowledgments` (`D21-5-2-MUST-130`): the
-  subscription asks for a 200 ms `SUBGROUP_DELIVERY_TIMEOUT` and the runner holds
-  each data stream at 64 bytes of credit. Withholding acknowledgements alone would
-  leave a fully received stream, where a later `RESET_STREAM` is not delivered to
-  the application, so the stream is kept unfinished instead; the publisher must
-  reset it when the timer expires.
-- `d21-request-well-formed-invalid-token` (`D21-8-9-MUST-270`) and
-  `d21-expired-token-alias-lifetime` (`-273`) use credentials the operator supplies
-  for a Token Type the publisher understands: `--invalid-auth-token TYPE:HEX`
-  and `--expired-auth-token TYPE:HEX` (one `TRACK_STATUS` each, then a repeat
-  registration for 273). Without them the context sends nothing and stays
-  `NOT_RUN`.
-
-Publisher-initiated scenarios (the runner sends nothing and answers what the
-publisher opens): `d21-concurrent-distinct-track-subscriptions`
-(`D21-3-1-2-MUST-NOT-048`), `d21-publish-distinct-tracks-in-one-scope`
-(`D21-2-5-MUST-032`, which compares Object payloads at a shared Location),
-`d21-reject-publish-before-object-production` and
-`d21-rejected-subscribe-no-delivery` (`D21-3-1-1-MUST-NOT-047`; only streams the
-publisher starts after it visibly reacted to the rejection count),
-`d21-publisher-update-credit-limit`, `-per-stream` and `d21-publisher-update-zero-unlimited`
-(`D21-9-1-7-MUST-NOT-316`; the runner announces `MAX_REQUEST_UPDATES` of 2 and
-leaves every update unanswered), `d21-publisher-client-goaway-control` and
-`-request` (`D21-9-2-MUST-318`) and `d21-publisher-delete-with-pending-alias-uses`
-(`D21-8-9-MUST-NOT-281`; the runner holds back the answer to each message that
-uses a Token Alias). A publisher that gives up after the runner rejects its
-request or withholds answers does not void the context (`publisher_exit_is_evidence`).
-
-Two harness primitives support these scenarios: per-context listener tuning
-(the `initial_peer_bidi_streams` and `initial_peer_uni_streams` credit used by the
-draft-18 stream-credit probes, plus `initial_peer_uni_stream_data` and
-`hold_uni_stream_credit`, which stops flow-control extension through
-`picoquic_set_app_flow_control`) and window-judged contribution scenarios
-(`Spec::window`), which judge a timed-out or peer-closed context on the
-evidence it collected.
-
-Draft-21 contribution profiles (`src/scenarios/draft21_contribution_*.cpp`)
-each need a configured track fixture. Every context proves the publisher kept
-serving requests with a fresh request for that track, and only a complete,
-well-framed observation can pass or fail a row; a close, timeout or missing
-data leaves it `NOT_RUN`.
-
-- SETUP token registration: an oversized `REGISTER` is sent against the
-  publisher's announced `MAX_AUTH_TOKEN_CACHE_SIZE`, or its default of zero.
-  Only an application close with `AUTH_TOKEN_CACHE_OVERFLOW` (0x13) fails
-  `D21-9-1-4-MUST-NOT-307`.
-- GREASE: reserved SETUP options (odd, even and repeated) and an unknown
-  `REQUEST_ERROR` code sent to the publisher's own PUBLISH must leave the
-  session usable. A close is never scored against the publisher.
-- REQUEST_UPDATE accounting: single, pipelined successful and pipelined
-  failing updates are counted on the request stream and fenced by a later
-  TRACK_STATUS request. More responses than updates fails; fewer stays
-  `NOT_RUN` because the fence can overtake data. The `MAX_REQUEST_UPDATES`
-  contexts adapt to the publisher's announced limit (zero or omitted means
-  unlimited); only the mandated `TOO_MANY_REQUEST_UPDATES` (0x1B) close
-  proves the over-limit rule, because an immediate responder never observes it.
-- Response types: `SUBSCRIBE_OK` must answer an accepted SUBSCRIBE. FETCH with
-  a start far beyond any Largest Object requires `INVALID_RANGE`. The empty
-  track FETCH passes only on `INVALID_RANGE` since emptiness is not observable.
-  `NAMESPACE_DONE` ordering is scored only after an observed withdrawal.
-- Message Parameters in publisher-originated messages (SUBSCRIBE_OK and any
-  PUBLISH or PUBLISH_STATE_NOTIFY) are walked with the draft-21 type deltas:
-  an overflowing delta fails ordering, an undefined type fails negotiation,
-  and a repeated type outside tokens and range filters fails multiplicity.
-- Padding: a 128 KiB padding stream and a padding datagram are sent to the
-  publisher before an ordinary SUBSCRIBE. A publisher that stops draining the
-  stream stalls the probe and stays `NOT_RUN`.
-- Object delivery: Forward State 0 must deliver no Objects until a
-  `REQUEST_UPDATE` sets Forward 1. Two subscriptions or FETCHes differing only
-  in delivery parameters must carry identical payloads. Gap, forwarding
-  preference and FETCH datagram-flag profiles require a track containing
-  Group 7, Object 9 (as the first-object profiles do) and compare its
-  subscription delivery with a FETCH of the same Object. Datagram and Subgroup
-  header bits, Subgroup FIN after End of Group, and reset after Forward 0 are
-  scored from the Objects the publisher actually produces.
-
-After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
-stored execution evidence. The JSON output gains `execution_audit` with
-per-run canonical SHA-256 hashes, scored-row counts, and explicit findings for
-passed rows missing declared evidence, score mismatches, active/error runs,
-and inconsistent repeats. Run ID, timestamps, and incidental evidence arrival
-order are excluded from the hash, while evidence kind counts remain significant;
-draft, transport, track, timeout, configured compatibility mapping, and validator revision remain part of the
-comparison group. A zero-run audit can be consistent but proves no behavior.
-Compare repetitions only when the publisher binary and fixture are the same;
-publisher identity is not yet stored as a grouping key. Run this audit after
-the service has stopped creating runs so pagination sees a stable database.
-
-The draft release gate accepts a new output directory, audit CLI, and optional
-Docker image, synthetic native peer, moqxr executable, and MP4 fixture:
+Create a first run in another terminal (observed mode, draft 18, native QUIC):
 
 ```sh
-bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit \
-  "$PWD/build/moq-interop-audit" "moq-interop-runner:$(git rev-parse --short HEAD)" \
-  "$PWD/build/moq-interop-picoquic-peer" \
-  /path/to/openmoq-publisher /path/to/locmaf-publisher.mp4
+curl -sS -X POST http://127.0.0.1:8080/api/v1/runs -H 'Content-Type: application/json' -d '{
+  "draft": 18, "transport": "native-quic", "mode": "observed",
+  "scenarios": ["subscribe-to-publisher-track"], "timeout_ms": 8000,
+  "track": {"namespace_hex": ["6d65646961"], "name_hex": "766964655f31"}
+}'
 ```
 
-Use an image built from the exact current commit; a mismatched revision label
-is rejected. Omitting the four optional arguments records the Docker and
-publisher stages as `missing`. The command refuses to overwrite an existing
-output directory. It writes `release-audit.json`, full draft audits, command
-receipts, Docker run results/events, moqxr repeat databases, and logs. The
-report records the external publisher version, executable SHA-256, and fixture
-SHA-256 so a passing matrix cannot be confused with a different local build.
-The `check` mode validates that artifact against the checked-in draft digests and
-current source revision. Native tests, focused ASan/UBSan tests, and bounded
-libFuzzer smoke tests run in either mode. The manually dispatched `Draft release
-audit` workflow builds a pinned moqxr checkout and source-matched image, retains
-the same evidence, and fails until every required stage and static gate passes.
-The required-row static gate now passes for both drafts; the release audit still
-fails until every required stage, including live matrix stages, passes. Local audits require Clang with libFuzzer and `timeout`.
-
-To launch a publisher automatically, configure a trusted executable adapter
-at runner startup and set the run request's `mode` to `"driven"`. The runner
-starts its native listener first, passes the exact endpoint and track fixture
-through the versioned JSON contract, and saves the adapter's stdout/stderr,
-exit status, and SHA-256 log hashes under a per-run directory. An adapter
-cannot set expected behavior or requirement scores. A publisher that exits
-before connecting yields a run-level `ERROR` with logs retained; once
-connected, scores derive from MoQT observations, not process exit status.
-The adapter executable and arguments are set by the operator, never by an
-unauthenticated HTTP caller.
-
-For `moqxr`, the bundled adapter requires `bash` and `jq` and expects the
-`media` namespace and `vide_1` track. This example uses the sibling build and
-fixture; substitute actual publisher paths if they differ:
+The response contains `publisher_endpoint` (address, port and ALPN `moqt-18`).
+Point your publisher at `moqt://ADDRESS:PORT/moq`, with the certificate trusted
+and QUIC DATAGRAM enabled, then read the outcome:
 
 ```sh
-MOQXR_BIN="$(realpath ../moqxr/build/openmoq-publisher)" \
-  build/moq-interop-runner --bind 127.0.0.1 --port 8080 \
-  --publisher-bind 127.0.0.1 --publisher-port-start 4443 \
-  --publisher-port-end 4452 --tls-cert cert.pem --tls-key key.pem \
-  --driver-executable "$PWD/adapters/moqxr/run.sh" \
-  --driver-fixture "$(realpath ../moqxr/tests/fixtures/locmaf-publisher.mp4)" \
-  --driver-log-root "$PWD/driver-logs"
+curl -s http://127.0.0.1:8080/api/v1/runs/RUN_ID | jq '.run | {state, verdict, score}'
+curl -s http://127.0.0.1:8080/results/RUN_ID.json | jq '.requirements[] | select(.outcome=="fail")'
 ```
 
-Submit the same run JSON shown above with `"mode":"driven"`,
-`"namespace_hex":["6d65646961"]`, and `"name_hex":"766964655f31"`.
-Use draft 18 or 21 and `native-quic` or `webtransport`; the adapter maps
-these to `moqxr` CLI options. For another publisher, implement the JSON
-contract in `adapters/contract.schema.json` and configure its executable
-with `--driver-executable`, optional repeated `--driver-arg`,
-`--driver-fixture`, optional `--driver-ca`, and `--driver-log-root`. The
-executable path must be absolute; arguments are never interpreted as a shell
-command. Observed mode remains available without an adapter.
+`/results/RUN_ID` is the HTML report and `/results/RUN_ID.tap` the TAP export. To
+have the runner launch your publisher for you, follow the
+[harness guide](docs/publisher-harness-guide.md).
 
-For Docker Compose, put `cert.pem` and `key.pem` in a directory readable by
-container UID 10001, set `MOQ_INTEROP_TLS_DIR` to that directory, and set
-`MOQ_INTEROP_PUBLISHER_HOST` to the externally reachable address. Use
-`MOQ_INTEROP_UDP_BIND`, `MOQ_INTEROP_UDP_START`, and `MOQ_INTEROP_UDP_END` to
-match the published UDP range. `scripts/container-build.sh build` creates the
-image from a clean committed tree; `docker compose up` starts the HTTP and UDP
-listeners. The HTTP endpoint is bound to localhost by default. Keep it on a
-trusted network because the API has no authentication yet.
-For container-driven runs, put a compatible publisher, media fixture, and any
-custom adapter in `MOQ_INTEROP_PUBLISHER_DIR` (mounted read-only at
-`/opt/publisher`). Set `MOQ_INTEROP_DRIVER_EXECUTABLE` to the in-container
-adapter path, such as `/usr/local/lib/moq-interop/moqxr/run.sh`, and set
-`MOQ_INTEROP_DRIVER_FIXTURE` to its in-container fixture path. For the bundled
-`moqxr` adapter, set `MOQXR_BIN` to the publisher executable path under
-`/opt/publisher`; the default is `/opt/publisher/openmoq-publisher`.
-Container logs are retained in the `validator-results` volume under
-`driver-logs/<run-id>`. If the adapter variable is unset, Compose runs
-observed mode only. The published host and UDP range must be reachable from
-the publisher process; `127.0.0.1` is valid only within the same network
-namespace.
-On graceful SIGTERM, active runs stop and finalize as incomplete. If the
-process or container is killed before it can finalize, the next startup
-marks each interrupted active run `ERROR` and records a `runner_recovery`
-event; already-finalized results are left unchanged. Keep the SQLite database
-and driver logs on persistent storage if results must survive container
-replacement.
+## Documentation
 
-An opt-in black-box check against an external publisher is available:
+| Document | What it covers |
+|---|---|
+| [docs/publisher-harness-guide.md](docs/publisher-harness-guide.md) | Build a harness for your publisher and run it against the runner: observed and driven mode, the driver contract, a worked adapter, unit-testing it, Docker Compose, publisher requirements, reading results, troubleshooting, CI |
+| [docs/building-and-running.md](docs/building-and-running.md) | Build from source, TLS material, every runner flag, Docker and Compose, persistence and recovery |
+| [docs/http-api.md](docs/http-api.md) | Routes, run request and response JSON, run lifecycle, events, JSON/TAP/HTML exports, completeness endpoint, error codes |
+| [docs/scoring-and-audit.md](docs/scoring-and-audit.md) | Outcome states, weights, verdicts, scores, `moq-interop-audit`, release audit, sanitizer and fuzz scripts |
+| [docs/scenario-reference.md](docs/scenario-reference.md) | Per-family fixture contracts, operator credentials, port and transport requirements, what `NOT_RUN` means |
+| [docs/interop-notes.md](docs/interop-notes.md) | Publisher compatibility notes: the bundled moqxr adapter, observed results, the standing rule on expected behavior |
+| [docs/moq-contribution-interop-runner-design.md](docs/moq-contribution-interop-runner-design.md) | Design: goals, architecture, requirement catalog, scoring model, verification strategy |
+| [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
+| [docs/plans/](docs/plans/) | Historical implementation plans |
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
+| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`), schema and draft digests |
+| `adapters/` | Driver contract schema and the bundled `moqxr` adapter |
+| `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
+| `docs/` | Documentation and the two draft texts |
+| `tests/` | Unit, golden, protocol, integration, end-to-end and fuzz tests |
+| `scripts/` | `container-build.sh`, which builds the pinned image from a clean tree |
+| `Dockerfile`, `compose.yaml` | Container image and Compose service |
+
+## Tests
 
 ```sh
-bash tests/e2e/moqxr-matrix.sh \
-  "$PWD/build/moq-interop-runner" \
-  "/path/to/openmoq-publisher" \
-  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
+ctest --test-dir build -j2 --timeout 600 --output-on-failure
+bash tests/e2e/moqxr-adapter-contract.sh              # adapter mapping, no network
+bash examples/harness/test-adapter.sh                 # example adapter, no network
+build/moq-interop-audit --draft 18                    # static completeness gate (also --draft 21)
 ```
 
-This starts four independent **driven** HTTP runs: drafts 18 and 21 over
-native QUIC and WebTransport. It checks runner health, process diagnostics,
-retained contract input, and the full requirement export; it reports pass/fail
-row counts without requiring the publisher to pass. Use the scripts below for
-manual observed-mode diagnostics.
+The default suite needs `jq`, `openssl` and `curl`. Checks against an external
+publisher (`tests/e2e/moqxr-matrix.sh` and the smoke scripts), Docker checks, and
+the sanitizer, fuzz and release-audit scripts are opt-in; see
+[docs/interop-notes.md](docs/interop-notes.md) and
+[docs/scoring-and-audit.md](docs/scoring-and-audit.md).
 
-```sh
-bash tests/e2e/draft18-native-moqxr.sh \
-  "$PWD/build/moq-interop-runner" \
-  "/path/to/openmoq-publisher" \
-  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
-```
+## License and contributing
 
-Pass `21` as a fourth argument to exercise the draft-21 PUBLISH-announcement
-profile with `moqxr --preannounce-tracks`; omitting it selects draft 18. The
-script checks the returned ALPN and prints publisher and runner logs on failure.
-In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, its picoquic client
-did not negotiate QUIC DATAGRAM for either draft, so both attempts ended at the
-transport gate before publisher behavior could be scored. This is an interop
-observation, not a validator pass or a reason to bypass that draft requirement.
-A 2026-10-01 re-check with build `g478d6c0.dirty` found the same: over raw QUIC
-the runner closes the session with PROTOCOL_VIOLATION "QUIC DATAGRAM not
-negotiated" before SETUP. The same build negotiates DATAGRAM over WebTransport,
-so driven draft-18 contribution runs against `moqxr` use `webtransport`. The
-adapter adds `--publish-catalog` for the scenarios that observe a
-publisher-originated PUBLISH (`publish-track-under-single-period-namespace`,
-`application-publish-track-in-session-namespace` and
-`publish-distinct-content-tracks-in-same-scope`), because `moqxr` only
-originates PUBLISH for its catalog track on request.
-It still held on 2026-10-01 with the same build for both drafts over native
-QUIC (the runner closes with `PROTOCOL_VIOLATION`, "QUIC DATAGRAM not
-negotiated"); draft 18 over WebTransport runs, so publisher-driven slice-B
-checks use that transport.
-
-The optional test peer exercises the actual HTTP-created run and production
-native listener for both drafts without depending on a particular publisher:
-`ctest --test-dir build -R 'draft(18|21)-native' --output-on-failure`.
-The WebTransport run API test creates both draft endpoints, performs an HTTP/3
-extended CONNECT with a scripted publisher, sends MOQT SETUP, and checks stored
-`peer_setup_received` evidence. For draft 18 it also answers the runner's
-SUBSCRIBE and checks the scored single-response requirement:
-`ctest --test-dir build -R webtransport-run-api --output-on-failure`.
-The sibling `moq-rs/moq-pub` is a useful publisher reference but its checked-in
-`moq-transport` currently lists draft versions only through 14 and ALPN
-`moq-00`, so it is not a draft-18/21 acceptance fixture. The diagnostic
-`tests/e2e/draft18-webtransport-smoke.sh` and
-`tests/e2e/draft21-webtransport-smoke.sh` take the runner binary, moqxr
-publisher binary, and MP4 fixture as arguments. They require a successful
-publisher exit, observed SETUP, and at least one passing requirement. They
-currently complete with moqxr in both drafts; the overall run verdict remains
-`incomplete` because these smoke scenarios cover only a small part of each
-draft's requirement inventory.
-
-```sh
-bash tests/e2e/draft18-webtransport-smoke.sh \
-  "$PWD/build/moq-interop-runner" \
-  "/path/to/openmoq-publisher" \
-  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
-bash tests/e2e/draft21-webtransport-smoke.sh \
-  "$PWD/build/moq-interop-runner" \
-  "/path/to/openmoq-publisher" \
-  "/path/to/moqxr/tests/fixtures/locmaf-publisher.mp4"
-```
-
-The runner acknowledges parameter-free PUBLISH_NAMESPACE requests needed for
-these contribution flows and rejects the forbidden `.` namespace. It does not
-silently authorize token-bearing announcements; those are not executable in
-the current observed profiles.
-
-Each script starts a loopback runner with temporary TLS material, asks the
-publisher to connect, prints the run verdict and any scored requirements, and
-removes its temporary files. It requires `openssl`, `curl`, and `jq`; it is not
-part of the default CTest suite because `moqxr` and media input are external.
-This fixture publishes the `media` namespace and `vide_1` track expected by
-the script.
-If the publisher omits QUIC DATAGRAM negotiation, the runner rejects the
-session as required by draft 18 section 3.1, records the close, and leaves
-publisher behavior unscored rather than marking a pass.
-
-Draft-21 MAX_FILTER_RANGES rejection coverage includes distinct named contexts
-for an initial aggregate exceeding the advertised positive cap, the omitted
-SETUP option default of zero, and a REQUEST_UPDATE adding SetID 1 while
-retaining the acknowledged subscription's SetID 0 filters. The last context
-exceeds the concurrent cap even though the update itself adds only one range.
-
-## Draft-18 publisher-contribution probes
-
-These raw probes (`src/scenarios/draft18_contribution*.cpp`) cover the draft-18
-publisher requirements about SETUP, GOAWAY, subscriptions, FETCH, discovery,
-data streams and unknown extensible values. Each context is a fresh session at
-the same endpoint. A probe scores `PASS` or `FAIL` only on wire evidence that
-establishes the rule; evidence that is missing, early, ambiguous or that fails a
-stated precondition leaves the row `NOT_RUN`. Several rows need the publisher
-(or its adapter, which receives the scenario ID) to perform an action the runner
-cannot force; those probes wait for it and stay `NOT_RUN` if it never happens.
-
-- SETUP: `observe-publisher-setup-options` inspects the publisher's own SETUP
-  for repeated option types (the SETUP is parsed without the duplicate check so a
-  repeat is visible). `observe-webtransport-publisher-setup` fails AUTHORITY or
-  PATH over WebTransport and is `NOT_RUN` on native QUIC. These rows also name a
-  typed scenario; either kind of context can establish them and any failing
-  context fails them. `receive-setup-with-unknown-option`,
-  `receive-setup-with-duplicate-unknown-options` and
-  `setup-unknown-grease-options-and-duplicates` send GREASE options `0x9D` and
-  `0x11C` in SETUP, then a SUBSCRIBE_NAMESPACE; a REQUEST_OK or REQUEST_ERROR
-  passes and an application close fails. The two token-cache probes send a
-  64-byte REGISTER in SETUP (cost 80 bytes) and apply only when the publisher's
-  MAX_AUTH_TOKEN_CACHE_SIZE is below that. The alias probe scores the
-  UNKNOWN_AUTH_TOKEN_ALIAS rejection only through the configured compatibility
-  code (draft 18 assigns no REQUEST_ERROR code); an accepted request fails.
-- URI: `connect-publisher-to-native-uri-with-{authority,path,query}` compare the
-  publisher's SETUP AUTHORITY and PATH with the URI the runner named for the
-  context (`context_ready` and the `raw_probe_connection_uri` evidence event).
-  The query scenario appends `?interop=1` to that URI, so the publisher must be
-  started with the URI given for that context. WebTransport contexts are `NOT_RUN`.
-- GOAWAY: `observe-publisher-client-goaway` checks every GOAWAY the publisher
-  sends for an empty New Session URI. `send-new-request-after-publisher-control-goaway`
-  and `publisher-control-goaway-with-pending-request-at-cutoff` wait for a control
-  GOAWAY from the publisher, then send a request (Request ID 1, or the first odd
-  ID at the cutoff) and require REQUEST_ERROR `GOING_AWAY` (0x6).
-  `D18-10-4-MUST-004` (reconnect to the GOAWAY URI) is not executable: the raw
-  probe controller and the native transport serve exactly one connection per
-  context, so a replacement session cannot be observed.
-- Subscriptions and FETCH (fixture track): a SUBSCRIBE must be answered with
-  SUBSCRIBE_OK (a refusal says nothing); a forwarded subscription must deliver an
-  Object on its SUBSCRIBE_OK alias; REQUEST_UPDATE gets exactly one reply (a
-  quiet window of a quarter of `timeout_ms`, at most 50 ms, follows the first
-  reply) and three coalesced updates get three REQUEST_OKs unless one
-  REQUEST_ERROR answers the batch. A Forward State 0 subscription's PUBLISH_DONE
-  must carry Stream Count 0 when no data stream was opened. Joining FETCH of a
-  Forward State 0 subscription, and FETCH on an empty track or beyond the Largest
-  Object, require INVALID_RANGE; the empty-track rows apply only when
-  SUBSCRIBE_OK has no LARGEST_OBJECT, and the beyond-largest row builds its
-  Start Location from the reported LARGEST_OBJECT. The update-then-joining-FETCH
-  row compares FETCH_OK's End Location with the LARGEST_OBJECT in
-  REQUEST_UPDATE_OK. A DOES_NOT_EXIST reply to a FETCH of a track that was just
-  subscribed fails; other error codes are inconclusive.
-- Discovery: a REDIRECT reply to SUBSCRIBE_NAMESPACE must leave the Track Name
-  empty; NAMESPACE_DONE must follow its NAMESPACE. The two authorization probes send
-  token type 0 with value `interop-denied`; the publisher must be configured to
-  refuse that token, and a REQUEST_OK then fails (any REQUEST_ERROR passes).
-- Data plane: padding streams and datagrams are observed passively; gap
-  Properties are counted in the mutable list and inside Immutable Properties;
-  non-normal status Objects must have no payload; a subgroup that delivered
-  End of Group or End of Track must close with FIN. Cancelling the subscription,
-  moving the Start Location past an open subgroup, or setting Forward State 0
-  must reset a subgroup that was open and incomplete when the trigger was sent
-  (a FIN is `NOT_RUN`, since it cannot show every Object was delivered). A
-  subgroup closed with FIN that later continues on another stream fails. The
-  datagram-fetch probe fetches an Object first seen as a datagram and requires
-  Serialization Flags bit 0x40; the redelivery probe ends the first subscription,
-  subscribes again from the observed Object, and compares Forwarding Preferences.
-- Publisher-initiated flows wait for the publisher's own request: a recovery
-  TRACK_STATUS answered with unknown optional Properties (ascending types
-  `0x00`, `0x01`, known `0x22` = 1, `0x9D`, `0x11C`) must leave the session
-  usable, and the same reply with invalid `0x22` = 0 after the unknown types must
-  close with PROTOCOL_VIOLATION (any other close code means the unknown
-  Properties were not skipped). A PUBLISH or PUBLISH_NAMESPACE rejected with
-  unknown REQUEST_ERROR `0x9D`, and a request stream stopped with unknown code
-  `0x9D` (sent as STOP_SENDING), must not close the session. A follow-up
-  SUBSCRIBE_NAMESPACE with a typed reply is the survival proof. The
-  simultaneous-tracks probe accepts one PUBLISH and compares its Track Alias
-  with the fixture track's SUBSCRIBE_OK alias.
-
-## Draft-21 slice-B contribution probes
-
-These raw probes (`src/scenarios/draft21_contribution_d21b.cpp`) close the
-remaining required draft-21 rows whose scenario and evaluator the catalog named.
-As elsewhere, a verdict rests on bytes the publisher put on the wire; missing or
-ambiguous evidence stays `NOT_RUN`. A row that names several scenarios needs all
-of them to pass, except `D21-9-9-MUST-365`, whose two scenarios are alternative
-ways to reach the precondition.
-
-- `D21-9-20-18-MUST-456` (`d21-largest-object-required-after-publication`,
-  `-before-publication`): after an Object's first byte is observed, a second
-  SUBSCRIBE, a REQUEST_UPDATE and a TRACK_STATUS must be answered with
-  LARGEST_OBJECT. TRACK_STATUS is sent last because a publisher without it may
-  end the session. The before-publication context is a control: no Object has
-  been observed, nothing is owed, and it only shows the subscription was answered.
-- `D21-9-9-MUST-365`: PUBLISH_DONE Stream Count must be 0 when no data stream
-  was opened. The first scenario subscribes from a Start Location far beyond any
-  Object (and sends a failing REQUEST_UPDATE that obliges a publisher to end the
-  subscription); the datagram-only scenario needs Objects that arrive only as
-  datagrams. A later request on a fresh stream settles the trace before judging.
-- `D21-9-4-1-MUST-340`: a REDIRECT reply to SUBSCRIBE_NAMESPACE or
-  SUBSCRIBE_TRACKS must have an empty Track Name. Publishers that never redirect
-  leave it `NOT_RUN`.
-- `D21-9-10-MUST-371/372`: PUBLISH_STATE_NOTIFY is publisher-initiated, so these
-  four contexts only observe. A notification after a known Object must carry
-  LARGEST_OBJECT; subscriber-controlled values (FORWARD, SUBSCRIBER_PRIORITY,
-  GROUP_ORDER) may differ from the subscriber's last request only after an
-  acknowledged REQUEST_UPDATE. No notification means `NOT_RUN`.
-- `D21-11-5-1-MUST-565`, `D21-11-5-2-MUST-570`: padding the publisher emits must be
-  all zero bytes after the type. Observation only.
-- `D21-9-15-MUST-386`, `D21-9-18-MUST-394`: discovery requests carry token type 0
-  value `interop-denied` (or the value given with `--denied-authorization-token`).
-  Only when that option is set does the runner assume the publisher refuses the
-  credential: a REQUEST_OK then fails the row and a REQUEST_ERROR passes it. Do not
-  set the option for a publisher that has no such policy.
-- `D21-9-20-3-MUST-NOT-407`: SUBSCRIBE_TRACKS carries a distinctive token; the
-  resulting PUBLISH must not carry the same credential, by value or through a
-  registered Alias the publisher itself registered.
-- `D21-11-3-2-MUST-543`: Forward State 0 is sent while a Subgroup stream is open,
-  then restored. A reset passes; a FIN fails only when the same Subgroup then
-  continues on another stream, which proves the first stream was incomplete.
-- `D21-10-7-MUST-489/490`: needs `MAX_FILTER_RANGES` in the publisher's SETUP. An
-  unfiltered subscription finds an even-typed integer Property that sits in only
-  the mutable list (or only inside Immutable Properties), and a second subscription
-  filters on its value. Filtered Objects pass; if matching Objects keep arriving
-  unfiltered while none passes the filter and the session ends, the row fails.
-- `D21-13-MUST-593/594`: besides the existing SETUP-option and REQUEST_ERROR
-  contexts, an unknown Auth Token Type (`0x9D`) and a STOP_SENDING with unknown
-  Stream Reset code `0x9D` against an open Subgroup stream are sent. A fresh request
-  answered afterwards proves the session survived; an application close with a
-  nonzero code before that answer fails both rows, because the unknown value was
-  the only departure from ordinary traffic. A close with code 0 proves nothing.
-- `D21-9-2-MUST-329` (`d21-publisher-goaway-alternate-uri`): the runner sends a
-  control GOAWAY whose New Session URI names a second listener on another port of
-  the configured range (without a free second port the context is unscored). Only
-  a session with a SETUP on that listener passes; native-QUIC AUTHORITY and PATH
-  options that contradict the URI fail. Staying on the first session leaves the
-  row `NOT_RUN`.
-
-`D21-11-1-2-MUST-510` is reclassified as not testable: a Subgroup Object carries
-an Object Status only when its payload length is zero and a datagram STATUS bit
-excludes the payload, so no byte sequence puts a payload with a non-Normal status.
-
-Harness notes. `RawProbeWrite::select_peer_stream` lets a probe send STOP_SENDING to
-a publisher-opened unidirectional stream chosen from the observed events (the proof
-re-derives the choice). Raw contexts acknowledge a publisher's PUBLISH_NAMESPACE with
-an empty REQUEST_OK so a publisher that waits for it keeps serving. A publisher that
-ends the session itself and then exits with a failure status no longer turns the
-context into a harness error once the probe was delivered and the close recorded.
-
-With `moqxr` (0.3.26-dev+g478d6c0.dirty, re-checked 2026-10-01) the native-QUIC
-runs still stop at the DATAGRAM gate for draft 21 (the publisher closes with
-PROTOCOL_VIOLATION, "QUIC DATAGRAM not negotiated"), so draft-21 probes against it
-use WebTransport. The adapter runs it with `--forward 0 --paced` for the slice-B
-scenarios so it serves the runner's requests. `moqxr` has no TRACK_STATUS support
-(a TRACK_STATUS with FIN ends the session with PROTOCOL_VIOLATION), no
-PUBLISH_STATE_NOTIFY, no padding, no authorization policy, no MAX_FILTER_RANGES and
-does not follow a GOAWAY URI, so the corresponding rows stay `NOT_RUN` against it.
+Licensed under the Apache License 2.0; see [LICENSE](LICENSE). Issues and pull
+requests are welcome on the project repository. When reporting that the runner
+scored a row incorrectly, cite the requirement ID and the draft lines it
+quotes: the checked-in drafts decide, not the runner and not any publisher.

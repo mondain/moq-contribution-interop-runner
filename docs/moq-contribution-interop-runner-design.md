@@ -307,7 +307,7 @@ draft and one transport. Connections with a mismatched ALPN or application
 protocol are rejected and recorded.
 
 Each run owns its session state, deadlines, scenario selection, evidence stream,
-and result aggregation. Port-range exhaustion returns an HTTP conflict rather
+and result aggregation. Port-range exhaustion returns HTTP 503 `publisher_ports_exhausted` rather
 than sharing state between runs. Stopping a run closes its listeners and active
 sessions without deleting evidence.
 
@@ -537,9 +537,10 @@ publisher trust in that certificate; the response does not embed private key
 material or claim a publisher has trusted the certificate.
 
 JSON responses carry an API schema version. Collection endpoints are paginated.
-Malformed input returns a structured client error; resource exhaustion or port
-range exhaustion returns a conflict; internal storage or listener failures mark
-the run `ERROR` where possible.
+Malformed input returns a structured client error; port range exhaustion and an
+unavailable listener return HTTP 503; internal storage or listener failures mark
+the run `ERROR` where possible. The current routes, fields and error codes are in
+[http-api.md](http-api.md).
 
 ## HTML Report
 

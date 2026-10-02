@@ -9,7 +9,7 @@ namespace {
 
 constexpr std::string_view kUnknownTrack = "interop-unknown-78937ae9d2abc4e0b6c1";
 constexpr std::uint64_t kPublish = 0x1d;
-// The fixture track is expected to contain Group 7, Object 9 (README, FETCH
+// The fixture track is expected to contain Group 7, Object 9 (docs/scenario-reference.md, FETCH
 // first-object profiles); retrieving it proves Objects have been published.
 constexpr d18::Location kFetchStart{7, 9};
 constexpr d18::Location kFetchEnd{7, 10};

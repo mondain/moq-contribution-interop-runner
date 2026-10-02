@@ -20,7 +20,7 @@ namespace {
 constexpr std::uint64_t kTrackStatus = 0x0D;
 constexpr std::uint64_t kPublish = 0x1d;
 constexpr std::string_view kUnknownParameterDetail = "unknown message parameter";
-// The fixture track is expected to contain Group 7, Object 9 (README, FETCH
+// The fixture track is expected to contain Group 7, Object 9 (docs/scenario-reference.md, FETCH
 // first-object profiles), as the other draft-18 Object comparison probes do.
 constexpr d18::Location kTargetObject{7, 9};
 
