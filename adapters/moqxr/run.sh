@@ -59,4 +59,15 @@ elif [[ "$draft" == 21 && "$transport" == webtransport ]]; then
           --namespace media --draft "$draft" --forward 1
           --timeout "$timeout_seconds" --ca "$ca_cert")
 fi
+# Scenario-specific CLI options. These only make moqxr emit the publisher-
+# initiated messages a scenario observes; they never describe expectations.
+scenario_id=$(jq -r '.scenario_id' "$request_file")
+case "$scenario_id" in
+    # moqxr only originates PUBLISH for the catalog track, and only on request.
+    publish-track-under-single-period-namespace|\
+    application-publish-track-in-session-namespace|\
+    publish-distinct-content-tracks-in-same-scope)
+        args+=(--publish-catalog)
+        ;;
+esac
 exec "$publisher_bin" "${args[@]}"
