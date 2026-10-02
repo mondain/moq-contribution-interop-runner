@@ -97,7 +97,7 @@ RawProbeDefinition largest_publish_definition(const Fixture& fixture, std::chron
         setup_frame(), deadline);
     definition.writes.push_back(known_fetch(1, fixture));
     definition.writes.push_back(after_published_object(
-        make_write(RawProbeChannel::NewBidi, subscribe_tracks_request(3, fixture.track_namespace))));
+        make_write(RawProbeChannel::NewBidi, subscribe_tracks_request(3, fixture.track_namespace, {forward_parameter(0)}))));
     return definition;
 }
 
@@ -439,37 +439,24 @@ Observation range_observe(const RawProbeTranscript& transcript, const Fixture&) 
 }
 
 // ---- joining-fetch-after-forward-enabled-and-track-advanced ---------------------
+// A far-future AbsoluteStart keeps Objects off the subscription (the saved
+// Joining Location does not depend on the filter), so no Object payload can
+// accumulate while the track advances.
+constexpr std::uint64_t kFarFutureGroup = std::uint64_t{1} << 40;
+
 struct JoiningState {
-    Established subscription;
     d18::Location joining;
 };
 
 std::optional<JoiningState> joining_state(const Streams& streams, const RawProbeAcceptedWrite& subscribe) {
-    const auto subscription = established_subscription(streams, subscribe);
-    if (!subscription) return std::nullopt;
     const auto messages = messages_of(streams, subscribe);
-    const auto* update = messages ? message_at(*messages, 1) : nullptr;
+    const auto* first = messages ? message_at(*messages, 0) : nullptr;
+    if (!first || !std::holds_alternative<d18::SubscribeOkMessage>(*first)) return std::nullopt;
+    const auto* update = message_at(*messages, 1);
     const auto* ok = update ? std::get_if<d18::RequestOkMessage>(update) : nullptr;
     const auto joining = ok ? largest_object(ok->parameters) : std::nullopt;
     if (!joining) return std::nullopt;
-    return JoiningState{*subscription, *joining};
-}
-
-bool track_advanced(const Streams& streams, const JoiningState& state) {
-    for (const auto& stream : subgroup_streams(streams, state.subscription.alias)) {
-        for (const auto& object : stream.objects) {
-            if (location_less(state.joining, {stream.header.group_id, object.object_id})) return true;
-        }
-    }
-    return false;
-}
-
-bool joining_ready(const RawProbeGateInput& input) {
-    if (input.prior_writes.empty()) return false;
-    const auto streams = collect_streams(input.events);
-    if (!streams) return false;
-    const auto state = joining_state(*streams, input.prior_writes[0]);
-    return state && track_advanced(*streams, *state);
+    return JoiningState{*joining};
 }
 
 bool forward_enabled_gate(const RawProbeGateInput& input) {
@@ -481,33 +468,58 @@ bool forward_enabled_gate(const RawProbeGateInput& input) {
     return first && std::holds_alternative<d18::SubscribeOkMessage>(*first);
 }
 
+bool joining_location_saved(const RawProbeGateInput& input) {
+    if (input.prior_writes.empty()) return false;
+    const auto streams = collect_streams(input.events);
+    return streams && joining_state(*streams, input.prior_writes[0]).has_value();
+}
+
+std::optional<d18::Location> status_largest(const Streams& streams, const RawProbeAcceptedWrite& status) {
+    const auto messages = messages_of(streams, status);
+    const auto* first = messages ? message_at(*messages, 0) : nullptr;
+    const auto* ok = first ? std::get_if<d18::RequestOkMessage>(first) : nullptr;
+    return ok ? largest_object(ok->parameters) : std::nullopt;
+}
+
+bool track_advanced(const RawProbeGateInput& input) {
+    if (input.prior_writes.size() != 3) return false;
+    const auto streams = collect_streams(input.events);
+    if (!streams) return false;
+    const auto state = joining_state(*streams, input.prior_writes[0]);
+    const auto current = status_largest(*streams, input.prior_writes[2]);
+    return state && current && location_less(state->joining, *current);
+}
+
 RawProbeDefinition joining_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
     auto definition = make_definition("joining-fetch-after-forward-enabled-and-track-advanced",
         setup_frame(), deadline);
     definition.writes.push_back(make_write(RawProbeChannel::NewBidi,
-        subscribe_request(1, fixture, {forward_parameter(0)})));
+        subscribe_request(1, fixture, {forward_parameter(0),
+            filter_parameter({d18::SubscriptionFilterType::AbsoluteStart,
+                              d18::Location{kFarFutureGroup, 0}, std::nullopt})})));
     // REQUEST_UPDATE_OK to this update communicates the Joining Location
     // (Section 5.1): the Largest Location when Forward State becomes 1.
     auto update = make_write(RawProbeChannel::NewBidi, request_update(3, {forward_parameter(1)}));
     update.reuse_write_stream = 0;
     update.evidence_ready = forward_enabled_gate;
     definition.writes.push_back(std::move(update));
-    auto fetch = make_write(RawProbeChannel::NewBidi, joining_fetch_request(5, 1, 0, true), true);
-    fetch.evidence_ready = [](const RawProbeGateInput& input) {
-        return input.prior_writes.size() == 2 && joining_ready({input.prior_writes.first(1), input.events});
-    };
+    auto status = make_write(RawProbeChannel::NewBidi, track_status_request(5, fixture), true);
+    status.evidence_ready = joining_location_saved;
+    definition.writes.push_back(std::move(status));
+    auto fetch = make_write(RawProbeChannel::NewBidi, joining_fetch_request(7, 1, 0, true), true);
+    fetch.evidence_ready = track_advanced;
     definition.writes.push_back(std::move(fetch));
     return definition;
 }
 
 Observation joining_observe(const RawProbeTranscript& transcript, const Fixture&) {
     Observation observation;
-    if (transcript.writes.size() != 3) return observation;
+    if (transcript.writes.size() != 4) return observation;
     const auto streams = collect_streams(transcript.events);
     if (!streams) return observation;
     const auto state = joining_state(*streams, transcript.writes[0]);
     if (!state) return observation;
-    const auto response = messages_of(*streams, transcript.writes[2]);
+    const auto response = messages_of(*streams, transcript.writes[3]);
     const auto* first = response ? message_at(*response, 0) : nullptr;
     if (!first) return observation;
     if (std::holds_alternative<d18::RequestErrorMessage>(*first)) {

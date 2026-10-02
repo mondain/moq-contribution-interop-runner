@@ -207,5 +207,74 @@ TEST(Draft18GapASetup, AliasRegisteredByRejectedRequestStillResolves) {
     EXPECT_EQ(score(probe, not_rejected), std::nullopt);
 }
 
+
+// Parameter-block probes read what the publisher sends: TRACK_STATUS_OK on the
+// TRACK_STATUS stream (local stream 1) and PUBLISH on a peer bidi stream.
+d18::Parameter location(std::uint64_t group, std::uint64_t object) {
+    return {0x09, d18::Location{group, object}};
+}
+Bytes status_ok(d18::Parameters parameters) {
+    return encode_draft18(d18::RequestOkMessage{std::move(parameters), {}});
+}
+void deliver(ScriptedPublisher& peer, std::uint64_t stream, const std::string& key, Bytes bytes,
+             bool fin = false) {
+    if (peer.sent(stream) && !peer.answered(key)) { peer.mark(key); peer.data(stream, std::move(bytes), fin); }
+}
+
+TEST(Draft18GapASetup, ParameterBlocksNeedSeveralParametersToPass) {
+    for (const auto* requirement : {"D18-10-2-MUST-001", "D18-10-2-MUST-NOT-001"}) {
+        const auto probe = profile(requirement);
+        ScriptedPublisher status(setup(), [](ScriptedPublisher& peer) {
+            deliver(peer, 1, "s", status_ok({{0x08, d18::VarIntParameterValue{1000}}, location(7, 9)}), true);
+        });
+        EXPECT_EQ(score(probe, status), std::optional<bool>{true}) << requirement;
+        ASSERT_NE(status.sent(5), nullptr);
+        EXPECT_EQ(status.sent(5)->bytes, encode_draft18(d18::SubscribeTracksMessage{3,
+            d18::TrackNamespace{{bytes_of("n")}}, {{0x10, d18::Uint8ParameterValue{0}}}}));
+        ScriptedPublisher publish(setup(), [](ScriptedPublisher& peer) {
+            deliver(peer, 1, "s", status_ok({location(7, 9)}), true);
+            if (peer.answered("s") && !peer.answered("p")) {
+                peer.mark("p");
+                peer.data(0, encode_draft18(d18::PublishMessage{2, d18::TrackNamespace{{bytes_of("n")}},
+                    d18::TrackName{bytes_of("t")}, 9, {location(7, 9), {0x10, d18::Uint8ParameterValue{1}}}, {}}));
+            }
+        });
+        EXPECT_EQ(score(probe, publish), std::optional<bool>{true}) << requirement;
+        ScriptedPublisher single(setup(), [](ScriptedPublisher& peer) {
+            deliver(peer, 1, "s", status_ok({location(7, 9)}), true);
+            if (peer.answered("s") && !peer.answered("p")) {
+                peer.mark("p");
+                peer.data(0, encode_draft18(d18::PublishMessage{2, d18::TrackNamespace{{bytes_of("n")}},
+                    d18::TrackName{bytes_of("t")}, 9, {location(7, 9)}, {}}));
+            }
+        });
+        EXPECT_EQ(score(probe, single), std::nullopt) << requirement;
+    }
+}
+
+TEST(Draft18GapASetup, RepeatedOrOverflowingParameterTypesAreDistinctFailures) {
+    const auto ordered = profile("D18-10-2-MUST-001");
+    const auto unique = profile("D18-10-2-MUST-NOT-001");
+    // REQUEST_OK with LARGEST_OBJECT repeated: the second Type Delta is 0.
+    const Bytes repeated{std::byte{7}, std::byte{0}, std::byte{7}, std::byte{2}, std::byte{9}, std::byte{7},
+                         std::byte{9}, std::byte{0}, std::byte{7}, std::byte{9}};
+    const auto repeat_reaction = [&](ScriptedPublisher& peer) { deliver(peer, 1, "s", repeated, true); };
+    ScriptedPublisher repeats(setup(), repeat_reaction);
+    EXPECT_EQ(score(unique, repeats), std::optional<bool>{false});
+    ScriptedPublisher repeats_for_order(setup(), repeat_reaction);
+    EXPECT_EQ(score(ordered, repeats_for_order), std::nullopt);
+    // A 9-byte Type Delta of 2^64 - 1 added to type 9 overflows uint64.
+    Bytes overflow{std::byte{7}, std::byte{0}, std::byte{17}, std::byte{2}, std::byte{9}, std::byte{7},
+                   std::byte{9}, std::byte{0xff}};
+    for (int i = 0; i < 8; ++i) overflow.push_back(std::byte{0xff});
+    overflow.push_back(std::byte{0});
+    overflow.push_back(std::byte{0});
+    overflow[2] = static_cast<std::byte>(overflow.size() - 3);
+    ScriptedPublisher overflows(setup(), [&](ScriptedPublisher& peer) { deliver(peer, 1, "s", overflow, true); });
+    EXPECT_EQ(score(ordered, overflows), std::optional<bool>{false});
+    ScriptedPublisher overflows_for_unique(setup(), [&](ScriptedPublisher& peer) { deliver(peer, 1, "s", overflow, true); });
+    EXPECT_EQ(score(unique, overflows_for_unique), std::nullopt);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

@@ -89,6 +89,14 @@ std::optional<d18::Message> decode_frame(std::span<const std::byte> bytes, const
     return *message;
 }
 
+std::optional<std::string> frame_decode_error(std::span<const std::byte> bytes, const Frame& frame) {
+    if (frame.offset > bytes.size() || frame.size > bytes.size() - frame.offset) return std::nullopt;
+    wire::Cursor cursor(bytes.subspan(frame.offset, frame.size));
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    if (const auto* error = std::get_if<wire::DecodeError>(&decoded)) return error->detail;
+    return std::nullopt;
+}
+
 std::optional<Streams> collect_streams(std::span<const transport::TransportEvent> events,
                                        std::size_t end) {
     if (end > events.size() || end > kMaximumEvents) return std::nullopt;

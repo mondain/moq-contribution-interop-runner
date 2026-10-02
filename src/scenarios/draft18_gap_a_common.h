@@ -53,6 +53,8 @@ struct SplitFrames {
 SplitFrames split_frames(std::span<const std::byte> bytes);
 std::optional<d18::Message> decode_frame(std::span<const std::byte> bytes,
                                          const Frame& frame);
+// The wire decoder's rejection detail for a complete frame, if it rejects it.
+std::optional<std::string> frame_decode_error(std::span<const std::byte> bytes, const Frame& frame);
 
 struct StreamData {
     Bytes bytes;

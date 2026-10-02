@@ -304,6 +304,87 @@ Observation rejected_register_observe(const RawProbeTranscript& transcript, cons
     return compare_alias_outcomes(transcript, true);
 }
 
+// ---- publisher-sent Message Parameter encoding -----------------------------------
+// The publisher's own parameter blocks are inspected: TRACK_STATUS_OK (what a
+// SUBSCRIBE_OK would carry, Section 10.14) and PUBLISH (Section 10.10).
+enum class ParameterRule { Ascending, NoRepeats };
+
+constexpr std::string_view kDuplicateDetail = "duplicate non-repeatable parameter";
+constexpr std::string_view kOverflowDetail = "parameter resolved type overflows uint64";
+
+RawProbeDefinition parameter_definition(std::string id, const Fixture& fixture,
+                                        std::chrono::milliseconds deadline) {
+    auto definition = make_definition(std::move(id), setup_frame(), deadline);
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi, track_status_request(1, fixture), true));
+    definition.writes.push_back(make_write(RawProbeChannel::NewBidi,
+        subscribe_tracks_request(3, fixture.track_namespace, {forward_parameter(0)})));
+    return definition;
+}
+
+Observation parameter_observe(const RawProbeTranscript& transcript, ParameterRule rule) {
+    Observation observation;
+    if (transcript.writes.size() != 2) return observation;
+    const auto streams = collect_streams(transcript.events);
+    if (!streams) return observation;
+    std::vector<std::pair<const Bytes*, Frame>> frames;
+    const auto* status = local_stream(*streams, transcript.writes[0]);
+    bool status_seen = false;
+    if (status) {
+        const auto split = split_frames(status->bytes);
+        if (!split.malformed && !split.frames.empty()) {
+            frames.emplace_back(&status->bytes, split.frames.front());
+            status_seen = true;
+        }
+    }
+    bool publish_seen = false;
+    for (const auto& [id, stream] : *streams) {
+        if (!is_peer_bidi(id)) continue;
+        const auto split = split_frames(stream.bytes);
+        if (split.malformed || split.frames.empty() || split.frames.front().type != 0x1d) continue;
+        frames.emplace_back(&stream.bytes, split.frames.front());
+        publish_seen = true;
+    }
+    bool multiple = false;
+    for (const auto& [bytes, frame] : frames) {
+        const auto message = decode_frame(*bytes, frame);
+        if (message) {
+            const d18::Parameters* parameters = nullptr;
+            if (const auto* value = std::get_if<d18::RequestOkMessage>(&*message)) parameters = &value->parameters;
+            else if (const auto* publish = std::get_if<d18::PublishMessage>(&*message)) parameters = &publish->parameters;
+            if (parameters && parameters->size() >= 2) multiple = true;
+            continue;
+        }
+        const auto detail = frame_decode_error(*bytes, frame);
+        if (detail && ((rule == ParameterRule::NoRepeats && *detail == kDuplicateDetail) ||
+                       (rule == ParameterRule::Ascending && *detail == kOverflowDetail))) {
+            observation.ready = true;
+            observation.result = false;
+            return observation;
+        }
+    }
+    // A pass needs a block with several parameters; fewer proves nothing.
+    if (multiple) {
+        observation.ready = true;
+        observation.result = true;
+    } else if (status_seen && publish_seen) {
+        observation.ready = true;
+    }
+    return observation;
+}
+
+RawProbeDefinition ordered_parameters_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    return parameter_definition("publish-with-multiple-message-parameter-types", fixture, deadline);
+}
+Observation ordered_parameters_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    return parameter_observe(transcript, ParameterRule::Ascending);
+}
+RawProbeDefinition unique_parameters_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
+    return parameter_definition("publish-with-multiple-configured-parameters", fixture, deadline);
+}
+Observation unique_parameters_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    return parameter_observe(transcript, ParameterRule::NoRepeats);
+}
+
 }  // namespace
 
 std::vector<Entry> setup_entries() {
@@ -329,6 +410,12 @@ std::vector<Entry> setup_entries() {
     entries.push_back({"D18-10-2-2-MUST-009", "register-token-in-rejected-request-then-use-alias",
         "rejected-request-token-alias-still-registered", true, false, FirstWrite::TrackStatus,
         rejected_register_definition, rejected_register_observe});
+    entries.push_back({"D18-10-2-MUST-001", "publish-with-multiple-message-parameter-types",
+        "message-parameters-encoded-in-ascending-type-order", true, false, FirstWrite::TrackStatus,
+        ordered_parameters_definition, ordered_parameters_observe});
+    entries.push_back({"D18-10-2-MUST-NOT-001", "publish-with-multiple-configured-parameters",
+        "no-unpermitted-duplicate-parameter-types-sent", true, false, FirstWrite::TrackStatus,
+        unique_parameters_definition, unique_parameters_observe});
     return entries;
 }
 

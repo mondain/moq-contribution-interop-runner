@@ -146,10 +146,12 @@ Observation exact_and_prefix_observe(const RawProbeTranscript& transcript, const
 }
 
 // ---- publish-track-namespace-fields -------------------------------------------
+// FORWARD 0 keeps the resulting PUBLISH subscriptions free of Object data, so
+// only control messages are examined (Section 10.19).
 RawProbeDefinition tracks_definition(std::string id, const Fixture& fixture, std::chrono::milliseconds deadline) {
     auto definition = make_definition(std::move(id), setup_frame(), deadline);
     definition.writes.push_back(make_write(RawProbeChannel::NewBidi,
-        subscribe_tracks_request(1, fixture.track_namespace)));
+        subscribe_tracks_request(1, fixture.track_namespace, {forward_parameter(0)})));
     return definition;
 }
 

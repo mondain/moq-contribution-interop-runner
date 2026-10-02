@@ -147,8 +147,9 @@ TEST(Draft18GapAObject, PublishIncludesLargestObjectForTheFixtureTrack) {
     ScriptedPublisher included(setup(), reaction({largest(7, 9)}, "t"));
     EXPECT_EQ(score(probe, included), std::optional<bool>{true});
     ASSERT_NE(included.sent(5), nullptr);
+    // FORWARD 0 keeps the PUBLISH subscriptions free of Object data.
     EXPECT_EQ(included.sent(5)->bytes, encode_draft18(d18::SubscribeTracksMessage{3,
-        d18::TrackNamespace{{bytes_of("n")}}, {}}));
+        d18::TrackNamespace{{bytes_of("n")}}, {{0x10, d18::Uint8ParameterValue{0}}}}));
     ScriptedPublisher missing(setup(), reaction({}, "t"));
     EXPECT_EQ(score(probe, missing), std::optional<bool>{false});
     ScriptedPublisher other_track(setup(), reaction({}, "other"));
@@ -346,35 +347,42 @@ TEST(Draft18GapAObject, SubscriptionRangeCoversOnlyTheGroupAfterTheLargestObject
 
 TEST(Draft18GapAObject, JoiningFetchEndsAtTheSavedJoiningLocation) {
     const auto probe = profile("D18-5-1-MUST-003");
-    const auto reaction = [](Bytes fetch_reply, bool advance) {
-        return [fetch_reply, advance](ScriptedPublisher& peer) {
+    const auto reaction = [](Bytes fetch_reply, std::uint64_t current_group, std::uint64_t current_object) {
+        return [fetch_reply, current_group, current_object](ScriptedPublisher& peer) {
             answer(peer, 1, "subscribed", subscribe_ok(4, {}));
             if (peer.answered("subscribed") && peer.sent(1) && peer.sent(1)->writes >= 2 &&
                 !peer.answered("updated")) {
                 peer.mark("updated");
                 peer.data(1, ok({largest(7, 3)}));
-                if (advance) peer.data(6, subgroup(4, 7, 0, {4, 5}));
             }
-            answer(peer, 5, "fetch", fetch_reply, true);
+            answer(peer, 5, "status", ok({largest(current_group, current_object)}), true);
+            answer(peer, 9, "fetch", fetch_reply, true);
         };
     };
-    ScriptedPublisher saved(setup(), reaction(fetch_ok(7, 4), true));
+    ScriptedPublisher saved(setup(), reaction(fetch_ok(7, 4), 7, 6));
     EXPECT_EQ(score(probe, saved), std::optional<bool>{true});
-    // The update shares the SUBSCRIBE stream; the joining FETCH is relative.
+    // The update shares the SUBSCRIBE stream; Objects stay off the
+    // subscription with a far-future start while the track advances.
     EXPECT_EQ(saved.sent(1)->bytes, concat({
         encode_draft18(d18::SubscribeMessage{1, d18::TrackNamespace{{bytes_of("n")}},
-            d18::TrackName{bytes_of("t")}, {{0x10, d18::Uint8ParameterValue{0}}}}),
+            d18::TrackName{bytes_of("t")}, {{0x10, d18::Uint8ParameterValue{0}},
+                {0x21, d18::SubscriptionFilter{d18::SubscriptionFilterType::AbsoluteStart,
+                    d18::Location{std::uint64_t{1} << 40, 0}, std::nullopt}}}}),
         encode_draft18(d18::RequestUpdateMessage{3, {{0x10, d18::Uint8ParameterValue{1}}}})}));
-    EXPECT_EQ(saved.sent(5)->bytes, encode_draft18(d18::FetchMessage{5,
+    EXPECT_EQ(saved.sent(5)->bytes, encode_draft18(d18::TrackStatusMessage{5,
+        d18::TrackNamespace{{bytes_of("n")}}, d18::TrackName{bytes_of("t")}, {}}));
+    EXPECT_EQ(saved.sent(9)->bytes, encode_draft18(d18::FetchMessage{7,
         d18::RelativeJoiningFetch{1, 0}, {}}));
-    ScriptedPublisher current_edge(setup(), reaction(fetch_ok(7, 6), true));
+    ScriptedPublisher next_group(setup(), reaction(fetch_ok(7, 4), 8, 0));
+    EXPECT_EQ(score(probe, next_group), std::optional<bool>{true});
+    ScriptedPublisher current_edge(setup(), reaction(fetch_ok(7, 6), 7, 6));
     EXPECT_EQ(score(probe, current_edge), std::optional<bool>{false});
-    ScriptedPublisher refused(setup(), reaction(error(0x11), true));
+    ScriptedPublisher refused(setup(), reaction(error(0x11), 7, 6));
     EXPECT_EQ(score(probe, refused), std::nullopt);
     // The FETCH waits until the track advanced beyond the Joining Location.
-    ScriptedPublisher static_track(setup(), reaction(fetch_ok(7, 4), false));
+    ScriptedPublisher static_track(setup(), reaction(fetch_ok(7, 4), 7, 3));
     EXPECT_EQ(score(probe, static_track), std::nullopt);
-    EXPECT_EQ(static_track.sent(5), nullptr);
+    EXPECT_EQ(static_track.sent(9), nullptr);
 }
 
 }  // namespace
