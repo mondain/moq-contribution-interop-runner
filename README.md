@@ -814,7 +814,8 @@ ways to reach the precondition.
   contexts, an unknown Auth Token Type (`0x9D`) and a STOP_SENDING with unknown
   Stream Reset code `0x9D` against an open Subgroup stream are sent. A fresh request
   answered afterwards proves the session survived; an application close with a
-  nonzero code before that answer fails `D21-13-MUST-NOT-594`.
+  nonzero code before that answer fails both rows, because the unknown value was
+  the only departure from ordinary traffic. A close with code 0 proves nothing.
 - `D21-9-2-MUST-329` (`d21-publisher-goaway-alternate-uri`): the runner sends a
   control GOAWAY whose New Session URI names a second listener on another port of
   the configured range (without a free second port the context is unscored). Only

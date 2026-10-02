@@ -943,18 +943,15 @@ Spec property_filter_spec(const char* scenario, const char* requirement, const c
     return spec(scenario, {{requirement, evaluator}},
         [in_immutable](const Fixture& fixture) {
             auto definition = base_definition("");
-            // Range Filters need a non-zero MAX_FILTER_RANGES (Section 3.3.2).
-            definition.peer_setup_ready = [](auto input) {
-                if (!setup_decodes(input)) return false;
-                const auto limit = setup_numeric_option(input, kMaxFilterRanges);
-                return limit && *limit >= 1;
-            };
             definition.writes.push_back(request_write(subscribe_frame(1, fixture,
                 {param_u8(kForwardParameter, 1)})));
             RawProbeWrite filtered{RawProbeChannel::NewBidi, {}, false};
             filtered.prepare_bytes = [fixture, in_immutable](const RawProbeGateInput& input) -> std::optional<Bytes> {
                 const View view(input.prior_writes, input.events);
                 if (!view.valid()) return std::nullopt;
+                // Range Filters need a non-zero MAX_FILTER_RANGES (Section 3.3.2).
+                const auto limit = view.peer_option(kMaxFilterRanges);
+                if (!limit || *limit < 1) return std::nullopt;
                 const auto candidate = find_candidate(view, in_immutable);
                 if (!candidate) return std::nullopt;
                 return subscribe_frame(3, fixture, {param_u8(kForwardParameter, 1),
@@ -1006,17 +1003,12 @@ Spec property_filter_spec(const char* scenario, const char* requirement, const c
 // ---- Section 13: unknown GREASE values ------------------------------------------------
 
 // Continued usability proves the unknown value was handled without ending the
-// session: the follow-up request on a fresh stream is answered.
-Judgement grease_handled(const View& view, std::size_t follow_up) {
-    if (answered(view, follow_up)) return {true, true};
-    return unresolved(view);
-}
-
-// An application close other than NO_ERROR after the stimulus and before any
-// answer is a session closed because of it (the only departure from ordinary
-// traffic is the unknown value). A close with no code, or a transport close,
-// proves nothing.
-Judgement grease_not_closed(const View& view, std::size_t follow_up, std::optional<std::size_t> after) {
+// session: the follow-up request on a fresh stream is answered. An application
+// close other than NO_ERROR after the stimulus and before any answer is a
+// session closed because of it (the only departure from ordinary traffic is the
+// unknown value), which is neither graceful handling nor an allowed close. A
+// close with no code, or a transport close, proves nothing.
+Judgement grease_handled(const View& view, std::size_t follow_up, std::optional<std::size_t> after) {
     if (answered(view, follow_up)) return {true, true};
     const auto& close = view.close();
     if (!close) return {false, std::nullopt};
@@ -1033,9 +1025,9 @@ Spec grease_token_type_spec() {
     Spec spec;
     spec.scenario = "d21-grease-auth-token-type";
     spec.rows = {{"D21-13-MUST-593", "d21-grease-publisher-context-handling",
-                  [](const View& view) { return grease_handled(view, 1); }},
+                  [](const View& view) { return grease_handled(view, 1, std::nullopt); }},
                  {"D21-13-MUST-NOT-594", "d21-grease-no-unknown-value-session-close",
-                  [](const View& view) { return grease_not_closed(view, 1, std::nullopt); }}};
+                  [](const View& view) { return grease_handled(view, 1, std::nullopt); }}};
     spec.build = [](const Fixture& fixture) {
         auto definition = base_definition("");
         definition.writes.push_back(request_write(grease_token_request(fixture)));
@@ -1043,7 +1035,7 @@ Spec grease_token_type_spec() {
         definition.writes.push_back(request_write(build_subscribe(fixture, 3, 0)));
         return definition;
     };
-    spec.judge = [](const View& view) { return grease_handled(view, 1); };
+    spec.judge = [](const View& view) { return grease_handled(view, 1, std::nullopt); };
     return spec;
 }
 
@@ -1066,9 +1058,9 @@ Spec grease_stop_sending_spec() {
     Spec spec;
     spec.scenario = "d21-grease-stop-sending";
     spec.rows = {{"D21-13-MUST-593", "d21-unknown-stop-sending-graceful-handling",
-                  [](const View& view) { return grease_handled(view, 2); }},
+                  [](const View& view) { return grease_handled(view, 2, view.write_event(1)); }},
                  {"D21-13-MUST-NOT-594", "d21-unknown-stop-sending-preserves-session",
-                  [](const View& view) { return grease_not_closed(view, 2, view.write_event(1)); }}};
+                  [](const View& view) { return grease_handled(view, 2, view.write_event(1)); }}};
     spec.build = [](const Fixture& fixture) {
         auto definition = base_definition("");
         definition.writes.push_back(request_write(build_subscribe(fixture, 1, 1)));
@@ -1085,7 +1077,7 @@ Spec grease_stop_sending_spec() {
     spec.judge = [](const View& view) {
         // Nothing is concluded unless the STOP_SENDING was actually delivered.
         if (!view.write_event(1)) return unresolved(view);
-        return grease_handled(view, 2);
+        return grease_handled(view, 2, view.write_event(1));
     };
     return spec;
 }
@@ -1200,14 +1192,14 @@ void d21b_attach_rows(std::vector<Spec>& specs) {
     for (auto& spec : specs) {
         if (spec.scenario == "d21-grease-setup-options") {
             spec.rows.push_back({"D21-13-MUST-593", "d21-grease-publisher-context-handling",
-                                 [](const View& view) { return grease_handled(view, 0); }});
+                                 [](const View& view) { return grease_handled(view, 0, std::nullopt); }});
             spec.rows.push_back({"D21-13-MUST-NOT-594", "d21-grease-no-unknown-value-session-close",
-                                 [](const View& view) { return grease_not_closed(view, 0, std::nullopt); }});
+                                 [](const View& view) { return grease_handled(view, 0, std::nullopt); }});
         } else if (spec.scenario == "d21-grease-request-error") {
             spec.rows.push_back({"D21-13-MUST-593", "d21-grease-publisher-context-handling",
-                                 [](const View& view) { return grease_handled(view, 1); }});
+                                 [](const View& view) { return grease_handled(view, 1, std::nullopt); }});
             spec.rows.push_back({"D21-13-MUST-NOT-594", "d21-grease-no-unknown-value-session-close",
-                                 [](const View& view) { return grease_not_closed(view, 1, std::nullopt); }});
+                                 [](const View& view) { return grease_handled(view, 1, std::nullopt); }});
         }
     }
 }

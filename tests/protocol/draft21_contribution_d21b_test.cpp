@@ -575,10 +575,16 @@ TEST(ContributionD21b, PropertyFilterNeedsAdvertisedRangesAndSearchesBothLists) 
     for (const bool immutable : {false, true}) {
         const auto& probe = find_probe(probes(),
             immutable ? "d21-filter-immutable-property" : "d21-filter-mutable-property");
-        // The publisher must advertise MAX_FILTER_RANGES.
-        EXPECT_FALSE(probe.definition.peer_setup_ready(cbytes({0xaf, 0, 0, 0})));
-        EXPECT_FALSE(probe.definition.peer_setup_ready(peer_setup(6, 0)));
-        EXPECT_TRUE(probe.definition.peer_setup_ready(peer_setup(6, 4)));
+        // The publisher must advertise MAX_FILTER_RANGES before a filter is sent.
+        const Bytes properties_for_setup = immutable ? bytes_pair(11, numeric(16, 6)) : numeric(16, 6);
+        for (const Bytes& setup : {cbytes({0xaf, 0, 0, 0}), peer_setup(6, 0)}) {
+            ContributionRun without(probe, setup);
+            without.deliver(0);
+            without.reply(without.stream_of(0), subscribe_ok(5));
+            without.reply(kData1, subgroup(5, 1, object_data(0, cbytes({'a'}), properties_for_setup, true), 0x31));
+            EXPECT_FALSE(probe.definition.writes[1].prepare_bytes(
+                {without.snapshot().writes, without.snapshot().events}).has_value());
+        }
 
         // Property 16 (even, one integer) with value 6 in exactly one list.
         const Bytes properties = immutable ? bytes_pair(11, numeric(16, 6)) : numeric(16, 6);
@@ -652,12 +658,13 @@ TEST(ContributionD21b, UnknownAuthTokenTypeIsHandledWithoutEndingTheSession) {
             EXPECT_EQ(evaluate(run, *row), true);
         }
     }
-    // The session ending with an error is not a pass, and for the closing rule a failure.
+    // The session ending with an error before any answer is neither graceful handling
+    // nor an allowed close.
     ContributionRun closed(probe);
     closed.deliver(0);
     closed.deliver(1);
     close_with(closed, 3);
-    EXPECT_EQ(evaluate(closed, probe), std::nullopt);
+    EXPECT_EQ(evaluate(closed, probe), false);
     EXPECT_EQ(evaluate(closed, strict), false);
     // NO_ERROR (0) closes prove nothing about the unknown value.
     ContributionRun graceful(strict);
@@ -708,7 +715,7 @@ TEST(ContributionD21b, UnknownStopSendingCodeCancelsTheStreamAndKeepsTheSession)
     EXPECT_EQ(evaluate(closed, kept), false);
     auto closed_handled = prepared(handled);
     close_with(closed_handled, 3);
-    EXPECT_EQ(evaluate(closed_handled, handled), std::nullopt);
+    EXPECT_EQ(evaluate(closed_handled, handled), false);
     // A finished stream is never targeted.
     ContributionRun finished(kept);
     finished.deliver(0);
@@ -733,7 +740,7 @@ TEST(ContributionD21b, GreaseSetupOptionsAndRequestErrorContextsFeedTheSessionRo
     ContributionRun closed_handled(setup_handled);
     closed_handled.deliver(0);
     close_with(closed_handled, 3);
-    EXPECT_EQ(evaluate(closed_handled, setup_handled), std::nullopt);
+    EXPECT_EQ(evaluate(closed_handled, setup_handled), false);
 
     const auto& error_handled = find_probe(probes(), "d21-grease-request-error", "D21-13-MUST-593");
     const auto& error_kept = find_probe(probes(), "d21-grease-request-error", "D21-13-MUST-NOT-594");
