@@ -397,7 +397,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
 
 
     # draft-18 gap-A probe tests
-    foreach(gap_a_test IN ITEMS setup discovery registry)
+    foreach(gap_a_test IN ITEMS setup discovery object registry)
         add_executable(moq-interop-draft18-gap-a-${gap_a_test}-tests
             tests/protocol/draft18_gap_a_${gap_a_test}_test.cpp)
         target_include_directories(moq-interop-draft18-gap-a-${gap_a_test}-tests PRIVATE

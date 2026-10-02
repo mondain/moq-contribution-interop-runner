@@ -9,7 +9,7 @@ namespace moq::interop::app {
 // Scenario IDs executed by the draft-18 gap-A raw probes
 // (include/moq/interop/scenarios/draft18_gap_a.h). Keep in step with
 // gap_a::*_entries(); tests/protocol/draft18_gap_a_registry_test.cpp checks it.
-inline constexpr std::array<std::string_view, 14> kDraft18GapAScenarios{
+inline constexpr std::array<std::string_view, 24> kDraft18GapAScenarios{
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "establish-moqt-with-datagram-capable-peer",
@@ -24,10 +24,20 @@ inline constexpr std::array<std::string_view, 14> kDraft18GapAScenarios{
     "initiate-namespace-publication",
     "publish-namespace-for-relay-subscription-routing",
     "receive-subscribe-before-outstanding-publish-response",
+    "retrieve-same-object-at-distinct-times",
+    "subscribe-to-track-after-observed-object-publication",
+    "publish-existing-track-after-observed-object-publication",
+    "accepted-subscription-update-after-observed-object-publication",
+    "accepted-track-status-after-observed-object-publication",
+    "publish-new-subgroup",
+    "subscribe-to-subgroup-without-reset-or-upstream-reordering",
+    "publisher-rejects-subscribe-request",
+    "publish-objects-before-within-and-after-subscription-range",
+    "joining-fetch-after-forward-enabled-and-track-advanced",
 };
 
 // The subset that names a configured track fixture in its stimulus.
-inline constexpr std::array<std::string_view, 10> kDraft18GapATrackScenarios{
+inline constexpr std::array<std::string_view, 20> kDraft18GapATrackScenarios{
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "register-delete-then-use-token-alias",
@@ -38,6 +48,16 @@ inline constexpr std::array<std::string_view, 10> kDraft18GapATrackScenarios{
     "publish-track-namespace-fields",
     "initiate-track-publication",
     "receive-subscribe-before-outstanding-publish-response",
+    "retrieve-same-object-at-distinct-times",
+    "subscribe-to-track-after-observed-object-publication",
+    "publish-existing-track-after-observed-object-publication",
+    "accepted-subscription-update-after-observed-object-publication",
+    "accepted-track-status-after-observed-object-publication",
+    "publish-new-subgroup",
+    "subscribe-to-subgroup-without-reset-or-upstream-reordering",
+    "publisher-rejects-subscribe-request",
+    "publish-objects-before-within-and-after-subscription-range",
+    "joining-fetch-after-forward-enabled-and-track-advanced",
 };
 
 template <std::size_t A, std::size_t B>
