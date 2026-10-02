@@ -797,6 +797,9 @@ Spec token_not_copied() {
             const auto frames = view.write_frames(0);
             const Bytes credential = text_bytes(kSubscriberCredential);
             std::map<std::uint64_t, ResolvedToken> aliases;
+            // A PUBLISH may be sent without a SUBSCRIBE_TRACKS, so only one on a stream
+            // opened after the REQUEST_OK can be the discovery request's result.
+            const bool accepted = !frames.empty() && frames.front().type == kRequestOk;
             bool observed = false;
             for (const auto& [id, stream] : view.streams()) {
                 if ((id & 3u) != 0u) continue;  // publisher-opened request streams
@@ -804,12 +807,11 @@ Spec token_not_copied() {
                 auto decoded = d21::decode_publish(cursor);
                 const auto* publish = std::get_if<d21::PublishMessage>(&decoded);
                 if (!publish) continue;
-                observed = true;
+                if (accepted && stream.first_event > frames.front().event) observed = true;
                 for (const auto& token : resolved_tokens(*publish, aliases))
                     if (token.type == 0 && token.value == credential) return {true, false};
             }
-            // Only a PUBLISH that follows an accepted SUBSCRIBE_TRACKS is its result.
-            if (observed && !frames.empty() && frames.front().type == kRequestOk) return {true, true};
+            if (observed) return {true, true};
             if (!frames.empty() && frames.front().type == kRequestError) return {true, std::nullopt};
             return unresolved(view);
         });

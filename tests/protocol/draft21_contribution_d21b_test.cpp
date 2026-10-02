@@ -510,6 +510,13 @@ TEST(ContributionD21b, PublishFromSubscribeTracksDoesNotCarryTheSubscribersToken
     silent.deliver(0);
     silent.reply(silent.stream_of(0), request_ok());
     EXPECT_EQ(evaluate(silent, probe), std::nullopt);
+    // An unsolicited PUBLISH that precedes the REQUEST_OK is not the discovery
+    // request's result (a PUBLISH may be sent without SUBSCRIBE_TRACKS).
+    ContributionRun early(probe);
+    early.deliver(0);
+    early.reply(0, peer_publish_with(cbytes({0})));
+    early.reply(early.stream_of(0), request_ok());
+    EXPECT_EQ(evaluate(early, probe), std::nullopt);
 }
 
 // ---- Section 11.3.2: early Subgroup termination -------------------------------------
