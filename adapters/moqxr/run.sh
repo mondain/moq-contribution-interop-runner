@@ -70,4 +70,24 @@ case "$scenario_id" in
         args+=(--publish-catalog)
         ;;
 esac
+# Raw-probe contexts act as the subscriber: the runner sends the requests and
+# moqxr must serve them. Only its await-subscribe mode (--forward 0) does that
+# without a PUBLISH of its own, and --paced keeps Subgroup streams open between
+# Objects so cancellation and update probes have an open stream to act on. Its
+# own timeout outlasts the context so an idle publisher is stopped by the runner
+# rather than exiting with a failure status first.
+# This chooses moqxr CLI options; it never changes what a scenario expects.
+if [[ "$draft" == 21 && "$transport" == webtransport ]]; then
+    case $(jq -r '.scenario_id' "$request_file") in
+        d21-largest-object-* | d21-publish-done-* | d21-publisher-namespace-redirect | \
+        d21-publisher-subscribe-tracks-redirect | d21-publish-state-notify-* | d21-padding-*-emission | \
+        d21-namespace-discovery-authorization | d21-track-discovery-* | d21-subgroup-early-handoff-reset | \
+        d21-filter-* | d21-grease-auth-token-type | d21-grease-stop-sending | d21-grease-setup-options | \
+        d21-publisher-goaway-alternate-uri)
+            args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
+                  --namespace media --draft "$draft" --forward 0 --paced
+                  --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
+            ;;
+    esac
+fi
 exec "$publisher_bin" "${args[@]}"

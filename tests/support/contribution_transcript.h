@@ -106,10 +106,19 @@ public:
             accepted.write.bytes = *prepared;
             accepted.prepared_event_count = transcript_.events.size();
         }
-        if (write.reuse_write_stream) {
+        if (write.select_peer_stream) {
+            const auto prior = std::span<const scenarios::RawProbeAcceptedWrite>(transcript_.writes).first(index);
+            const auto selected = write.select_peer_stream({prior, transcript_.events});
+            if (!selected) throw std::logic_error("test peer stream selection");
+            accepted.stream_id = *selected;
+            accepted.prepared_event_count = transcript_.events.size();
+            accepted.operation_accepted = true;
+        } else if (write.reuse_write_stream) {
             accepted.stream_id = transcript_.writes[*write.reuse_write_stream].stream_id;
         } else if (write.channel == scenarios::RawProbeChannel::PeerBidi) {
             accepted.stream_id = 0;
+        } else if (write.channel == scenarios::RawProbeChannel::Control) {
+            accepted.stream_id = transcript_.setup.stream_id;
         } else if (write.channel == scenarios::RawProbeChannel::Datagram) {
             accepted.stream_id = std::nullopt;
         } else if (write.channel == scenarios::RawProbeChannel::NewUni) {

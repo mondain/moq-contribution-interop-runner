@@ -598,7 +598,8 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
             const auto scenario_succeeded = [&](const auto& scenario) {
                 return contexts[scenario] == 1 && successful[scenario] == 1;
             };
-            const bool scenarios_settled = draft21_gap_a_scenarios_are_alternatives(row)
+            const bool scenarios_settled = (draft21_gap_a_scenarios_are_alternatives(row) ||
+                                            scenarios::draft21_contribution_scenarios_are_alternatives(row.id))
                 ? std::any_of(row.scenarios.begin(), row.scenarios.end(), scenario_succeeded)
                 : std::all_of(row.scenarios.begin(), row.scenarios.end(), scenario_succeeded);
             if (state != OutcomeState::Fail && !row.scenarios.empty() && !row.evaluators.empty() &&

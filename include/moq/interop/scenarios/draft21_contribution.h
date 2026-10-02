@@ -24,7 +24,15 @@ struct Draft21ContributionProbe {
 std::vector<Draft21ContributionProbe> draft21_contribution_probes(
     std::chrono::milliseconds deadline = std::chrono::milliseconds{1000},
     std::vector<std::vector<std::byte>> track_namespace = {},
-    std::vector<std::byte> track_name = {std::byte{'x'}});
+    std::vector<std::byte> track_name = {std::byte{'x'}},
+    // Credential the publisher's authorization policy is configured to refuse
+    // (Section 8.9); empty selects the documented default contract value.
+    std::string denied_token = {});
+
+// Rows whose named contribution scenarios are alternative ways to reach the
+// precondition, so any one passing context settles them (D21-9-9-MUST-365:
+// a subscription with no data streams, with or without datagram delivery).
+bool draft21_contribution_scenarios_are_alternatives(const std::string& requirement_id);
 
 // Returns true or false only when the actual transcript proves the canonical
 // stimulus and contains conclusive evidence; absent or ambiguous evidence

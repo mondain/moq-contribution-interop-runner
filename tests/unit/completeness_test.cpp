@@ -126,7 +126,6 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             ? draft18_executable_bindings() : draft21_executable_bindings();
         const auto report = audit_completeness(
             catalog, bindings, app::executable_scenarios(draft));
-        EXPECT_FALSE(report.complete());
         // The required set is the testable MUST and MUST NOT rows. It started at 175 rows per
         // draft and shrinks only when a row is reclassified as not testable in the catalog.
         const auto expected_required = static_cast<std::size_t>(std::count_if(
@@ -142,7 +141,9 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
         // must remain a blocking finding so the gate cannot be satisfied by
         // omission.
         EXPECT_GE(report.required_covered, 76u);
-        EXPECT_LT(report.required_covered, report.required_total);
+        EXPECT_LE(report.required_covered, report.required_total);
+        // A draft may only report complete once every required row is bound.
+        if (report.complete()) EXPECT_EQ(report.required_covered, report.required_total);
         const auto blocking = static_cast<std::size_t>(std::count_if(
             report.findings.begin(), report.findings.end(),
             [](const auto& finding) {

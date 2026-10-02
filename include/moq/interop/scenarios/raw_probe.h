@@ -43,6 +43,11 @@ struct RawProbeWrite {
     // The write waits until this long after the previous write (or SETUP, for
     // the first) was accepted; the proof checks the recorded acceptance times.
     std::chrono::milliseconds delay_after_previous{0};
+    // STOP_SENDING aimed at a peer-initiated unidirectional stream. Only valid
+    // with operation StopSending and no reuse_write_stream. The callback
+    // returns no value until a stream qualifies; the first stream it names is
+    // frozen, and the proof calls it again on the events seen at that point.
+    std::function<std::optional<transport::StreamId>(const RawProbeGateInput&)> select_peer_stream{};
 };
 struct RawProbeTranscript;
 struct RawProbeDefinition {
@@ -80,6 +85,9 @@ struct RawProbeDefinition {
     // RawProbeGateInput::replacement_uri) and records what connects to it in
     // RawProbeTranscript::replacement_events. Used for GOAWAY migration.
     bool offer_replacement_session{false};
+    // Called by the run with the replacement listener's URI so a definition
+    // can embed it in its writes (used with offer_replacement_session).
+    std::function<void(RawProbeDefinition&, const std::string&)> bind_alternate_uri{};
 };
 struct RawProbeAutoReply {
     transport::StreamId stream_id{0};
@@ -134,6 +142,9 @@ struct RawProbeTranscript {
     // transport events of whatever connected there.
     std::optional<std::string> replacement_uri{};
     std::vector<transport::TransportEvent> replacement_events;
+    // Token value the operator configured the publisher's authorization policy
+    // to refuse (Section 8.9). Absent when no policy is controllable.
+    std::optional<std::string> denied_authorization_token{};
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);

@@ -31,6 +31,10 @@ struct NativeRunManagerConfig {
     std::filesystem::path driver_tls_ca{};
     std::filesystem::path driver_log_root{};
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
+    // Credential (token type 0, Section 8.9) the publisher's authorization
+    // policy is configured to refuse. Discovery authorization probes score a
+    // pass or failure only when it is set; the operator controls the policy.
+    std::optional<std::string> denied_authorization_token{};
 };
 
 enum class RunStartStatus {

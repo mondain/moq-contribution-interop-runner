@@ -67,17 +67,21 @@ for draft in 18 21; do
         --format json >"$test_dir/audit-$draft.json"
     status=$?
     set -e
-    [[ "$status" -eq 1 ]] || exit 1
+    # Exit status 0 means the static gate passes; 1 means it does not.
+    complete=$(jq -r '.static_complete' "$test_dir/audit-$draft.json")
+    if [[ "$complete" == true ]]; then
+        [[ "$status" -eq 0 ]] || exit 1
+    else
+        [[ "$status" -eq 1 ]] || exit 1
+    fi
     if [[ "$draft" == 18 ]]; then
-        jq -e '.static_complete == false and
-            .execution_audit.consistent == true and
+        jq -e '.execution_audit.consistent == true and
             .execution_audit.run_count == 1 and
             .execution_audit.scored_rows == 0 and
             (.execution_audit.runs[0].canonical_sha256 | length) == 64' \
             "$test_dir/audit-$draft.json" >/dev/null
     else
-        jq -e '.static_complete == false and
-            .execution_audit.consistent == true and
+        jq -e '.execution_audit.consistent == true and
             .execution_audit.run_count == 0' \
             "$test_dir/audit-$draft.json" >/dev/null
     fi

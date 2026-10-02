@@ -52,6 +52,7 @@ void usage(std::ostream& output) {
               "  --driver-ca PATH        publisher TLS trust file (defaults to --tls-cert)\n"
               "  --driver-log-root PATH  per-run publisher logs\n"
               "  --unknown-auth-token-alias-compat-code CODE  explicit REQUEST_ERROR compatibility mapping\n"
+              "  --denied-authorization-token VALUE  credential (token type 0) the publisher's policy refuses\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -104,6 +105,12 @@ Options parse_options(int argc, char* argv[]) {
             if (input.empty() || error != std::errc{} || end != input.data() + input.size())
                 throw std::invalid_argument("compatibility code must be an unsigned decimal or hexadecimal integer");
             options.native.unknown_auth_token_alias_compatibility_code = code;
+        }
+        else if (argument == "--denied-authorization-token") {
+            const auto input = value(argument);
+            if (input.empty() || input.size() > 1024)
+                throw std::invalid_argument("denied authorization token must be 1 to 1024 bytes");
+            options.native.denied_authorization_token = std::string(input);
         }
         else throw std::invalid_argument("unknown option: " + std::string(argument));
     }

@@ -648,8 +648,17 @@ public:
                     handle = start_context_driver(worker, run_config, current_id, driver);
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
-                const bool process_error = retire_driver() &&
+                bool process_error = retire_driver() &&
                     !scenarios::draft18_contribution_empty_host_scenario(current_id);
+                // A publisher that ends the session itself typically exits with a
+                // failure status. Once the probe was delivered in full and the
+                // transport recorded that close, the exit status is a consequence
+                // of the observed behavior, not a separate harness fault.
+                if (process_error && transcript.complete && !transcript.harness_failed &&
+                    std::any_of(transcript.events.begin(), transcript.events.end(), [](const auto& event) {
+                        return std::holds_alternative<transport::PeerCloseEvent>(event);
+                    }))
+                    process_error = false;
                 if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
@@ -787,6 +796,7 @@ public:
                 ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
             replacement_uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
                 host + ":" + std::to_string(created.endpoint.port) + std::string(kReplacementPath);
+            if (definition.bind_alternate_uri) definition.bind_alternate_uri(definition, replacement_uri);
         }
         struct ReplacementGuard {
             std::function<void()> release;
@@ -895,6 +905,7 @@ public:
             scenarios::RawProbeClock::now() >= deadline)
             transcript.timed_out = true;
         transcript.unknown_auth_token_alias_compatibility_code = config.unknown_auth_token_alias_compatibility_code;
+        transcript.denied_authorization_token = config.denied_authorization_token;
         transcript.connection_uri = endpoint_uri(worker, run_config, transcript.scenario_id);
         storage::EvidenceEvent stimulus;
         stimulus.scenario_id = transcript.scenario_id;
@@ -977,7 +988,8 @@ public:
             for (const auto& field : run_config.track_fixture->namespace_fields)
                 contribution_namespace.push_back(bytes_of(field));
             auto profiles = scenarios::draft21_contribution_probes(run_config.timeout,
-                std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name));
+                std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name),
+                config.denied_authorization_token.value_or(std::string{}));
             const auto found = std::find_if(profiles.begin(), profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown contribution probe");

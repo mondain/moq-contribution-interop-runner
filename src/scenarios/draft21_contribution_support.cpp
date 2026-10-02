@@ -109,6 +109,16 @@ Bytes subscribe_namespace_frame(std::uint64_t request_id, const Namespace& prefi
     put_vi(body, 0);
     return frame(0x50, body);
 }
+Bytes discovery_frame(std::uint64_t type, std::uint64_t request_id, const Namespace& prefix,
+                      const std::vector<Param>& params) {
+    Bytes body;
+    put_vi(body, request_id);
+    put_namespace(body, prefix);
+    put_vi(body, params.size());
+    const auto encoded = encode_params(params);
+    body.insert(body.end(), encoded.begin(), encoded.end());
+    return frame(type, body);
+}
 Bytes request_update_frame(std::uint64_t request_id, const std::vector<Param>& params) {
     Bytes body;
     put_vi(body, request_id);
@@ -146,7 +156,7 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> request) {
     if (request.size() > 65546) return std::nullopt;
     wire::Cursor cursor(request);
     const auto type = read_vi(cursor);
-    if (!type || (*type != 0x3 && *type != 0x16 && *type != 0xd && *type != 0x50)) return std::nullopt;
+    if (!type || (*type != 0x3 && *type != 0x16 && *type != 0xd && *type != 0x50 && *type != 0x51)) return std::nullopt;
     const auto length = read_n(cursor, 2);
     if (!length) return std::nullopt;
     const auto size = (static_cast<std::size_t>(std::to_integer<unsigned>((*length)[0])) << 8u) |
@@ -166,7 +176,7 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> request) {
         total += value->size();
         fixture.track_namespace.emplace_back(value->begin(), value->end());
     }
-    if (*type == 0x50) {
+    if (*type == 0x50 || *type == 0x51) {
         // Discovery names no track; any ordinary track name completes the fixture.
         fixture.track_name = bytes_of({'x'});
     } else {
@@ -207,7 +217,11 @@ std::vector<Frame> parse_frames(const StreamRecord& record, bool& malformed) {
     return result;
 }
 
-View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {}
+View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {
+    denied_token_ = transcript.denied_authorization_token;
+    alternate_uri_ = transcript.replacement_uri;
+    alternate_events_ = transcript.replacement_events;
+}
 
 View::View(std::span<const RawProbeAcceptedWrite> writes,
            std::span<const transport::TransportEvent> events)
@@ -350,11 +364,31 @@ bool subscribe_ok_ready(std::span<const std::byte> input) {
 
 Bytes empty_setup() { return bytes_of({0xaf, 0, 0, 0}); }
 
+namespace {
+// A complete PUBLISH_NAMESPACE (type 0x6) opening a publisher-opened stream.
+bool is_namespace_announcement(std::span<const std::byte> input) {
+    wire::Cursor cursor(input);
+    const auto type = read_vi(cursor);
+    if (!type || *type != 0x6) return false;
+    const auto length = read_n(cursor, 2);
+    if (!length) return false;
+    const auto size = (static_cast<std::size_t>(std::to_integer<unsigned>((*length)[0])) << 8u) |
+                      std::to_integer<unsigned>((*length)[1]);
+    return read_n(cursor, size).has_value();
+}
+}  // namespace
+
 RawProbeDefinition base_definition(const std::string& id) {
     RawProbeDefinition definition;
     definition.id = id;
     definition.setup_bytes = empty_setup();
     definition.peer_setup_ready = setup_decodes;
+    // A publisher that announces its namespace first waits for REQUEST_OK
+    // (no Parameters, no Track Properties) before serving requests; the
+    // acknowledgement is recorded but is not part of any stimulus.
+    definition.auto_accept_ready = is_namespace_announcement;
+    definition.auto_accept_reply = bytes_of({7, 0, 1, 0});
+    definition.auto_accept_limit = 4;
     return definition;
 }
 

@@ -826,3 +826,82 @@ cannot force; those probes wait for it and stay `NOT_RUN` if it never happens.
   SUBSCRIBE_NAMESPACE with a typed reply is the survival proof. The
   simultaneous-tracks probe accepts one PUBLISH and compares its Track Alias
   with the fixture track's SUBSCRIBE_OK alias.
+
+## Draft-21 slice-B contribution probes
+
+These raw probes (`src/scenarios/draft21_contribution_d21b.cpp`) close the
+remaining required draft-21 rows whose scenario and evaluator the catalog named.
+As elsewhere, a verdict rests on bytes the publisher put on the wire; missing or
+ambiguous evidence stays `NOT_RUN`. A row that names several scenarios needs all
+of them to pass, except `D21-9-9-MUST-365`, whose two scenarios are alternative
+ways to reach the precondition.
+
+- `D21-9-20-18-MUST-456` (`d21-largest-object-required-after-publication`,
+  `-before-publication`): after an Object's first byte is observed, a second
+  SUBSCRIBE, a REQUEST_UPDATE and a TRACK_STATUS must be answered with
+  LARGEST_OBJECT. TRACK_STATUS is sent last because a publisher without it may
+  end the session. The before-publication context is a control: no Object has
+  been observed, nothing is owed, and it only shows the subscription was answered.
+- `D21-9-9-MUST-365`: PUBLISH_DONE Stream Count must be 0 when no data stream
+  was opened. The first scenario subscribes from a Start Location far beyond any
+  Object (and sends a failing REQUEST_UPDATE that obliges a publisher to end the
+  subscription); the datagram-only scenario needs Objects that arrive only as
+  datagrams. A later request on a fresh stream settles the trace before judging.
+- `D21-9-4-1-MUST-340`: a REDIRECT reply to SUBSCRIBE_NAMESPACE or
+  SUBSCRIBE_TRACKS must have an empty Track Name. Publishers that never redirect
+  leave it `NOT_RUN`.
+- `D21-9-10-MUST-371/372`: PUBLISH_STATE_NOTIFY is publisher-initiated, so these
+  four contexts only observe. A notification after a known Object must carry
+  LARGEST_OBJECT; subscriber-controlled values (FORWARD, SUBSCRIBER_PRIORITY,
+  GROUP_ORDER) may differ from the subscriber's last request only after an
+  acknowledged REQUEST_UPDATE. No notification means `NOT_RUN`.
+- `D21-11-5-1-MUST-565`, `D21-11-5-2-MUST-570`: padding the publisher emits must be
+  all zero bytes after the type. Observation only.
+- `D21-9-15-MUST-386`, `D21-9-18-MUST-394`: discovery requests carry token type 0
+  value `interop-denied` (or the value given with `--denied-authorization-token`).
+  Only when that option is set does the runner assume the publisher refuses the
+  credential: a REQUEST_OK then fails the row and a REQUEST_ERROR passes it. Do not
+  set the option for a publisher that has no such policy.
+- `D21-9-20-3-MUST-NOT-407`: SUBSCRIBE_TRACKS carries a distinctive token; the
+  resulting PUBLISH must not carry the same credential, by value or through a
+  registered Alias the publisher itself registered.
+- `D21-11-3-2-MUST-543`: Forward State 0 is sent while a Subgroup stream is open,
+  then restored. A reset passes; a FIN fails only when the same Subgroup then
+  continues on another stream, which proves the first stream was incomplete.
+- `D21-10-7-MUST-489/490`: needs `MAX_FILTER_RANGES` in the publisher's SETUP. An
+  unfiltered subscription finds an even-typed integer Property that sits in only
+  the mutable list (or only inside Immutable Properties), and a second subscription
+  filters on its value. Filtered Objects pass; if matching Objects keep arriving
+  unfiltered while none passes the filter and the session ends, the row fails.
+- `D21-13-MUST-593/594`: besides the existing SETUP-option and REQUEST_ERROR
+  contexts, an unknown Auth Token Type (`0x9D`) and a STOP_SENDING with unknown
+  Stream Reset code `0x9D` against an open Subgroup stream are sent. A fresh request
+  answered afterwards proves the session survived; an application close with a
+  nonzero code before that answer fails both rows, because the unknown value was
+  the only departure from ordinary traffic. A close with code 0 proves nothing.
+- `D21-9-2-MUST-329` (`d21-publisher-goaway-alternate-uri`): the runner sends a
+  control GOAWAY whose New Session URI names a second listener on another port of
+  the configured range (without a free second port the context is unscored). Only
+  a session with a SETUP on that listener passes; native-QUIC AUTHORITY and PATH
+  options that contradict the URI fail. Staying on the first session leaves the
+  row `NOT_RUN`.
+
+`D21-11-1-2-MUST-510` is reclassified as not testable: a Subgroup Object carries
+an Object Status only when its payload length is zero and a datagram STATUS bit
+excludes the payload, so no byte sequence puts a payload with a non-Normal status.
+
+Harness notes. `RawProbeWrite::select_peer_stream` lets a probe send STOP_SENDING to
+a publisher-opened unidirectional stream chosen from the observed events (the proof
+re-derives the choice). Raw contexts acknowledge a publisher's PUBLISH_NAMESPACE with
+an empty REQUEST_OK so a publisher that waits for it keeps serving. A publisher that
+ends the session itself and then exits with a failure status no longer turns the
+context into a harness error once the probe was delivered and the close recorded.
+
+With `moqxr` (0.3.26-dev+g478d6c0.dirty, re-checked 2026-10-01) the native-QUIC
+runs still stop at the DATAGRAM gate for draft 21 (the publisher closes with
+PROTOCOL_VIOLATION, "QUIC DATAGRAM not negotiated"), so draft-21 probes against it
+use WebTransport. The adapter runs it with `--forward 0 --paced` for the slice-B
+scenarios so it serves the runner's requests. `moqxr` has no TRACK_STATUS support
+(a TRACK_STATUS with FIN ends the session with PROTOCOL_VIOLATION), no
+PUBLISH_STATE_NOTIFY, no padding, no authorization policy, no MAX_FILTER_RANGES and
+does not follow a GOAWAY URI, so the corresponding rows stay `NOT_RUN` against it.
