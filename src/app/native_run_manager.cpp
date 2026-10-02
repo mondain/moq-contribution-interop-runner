@@ -483,9 +483,9 @@ public:
 
     // Every raw probe answers a publisher's PUBLISH_NAMESPACE by default (see
     // scenarios::apply_default_namespace_answer for the exceptions).
-    std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
-        const RunConfig& run_config, std::string_view id) const {
-        auto definition = resolve_raw_probe_definition(run_config, id);
+    static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
+        auto definition = resolve_raw_probe_definition(config, run_config, id);
         if (definition)
             scenarios::apply_default_namespace_answer(*definition, static_cast<unsigned>(run_config.draft));
         // A definition that opted into a liveness follow-up asks for the track fixture.
@@ -498,8 +498,8 @@ public:
         return definition;
     }
 
-    std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
-        const RunConfig& run_config, std::string_view id) const {
+    static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_scenario(id)) {
             std::vector<std::vector<std::byte>> name_space;
@@ -517,7 +517,7 @@ public:
             if (found == profiles.end()) return std::nullopt;
             return std::move(found->definition);
         }
-        if (auto definition = resolve_track_probe(run_config, id)) return definition;
+        if (auto definition = resolve_track_probe(config, run_config, id)) return definition;
         const auto find = [id](auto profiles) -> std::optional<scenarios::RawProbeDefinition> {
             const auto found = std::find_if(profiles.begin(), profiles.end(),
                 [id](const auto& profile) { return profile.definition.id == id; });
@@ -1049,8 +1049,8 @@ public:
         return transcript;
     }
 
-    std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
-        const RunConfig& run_config, std::string_view id) const {
+    static std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id)) {
             std::vector<std::vector<std::byte>> contribution_namespace;
             std::vector<std::byte> contribution_name{std::byte{'x'}};
@@ -1437,7 +1437,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         }
         if (raw_probe_scenario(draft, id)) {
             try {
-                auto definition = impl_->resolve_raw_probe(config, id);
+                auto definition = impl_->resolve_raw_probe(impl_->config, config, id);
                 if (!definition || definition->id != id)
                     return {RunStartStatus::Unsupported, {}, {}};
                 definitions.push_back(std::move(*definition));
@@ -1523,6 +1523,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::ListenerError, {}, {}};
     }
     return {RunStartStatus::Started, id, endpoint, url, path, protocol};
+}
+
+std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
+    const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id) {
+    return Impl::resolve_raw_probe(manager_config, run_config, id);
 }
 
 bool NativeRunManager::supports(DraftVersion draft) const noexcept {

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -526,6 +527,85 @@ inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
     // entries execute raw probes and can contribute an independent transcript.
     return known.size() > 5 &&
         std::find(known.begin() + 5, known.end(), scenario) != known.end();
+}
+
+// ---- Publisher capabilities -------------------------------------------------------------
+// A scenario that sends the publisher a FETCH (or depends on FETCH to retrieve objects)
+// cannot run against a publisher that declared `"fetch": false`. The lists below are
+// checked against the scenarios' own stimuli by tests/protocol/publisher_capability_tagging_test.cpp:
+// every raw probe whose writes contain a FETCH message (draft 18 and draft 21 type 0x16)
+// must be listed, and nothing may be listed that has no FETCH dependency.
+//
+// Two entries are not visible to that static decode and are pinned by the test instead:
+// receive-fetch-start-beyond-largest-published-object and
+// fetch-object-previously-observed-as-datagram build their FETCH from the publisher's
+// own SUBSCRIBE_OK / first datagram (a prepare_bytes closure), and
+// fetch-publisher-track-range is a typed controller (checked through its step actions).
+inline constexpr auto kDraft18FetchScenarios = std::to_array<std::string_view>({
+    "fetch-publisher-track-range",
+    "receive-fetch-with-unknown-type",
+    "receive-joining-fetch-with-unrelated-or-wrong-state-request-id",
+    "cancel-fetch-request-with-open-data-stream",
+    "reject-request-update-for-open-fetch",
+    "fetch-known-first-object-with-nonzero-group-and-object-ids",
+    "fetch-multiple-published-groups-in-each-explicit-order",
+    "publish-and-retrieve-same-object-and-track-immutable-properties",
+    "repeat-immutable-property-with-alternative-varint-encodings-available",
+    "publish-object-with-immutable-properties",
+    "receive-joining-fetch-for-forward-zero-subscription",
+    "receive-forward-state-update-then-joining-fetch",
+    "receive-joining-fetch-for-track-with-no-published-objects",
+    "receive-standalone-fetch-for-track-with-no-published-objects",
+    "receive-fetch-start-beyond-largest-published-object",
+    "fetch-object-previously-observed-as-datagram",
+    "retrieve-same-object-at-distinct-times",
+    "subscribe-to-track-after-observed-object-publication",
+    "publish-existing-track-after-observed-object-publication",
+    "accepted-subscription-update-after-observed-object-publication",
+    "accepted-track-status-after-observed-object-publication",
+    "joining-fetch-after-forward-enabled-and-track-advanced",
+    "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters",
+});
+
+inline constexpr auto kDraft21FetchScenarios = std::to_array<std::string_view>({
+    "d21-cancel-fetch-with-open-request-and-data-streams",
+    "d21-failed-fetch-update-data-reset",
+    "d21-fetch-accepted",
+    "d21-fetch-rejected",
+    "d21-fetch-first-object-flags",
+    "d21-fetch-ascending-groups",
+    "d21-fetch-descending-groups",
+    "d21-fetch-default-group-order",
+    "d21-publish-state-notify-on-fetch",
+    "d21-immutable-property-repeat",
+    "d21-repeat-object-retrieval",
+    "d21-object-immutable-property-singleton",
+    "d21-request-stream-terminal-message-order",
+    "d21-fetch-start-beyond-largest-object",
+    "d21-fetch-track-with-no-published-objects",
+    "d21-fetch-parameters-preserve-payload",
+    "d21-prior-group-gap-repeat",
+    "d21-prior-group-gap-singleton",
+    "d21-prior-object-gap-repeat",
+    "d21-prior-object-gap-singleton",
+    "d21-subscription-forwarding-preference",
+    "d21-fetch-datagram-preference",
+});
+
+// The per-scenario `requires_fetch` flag (also exposed in /healthz executable_profiles).
+inline bool scenario_requires_fetch(unsigned draft, std::string_view scenario) {
+    const auto contains = [scenario](const auto& list) {
+        return std::find(list.begin(), list.end(), scenario) != list.end();
+    };
+    return (draft == 18 && contains(kDraft18FetchScenarios)) ||
+           (draft == 21 && contains(kDraft21FetchScenarios));
+}
+
+// Name of the capability a scenario needs that a publisher may decline, if any.
+inline std::optional<std::string_view> scenario_required_capability(unsigned draft,
+                                                                    std::string_view scenario) {
+    if (scenario_requires_fetch(draft, scenario)) return std::string_view{"fetch"};
+    return std::nullopt;
 }
 
 }  // namespace moq::interop::app

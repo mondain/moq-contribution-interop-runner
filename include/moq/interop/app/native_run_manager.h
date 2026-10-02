@@ -3,6 +3,7 @@
 #include "moq/interop/app/types.h"
 #include "moq/interop/requirements/catalog.h"
 #include "moq/interop/scenarios/draft21_contribution.h"
+#include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/storage/run_store.h"
 #include "moq/interop/transport/native_quic_listener.h"
 
@@ -12,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace moq::interop::app {
@@ -79,6 +81,11 @@ public:
 
     RunStartResult start(const RunConfig& config);
     bool stop(const RunId& id);
+    // The raw-probe definition a run would execute for `id`, or nothing when `id`
+    // is not a raw probe. Used by tests that inspect what a scenario sends.
+    static std::optional<scenarios::RawProbeDefinition> resolve_probe(
+        const NativeRunManagerConfig& manager_config, const RunConfig& run_config,
+        std::string_view id);
     [[nodiscard]] bool supports(DraftVersion draft) const noexcept;
     [[nodiscard]] bool supports_driven() const noexcept;
 
