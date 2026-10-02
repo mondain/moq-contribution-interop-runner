@@ -452,9 +452,13 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
         {bidi, frame(2, bytes({3, 1, 0x22, 1})), false, 0,
          [](auto input) { return successful_response_ready(
              input, wire::draft21::ResponseContext::Subscribe); }});
+    // Section 9.18.1 carries SUBSCRIBE parameters into SUBSCRIBE_TRACKS and
+    // Section 9.20.19 allows FORWARD 0 there. The initial Forward State 0
+    // keeps a publisher from pushing objects for the PUBLISH messages this
+    // probe never answers, so it still reads the follow-up REQUEST_UPDATE.
     add("D21-9-20-19-MUST-460", "d21-discovery-update-invalid-forward",
         "d21-forward-bounds-protocol-violation", bidi,
-        frame(0x51, bytes({1, 0, 0})));
+        frame(0x51, bytes({1, 0, 1, 0x10, 0})));
     result.back().definition.writes.push_back(
         {bidi, frame(2, bytes({3, 1, 0x10, 255})), false, 0,
          [](auto input) { return successful_response_ready(

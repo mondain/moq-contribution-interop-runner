@@ -1214,7 +1214,7 @@ TEST(NativeQuicLive, EstablishedServerUpdateProbesUseActualResponseAndSameReques
         ASSERT_NE(client, nullptr);
         ASSERT_TRUE(pump_until(*client, [&] { const auto setup = client->stream(3); return setup && setup->data.size() == 4; }));
         ASSERT_TRUE(client->send_stream(2, bytes({0xaf, 0, 0, 0}), false));
-        const auto initial = fixture.discovery ? bytes({0x51, 0, 3, 1, 0, 0}) : bytes({3, 0, 5, 1, 0, 1, 'x', 0});
+        const auto initial = fixture.discovery ? bytes({0x51, 0, 5, 1, 0, 1, 0x10, 0}) : bytes({3, 0, 5, 1, 0, 1, 'x', 0});
         ASSERT_TRUE(pump_until(*client, [&] { const auto request = client->stream(1); return request && request->data.size() == initial.size(); }));
         EXPECT_EQ(client->stream(1)->data, initial);
         // Both responses exercise legal EXPIRES. SUBSCRIBE_OK additionally
