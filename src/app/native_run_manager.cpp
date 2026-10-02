@@ -569,6 +569,15 @@ public:
         store->finalize(worker->id, summary, outcomes);
     }
 
+    static bool refused_for_missing_datagram(const scenarios::RawProbeTranscript& transcript) {
+        constexpr std::string_view reason = "QUIC DATAGRAM not negotiated";
+        if (transcript.transport_established || transcript.harness_failed || transcript.events.size() != 1)
+            return false;
+        const auto* close = std::get_if<transport::LocalCloseEvent>(&transcript.events.front());
+        return close != nullptr &&
+               std::string_view(reinterpret_cast<const char*>(close->reason.data()), close->reason.size()) == reason;
+    }
+
     void run_raw_family(Worker* worker, std::unique_ptr<transport::SessionTransport>& listener,
                         const RunConfig& run_config,
                         std::vector<scenarios::RawProbeDefinition> definitions) {
@@ -618,7 +627,14 @@ public:
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
                 const bool process_error = retire_driver();
-                if (process_error) {
+                if (process_error && refused_for_missing_datagram(transcript)) {
+                    // The listener refused a client that never offered QUIC DATAGRAM
+                    // (draft 21 Section 6.2), so a publisher that then exits with an
+                    // error is the consequence of the observed refusal, not a harness
+                    // failure; the transport evidence stays scoreable.
+                    append_context_event(worker, current_id, "publisher_exit_after_refusal",
+                                         "publisher process exited after QUIC DATAGRAM refusal");
+                } else if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
                     append_context_event(worker, current_id, "harness_error", "publisher process failed");
