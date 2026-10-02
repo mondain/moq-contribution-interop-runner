@@ -62,7 +62,7 @@ elif [[ "$draft" == 21 && "$transport" == webtransport ]]; then
     forward=1
     case "$(jq -r '.scenario_id' "$request_file")" in
         d21-overlapping-subscriptions-*|d21-forward-location-and-range-filter-conjunction|\
-        d21-subscribe-multiple-subgroups|d21-fill-fails-before-first-object|\
+        d21-fill-fails-before-first-object|\
         d21-cancel-subscription-with-concurrent-fill-streams|\
         d21-subscribe-tracks-publish-skipped-then-capacity-recovers|\
         d21-subgroup-completion-withheld-acknowledgments|d21-request-well-formed-invalid-token|\

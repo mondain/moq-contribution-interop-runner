@@ -165,60 +165,6 @@ Spec filter_conjunction_spec() {
         true);
 }
 
-// ---- Section 2.2: one Subgroup per stream (D21-2-2-MUST-NOT-017) -------------
-std::optional<int> membership(const ObjectRecord& object) {
-    if (object.group != 0 || object.status) return std::nullopt;
-    if (object.object <= 4) return 0;
-    if (object.object <= 9) return 1;
-    return std::nullopt;
-}
-
-Spec mixed_subgroup_spec() {
-    return spec("d21-subscribe-multiple-subgroups",
-        {{"D21-2-2-MUST-NOT-017", "d21-no-mixed-subgroups-on-subscription-stream"}},
-        [](const Fixture& fixture) {
-            auto definition = residual_definition();
-            // The whole of Group 0: Start {0, 0} with an End Group delta of 0 and End
-            // Object omitted (three fields), which includes every Object of the End
-            // Group (Section 9.20.10). Two fields would instead mean the Next Object.
-            definition.writes.push_back(request_write(subscribe_frame(1, fixture,
-                {param_u8(0x10, 1), param_lp(0x21, [] {
-                    auto value = location_pair(0, 0);
-                    put_vi(value, 0);
-                    return value;
-                }())})));
-            return definition;
-        },
-        [](const View& view) -> Judgement {
-            if (rejected(view, 0)) return {true, std::nullopt};
-            const auto alias = alias_of(view, 0);
-            if (!alias) return {view.close().has_value(), std::nullopt};
-            // A Subgroup stream carries a single Subgroup ID, so two cells on one stream
-            // are only a violation when something else shows the publisher puts them in
-            // different Subgroups (the cells are the fixture's assumption, not the wire's):
-            // a stream holding just one cell, or two distinct Subgroup IDs among streams.
-            std::set<int> cells_seen;
-            std::set<std::uint64_t> subgroup_ids;
-            bool stream_with_both = false;
-            bool stream_with_one = false;
-            for (const auto& stream : subgroup_streams(view, *alias)) {
-                std::set<int> cells;
-                for (const auto& object : stream.parsed.objects)
-                    if (const auto cell = membership(object)) cells.insert(*cell);
-                if (cells.empty()) continue;
-                if (stream.parsed.subgroup) subgroup_ids.insert(*stream.parsed.subgroup);
-                (cells.size() > 1 ? stream_with_both : stream_with_one) = true;
-                cells_seen.insert(cells.begin(), cells.end());
-            }
-            if (stream_with_both && (stream_with_one || subgroup_ids.size() > 1)) return {true, false};
-            if (!view.window_ended()) return {false, std::nullopt};
-            // Both Subgroups must have been observed, each on streams of its own, for the
-            // split to be exercised and kept.
-            return {true, cells_seen.size() == 2 && !stream_with_both ? std::optional<bool>{true} : std::nullopt};
-        },
-        true);
-}
-
 // ---- Section 3.4: fill fetch streams ------------------------------------------
 // A fill is only owed when its range is not empty and does not start after the
 // Largest Object, so every fill context first subscribes plainly and waits for
@@ -487,7 +433,6 @@ std::vector<Spec> residual_subscription_specs() {
     result.push_back(concurrent_subscription_spec("d21-overlapping-subscriptions-shared-alias", true));
     result.push_back(concurrent_subscription_spec("d21-overlapping-subscriptions-distinct-aliases", false));
     result.push_back(filter_conjunction_spec());
-    result.push_back(mixed_subgroup_spec());
     result.push_back(failed_fill_spec());
     result.push_back(cancelled_fill_spec());
     result.push_back(skipped_publish_spec());

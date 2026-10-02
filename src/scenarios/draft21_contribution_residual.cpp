@@ -6,10 +6,7 @@
 // Fixture contract (this slice does not use the Group 7 contract of
 // draft21_gap_a.h). The configured track holds Groups 0 and 1, each with Objects
 // 0 and 1, delivered to every subscription that asks for them; the first Group of
-// an LOC/CMAF GOP-per-Group source has exactly this shape. The Subgroup row
-// (D21-2-2-MUST-NOT-017) instead needs a Group 0 whose Objects 0-4 form one
-// Subgroup and Objects 5-9 another, which a one-Subgroup-per-Group source cannot
-// provide. Every context also asks the runner to acknowledge a PUBLISH_NAMESPACE
+// an LOC/CMAF GOP-per-Group source has exactly this shape. Every context also asks the runner to acknowledge a PUBLISH_NAMESPACE
 // the publisher opens, as any subscriber that wants a publisher to keep serving
 // requests would; this is not scored.
 //

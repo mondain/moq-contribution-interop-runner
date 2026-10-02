@@ -312,14 +312,10 @@
       "actor": "publisher",
       "summary": "Do not send Objects from two Subgroups on the same subscription stream.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "d21-subscribe-multiple-subgroups"
-      ],
-      "evaluators": [
-        "d21-no-mixed-subgroups-on-subscription-stream"
-      ],
-      "rationale": "Known fixture Subgroup membership and SUBGROUP_HEADER in Section 11.3.1 identify mixed streams. The rule is for subscription delivery, not FETCH or datagrams. Section 2.2 references Section 11.1.3 for forwarding preference, but that heading is Object Properties in this draft; Sections 11.2 and 11.3.1 supply the actual Datagram/Subgroup descriptions."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 11.3.1 (lines 5873-5875, with the SUBGROUP_HEADER of lines 5896-5902) makes every Object on a Subgroup stream belong to the one Subgroup named by that stream's single SUBGROUP_HEADER Group ID and Subgroup ID, and the Subgroup Object fields (lines 6001-6007) carry only an Object ID Delta, properties, payload length, status and payload, never a Subgroup field. Objects of two distinct Subgroups on one stream therefore have no wire representation: a receiver can only read them as one Subgroup, so the violation is decided inside the publisher before serialization and no byte sequence, even from a cooperating publisher, exhibits it. The separate rule that one Subgroup must not span streams (lines 719-722, second clause) is a different statement."
     },
     {
       "id": "D21-2-2-MUST-NOT-018",
