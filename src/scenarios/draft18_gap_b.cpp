@@ -251,6 +251,7 @@ RawProbeDefinition retire_token_definition(const Fixture&, std::chrono::millisec
 struct TokenUse {
     transport::StreamId stream;
     std::size_t event;
+    std::size_t frame;  // position of the carrying message on its stream
 };
 
 Observation retire_token_observe(const RawProbeTranscript& transcript, const Fixture&) {
@@ -265,7 +266,8 @@ Observation retire_token_observe(const RawProbeTranscript& transcript, const Fix
     std::map<transport::StreamId, std::size_t> consumed;
     std::map<std::uint64_t, std::vector<TokenUse>> uses;
     std::set<std::uint64_t> registered;
-    bool retired_cleanly = false;
+    // A DELETE with no recorded use never exercises the rule: stay unscored.
+    bool retired_after_use = false;
     for (std::size_t index = 0; index < transcript.events.size(); ++index) {
         const auto* data = std::get_if<transport::StreamDataEvent>(&transcript.events[index]);
         if (!data || !(is_peer_bidi(data->stream_id))) continue;
@@ -283,24 +285,28 @@ Observation retire_token_observe(const RawProbeTranscript& transcript, const Fix
                 if (token.alias_type == d18::TokenAliasType::Register) {
                     registered.insert(*token.alias);
                 } else if (token.alias_type == d18::TokenAliasType::UseAlias) {
-                    uses[*token.alias].push_back({data->stream_id, index});
+                    uses[*token.alias].push_back({data->stream_id, index, frame});
                 } else if (token.alias_type == d18::TokenAliasType::Delete &&
                            registered.contains(*token.alias)) {
                     for (const auto& use : uses[*token.alias]) {
-                        // Only the registering request received a response.
-                        const bool responded = use.stream == answered_stream && answered_at <= index;
+                        // The runner sent one response, a REQUEST_OK for the request
+                        // that opened the answered stream. A later message on that
+                        // stream (e.g. REQUEST_UPDATE) is owed its own response
+                        // (draft 18 lines 3238-3239) and never receives one here.
+                        const bool responded = use.stream == answered_stream && use.frame == 0 &&
+                                               use.event < answered_at;
                         if (!responded) {
                             observation.ready = true;
                             observation.result = false;
                             return observation;
                         }
                     }
-                    retired_cleanly = true;
+                    retired_after_use = retired_after_use || !uses[*token.alias].empty();
                 }
             }
         }
     }
-    if (retired_cleanly) {
+    if (retired_after_use) {
         observation.ready = true;
         observation.result = true;
     }
