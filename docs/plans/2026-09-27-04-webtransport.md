@@ -1,5 +1,7 @@
 # Picoquic Transport Migration Implementation Plan
 
+Status (2026-10-01): partially implemented. Strict WebTransport admission and session mapping are committed; picoquic parity and full draft suites over WebTransport are not complete.
+
 Backend update (2026-10-01): picoquic is the sole supported backend and local
 test peer. Quiche options, dependencies, legacy sources, and parity targets
 have been retired; quiche references below describe the earlier migration.

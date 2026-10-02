@@ -1,5 +1,7 @@
 # Publisher Integration and Operations Implementation Plan
 
+Status (2026-10-01): Tasks 1-4 done. Tasks 5-6 (documented-command smoke test, CI and recovery verification) are not yet confirmed against this plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the validator usable with arbitrary publishers, add black-box `moqxr` coverage, finish result exports and the accessible report, and document local, Docker, and CI operation.
@@ -39,9 +41,9 @@ struct DriverRequest { RunId run_id; std::string scenario_id; std::string endpoi
 class PublisherDriver { public: DriverHandle start(const DriverRequest&); DriverStatus poll(DriverHandle); DriverResult stop(DriverHandle); };
 ```
 
-- [ ] Write tests for full environment/JSON serialization, missing executable, early exit, timeout, SIGTERM then SIGKILL escalation, invalid UTF-8 log bytes, and log SHA-256 metadata.
-- [ ] Confirm focused tests fail, implement bounded process control without a shell command string, and rerun tests.
-- [ ] Commit with `git commit -m "feat: define publisher driver contract"`.
+- [x] Write tests for full environment/JSON serialization, missing executable, early exit, timeout, SIGTERM then SIGKILL escalation, invalid UTF-8 log bytes, and log SHA-256 metadata.
+- [x] Confirm focused tests fail, implement bounded process control without a shell command string, and rerun tests.
+- [x] Commit with `git commit -m "feat: define publisher driver contract"`.
 
 ### Task 2: `moqxr` black-box adapter and Compose matrix
 
@@ -49,11 +51,11 @@ class PublisherDriver { public: DriverHandle start(const DriverRequest&); Driver
 
 **Interfaces:** Consumes the driver contract and a mounted `openmoq-publisher`; produces publisher logs and exit metadata only.
 
-- [ ] Write adapter contract tests for draft 18/21, native/WebTransport selection, input fixture, TLS trust, unsupported combinations, and paths containing spaces.
-- [ ] Run contract tests before the adapter exists and confirm failure.
-- [ ] Implement argument-array construction for the documented `moqxr` CLI without reading its internal source during execution.
-- [ ] Run the supported matrix; assert only harness health, completed runs, and persisted row-level results, not predeclared publisher passes.
-- [ ] Commit with `git commit -m "test: add moqxr black-box interop matrix"`.
+- [x] Write adapter contract tests for draft 18/21, native/WebTransport selection, input fixture, TLS trust, unsupported combinations, and paths containing spaces.
+- [x] Run contract tests before the adapter exists and confirm failure.
+- [x] Implement argument-array construction for the documented `moqxr` CLI without reading its internal source during execution.
+- [x] Run the supported matrix; assert only harness health, completed runs, and persisted row-level results, not predeclared publisher passes.
+- [x] Commit with `git commit -m "test: add moqxr black-box interop matrix"`.
 
 ### Task 3: Complete API, JSON, and TAP exports
 
@@ -66,9 +68,9 @@ nlohmann::json serialize_result(const RunRecord&, std::string_view schema_versio
 std::string serialize_tap14(const RunRecord&);
 ```
 
-- [ ] Add golden responses for pass, fail, incomplete, error, zero denominator, every row state, evidence pagination, invalid run ID, and TAP escaping/YAML diagnostics.
-- [ ] Confirm focused tests fail, implement stable field ordering and valid TAP plan/count rules, then compare exact fixtures.
-- [ ] Commit with `git commit -m "feat: export complete interop results"`.
+- [x] Add golden responses for pass, fail, incomplete, error, zero denominator, every row state, evidence pagination, invalid run ID, and TAP escaping/YAML diagnostics.
+- [x] Confirm focused tests fail, implement stable field ordering and valid TAP plan/count rules, then compare exact fixtures.
+- [x] Commit with `git commit -m "feat: export complete interop results"`.
 
 ### Task 4: Accessible HTML report
 
@@ -76,9 +78,9 @@ std::string serialize_tap14(const RunRecord&);
 
 **Interfaces:** Produces server-rendered run lists, summaries, filters, requirement tables, and expandable evidence without JavaScript.
 
-- [ ] Test dark-text/light-background contrast, visible status words, keyboard-operable details, table headers, score labels, filter query validation, and malicious publisher/requirement strings.
-- [ ] Confirm tests fail, implement semantic HTML and a single escaped rendering path, then validate representative output with an HTML parser.
-- [ ] Commit with `git commit -m "feat: render accessible interop reports"`.
+- [x] Test dark-text/light-background contrast, visible status words, keyboard-operable details, table headers, score labels, filter query validation, and malicious publisher/requirement strings.
+- [x] Confirm tests fail, implement semantic HTML and a single escaped rendering path, then validate representative output with an HTML parser.
+- [x] Commit with `git commit -m "feat: render accessible interop reports"`.
 
 ### Task 5: Operator and contributor documentation
 

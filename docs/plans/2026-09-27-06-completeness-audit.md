@@ -1,5 +1,7 @@
 # Draft Completeness Audit Implementation Plan
 
+Status (2026-10-01): Tasks 1 and 4 done. Tasks 2-3 are partly delivered (execution audit, release matrix) but the static gate still fails (188 draft-18 and 195 draft-21 findings), so they stay unchecked.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Establish evidence-backed completion gates for draft 18 and 21 and publish honest residual `NOT_TESTABLE`, `NOT_APPLICABLE`, and `NOT_RUN` inventories.
@@ -39,9 +41,9 @@ struct CompletenessReport { DraftVersion draft; std::vector<AuditFinding> findin
 CompletenessReport audit_completeness(const RequirementCatalog&, const ScenarioRegistry&, const EvaluatorRegistry&);
 ```
 
-- [ ] Write tests for missing scenarios/evaluators, orphan registrations, absent evidence schema, duplicate source clauses, unclassified keywords, and fully complete synthetic catalogs.
-- [ ] Confirm tests fail, implement deterministic sorted findings with nonzero exit on any required gap, and rerun.
-- [ ] Commit with `git commit -m "feat: audit static draft completeness"`.
+- [x] Write tests for missing scenarios/evaluators, orphan registrations, absent evidence schema, duplicate source clauses, unclassified keywords, and fully complete synthetic catalogs.
+- [x] Confirm tests fail, implement deterministic sorted findings with nonzero exit on any required gap, and rerun.
+- [x] Commit with `git commit -m "feat: audit static draft completeness"`.
 
 ### Task 2: Dynamic evidence and determinism audit
 
@@ -70,8 +72,8 @@ CompletenessReport audit_completeness(const RequirementCatalog&, const ScenarioR
 
 **Interfaces:** Exposes per-draft/per-transport catalog counts, evaluator coverage, executed coverage, verification commands, and residual classifications in docs and `/results`.
 
-- [ ] Add tests requiring every reported count to match `moq-interop-audit` JSON and every residual row to include a reason and draft citation.
-- [ ] Confirm the test fails before the document/report section exists.
-- [ ] Generate counts from audit output, write the human explanation without claiming unexecuted behavior, and link downloadable audit JSON.
-- [ ] Run `git diff --check`, the full release audit, and documentation smoke tests.
-- [ ] Commit with `git commit -m "docs: publish draft completeness evidence"`.
+- [x] Add tests requiring every reported count to match `moq-interop-audit` JSON and every residual row to include a reason and draft citation.
+- [x] Confirm the test fails before the document/report section exists.
+- [x] Generate counts from audit output, write the human explanation without claiming unexecuted behavior, and link downloadable audit JSON.
+- [x] Run `git diff --check`, the full release audit, and documentation smoke tests.
+- [x] Commit with `git commit -m "docs: publish draft completeness evidence"`.
