@@ -1203,7 +1203,11 @@ public:
                      const RunConfig& run_config, PublisherDriver* driver,
                      DriverHandle handle, const std::function<void()>& record_driver) {
         const auto started = scenarios::Draft21Clock::now();
-        const auto deadline = started + run_config.timeout;
+        // The controller starts its own observation clock at its first poll, a
+        // little after `started`. This deadline is only a backstop: if it fired
+        // first, a window-judged row would be abandoned before the controller
+        // recorded that the window elapsed, and a pass would degrade to not_run.
+        const auto deadline = started + run_config.timeout + std::chrono::milliseconds{250};
         std::vector<std::vector<std::byte>> name_space;
         for (const auto& field : run_config.track_fixture->namespace_fields) {
             name_space.push_back(bytes_of(field));

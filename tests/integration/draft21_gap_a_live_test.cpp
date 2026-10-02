@@ -92,10 +92,14 @@ TEST(Draft21GapALive, ReservedNamespaceAttemptPassesWhenNothingIsPublishedAndFai
     ASSERT_TRUE(harness.started);
     // Section 2.4.2: ".", the single period, is the fixture the publisher is told to publish.
     const auto scenario = "d21-attempt-single-period-track-publication";
+    // The observation window is the run's whole timeout and starts when the run is created,
+    // so it must outlast the handshake and SETUP exchange even under sanitizers and a loaded
+    // machine; otherwise the absence-based pass degrades to not_run.
+    constexpr unsigned kBudgetMs = 2000;
     for (const bool violate : {false, true}) {
         SCOPED_TRACE(violate);
         const auto created = harness.api->Post("/api/v1/runs",
-            harness.request(scenario, "2e", 500).dump(), "application/json");
+            harness.request(scenario, "2e", kBudgetMs).dump(), "application/json");
         ASSERT_TRUE(created);
         ASSERT_EQ(created->status, 201) << created->body;
         const auto body = Json::parse(created->body);
@@ -120,11 +124,15 @@ TEST(Draft21GapALive, ReservedNamespaceAttemptPassesWhenNothingIsPublishedAndFai
         }
         ASSERT_TRUE(pump_until(*client, [&] {
             return harness.store->load(id).state == storage::RunState::Finalized;
-        }, std::chrono::seconds{5}));
+        }, std::chrono::milliseconds{kBudgetMs} + std::chrono::seconds{5}));
         const auto result = harness.api->Get("/api/v1/runs/" + id);
         ASSERT_TRUE(result);
         const auto run = Json::parse(result->body).at("run");
-        EXPECT_EQ(state_of(run, "D21-2-4-2-MUST-NOT-029"), violate ? "fail" : "pass");
+        EXPECT_EQ(state_of(run, "D21-2-4-2-MUST-NOT-029"), violate ? "fail" : "pass")
+            << "run events: " << [&] {
+                   const auto events = harness.api->Get("/api/v1/runs/" + id + "/events");
+                   return events ? events->body : std::string("unavailable");
+               }();
         // The same publication also breaks the broader prohibition, which this scenario does not score.
         EXPECT_EQ(state_of(run, "D21-2-4-2-MUST-NOT-028"), "not_run");
     }
