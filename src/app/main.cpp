@@ -53,6 +53,9 @@ void usage(std::ostream& output) {
               "  --driver-log-root PATH  per-run publisher logs\n"
               "  --unknown-auth-token-alias-compat-code CODE  explicit REQUEST_ERROR compatibility mapping\n"
               "  --denied-authorization-token VALUE  credential (token type 0) the publisher's policy refuses\n"
+              "  --invalid-auth-token TYPE:HEX  well-formed but invalid credential for a Token Type the publisher\n"
+              "                          understands (D18-10-2-2-MUST-008, D21-8-9-MUST-270); unset leaves the row NOT_RUN\n"
+              "  --expired-auth-token TYPE:HEX  expired credential, same contract (D18-10-2-2-MUST-010, D21-8-9-MUST-273)\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }

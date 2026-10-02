@@ -520,5 +520,10 @@ std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadl
 std::vector<Draft18ContributionProbe> closure_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 std::vector<Draft18ContributionProbe> origination_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
+// Section 10.2.2 rows that need an operator-supplied credential (draft18_contribution_token.cpp).
+std::vector<Draft18ContributionProbe> token_probes(std::chrono::milliseconds deadline, const Fixture& fixture,
+                                                   const Draft18TokenCredentials& credentials);
+// The credentials a token scenario sent, recovered from the transcript's writes.
+Draft18TokenCredentials token_credentials(const RawProbeTranscript& transcript);
 
 }  // namespace moq::interop::scenarios::contribution

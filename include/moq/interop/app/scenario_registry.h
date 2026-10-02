@@ -131,6 +131,8 @@ inline constexpr auto kDraft18ExecutableScenarios = std::to_array<std::string_vi
     "redeliver-previously-observed-object-in-later-subscription",
     "receive-subscribe-namespace-denied-by-configured-authorization-policy",
     "receive-subscribe-tracks-denied-by-configured-authorization-policy",
+    "receive-well-formed-token-with-invalid-known-type-value",
+    "register-token-expire-then-use-alias-before-delete",
     // Draft-18 slice A: publisher-originated behavior (draft18_contribution_origination.cpp).
     "publish-under-unregistered-period-prefixed-namespace",
     "originate-publisher-operations-under-single-period-namespace",
@@ -461,6 +463,8 @@ inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::st
     "redeliver-previously-observed-object-in-later-subscription",
     "receive-subscribe-namespace-denied-by-configured-authorization-policy",
     "receive-subscribe-tracks-denied-by-configured-authorization-policy",
+    "receive-well-formed-token-with-invalid-known-type-value",
+    "register-token-expire-then-use-alias-before-delete",
     "finish-subscription-with-open-object-streams",
     "publish-track-with-mandatory-property",
     "publish-distinct-content-tracks-in-same-scope",

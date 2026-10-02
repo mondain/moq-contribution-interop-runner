@@ -38,7 +38,8 @@ struct NativeRunManagerConfig {
     std::optional<std::string> denied_authorization_token{};
     // Credentials, for a Token Type the publisher under test is configured to
     // understand, used by the draft-21 token rows D21-8-9-MUST-270 (invalid) and
-    // D21-8-9-MUST-273 (expired). The runner cannot create these itself.
+    // D21-8-9-MUST-273 (expired) and their draft-18 twins D18-10-2-2-MUST-008 and
+    // D18-10-2-2-MUST-010. The runner cannot create these itself.
     std::optional<scenarios::Draft21TokenCredential> invalid_auth_token{};
     std::optional<scenarios::Draft21TokenCredential> expired_auth_token{};
 };

@@ -30,7 +30,7 @@ std::optional<Fixture> fixture_from_transcript(const RawProbeTranscript& transcr
 
 std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     std::chrono::milliseconds deadline, std::vector<std::vector<std::byte>> track_namespace,
-    std::vector<std::byte> track_name) {
+    std::vector<std::byte> track_name, Draft18TokenCredentials credentials) {
     if (deadline.count() <= 0)
         throw std::invalid_argument("invalid draft-18 contribution deadline");
     const contribution::Fixture fixture{std::move(track_namespace), std::move(track_name)};
@@ -47,6 +47,7 @@ std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     append(contribution::closure_probes(deadline, fixture));
     append(contribution::exchange_probes(deadline, fixture));
     append(contribution::origination_probes(deadline, fixture));
+    append(contribution::token_probes(deadline, fixture, credentials));
     return result;
 }
 
@@ -79,7 +80,10 @@ std::optional<bool> evaluate_draft18_contribution_probe(
     const RawProbeTranscript& transcript, const Draft18ContributionProbe& profile,
     bool webtransport) {
     contribution::Fixture fixture{{}, {std::byte{'x'}}};
-    if (profile.requires_track) {
+    // A context that sends nothing carries no request to recover the fixture from,
+    // and its stimulus does not depend on the fixture.
+    const bool sends_nothing = transcript.writes.empty();
+    if (profile.requires_track && !sends_nothing) {
         auto recovered = contribution::fixture_from_transcript(transcript);
         if (!recovered || !draft18_contribution_fixture_valid(recovered->track_namespace,
                                                               recovered->track_name))
@@ -87,7 +91,8 @@ std::optional<bool> evaluate_draft18_contribution_probe(
         fixture = std::move(*recovered);
     }
     const auto candidates = draft18_contribution_probes(
-        profile.definition.deadline, fixture.track_namespace, fixture.track_name);
+        profile.definition.deadline, fixture.track_namespace, fixture.track_name,
+        contribution::token_credentials(transcript));
     const auto expected = std::find_if(candidates.begin(), candidates.end(), [&](const auto& c) {
         return c.requirement_id == profile.requirement_id &&
                c.evaluator_id == profile.evaluator_id &&

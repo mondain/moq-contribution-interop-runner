@@ -1002,8 +1002,16 @@ public:
                     contribution_namespace.push_back(bytes_of(field));
                 contribution_name = bytes_of(run_config.track_fixture->track_name);
             }
+            // The operator's credentials for the section 10.2.2 token rows (D18-10-2-2-MUST-008, -010).
+            scenarios::Draft18TokenCredentials token_credentials;
+            if (config.invalid_auth_token)
+                token_credentials.invalid = scenarios::Draft18TokenCredential{
+                    config.invalid_auth_token->token_type, config.invalid_auth_token->value};
+            if (config.expired_auth_token)
+                token_credentials.expired = scenarios::Draft18TokenCredential{
+                    config.expired_auth_token->token_type, config.expired_auth_token->value};
             auto contributions = scenarios::draft18_contribution_probes(
-                run_config.timeout, contribution_namespace, contribution_name);
+                run_config.timeout, contribution_namespace, contribution_name, std::move(token_credentials));
             const auto found = std::find_if(contributions.begin(), contributions.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == contributions.end()) throw std::invalid_argument("unknown contribution probe");

@@ -247,7 +247,8 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution_goaway.cpp
     src/scenarios/draft18_contribution_uri.cpp
     src/scenarios/draft18_contribution_closure.cpp
-    src/scenarios/draft18_contribution_exchange.cpp)
+    src/scenarios/draft18_contribution_exchange.cpp
+    src/scenarios/draft18_contribution_token.cpp)
 # Draft-18 slice A: publisher-originated request, Key-Value-Pair, closure and Property probes.
 target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution_origination.cpp)
@@ -586,7 +587,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         tests/protocol/draft18_contribution_goaway_test.cpp
         tests/protocol/draft18_contribution_uri_test.cpp
         tests/protocol/draft18_contribution_closure_test.cpp
-        tests/protocol/draft18_contribution_exchange_test.cpp)
+        tests/protocol/draft18_contribution_exchange_test.cpp
+        tests/protocol/draft18_contribution_token_test.cpp)
     target_link_libraries(moq-interop-draft18-contribution-tests PRIVATE moq-interop-scenarios
         moq-interop-requirements moq-interop-draft18-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-draft18-contribution-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
