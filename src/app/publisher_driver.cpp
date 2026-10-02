@@ -5,8 +5,10 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -98,6 +100,25 @@ int reap(pid_t pid, int flags, int& status) {
     int result;
     do { result = waitpid(pid, &status, flags); } while (result < 0 && errno == EINTR);
     return result;
+}
+
+// Closes every descriptor above stderr in the spawned child. posix_spawn has no portable
+// "close all" action, so use closefrom where glibc provides it and otherwise close what
+// the parent has open now; sockets are also created close-on-exec for the descriptors a
+// concurrent thread opens after this enumeration.
+void close_inherited_descriptors(posix_spawn_file_actions_t& actions) {
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+#else
+    std::error_code ignored;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fd", ignored)) {
+        const auto name = entry.path().filename().string();
+        char* end = nullptr;
+        const long descriptor = std::strtol(name.c_str(), &end, 10);
+        if (end != name.c_str() && *end == '\0' && descriptor > STDERR_FILENO)
+            posix_spawn_file_actions_addclose(&actions, static_cast<int>(descriptor));
+    }
+#endif
 }
 
 }  // namespace
@@ -215,6 +236,10 @@ DriverStartResult PublisherDriver::start(const DriverRequest& request) {
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, stdout_path.c_str(), O_WRONLY, 0600);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, stderr_path.c_str(), O_WRONLY, 0600);
+    // The publisher must not inherit the runner's descriptors. A leaked UDP listener keeps its
+    // port bound after the runner closes it, so the runner's next bind of the same reserved
+    // port fails, and one run's publisher would hold another run's sockets.
+    close_inherited_descriptors(actions);
     posix_spawnattr_t attributes;
     posix_spawnattr_init(&attributes);
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);

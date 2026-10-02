@@ -146,7 +146,9 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 - Standard output and standard error are redirected to files in `log_dir`
   (`stdout.bin`, `stderr.bin`); standard input is not redirected and must not be
   read. The adapter runs from the runner's working directory in its own process
-  group.
+  group. It starts with no open descriptors above standard error: the runner closes
+  its own sockets and files in the child, so a long-lived publisher cannot keep a
+  run's UDP port bound after the runner releases it.
 - Check the contract version first and refuse any other value.
 
 ### 3.2 The request file

@@ -18,6 +18,16 @@ case "${1-}" in
     sleep)
         exec sleep 5
         ;;
+    list-sockets)
+        # Report every inherited socket; a driver must not leak the runner's descriptors.
+        for entry in /proc/$$/fd/*; do
+            target=$(readlink "$entry" 2>/dev/null || true)
+            case "$target" in
+                socket:*) printf 'inherited %s\n' "$target" ;;
+            esac
+        done
+        printf 'done\n'
+        ;;
     ignore-term)
         trap '' TERM
         while :; do :; done

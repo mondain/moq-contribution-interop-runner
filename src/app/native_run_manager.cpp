@@ -423,6 +423,22 @@ public:
                 definition.initial_peer_uni_stream_data, definition.hold_uni_stream_credit, {}};
     }
 
+    static std::string describe_listener_failure(const ListenerResult& result, std::uint16_t wanted_port) {
+        static constexpr std::array<std::string_view, 11> names{
+            "InvalidConfiguration", "UnsupportedBindAddress", "CertificateLoadFailed",
+            "PrivateKeyLoadFailed", "CryptoInitializationFailed", "SocketOpenFailed",
+            "SocketConfigurationFailed", "BindFailed", "BoundEndpointFailed", "AfterBindFailed",
+            "TransportConfigurationFailed"};
+        std::string text = " (wanted port " + std::to_string(wanted_port);
+        if (result.error) {
+            const auto index = static_cast<std::size_t>(*result.error);
+            text += ", listener error " + std::string(index < names.size() ? names[index] : "unknown");
+        } else if (result.listener) {
+            text += ", bound port " + std::to_string(result.endpoint.port);
+        }
+        return text + ")";
+    }
+
     ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
                                    Tuning tuning = {}) const {
         const auto& peer_bidi_streams = tuning.peer_bidi_streams;
@@ -695,7 +711,8 @@ public:
                     if (worker->stop_requested) break;
                     auto replacement = create_listener(run_config, worker->endpoint.port, tuning_of(definitions[index]));
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
-                        throw std::runtime_error("raw context listener could not rebind reserved run port");
+                        throw std::runtime_error("raw context listener could not rebind reserved run port" +
+                            describe_listener_failure(replacement, worker->endpoint.port));
                     listener = std::move(replacement.listener);
                 }
                 if (worker->stop_requested) break;

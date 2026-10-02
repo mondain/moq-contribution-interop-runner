@@ -344,7 +344,7 @@ WebTransportListenerCreateResult WebTransportListener::create(
         ipv6->sin6_port = htons(impl->config.quic.bind_port);
         length = sizeof(sockaddr_in6);
     }
-    impl->socket_fd = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    impl->socket_fd = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (impl->socket_fd < 0)
         return {nullptr, NativeQuicListenerError::SocketOpenFailed};
     const int flags = ::fcntl(impl->socket_fd, F_GETFL, 0);

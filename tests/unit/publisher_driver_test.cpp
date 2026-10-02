@@ -3,6 +3,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <chrono>
 #include <csignal>
 #include <filesystem>
@@ -190,6 +193,25 @@ TEST(PublisherDriver, InvalidUtf8StaysInOpaqueLogNotResultJson) {
     EXPECT_EQ(json.at("status"), "exited");
     EXPECT_EQ(json.at("stderr_log").at("bytes"), 3);
     EXPECT_FALSE(json.dump().empty());
+}
+
+// A runner socket without close-on-exec must not reach the publisher: the child would
+// keep the UDP port bound after the runner closes its own descriptor, and the runner's
+// next bind of the same reserved port would fail with EADDRINUSE.
+TEST(PublisherDriver, ChildDoesNotInheritTheRunnersSockets) {
+    const int leaked = ::socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_GE(leaked, 0);
+    DriverDirectory directory;
+    PublisherDriver driver;
+    const auto started = driver.start(request(directory, "list-sockets"));
+    ASSERT_EQ(started.status, DriverStartStatus::Started) << started.error;
+    const auto result = wait_for(driver, started.handle);
+    ::close(leaked);
+    EXPECT_EQ(result.status, DriverStatus::Exited);
+    std::ifstream output(directory.path() / "publisher logs/stdout.bin");
+    const std::string text((std::istreambuf_iterator<char>(output)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("done"), std::string::npos) << text;
+    EXPECT_EQ(text.find("inherited"), std::string::npos) << text;
 }
 
 }  // namespace
