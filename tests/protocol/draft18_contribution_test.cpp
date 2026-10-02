@@ -3,7 +3,7 @@
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/wire/draft18/messages.h"
-#include "../support/contribution_harness.h"
+#include "../support/contribution_wire.h"
 
 #include <gtest/gtest.h>
 
@@ -13,46 +13,7 @@
 
 namespace moq::interop::scenarios {
 namespace {
-namespace d18 = wire::draft18;
-using test::bytes_of;
-using test::concat;
-using test::drive_probe;
-using test::PeerView;
-using Bytes = std::vector<std::byte>;
-
-Bytes text(std::string_view value) {
-    Bytes result;
-    for (const auto c : value) result.push_back(static_cast<std::byte>(c));
-    return result;
-}
-Bytes encode(const d18::Message& message) {
-    wire::ByteWriter out(65546);
-    EXPECT_TRUE(d18::encode_message(message, out).has_value());
-    return {out.bytes().begin(), out.bytes().end()};
-}
-Bytes setup_with(d18::KeyValuePairs options) { return encode(d18::SetupMessage{std::move(options)}); }
-// Hand-assembled SETUP so that duplicate option types are not rejected by the
-// typed encoder or decoder: 0x2F00, 16-bit length, then raw key-value pairs.
-Bytes raw_setup(const Bytes& payload) {
-    Bytes result = bytes_of({0xaf, 0x00, static_cast<unsigned>(payload.size() >> 8),
-                             static_cast<unsigned>(payload.size() & 255)});
-    return concat(std::move(result), payload);
-}
-
-const Draft18ContributionProbe& probe(const std::vector<Draft18ContributionProbe>& probes,
-                                      std::string_view scenario, std::string_view requirement) {
-    const auto found = std::find_if(probes.begin(), probes.end(), [&](const auto& p) {
-        return p.definition.id == scenario && p.requirement_id == requirement;
-    });
-    EXPECT_NE(found, probes.end()) << scenario << " " << requirement;
-    return *found;
-}
-
-Bytes ok() { return encode(d18::RequestOkMessage{{}, {}}); }
-Bytes error(std::uint64_t code) {
-    return encode(d18::RequestErrorMessage{code, 0, {}, std::nullopt});
-}
-
+using namespace test;
 TEST(Draft18ContributionRegistry, NamesEveryScenarioOfTheFirstBatch) {
     const std::set<std::string> expected{
         "observe-publisher-setup-options", "observe-webtransport-publisher-setup",

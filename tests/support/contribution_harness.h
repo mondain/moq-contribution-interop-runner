@@ -2,7 +2,9 @@
 
 #include "moq/interop/scenarios/raw_probe.h"
 
+#include <chrono>
 #include <deque>
+#include <thread>
 #include <functional>
 #include <map>
 #include <set>
@@ -91,6 +93,8 @@ inline scenarios::RawProbeTranscript drive_probe(
         peer(view);
         const auto& transcript = controller.poll(start + std::chrono::milliseconds(step));
         if (transcript.complete || transcript.timed_out || transcript.harness_failed) break;
+        // Probes that wait out a quiet window read the real clock.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return controller.transcript();
 }

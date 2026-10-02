@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <chrono>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -262,7 +264,113 @@ inline std::function<bool(const RawProbeTranscript&)> first_response_or_close(
     };
 }
 
+// Peer-opened unidirectional streams other than the control stream, with the
+// bytes and closure observed before the first terminal event.
+struct DataStream {
+    Bytes bytes;
+    bool fin{false};
+    bool reset{false};
+    std::optional<std::uint64_t> reset_code;
+    std::size_t first_event{0};
+};
+inline std::map<transport::StreamId, DataStream> peer_data_streams(const RawProbeTranscript& transcript) {
+    std::map<transport::StreamId, DataStream> result;
+    const auto control = peer_control(transcript);
+    for (std::size_t i = 0; i < transcript.events.size(); ++i) {
+        const auto& event = transcript.events[i];
+        if (terminal(event)) break;
+        if (const auto* data = std::get_if<transport::StreamDataEvent>(&event)) {
+            if ((data->stream_id & 3u) != 2u || (control && control->stream == data->stream_id)) continue;
+            auto [it, inserted] = result.try_emplace(data->stream_id);
+            if (inserted) it->second.first_event = i;
+            it->second.bytes.insert(it->second.bytes.end(), data->data.begin(), data->data.end());
+            it->second.fin = it->second.fin || data->fin;
+        } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&event)) {
+            if ((reset->stream_id & 3u) != 2u) continue;
+            auto [it, inserted] = result.try_emplace(reset->stream_id);
+            if (inserted) it->second.first_event = i;
+            it->second.reset = true;
+            it->second.reset_code = reset->application_error;
+        }
+    }
+    return result;
+}
+
+// Request builders. The runner is the MOQT server, so its Request IDs are odd.
+inline d18::Parameter forward_parameter(std::uint8_t value) {
+    return {0x10, d18::Uint8ParameterValue{value}};
+}
+inline d18::Parameter priority_parameter(std::uint8_t value) {
+    return {0x20, d18::Uint8ParameterValue{value}};
+}
+inline Bytes subscribe_request(const Fixture& fixture, std::uint64_t id, d18::Parameters parameters = {}) {
+    return encode(d18::SubscribeMessage{id, track_namespace(fixture.track_namespace),
+                                        d18::TrackName{fixture.track_name}, std::move(parameters)});
+}
+inline Bytes request_update(std::uint64_t id, d18::Parameters parameters) {
+    return encode(d18::RequestUpdateMessage{id, std::move(parameters)});
+}
+inline Bytes standalone_fetch(const Fixture& fixture, std::uint64_t id, d18::Location start,
+                              d18::Location end, d18::Parameters parameters = {}) {
+    return encode(d18::FetchMessage{id,
+        d18::StandaloneFetch{track_namespace(fixture.track_namespace), d18::TrackName{fixture.track_name},
+                             start, end}, std::move(parameters)});
+}
+inline Bytes relative_joining_fetch(std::uint64_t id, std::uint64_t joining_request, std::uint64_t start) {
+    return encode(d18::FetchMessage{id, d18::RelativeJoiningFetch{joining_request, start}, {}});
+}
+
+inline std::optional<d18::Location> largest_object(const d18::Parameters& parameters) {
+    for (const auto& parameter : parameters)
+        if (parameter.type == 0x09)
+            if (const auto* location = std::get_if<d18::Location>(&parameter.value)) return *location;
+    return std::nullopt;
+}
+inline const d18::SubscribeOkMessage* subscribe_ok(const Reply& reply, std::size_t index = 0) {
+    return index < reply.messages.size()
+               ? std::get_if<d18::SubscribeOkMessage>(&reply.messages[index]) : nullptr;
+}
+inline bool first_message_is_subscribe_ok(std::span<const std::byte> input) {
+    wire::Cursor cursor(input);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    return message && std::holds_alternative<d18::SubscribeOkMessage>(*message);
+}
+
+// Reply to a prior write as seen by a gate or byte preparer.
+inline Reply gate_reply(const RawProbeGateInput& input, std::size_t write_index) {
+    Reply result;
+    if (write_index >= input.prior_writes.size()) return result;
+    const auto& write = input.prior_writes[write_index];
+    if (!write.stream_id || !write.delivery_event_count ||
+        *write.delivery_event_count > input.events.size()) return result;
+    RawProbeTranscript view;
+    view.events.assign(input.events.begin(), input.events.end());
+    return stream_reply(view, *write.stream_id, *write.delivery_event_count);
+}
+
+// Becomes true once `seen` has held for `window`. The first sighting is
+// forgotten whenever `seen` is false, so a definition reused for a new
+// session starts its window afresh.
+inline std::function<bool(const RawProbeTranscript&)> settled_after(
+    std::function<bool(const RawProbeTranscript&)> seen, std::chrono::milliseconds window) {
+    auto first = std::make_shared<std::optional<RawProbeClock::time_point>>();
+    return [seen = std::move(seen), window, first](const RawProbeTranscript& transcript) {
+        if (!seen(transcript)) {
+            first->reset();
+            return false;
+        }
+        if (!*first) *first = RawProbeClock::now();
+        return RawProbeClock::now() - **first >= window;
+    };
+}
+inline std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline) {
+    return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
+}
+
 // Module entry points.
 std::vector<Draft18ContributionProbe> setup_probes(std::chrono::milliseconds deadline);
+std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseconds deadline,
+                                                          const Fixture& fixture);
 
 }  // namespace moq::interop::scenarios::contribution

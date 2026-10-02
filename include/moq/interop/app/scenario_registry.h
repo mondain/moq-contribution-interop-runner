@@ -7,7 +7,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 80> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 93> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -89,6 +89,19 @@ inline constexpr std::array<std::string_view, 80> kDraft18ExecutableScenarios{
     "setup-unknown-grease-options-and-duplicates",
     "receive-setup-token-register-exceeding-cache-limit",
     "receive-oversize-setup-register-then-use-its-alias",
+    "accept-subscribe-for-known-publisher-track",
+    "accept-forward-one-subscribe-then-publish-matching-object",
+    "receive-one-request-update-on-established-publisher-request",
+    "receive-multiple-successful-request-updates-on-one-stream",
+    "publisher-ends-subscription-with-no-data-streams",
+    "receive-joining-fetch-for-forward-zero-subscription",
+    "receive-forward-state-update-then-joining-fetch",
+    "receive-joining-fetch-for-track-with-no-published-objects",
+    "receive-standalone-fetch-for-track-with-no-published-objects",
+    "receive-fetch-start-beyond-largest-published-object",
+    "publisher-redirects-subscribe-namespace",
+    "publish-and-withdraw-namespace-during-discovery",
+    "subscribe-unknown-auth-token-type",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -259,7 +272,21 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 // Draft-18 publisher-contribution probes whose first write names the fixture.
-inline constexpr std::array<std::string_view, 0> kDraft18ContributionTrackScenarios{};
+inline constexpr std::array<std::string_view, 13> kDraft18ContributionTrackScenarios{
+    "accept-subscribe-for-known-publisher-track",
+    "accept-forward-one-subscribe-then-publish-matching-object",
+    "receive-one-request-update-on-established-publisher-request",
+    "receive-multiple-successful-request-updates-on-one-stream",
+    "publisher-ends-subscription-with-no-data-streams",
+    "receive-joining-fetch-for-forward-zero-subscription",
+    "receive-forward-state-update-then-joining-fetch",
+    "receive-joining-fetch-for-track-with-no-published-objects",
+    "receive-standalone-fetch-for-track-with-no-published-objects",
+    "receive-fetch-start-beyond-largest-published-object",
+    "publisher-redirects-subscribe-namespace",
+    "publish-and-withdraw-namespace-during-discovery",
+    "subscribe-unknown-auth-token-type",
+};
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (draft == 18 && std::find(kDraft18ContributionTrackScenarios.begin(),

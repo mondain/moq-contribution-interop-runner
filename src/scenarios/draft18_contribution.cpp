@@ -16,6 +16,8 @@ std::optional<Fixture> fixture_from_transcript(const RawProbeTranscript& transcr
     if (!message) return std::nullopt;
     if (const auto* subscribe = std::get_if<d18::SubscribeMessage>(message))
         return Fixture{subscribe->track_namespace.fields, subscribe->track_name.bytes};
+    if (const auto* discovery = std::get_if<d18::SubscribeNamespaceMessage>(message))
+        return Fixture{discovery->track_namespace_prefix.fields, {std::byte{'x'}}};
     if (const auto* fetch = std::get_if<d18::FetchMessage>(message))
         if (const auto* standalone = std::get_if<d18::StandaloneFetch>(&fetch->fetch))
             return Fixture{standalone->track_namespace.fields, standalone->track_name.bytes};
@@ -29,13 +31,13 @@ std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     std::vector<std::byte> track_name) {
     if (deadline.count() <= 0)
         throw std::invalid_argument("invalid draft-18 contribution deadline");
-    (void)track_namespace;
-    (void)track_name;
+    const contribution::Fixture fixture{std::move(track_namespace), std::move(track_name)};
     std::vector<Draft18ContributionProbe> result;
     const auto append = [&](std::vector<Draft18ContributionProbe> probes) {
         for (auto& probe : probes) result.push_back(std::move(probe));
     };
     append(contribution::setup_probes(deadline));
+    append(contribution::subscription_probes(deadline, fixture));
     return result;
 }
 
