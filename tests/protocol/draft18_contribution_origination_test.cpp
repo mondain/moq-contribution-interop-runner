@@ -313,6 +313,12 @@ TEST(Draft18ContributionOrigination, MandatoryPropertyIsOnlyUsedAtTrackScope) {
     // Inside the Immutable Properties container an Object Property is still an Object Property.
     EXPECT_EQ(row(d18::KeyValuePairs{odd_option(0x0B, kvp({even_option(0x4002, 1)}))}), std::optional<bool>{false});
     EXPECT_EQ(row(d18::KeyValuePairs{odd_option(0x0B, kvp({even_option(0x3000, 1)}))}), std::optional<bool>{true});
+    // Nested Immutable Properties are malformed (section 12.7) and never followed: a
+    // Mandatory Property buried thousands of levels down is not searched for, so the
+    // work stays linear and the stack does not grow with the peer's nesting.
+    Bytes deep = kvp({even_option(0x4000, 1)});
+    for (int level = 0; level < 3000; ++level) deep = kvp({odd_option(0x0B, deep)});
+    EXPECT_EQ(row(d18::KeyValuePairs{odd_option(0x0B, deep)}), std::optional<bool>{true});
     // On the Track itself it is allowed.
     EXPECT_EQ(row(std::nullopt, true), std::optional<bool>{true});
     // Without any Object there is nothing to inspect.

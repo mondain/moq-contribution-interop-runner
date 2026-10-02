@@ -1,4 +1,5 @@
 #include "draft18_gap_a_common.h"
+#include "draft18_probe_timing.h"
 
 #include <algorithm>
 #include <concepts>
@@ -251,6 +252,7 @@ RawProbeDefinition retire_token_definition(const Fixture&, std::chrono::millisec
 struct TokenUse {
     transport::StreamId stream;
     std::size_t event;
+    std::size_t frame;  // position of the carrying message on its stream
 };
 
 Observation retire_token_observe(const RawProbeTranscript& transcript, const Fixture&) {
@@ -265,7 +267,8 @@ Observation retire_token_observe(const RawProbeTranscript& transcript, const Fix
     std::map<transport::StreamId, std::size_t> consumed;
     std::map<std::uint64_t, std::vector<TokenUse>> uses;
     std::set<std::uint64_t> registered;
-    bool retired_cleanly = false;
+    // A DELETE with no recorded use never exercises the rule: stay unscored.
+    bool retired_after_use = false;
     for (std::size_t index = 0; index < transcript.events.size(); ++index) {
         const auto* data = std::get_if<transport::StreamDataEvent>(&transcript.events[index]);
         if (!data || !(is_peer_bidi(data->stream_id))) continue;
@@ -283,24 +286,28 @@ Observation retire_token_observe(const RawProbeTranscript& transcript, const Fix
                 if (token.alias_type == d18::TokenAliasType::Register) {
                     registered.insert(*token.alias);
                 } else if (token.alias_type == d18::TokenAliasType::UseAlias) {
-                    uses[*token.alias].push_back({data->stream_id, index});
+                    uses[*token.alias].push_back({data->stream_id, index, frame});
                 } else if (token.alias_type == d18::TokenAliasType::Delete &&
                            registered.contains(*token.alias)) {
                     for (const auto& use : uses[*token.alias]) {
-                        // Only the registering request received a response.
-                        const bool responded = use.stream == answered_stream && answered_at <= index;
+                        // The runner sent one response, a REQUEST_OK for the request
+                        // that opened the answered stream. A later message on that
+                        // stream (e.g. REQUEST_UPDATE) is owed its own response
+                        // (draft 18 lines 3238-3239) and never receives one here.
+                        const bool responded = use.stream == answered_stream && use.frame == 0 &&
+                                               use.event < answered_at;
                         if (!responded) {
                             observation.ready = true;
                             observation.result = false;
                             return observation;
                         }
                     }
-                    retired_cleanly = true;
+                    retired_after_use = retired_after_use || !uses[*token.alias].empty();
                 }
             }
         }
     }
-    if (retired_cleanly) {
+    if (retired_after_use) {
         observation.ready = true;
         observation.result = true;
     }
@@ -319,25 +326,8 @@ constexpr std::uint64_t kRequestError = 0x05;
 constexpr std::uint64_t kPublishBlocked = 0x0f;
 constexpr std::uint64_t kCreditGrant = 8;
 
-// Becomes true once `seen` has held for `window` polls. The controller is
-// polled about once per millisecond, and counting polls (rather than reading a
-// clock) keeps the period identical under a simulated clock; losing `seen`
-// restarts the count.
-std::function<bool(const RawProbeTranscript&)> settled_after(
-    std::function<bool(const RawProbeTranscript&)> seen, std::chrono::milliseconds window) {
-    struct State { std::int64_t streak{0}; std::size_t events{0}; };
-    auto state = std::make_shared<State>();
-    return [seen = std::move(seen), window, state](const RawProbeTranscript& transcript) {
-        // A shorter event log means the definition serves a new session.
-        if (transcript.events.size() < state->events) state->streak = 0;
-        state->events = transcript.events.size();
-        if (!seen(transcript)) { state->streak = 0; return false; }
-        return ++state->streak >= window.count();
-    };
-}
-std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline) {
-    return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
-}
+using probe_timing::quiet_window;
+using probe_timing::settled_after;
 
 RawProbeDefinition no_credit_definition(const Fixture& fixture, std::chrono::milliseconds deadline) {
     auto definition = make_definition("subscribe-tracks-with-no-bidirectional-stream-credit",

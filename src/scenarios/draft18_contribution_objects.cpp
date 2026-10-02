@@ -5,7 +5,6 @@ namespace {
 
 constexpr std::uint64_t kSubscribeId = 1;
 constexpr std::uint64_t kPaddingStreamType = 0x132B3E28;
-constexpr std::uint64_t kPropertyImmutable = 0x0B;
 constexpr std::uint64_t kPropertyPriorGroupIdGap = 0x3C;
 constexpr std::uint64_t kPropertyPriorObjectIdGap = 0x3E;
 
@@ -24,17 +23,9 @@ std::vector<d18::ObjectEvent> subscription_objects(const RawProbeTranscript& tra
 // Immutable Properties (section 12.7 requires searching both).
 std::size_t property_count(const d18::KeyValuePairs& properties, std::uint64_t type) {
     std::size_t count = 0;
-    for (const auto& property : properties) {
+    for_each_object_property(properties, [&](const auto& property) {
         if (property.type == type) ++count;
-        if (property.type != kPropertyImmutable) continue;
-        const auto* nested = std::get_if<d18::ByteValue>(&property.value);
-        if (!nested) continue;
-        wire::Cursor cursor(nested->bytes);
-        const auto decoded = d18::decode_key_value_pairs(cursor, nested->bytes.size(), {});
-        if (const auto* inner = std::get_if<d18::KeyValuePairs>(&decoded))
-            for (const auto& entry : *inner)
-                if (entry.type == type) ++count;
-    }
+    });
     return count;
 }
 

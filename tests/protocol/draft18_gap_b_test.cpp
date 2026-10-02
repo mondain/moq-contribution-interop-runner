@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 namespace moq::interop::scenarios {
 namespace {
@@ -43,8 +45,22 @@ Draft18GapAProbe profile(const std::string& requirement,
     return *found;
 }
 
+// The quiet windows of the probes read RawProbeClock (as in a live run), not the
+// controller's poll count, so the controller is polled against the real clock
+// at about the 1 ms cadence of a live run. Only probes that must wait out a
+// window or their deadline cost real time.
+RawProbeTranscript run_probe_in_real_time(ScriptedPublisher& publisher, RawProbeDefinition definition) {
+    RawProbeController controller(publisher, std::move(definition));
+    for (;;) {
+        const auto& transcript = controller.poll(RawProbeClock::now());
+        if (transcript.complete || transcript.harness_failed || transcript.timed_out) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return controller.transcript();
+}
+
 std::optional<bool> score(const Draft18GapAProbe& probe, ScriptedPublisher& publisher) {
-    const auto transcript = run_probe(publisher, probe.definition);
+    const auto transcript = run_probe_in_real_time(publisher, probe.definition);
     return evaluate_draft18_gap_a_probe(transcript, probe);
 }
 
@@ -219,18 +235,33 @@ TEST(Draft18GapB, DeleteMustWaitForEveryUseAliasResponse) {
     ASSERT_NE(early.sent(0), nullptr);
     EXPECT_EQ(early.sent(0)->bytes, ok());
     EXPECT_EQ(early.sent(4), nullptr);
-    // A DELETE with no USE_ALIAS outstanding is allowed.
+    // A DELETE with no USE_ALIAS ever seen never exercises the rule: unscored.
     ScriptedPublisher clean(setup(), reaction([](ScriptedPublisher& peer) {
         once(peer, "delete", [&] { peer.data(0, update(4, token(d18::TokenAliasType::Delete, 1))); });
     }));
-    EXPECT_EQ(score(probe, clean), std::optional<bool>{true});
-    // USE_ALIAS on the acknowledged stream itself after the response is answered.
+    EXPECT_EQ(score(probe, clean), std::nullopt);
+    // A USE_ALIAS inside a REQUEST_UPDATE on the answered stream is owed its own
+    // response (draft 18 lines 3238-3239); the runner's REQUEST_OK answered the
+    // registering request only, so deleting afterwards is a violation.
     ScriptedPublisher answered_use(setup(), reaction([](ScriptedPublisher& peer) {
         once(peer, "use", [&] { peer.data(0, update(4, token(d18::TokenAliasType::UseAlias, 1))); });
         if (peer.answered("use"))
             once(peer, "delete", [&] { peer.data(0, update(6, token(d18::TokenAliasType::Delete, 1))); });
     }));
-    EXPECT_EQ(score(probe, answered_use), std::optional<bool>{true});
+    EXPECT_EQ(score(probe, answered_use), std::optional<bool>{false});
+    // A USE_ALIAS in the registering request itself is answered by the runner's
+    // REQUEST_OK, so a later DELETE is clean.
+    ScriptedPublisher registering_use(setup(), [](ScriptedPublisher& peer) {
+        once(peer, "register", [&] {
+            auto both = token(d18::TokenAliasType::Register, 1);
+            const auto use = token(d18::TokenAliasType::UseAlias, 1);
+            both.insert(both.end(), use.begin(), use.end());
+            peer.data(0, announce(2, std::move(both)));
+        });
+        if (peer.sent(0))
+            once(peer, "delete", [&] { peer.data(4, announce(4, token(d18::TokenAliasType::Delete, 1))); });
+    });
+    EXPECT_EQ(score(probe, registering_use), std::optional<bool>{true});
     // No retirement observed: nothing established.
     ScriptedPublisher kept(setup(), reaction([](ScriptedPublisher& peer) {
         once(peer, "use", [&] { peer.data(4, announce(4, token(d18::TokenAliasType::UseAlias, 1))); });

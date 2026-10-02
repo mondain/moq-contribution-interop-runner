@@ -1,5 +1,6 @@
 #pragma once
 
+#include "draft18_probe_timing.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/wire/draft18/messages.h"
 #include "moq/interop/wire/draft18/objects.h"
@@ -74,28 +75,42 @@ inline d18::TrackNamespace track_namespace(const Namespace& fields) {
     return {fields};
 }
 
+// SETUP framing only: the Type, the 16-bit length and that many bytes. Returns
+// the payload (the Setup Options) when the frame is complete, without
+// validating the options, and reports the bytes the frame occupies.
+inline std::optional<std::span<const std::byte>> setup_frame_payload(
+    std::span<const std::byte> input, std::size_t* consumed = nullptr) {
+    wire::Cursor cursor(input);
+    const auto type = wire::read_vi64(cursor);
+    const auto* value = std::get_if<std::uint64_t>(&type);
+    if (!value || *value != kSetupType) return std::nullopt;
+    const auto high = wire::read_bytes(cursor, 2);
+    const auto* length_bytes = std::get_if<std::span<const std::byte>>(&high);
+    if (!length_bytes) return std::nullopt;
+    const std::size_t length =
+        (std::to_integer<std::size_t>((*length_bytes)[0]) << 8u) |
+        std::to_integer<std::size_t>((*length_bytes)[1]);
+    if (cursor.remaining() < length) return std::nullopt;
+    const auto payload = wire::read_bytes(cursor, length);
+    const auto* block = std::get_if<std::span<const std::byte>>(&payload);
+    if (!block) return std::nullopt;
+    if (consumed) *consumed = cursor.offset();
+    return *block;
+}
+
 // Parses SETUP framing and options without applying the duplicate-option
 // validation of the generic decoder, so that a publisher's repeated option is
 // observable instead of hiding its SETUP.
 inline bool parse_setup(std::span<const std::byte> input,
                         d18::KeyValuePairs* options = nullptr,
                         std::size_t* consumed = nullptr) {
-    wire::Cursor cursor(input);
-    const auto type = wire::read_vi64(cursor);
-    const auto* value = std::get_if<std::uint64_t>(&type);
-    if (!value || *value != kSetupType) return false;
-    const auto high = wire::read_bytes(cursor, 2);
-    const auto* length_bytes = std::get_if<std::span<const std::byte>>(&high);
-    if (!length_bytes) return false;
-    const std::size_t length =
-        (std::to_integer<std::size_t>((*length_bytes)[0]) << 8u) |
-        std::to_integer<std::size_t>((*length_bytes)[1]);
-    if (cursor.remaining() < length) return false;
-    const auto decoded = d18::decode_key_value_pairs(cursor, length, {});
+    const auto payload = setup_frame_payload(input, consumed);
+    if (!payload) return false;
+    wire::Cursor cursor(*payload);
+    const auto decoded = d18::decode_key_value_pairs(cursor, payload->size(), {});
     const auto* pairs = std::get_if<d18::KeyValuePairs>(&decoded);
     if (!pairs) return false;
     if (options) *options = *pairs;
-    if (consumed) *consumed = cursor.offset();
     return true;
 }
 inline bool setup_ready(std::span<const std::byte> input) { return parse_setup(input); }
@@ -437,24 +452,30 @@ inline bool delivered_final_object(const SubgroupStream& stream) {
             *stream.objects.back().status == kStatusEndOfTrack);
 }
 
-// Becomes true once `seen` has held for `window`. The first sighting is
-// forgotten whenever `seen` is false, so a definition reused for a new
-// session starts its window afresh.
-inline std::function<bool(const RawProbeTranscript&)> settled_after(
-    std::function<bool(const RawProbeTranscript&)> seen, std::chrono::milliseconds window) {
-    auto first = std::make_shared<std::optional<RawProbeClock::time_point>>();
-    return [seen = std::move(seen), window, first](const RawProbeTranscript& transcript) {
-        if (!seen(transcript)) {
-            first->reset();
-            return false;
-        }
-        if (!*first) *first = RawProbeClock::now();
-        return RawProbeClock::now() - **first >= window;
-    };
+// Section 12.7: Immutable Properties (type 0x0B) carries a Key-Value-Pair list
+// that may not itself contain Immutable Properties, so one decoded level is the
+// whole search space. Nested containers in a peer's payload stay opaque, which
+// keeps the work linear in the payload instead of following the nesting.
+inline constexpr std::uint64_t kPropertyImmutable = 0x0B;
+
+// Calls `visit` for every mutable Property and every Property found directly
+// inside an Immutable Properties container.
+template <typename Visit>
+void for_each_object_property(const d18::KeyValuePairs& properties, Visit&& visit) {
+    for (const auto& property : properties) {
+        visit(property);
+        if (property.type != kPropertyImmutable) continue;
+        const auto* nested = std::get_if<d18::ByteValue>(&property.value);
+        if (!nested) continue;
+        wire::Cursor cursor(nested->bytes);
+        const auto decoded = d18::decode_key_value_pairs(cursor, nested->bytes.size(), {});
+        if (const auto* inner = std::get_if<d18::KeyValuePairs>(&decoded))
+            for (const auto& entry : *inner) visit(entry);
+    }
 }
-inline std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline) {
-    return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
-}
+
+using probe_timing::quiet_window;
+using probe_timing::settled_after;
 
 // A complete first message of type `Message` opening a publisher-initiated
 // request stream. Section 10.1: the publisher is the client and uses even IDs.
