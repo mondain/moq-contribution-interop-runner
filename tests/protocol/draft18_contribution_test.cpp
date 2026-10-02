@@ -346,6 +346,33 @@ TEST(Draft18ContributionEvaluators, ScoresRowsFromRawContexts) {
     all_five[2].complete = all_five[2].raw_probe->complete;
     all_five[2].stimulus_delivered = all_five[2].raw_probe->stimulus_delivered;
     EXPECT_EQ(outcome(all_five, "D18-14-MUST-NOT-001"), OutcomeState::Fail);
+    // The unknown-Property rows need both the surviving and the invalid-value contexts.
+    {
+        const auto status_context = [&](std::string_view scenario, const std::function<void(PeerView&)>& reaction) {
+            const auto& p = probe(probes, scenario, "D18-14-MUST-002");
+            requirements::ScenarioContext context;
+            context.scenario_id = std::string(scenario);
+            context.raw_probe = drive_probe(p.definition, [&](PeerView& v) {
+                v.when("setup", true, [&] { v.data(2, setup_with({})); });
+                v.when("open", v.step > 1, [&] {
+                    v.data(0, encode(d18::TrackStatusMessage{0, d18::TrackNamespace{}, d18::TrackName{text("x")}, {}}));
+                });
+                reaction(v);
+            });
+            context.complete = context.raw_probe->complete;
+            context.stimulus_delivered = context.raw_probe->stimulus_delivered;
+            return context;
+        };
+        const auto survive = status_context("publisher-recovery-track-status-unknown-optional-properties",
+            [&](PeerView& v) { v.when("reply", v.sent(1), [&] { v.data(1, ok()); }); });
+        const auto violation = status_context("publisher-recovery-track-status-unknown-before-invalid-property",
+            [&](PeerView& v) { v.when("close", v.sent(0), [&] {
+                v.push(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 3, {}}); }); });
+        for (const auto* row : {"D18-14-MUST-002", "D18-14-MUST-009", "D18-15-8-MUST-001"}) {
+            EXPECT_EQ(outcome({survive}, row), OutcomeState::NotRun) << row;
+            EXPECT_EQ(outcome({survive, violation}, row), OutcomeState::Pass) << row;
+        }
+    }
     // The SETUP rows also named by a typed scenario accept either kind of context.
     EXPECT_EQ(outcome({context_for("observe-publisher-setup-options", "D18-10-3-MUST-NOT-001",
                                    setup_with({}), none)}, "D18-10-3-MUST-NOT-001"),
