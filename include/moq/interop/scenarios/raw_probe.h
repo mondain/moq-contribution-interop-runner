@@ -9,12 +9,19 @@
 #include <span>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace moq::interop::scenarios {
 
 using RawProbeClock = std::chrono::steady_clock;
-enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi };
+// Credit, UniCredit, DropInbound and ResumeInbound are transport steps rather
+// than streams and carry no bytes. Credit and UniCredit raise the peer's
+// bidirectional or unidirectional stream limit by `application_error` (reused
+// as the count). DropInbound discards everything the peer sends from then on
+// (nothing is acknowledged) and ResumeInbound ends that.
+enum class RawProbeChannel { NewUni, NewBidi, Control, Datagram, PeerBidi, Credit, UniCredit,
+                             DropInbound, ResumeInbound };
 enum class RawProbeOperation { Write, StopSending };
 struct RawProbeGateInput;
 struct RawProbeWrite {
@@ -33,6 +40,9 @@ struct RawProbeWrite {
     // Returns no value while awaiting evidence. The first nonempty result is
     // frozen before opening a stream, and regenerated from its prefix in proof.
     std::function<std::optional<std::vector<std::byte>>(const RawProbeGateInput&)> prepare_bytes{};
+    // The write waits until this long after the previous write (or SETUP, for
+    // the first) was accepted; the proof checks the recorded acceptance times.
+    std::chrono::milliseconds delay_after_previous{0};
 };
 struct RawProbeTranscript;
 struct RawProbeDefinition {
@@ -54,6 +64,22 @@ struct RawProbeDefinition {
     std::function<bool(std::span<const std::byte>)> auto_accept_ready{};
     std::vector<std::byte> auto_accept_reply{};
     std::size_t auto_accept_limit{0};
+    // Answers each parameter-free PUBLISH_NAMESPACE the publisher opens with
+    // REQUEST_OK, as a subscriber must for the publisher to proceed (draft 18
+    // Section 10.15). The answers are recorded in the transcript, are not part
+    // of the stimulus, and cannot be combined with PeerBidi writes.
+    bool acknowledge_publisher_namespace{false};
+    // Initial QUIC credit for peer-initiated bidirectional streams. The
+    // harness adds the WebTransport CONNECT stream where it applies.
+    std::optional<std::uint64_t> initial_peer_bidi_streams{};
+    // Initial credit for peer-initiated unidirectional streams beyond those the
+    // session itself needs (MOQT control stream; WebTransport adds its three
+    // HTTP/3 streams).
+    std::optional<std::uint64_t> initial_peer_uni_streams{};
+    // The harness runs a second listener whose URI a write can name (through
+    // RawProbeGateInput::replacement_uri) and records what connects to it in
+    // RawProbeTranscript::replacement_events. Used for GOAWAY migration.
+    bool offer_replacement_session{false};
 };
 struct RawProbeAutoReply {
     transport::StreamId stream_id{0};
@@ -70,13 +96,25 @@ struct RawProbeAcceptedWrite {
     // STOP acceptance is distinct from successful zero-byte writes.
     bool operation_accepted{false};
     std::optional<std::size_t> prepared_event_count{};
+    // When the controller accepted the write, on the polling clock.
+    std::optional<RawProbeClock::time_point> accepted_at{};
 };
 struct RawProbeGateInput {
     std::span<const RawProbeAcceptedWrite> prior_writes;
     std::span<const transport::TransportEvent> events;
+    // The runner's replacement-session URI (see offer_replacement_session);
+    // empty when the definition offers none.
+    std::string_view replacement_uri{};
+};
+// A REQUEST_OK the controller wrote on a publisher-opened request stream.
+struct RawProbeAcknowledgement {
+    transport::StreamId stream_id{0};
+    // Transport events observed when the answer was fully accepted.
+    std::size_t event_count{0};
 };
 struct RawProbeTranscript {
     std::string scenario_id;
+    std::vector<RawProbeAcknowledgement> acknowledgements;
     RawProbeAcceptedWrite setup;
     std::vector<RawProbeAcceptedWrite> writes;
     std::vector<RawProbeAutoReply> auto_replies;
@@ -92,6 +130,10 @@ struct RawProbeTranscript {
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
+    // Set when the definition offers a replacement session: its URI and the
+    // transport events of whatever connected there.
+    std::optional<std::string> replacement_uri{};
+    std::vector<transport::TransportEvent> replacement_events;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -101,8 +143,11 @@ std::optional<bool> evaluate_raw_probe_close(
 
 class RawProbeController {
 public:
+    // `replacement` is the second listener of a replacement-session definition.
     RawProbeController(transport::SessionTransport& transport,
-                       RawProbeDefinition definition);
+                       RawProbeDefinition definition,
+                       transport::SessionTransport* replacement = nullptr,
+                       std::string replacement_uri = {});
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
 private:
@@ -110,6 +155,9 @@ private:
     void send_auto_replies();
     void fail();
     transport::SessionTransport& transport_;
+    transport::SessionTransport* replacement_;
+    bool replacement_setup_sent_{false};
+    bool session_closed_{false};
     RawProbeDefinition definition_;
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;
@@ -120,6 +168,10 @@ private:
     std::set<transport::StreamId> auto_accept_replied_;
     std::optional<transport::StreamId> peer_request_stream_;
     std::size_t peer_request_bytes_count_{0};
+    std::map<transport::StreamId, std::vector<std::byte>> acknowledgement_candidates_;
+    std::set<transport::StreamId> acknowledgement_pending_;
+    std::set<transport::StreamId> acknowledged_;
+    void acknowledge_publisher_namespaces();
     std::optional<RawProbeClock::time_point> delivered_at_;
     std::optional<RawProbeClock::time_point> started_at_;
     std::size_t next_write_{0};

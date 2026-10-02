@@ -403,10 +403,35 @@ public:
         std::optional<transport::NativeQuicListenerError> error;
     };
 
-    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port) const {
+    // Path of the replacement session's URI, distinct from the primary "/moq".
+    static constexpr std::string_view kReplacementPath = "/moq-next";
+
+    struct Tuning {
+        std::optional<std::uint64_t> peer_bidi_streams;
+        std::optional<std::uint64_t> peer_uni_streams;
+        std::string_view path;
+    };
+    static Tuning tuning_of(const scenarios::RawProbeDefinition& definition) {
+        return {definition.initial_peer_bidi_streams, definition.initial_peer_uni_streams, {}};
+    }
+
+    ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
+                                   Tuning tuning = {}) const {
+        const auto& peer_bidi_streams = tuning.peer_bidi_streams;
+        const auto path = tuning.path;
         transport::NativeQuicListenerConfig quic;
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
+        // A stream-credit scenario starts the peer with only this many
+        // bidirectional streams; WebTransport spends one on its CONNECT.
+        if (peer_bidi_streams)
+            quic.initial_max_streams_bidi = *peer_bidi_streams +
+                (run_config.transport == TransportKind::WebTransport ? 1u : 0u);
+        // The MOQT control stream, plus HTTP/3 control and two QPACK streams
+        // under WebTransport, come out of the unidirectional credit.
+        if (tuning.peer_uni_streams)
+            quic.initial_max_streams_uni = *tuning.peer_uni_streams +
+                (run_config.transport == TransportKind::WebTransport ? 4u : 1u);
         quic.certificate_path = config.certificate_path;
         quic.private_key_path = config.private_key_path;
         const std::string protocol = run_config.draft == DraftVersion::Draft21 ? "moqt-21" : "moqt-18";
@@ -417,6 +442,7 @@ public:
             settings.allowed_origins = config.webtransport_allowed_origins;
             settings.require_origin = config.webtransport_require_origin;
             settings.application_protocol = protocol;
+            if (!path.empty()) settings.path = std::string(path);
             auto created = transport::WebTransportListener::create(std::move(settings));
             const auto endpoint = created.listener ? created.listener->bound_endpoint() : transport::BoundEndpoint{};
             return {std::move(created.listener), endpoint, created.error};
@@ -596,6 +622,7 @@ public:
                 current_id = definitions[index].id;
                 worker->context_ordinal = index + 1;
                 worker->connection_id.clear();
+                // The first context's listener already carries its tuning (start()).
                 if (index != 0) {
                     // Cleanup events belong outside the frozen proof of the preceding context.
                     listener->close(0, {});
@@ -607,7 +634,7 @@ public:
                     } while (scenarios::RawProbeClock::now() < cleanup_deadline);
                     listener.reset();
                     if (worker->stop_requested) break;
-                    auto replacement = create_listener(run_config, worker->endpoint.port);
+                    auto replacement = create_listener(run_config, worker->endpoint.port, tuning_of(definitions[index]));
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
                         throw std::runtime_error("raw context listener could not rebind reserved run port");
                     listener = std::move(replacement.listener);
@@ -732,8 +759,50 @@ public:
                        PublisherDriver* driver, DriverHandle handle) {
         const auto started = scenarios::RawProbeClock::now();
         const auto deadline = started + run_config.timeout;
-        scenarios::RawProbeController controller(listener,std::move(definition));
+        // A replacement-session definition gets a second listener at its own
+        // port and path, observed alongside the first session.
+        std::unique_ptr<transport::SessionTransport> replacement;
+        std::string replacement_uri;
+        std::optional<std::uint16_t> replacement_port;
+        if (definition.offer_replacement_session) {
+            std::uint16_t port = 0;
+            if (config.port_start != 0) {
+                std::lock_guard lock(mutex);
+                for (auto candidate = config.port_start; candidate <= config.port_end; ++candidate) {
+                    if (candidate == worker->endpoint.port || reserved_ports.contains(candidate)) continue;
+                    port = candidate;
+                    break;
+                }
+                if (port == 0) throw std::runtime_error("no free port for the replacement session listener");
+                reserved_ports.insert(port);
+                replacement_port = port;
+            }
+            auto created = create_listener(run_config, port, Tuning{std::nullopt, std::nullopt, kReplacementPath});
+            if (!created.listener) {
+                if (replacement_port) { std::lock_guard lock(mutex); reserved_ports.erase(*replacement_port); }
+                throw std::runtime_error("replacement session listener could not be created");
+            }
+            replacement = std::move(created.listener);
+            const auto host = worker->endpoint.address.find(':') != std::string::npos
+                ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
+            replacement_uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
+                host + ":" + std::to_string(created.endpoint.port) + std::string(kReplacementPath);
+        }
+        struct ReplacementGuard {
+            std::function<void()> release;
+            ~ReplacementGuard() { release(); }
+        } guard{[&] {
+            // Runs after the controller (declared next) is gone.
+            replacement.reset();
+            if (replacement_port) {
+                std::lock_guard lock(mutex);
+                reserved_ports.erase(*replacement_port);
+            }
+        }};
+        scenarios::RawProbeController controller(listener, std::move(definition), replacement.get(),
+                                                 std::move(replacement_uri));
         std::size_t recorded = 0;
+        std::size_t replacement_recorded = 0;
         std::string operational_error;
         try {
             while (!worker->stop_requested) {
@@ -781,6 +850,22 @@ public:
                     }
                     event.connection_id = worker->connection_id;
                     event.detail += " ordinal=" + std::to_string(worker->context_ordinal);
+                    batch.push_back(std::move(event));
+                }
+                for (; replacement_recorded < transcript.replacement_events.size(); ++replacement_recorded) {
+                    storage::EvidenceEvent event;
+                    event.scenario_id = transcript.scenario_id;
+                    event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
+                    event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    const auto& source = transcript.replacement_events[replacement_recorded];
+                    event.kind = "raw_probe_replacement_event";
+                    event.detail = "replacement session event variant=" + std::to_string(source.index());
+                    if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
+                        event.stream_id = std::to_string(data->stream_id);
+                        event.detail += " fin=" + std::string(data->fin ? "true" : "false") + " bytes=" + hex_bytes(data->data);
+                    }
+                    event.detail += " replacement_event_index=" + std::to_string(replacement_recorded) +
+                        " ordinal=" + std::to_string(worker->context_ordinal);
                     batch.push_back(std::move(event));
                 }
                 if (!batch.empty()) store->append_events(worker->id,batch);
@@ -1241,6 +1326,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             }
         }
     }
+    // A replacement session needs a second port beside the run's own.
+    if (impl_->config.port_start != 0 && impl_->config.port_end == impl_->config.port_start &&
+        std::any_of(definitions.begin(), definitions.end(),
+                    [](const auto& definition) { return definition.offer_replacement_session; }))
+        return {RunStartStatus::PortExhausted, {}, {}};
     std::lock_guard lock(impl_->mutex);
     impl_->reap_finished();
     if (impl_->reserved_ports.size() >= impl_->config.maximum_active_runs) {
@@ -1258,7 +1348,8 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         const auto port = ephemeral ? std::uint16_t{0} :
             static_cast<std::uint16_t>(impl_->config.port_start + attempt);
         if (port != 0 && impl_->reserved_ports.contains(port)) continue;
-        auto created = impl_->create_listener(config, port);
+        auto created = impl_->create_listener(config, port,
+            definitions.empty() ? Impl::Tuning{} : Impl::tuning_of(definitions.front()));
         if (created.listener) {
             if (impl_->reserved_ports.contains(created.endpoint.port)) continue;
             endpoint = created.endpoint;

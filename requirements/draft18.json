@@ -3707,14 +3707,10 @@
       "actor": "publisher",
       "summary": "Drop an Object datagram when its first-payload-byte age exceeds the nonzero Object Delivery Timeout.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "datagram-object-expires-while-waiting-to-send"
-      ],
-      "evaluators": [
-        "expired-object-datagram-not-sent"
-      ],
-      "rationale": "The application controls first-byte provision and an induced sending delay crosses the configured timeout. A transport-side outgoing trace can check that the expired datagram is never sent, avoiding confusion with receiver-side packet loss."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The age that triggers the drop runs from the instant the original publisher application provided the first payload byte (draft lines 2485-2488 and 2505-2506), an event internal to the publisher. An Object datagram carries no production time, and a datagram the publisher dropped for age cannot be told apart at the protocol boundary from one lost or delayed on the path or never produced; a cooperating publisher cannot make that clock visible on the wire either. Unlike the subgroup rule (lines 2494-2496) the datagram rule has no reset or other wire action to observe."
     },
     {
       "id": "D18-8-SHOULD-003",
@@ -5360,14 +5356,10 @@
       "actor": "endpoint",
       "summary": "Reject a structurally well-formed but otherwise invalid AUTHORIZATION TOKEN parameter with MALFORMED_AUTH_TOKEN.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "receive-well-formed-token-with-invalid-known-type-value"
-      ],
-      "evaluators": [
-        "request-error-malformed-auth-token"
-      ],
-      "rationale": "Use an agreed token type with an invalid value while keeping the outer Token encoding valid. The request-level MALFORMED_AUTH_TOKEN result is distinct from KEY_VALUE_FORMATTING_ERROR and from a valid token lacking authorization."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Whether a structurally well-formed token is otherwise invalid (draft lines 3168-3169) depends on the semantics of its Token Type, and draft 18 defines no token type: Table 12 (lines 6580-6588) lists only reserved type 0 and the greasing codes, and lines 3153-3155 leave type 0 to out-of-band negotiation. The invalidity precondition is therefore not a protocol-level fact the runner can establish, even with a cooperating publisher, so a REQUEST_ERROR code or an acceptance cannot be attributed to a token being invalid."
     },
     {
       "id": "D18-10-2-2-MUST-009",
@@ -5422,14 +5414,10 @@
       "actor": "endpoint",
       "summary": "Retain a registered Alias after detecting token expiration until the sender deletes it.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "register-token-expire-then-use-alias-before-delete"
-      ],
-      "evaluators": [
-        "expired-alias-rejected-as-expired-not-unknown"
-      ],
-      "rationale": "With a controllable token lifetime, a later USE_ALIAS must produce EXPIRED_AUTH_TOKEN instead of forgetting the alias. Expiration leaves its accounted cache size unchanged; the publisher's stored bytes need not be inspected."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Token expiration (draft lines 3198-3202) is defined by the Token Type's own payload and clock, and draft 18 defines no token type (Table 12, lines 6580-6588; type 0 is negotiated out of band, lines 3153-3155). The runner can neither mint a token that expires at a known time nor learn when the receiver detects expiry, and the retained alias is internal state; the only wire trace, EXPIRED_AUTH_TOKEN on a later USE_ALIAS, cannot be tied to the retained alias without the type's expiry semantics, even with a cooperating publisher."
     },
     {
       "id": "D18-10-2-2-MAY-003",

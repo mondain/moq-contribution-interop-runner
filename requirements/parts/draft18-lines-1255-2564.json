@@ -2259,14 +2259,10 @@
       "actor": "publisher",
       "summary": "Drop an Object datagram when its first-payload-byte age exceeds the nonzero Object Delivery Timeout.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "datagram-object-expires-while-waiting-to-send"
-      ],
-      "evaluators": [
-        "expired-object-datagram-not-sent"
-      ],
-      "rationale": "The application controls first-byte provision and an induced sending delay crosses the configured timeout. A transport-side outgoing trace can check that the expired datagram is never sent, avoiding confusion with receiver-side packet loss."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The age that triggers the drop runs from the instant the original publisher application provided the first payload byte (draft lines 2485-2488 and 2505-2506), an event internal to the publisher. An Object datagram carries no production time, and a datagram the publisher dropped for age cannot be told apart at the protocol boundary from one lost or delayed on the path or never produced; a cooperating publisher cannot make that clock visible on the wire either. Unlike the subgroup rule (lines 2494-2496) the datagram rule has no reset or other wire action to observe."
     },
     {
       "id": "D18-8-SHOULD-003",

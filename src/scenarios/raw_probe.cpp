@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/raw_probe.h"
+#include "moq/interop/wire/draft18/messages.h"
 #include <algorithm>
 #include <stdexcept>
 #include <set>
@@ -8,6 +9,15 @@ namespace moq::interop::scenarios {
 namespace {
 constexpr std::size_t kMaximumEvents = 4096;
 constexpr std::size_t kMaximumSetupBytes = 65546;
+bool stream_less(RawProbeChannel channel) {
+    return channel == RawProbeChannel::Datagram || channel == RawProbeChannel::Credit ||
+           channel == RawProbeChannel::UniCredit || channel == RawProbeChannel::DropInbound ||
+           channel == RawProbeChannel::ResumeInbound;
+}
+bool transport_step(RawProbeChannel channel) {
+    return channel == RawProbeChannel::Credit || channel == RawProbeChannel::UniCredit ||
+           channel == RawProbeChannel::DropInbound || channel == RawProbeChannel::ResumeInbound;
+}
 bool staged(const RawProbeDefinition& definition) {
     return std::any_of(definition.writes.begin(),definition.writes.end(),[](const auto& write) {
         return write.reuse_write_stream.has_value() || static_cast<bool>(write.peer_response_ready) ||
@@ -23,6 +33,15 @@ bool valid_stages(const RawProbeDefinition& definition) {
             return false;
         if (write.operation != RawProbeOperation::Write && write.operation != RawProbeOperation::StopSending)
             return false;
+        if (transport_step(write.channel)) {
+            const bool counted = write.channel == RawProbeChannel::Credit ||
+                                 write.channel == RawProbeChannel::UniCredit;
+            if (!write.bytes.empty() || write.fin || write.prepare_bytes || write.reuse_write_stream ||
+                write.operation != RawProbeOperation::Write ||
+                (counted ? (write.application_error == 0 || write.application_error > (std::uint64_t{1} << 40))
+                         : write.application_error != 0)) return false;
+        }
+        if (write.delay_after_previous.count() < 0 || write.delay_after_previous.count() > 600000) return false;
         if (write.operation == RawProbeOperation::StopSending &&
             (!write.reuse_write_stream || !write.bytes.empty() || write.fin ||
              write.application_error >= (std::uint64_t{1} << 62))) return false;
@@ -60,7 +79,8 @@ bool stream_continues(const RawProbeTranscript& transcript, transport::StreamId 
 enum class GateState { Pending, Ready, Cancelled, LimitExceeded };
 GateState evidence_gate(std::span<const RawProbeAcceptedWrite> prior_writes,
                         std::span<const transport::TransportEvent> events,
-                        const std::function<bool(const RawProbeGateInput&)>& ready) {
+                        const std::function<bool(const RawProbeGateInput&)>& ready,
+                        std::string_view replacement_uri = {}) {
     if (events.size() > kMaximumEvents) return GateState::LimitExceeded;
     std::size_t bytes = 0;
     const auto fits = [&](std::size_t size) {
@@ -82,7 +102,7 @@ GateState evidence_gate(std::span<const RawProbeAcceptedWrite> prior_writes,
             if (!fits(close->reason.size())) return GateState::LimitExceeded;
         }
     }
-    return ready({prior_writes,events}) ? GateState::Ready : GateState::Pending;
+    return ready({prior_writes,events,replacement_uri}) ? GateState::Ready : GateState::Pending;
 }
 GateState response_gate(const RawProbeTranscript& transcript, transport::StreamId id,
                         std::size_t begin, std::size_t end,
@@ -122,7 +142,8 @@ bool setup_before(const RawProbeTranscript& transcript, const RawProbeDefinition
     return connection && setup;
 }
 bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expected) {
-    return (expected.channel == RawProbeChannel::Datagram ? !observed.stream_id : observed.stream_id.has_value()) &&
+    return (stream_less(expected.channel) ? !observed.stream_id : observed.stream_id.has_value()) &&
+           observed.write.delay_after_previous == expected.delay_after_previous &&
            observed.write.channel == expected.channel &&
            observed.write.bytes == expected.bytes && observed.write.fin == expected.fin &&
            observed.write.reuse_write_stream == expected.reuse_write_stream &&
@@ -137,14 +158,24 @@ bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expect
 }
 }
 RawProbeController::RawProbeController(transport::SessionTransport& transport,
-                                     RawProbeDefinition definition)
-    : transport_(transport), definition_(std::move(definition)) {
+                                     RawProbeDefinition definition,
+                                     transport::SessionTransport* replacement,
+                                     std::string replacement_uri)
+    : transport_(transport), replacement_(replacement), definition_(std::move(definition)) {
+    if (definition_.offer_replacement_session != (replacement != nullptr && !replacement_uri.empty()) ||
+        (replacement == nullptr) != replacement_uri.empty())
+        throw std::invalid_argument("invalid raw probe replacement session");
+    if (!replacement_uri.empty()) transcript_.replacement_uri = std::move(replacement_uri);
     if (definition_.id.empty() || definition_.setup_bytes.empty() ||
         definition_.deadline.count() <= 0 || !valid_stages(definition_) ||
         (definition_.start_after_peer_setup && !definition_.peer_setup_ready) ||
         (std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
             return write.channel == RawProbeChannel::PeerBidi;
-        }) && !definition_.peer_request_ready))
+        }) && !definition_.peer_request_ready) ||
+        (definition_.acknowledge_publisher_namespace &&
+         std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
+             return write.channel == RawProbeChannel::PeerBidi;
+         })))
         throw std::invalid_argument("invalid raw probe definition");
     transcript_.scenario_id = definition_.id;
     transcript_.setup.write = {RawProbeChannel::NewUni, definition_.setup_bytes, false};
@@ -156,6 +187,18 @@ void RawProbeController::fail() {
     transcript_.complete = false;
 }
 bool RawProbeController::flush(RawProbeAcceptedWrite& pending) {
+    if (transport_step(pending.write.channel)) {
+        if (pending.stream_id || !pending.write.bytes.empty() || pending.write.fin) { fail(); return false; }
+        const auto channel = pending.write.channel;
+        const auto result = channel == RawProbeChannel::Credit
+            ? transport_.grant_peer_streams(true, pending.write.application_error)
+            : channel == RawProbeChannel::UniCredit
+                ? transport_.grant_peer_streams(false, pending.write.application_error)
+                : transport_.set_inbound_drop(channel == RawProbeChannel::DropInbound);
+        if (result.status == transport::TransportStatus::WouldBlock) return false;
+        if (result.status != transport::TransportStatus::Success) { fail(); return false; }
+        return true;
+    }
     if (pending.write.channel == RawProbeChannel::Datagram) {
         if (pending.stream_id || pending.write.fin || pending.write.bytes.empty() ||
             pending.write.bytes.size() > transcript_.max_datagram_payload) { fail(); return false; }
@@ -237,14 +280,37 @@ void RawProbeController::send_auto_replies() {
         transcript_.auto_replies.push_back({id, transcript_.events.size()});
     }
 }
+void RawProbeController::acknowledge_publisher_namespaces() {
+    static const std::vector<std::byte> request_ok = [] {
+        wire::ByteWriter output(16);
+        wire::draft18::encode_message(wire::draft18::RequestOkMessage{{}, {}}, output);
+        return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+    }();
+    for (auto it = acknowledgement_pending_.begin(); it != acknowledgement_pending_.end();) {
+        const auto id = *it;
+        if (cancelled_peer_requests_.contains(id)) { it = acknowledgement_pending_.erase(it); continue; }
+        const auto result = transport_.write(id, request_ok, false);
+        if (result.status == transport::TransportStatus::WouldBlock && result.accepted == 0) { ++it; continue; }
+        if (result.status != transport::TransportStatus::Success || result.accepted != request_ok.size()) {
+            // A closing or reset stream cannot be answered; nothing is scored from it.
+            it = acknowledgement_pending_.erase(it);
+            continue;
+        }
+        acknowledged_.insert(id);
+        transcript_.acknowledgements.push_back({id, transcript_.events.size()});
+        it = acknowledgement_pending_.erase(it);
+    }
+}
 const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now) {
     if (transcript_.complete || transcript_.harness_failed || transcript_.timed_out) return transcript_;
     if (!started_at_) started_at_ = now;
     const auto send = [&] {
         if (!transcript_.transport_established || transcript_.harness_failed ||
             !flush(transcript_.setup)) return;
-        if (!transcript_.setup.delivery_event_count)
+        if (!transcript_.setup.delivery_event_count) {
             transcript_.setup.delivery_event_count = transcript_.events.size();
+            transcript_.setup.accepted_at = now;
+        }
         if (definition_.start_after_peer_setup && !transcript_.peer_setup_received) return;
         if (definition_.peer_request_ready && !peer_request_stream_) {
             for (const auto& [id, candidate] : peer_request_candidates_) {
@@ -259,6 +325,10 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         if (transcript_.harness_failed) return;
         while (next_write_ < transcript_.writes.size()) {
             auto& pending = transcript_.writes[next_write_];
+            if (pending.write.delay_after_previous.count() > 0) {
+                const auto& before = next_write_ == 0 ? transcript_.setup : transcript_.writes[next_write_ - 1];
+                if (!before.accepted_at || now - *before.accepted_at < pending.write.delay_after_previous) return;
+            }
             if (pending.write.reuse_write_stream) {
                 const auto& previous = transcript_.writes[*pending.write.reuse_write_stream];
                 if (!previous.delivery_event_count || !previous.stream_id) return;
@@ -273,7 +343,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                        peer_request_stream_ && !stream_continues(transcript_,*peer_request_stream_,transcript_.events.size())) return;
             if (pending.write.evidence_ready && !pending.prepared_event_count) {
                 const auto gate = evidence_gate(std::span<const RawProbeAcceptedWrite>(transcript_.writes).first(next_write_),
-                    transcript_.events,pending.write.evidence_ready);
+                    transcript_.events,pending.write.evidence_ready,transcript_.replacement_uri.value_or(""));
                 if (gate == GateState::LimitExceeded) fail();
                 if (gate != GateState::Ready) return;
             }
@@ -284,7 +354,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (evidence_gate(prior,transcript_.events,[](const auto&){return true;}) != GateState::Ready) {
                     fail(); return;
                 }
-                auto bytes = pending.write.prepare_bytes({prior,transcript_.events});
+                auto bytes = pending.write.prepare_bytes({prior,transcript_.events,transcript_.replacement_uri.value_or("")});
                 if (!bytes) return;
                 if (bytes->empty() || bytes->size() > kMaximumSetupBytes) { fail(); return; }
                 pending.write.bytes = std::move(*bytes);
@@ -292,6 +362,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             }
             if (!flush(pending)) return;
             pending.delivery_event_count = transcript_.events.size();
+            pending.accepted_at = now;
             ++next_write_;
         }
         if (!transcript_.stimulus_delivered) {
@@ -300,7 +371,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             delivered_at_ = now;
         }
     };
-    for (auto& event : transport_.poll(256)) {
+    for (auto& event : session_closed_ ? std::vector<transport::TransportEvent>{} : transport_.poll(256)) {
         if (transcript_.events.size() >= kMaximumEvents) { fail(); break; }
         transcript_.events.push_back(std::move(event));
         const auto& observed = transcript_.events.back();
@@ -328,6 +399,23 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (data->data.size() > kMaximumSetupBytes - candidate.size()) { fail(); break; }
                 candidate.insert(candidate.end(), data->data.begin(), data->data.end());
             }
+            if (definition_.acknowledge_publisher_namespace && (data->stream_id & 3u) == 0u &&
+                !acknowledged_.contains(data->stream_id) &&
+                !acknowledgement_pending_.contains(data->stream_id) &&
+                (acknowledgement_candidates_.contains(data->stream_id) || acknowledgement_candidates_.size() < 64)) {
+                auto& candidate = acknowledgement_candidates_[data->stream_id];
+                if (candidate.size() + data->data.size() <= kMaximumSetupBytes) {
+                    candidate.insert(candidate.end(), data->data.begin(), data->data.end());
+                    wire::Cursor cursor(candidate);
+                    const auto decoded = wire::draft18::decode_message(wire::draft18::StreamRole::Request, cursor, {});
+                    const auto* message = std::get_if<wire::draft18::Message>(&decoded);
+                    const auto* announce = message ? std::get_if<wire::draft18::PublishNamespaceMessage>(message) : nullptr;
+                    if (announce && announce->parameters.empty() && !announce->track_namespace.fields.empty() &&
+                        !(announce->track_namespace.fields.front().size() == 1 &&
+                          announce->track_namespace.fields.front().front() == std::byte{'.'}))
+                        acknowledgement_pending_.insert(data->stream_id);
+                }
+            }
             const bool opener_accepted = std::any_of(transcript_.writes.begin(),transcript_.writes.end(),[](const auto& write) {
                 return write.write.channel == RawProbeChannel::PeerBidi && !write.write.reuse_write_stream && write.delivery_event_count;
             });
@@ -347,6 +435,13 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         } else if (std::holds_alternative<transport::PeerCloseEvent>(observed)) {
             transcript_.complete = transcript_.stimulus_delivered;
             if (!transcript_.complete) transcript_.timed_out = true;
+            // A publisher that migrates may close the old session first; the
+            // replacement session is still awaited until it settles or times out.
+            if (replacement_ && transcript_.complete && !transcript_.timed_out) {
+                transcript_.complete = false;
+                session_closed_ = true;
+                break;
+            }
             return transcript_;
         } else if (std::holds_alternative<transport::LocalCloseEvent>(observed) ||
                    std::holds_alternative<transport::IdleTimeoutEvent>(observed)) {
@@ -357,8 +452,24 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             fail(); break;
         }
     }
+    if (replacement_ && !transcript_.harness_failed) {
+        for (auto& event : replacement_->poll(256)) {
+            if (transcript_.replacement_events.size() >= kMaximumEvents) { fail(); break; }
+            transcript_.replacement_events.push_back(std::move(event));
+            // The replacement session gets the same SETUP as the first one.
+            if (!replacement_setup_sent_ &&
+                std::holds_alternative<transport::ConnectionEstablishedEvent>(transcript_.replacement_events.back())) {
+                replacement_setup_sent_ = true;
+                const auto opened = replacement_->open_uni();
+                if (opened.status == transport::TransportStatus::Success)
+                    replacement_->write(opened.stream_id, definition_.setup_bytes, false);
+            }
+        }
+    }
     // All events in this batch were already observed before any new writes.
-    if (!transcript_.harness_failed) send();
+    if (!transcript_.harness_failed && !session_closed_ && transcript_.transport_established)
+        acknowledge_publisher_namespaces();
+    if (!transcript_.harness_failed && !session_closed_) send();
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {
         transcript_.complete = true;
@@ -406,6 +517,7 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition) {
     if (!valid_stages(definition) || transcript.events.size() > kMaximumEvents ||
         transcript.scenario_id != definition.id || !transcript.complete ||
+        transcript.replacement_uri.has_value() != definition.offer_replacement_session ||
         transcript.harness_failed || transcript.timed_out || !transcript.stimulus_delivered ||
         !transcript.delivery_event_count || *transcript.delivery_event_count > transcript.events.size() ||
         transcript.setup.prepared_event_count ||
@@ -456,6 +568,11 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
         } else if (write.prepared_event_count) return false;
         if (!expected.prepare_bytes && !accepted(write, expected)) return false;
         if (marked && !write.delivery_event_count) return false;
+        if (definition.writes[i].delay_after_previous.count() > 0) {
+            const auto& before = i == 0 ? transcript.setup : transcript.writes[i - 1];
+            if (!before.accepted_at || !write.accepted_at ||
+                *write.accepted_at - *before.accepted_at < definition.writes[i].delay_after_previous) return false;
+        }
         if (marker < previous_marker || marker > *transcript.delivery_event_count ||
             !setup_before(transcript,definition,marker)) return false;
         previous_marker = marker;
@@ -466,6 +583,8 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
             if (definition.writes[i].peer_response_ready &&
                 response_gate(transcript,*write.stream_id,*previous.delivery_event_count,gate_marker,
                     definition.writes[i].peer_response_ready) != GateState::Ready) return false;
+        } else if (transport_step(write.write.channel)) {
+            if (write.stream_id || write.write.fin || !write.write.bytes.empty()) return false;
         } else if (write.write.channel == RawProbeChannel::Datagram) {
             if (write.write.fin || write.write.bytes.empty() ||
                 write.write.bytes.size() > datagram_capacity ||
@@ -509,11 +628,11 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
         if (definition.writes[i].evidence_ready &&
             evidence_gate(std::span<const RawProbeAcceptedWrite>(transcript.writes).first(i),
                 std::span<const transport::TransportEvent>(transcript.events).first(gate_marker),
-                definition.writes[i].evidence_ready) != GateState::Ready) return false;
+                definition.writes[i].evidence_ready, transcript.replacement_uri.value_or("")) != GateState::Ready) return false;
         if (expected.prepare_bytes) {
             const auto prior = std::span<const RawProbeAcceptedWrite>(transcript.writes).first(i);
             const auto events = std::span<const transport::TransportEvent>(transcript.events).first(gate_marker);
-            const auto bytes = expected.prepare_bytes({prior,events});
+            const auto bytes = expected.prepare_bytes({prior,events,transcript.replacement_uri.value_or("")});
             if (!bytes || bytes->empty() || bytes->size() > kMaximumSetupBytes) return false;
             expected.bytes = *bytes;
             if (!accepted(write,expected)) return false;

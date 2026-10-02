@@ -12,6 +12,11 @@
 
 namespace moq::interop::transport::detail {
 
+// Queues a MAX_STREAMS frame raising the peer's stream credit by `additional`
+// and records the new limit so the peer's use of it is not a protocol error.
+OperationResult grant_peer_streams(picoquic_cnx_t* connection, bool bidirectional,
+                                   std::uint64_t additional);
+
 class PicoquicConnectionState {
 public:
     explicit PicoquicConnectionState(const NativeQuicListenerConfig& config)

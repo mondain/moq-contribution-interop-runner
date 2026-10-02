@@ -31,6 +31,28 @@ std::size_t payload_size(const TransportEvent& event) {
 
 }  // namespace
 
+OperationResult grant_peer_streams(picoquic_cnx_t* connection, bool bidirectional,
+                                   std::uint64_t additional) {
+    if (connection == nullptr || additional == 0 || additional > (std::uint64_t{1} << 40))
+        return {TransportStatus::InvalidState, 0, std::nullopt};
+    auto& limit = bidirectional ? connection->max_streams_bidir_local
+                                : connection->max_streams_unidir_local;
+    const auto raised = limit + additional;
+    if (raised > (std::uint64_t{1} << 60)) return {TransportStatus::InvalidState, 0, std::nullopt};
+    std::uint8_t frame[16];
+    std::uint8_t* end = picoquic_frames_uint8_encode(
+        frame, frame + sizeof(frame),
+        bidirectional ? picoquic_frame_type_max_streams_bidir
+                      : picoquic_frame_type_max_streams_unidir);
+    if (end != nullptr) end = picoquic_frames_varint_encode(end, frame + sizeof(frame), raised);
+    if (end == nullptr ||
+        picoquic_queue_misc_frame(connection, frame, static_cast<std::size_t>(end - frame), 0,
+                                  picoquic_packet_context_application) != 0)
+        return {TransportStatus::InternalError, 0, std::nullopt};
+    limit = raised;
+    return {TransportStatus::Success, 0, std::nullopt};
+}
+
 int PicoquicConnectionState::callback(picoquic_cnx_t* connection,
                                       std::uint64_t stream_id,
                                       std::uint8_t* bytes, std::size_t length,

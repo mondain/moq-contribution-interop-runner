@@ -142,10 +142,13 @@ TEST_F(Draft18CatalogPart02Test, DeliveryTimeoutsSeparateInternalTrackingFromWir
     ASSERT_EQ(expired_subgroup.size(), 1u);
     EXPECT_EQ(expired_subgroup.front()->evaluators,
               std::vector<std::string>{"subgroup-reset-delivery-timeout"});
+    // The datagram drop has no wire action: the age runs from an internal
+    // application event and a dropped datagram looks like path loss.
     const auto expired_datagram = at(2505);
     ASSERT_EQ(expired_datagram.size(), 1u);
-    EXPECT_EQ(expired_datagram.front()->evaluators,
-              std::vector<std::string>{"expired-object-datagram-not-sent"});
+    EXPECT_EQ(expired_datagram.front()->testability, Testability::NotTestable);
+    EXPECT_TRUE(expired_datagram.front()->scenarios.empty());
+    EXPECT_TRUE(expired_datagram.front()->evaluators.empty());
     const auto uncommitted_subgroup = at(2528);
     ASSERT_EQ(uncommitted_subgroup.size(), 1u);
     EXPECT_EQ(uncommitted_subgroup.front()->evaluators,

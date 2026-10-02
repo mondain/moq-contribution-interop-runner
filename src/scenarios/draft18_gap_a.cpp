@@ -12,7 +12,7 @@ using namespace gap_a;
 const std::vector<Entry>& entries() {
     static const std::vector<Entry> all = [] {
         std::vector<Entry> result;
-        for (auto builder : {setup_entries, discovery_entries, object_entries}) {
+        for (auto builder : {setup_entries, discovery_entries, object_entries, gap_b_entries}) {
             auto part = builder();
             result.insert(result.end(), std::make_move_iterator(part.begin()),
                           std::make_move_iterator(part.end()));
@@ -26,9 +26,12 @@ RawProbeDefinition build(const Entry& entry, const Fixture& fixture,
                          std::chrono::milliseconds deadline) {
     auto definition = entry.build(fixture, deadline);
     const auto observe = entry.observe;
-    definition.response_ready = [observe, fixture](const RawProbeTranscript& transcript) {
-        return observe(transcript, fixture).ready;
-    };
+    // An entry whose evidence needs a quiet period supplies its own readiness.
+    if (!definition.response_ready) {
+        definition.response_ready = [observe, fixture](const RawProbeTranscript& transcript) {
+            return observe(transcript, fixture).ready;
+        };
+    }
     return definition;
 }
 }  // namespace

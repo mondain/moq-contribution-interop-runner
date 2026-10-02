@@ -81,6 +81,15 @@ public:
     transport::OperationResult send_datagram(std::span<const std::byte> bytes) override {
         return {transport::TransportStatus::Success, bytes.size(), {}};
     }
+    transport::OperationResult grant_peer_streams(bool bidirectional, std::uint64_t additional) override {
+        (bidirectional ? granted_bidi_ : granted_uni_) += additional;
+        return {transport::TransportStatus::Success, 0, {}};
+    }
+    transport::OperationResult set_inbound_drop(bool enabled) override {
+        inbound_dropped_ = enabled;
+        ++inbound_drop_changes_;
+        return {transport::TransportStatus::Success, 0, {}};
+    }
     transport::OperationResult close(std::uint64_t, std::span<const std::byte>) override {
         return {transport::TransportStatus::Success, 0, {}};
     }
@@ -120,11 +129,19 @@ public:
     bool answered(const std::string& key) const { return answered_.contains(key); }
     void mark(const std::string& key) { answered_.insert(key); }
 
+    bool inbound_dropped() const { return inbound_dropped_; }
+    int inbound_drop_changes() const { return inbound_drop_changes_; }
+    std::uint64_t granted_bidi() const { return granted_bidi_; }
+    std::uint64_t granted_uni() const { return granted_uni_; }
     std::size_t datagram_payload{1200};
 
 private:
     Bytes peer_setup_;
     Reaction reaction_;
+    bool inbound_dropped_{false};
+    int inbound_drop_changes_{0};
+    std::uint64_t granted_bidi_{0};
+    std::uint64_t granted_uni_{0};
     bool started_{false};
     std::uint64_t next_bidi_{1};
     std::uint64_t next_uni_{3};
@@ -135,8 +152,11 @@ private:
 
 // Runs a probe to completion or its deadline on a deterministic clock.
 inline scenarios::RawProbeTranscript run_probe(ScriptedPublisher& publisher,
-                                              scenarios::RawProbeDefinition definition) {
-    scenarios::RawProbeController controller(publisher, std::move(definition));
+                                              scenarios::RawProbeDefinition definition,
+                                              ScriptedPublisher* replacement = nullptr,
+                                              std::string replacement_uri = {}) {
+    scenarios::RawProbeController controller(publisher, std::move(definition), replacement,
+                                             std::move(replacement_uri));
     auto now = scenarios::RawProbeClock::now();
     for (int step = 0; step < 4000; ++step) {
         const auto& transcript = controller.poll(now);

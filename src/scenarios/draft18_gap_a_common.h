@@ -189,6 +189,8 @@ struct Entry {
 std::vector<Entry> setup_entries();
 std::vector<Entry> discovery_entries();
 std::vector<Entry> object_entries();
+// Slice B (draft18_gap_b.cpp).
+std::vector<Entry> gap_b_entries();
 
 RawProbeWrite make_write(RawProbeChannel channel, Bytes bytes, bool fin = false);
 RawProbeDefinition make_definition(std::string id, Bytes setup,

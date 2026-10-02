@@ -62,6 +62,7 @@ public:
     OperationResult stop_sending(StreamId stream_id,
                                  std::uint64_t application_error) override;
     OperationResult send_datagram(std::span<const std::byte> data) override;
+    OperationResult grant_peer_streams(bool bidirectional, std::uint64_t additional) override;
     OperationResult close(std::uint64_t application_error,
                           std::span<const std::byte> reason) override;
     std::vector<TransportEvent> poll(std::size_t max_events) override;
