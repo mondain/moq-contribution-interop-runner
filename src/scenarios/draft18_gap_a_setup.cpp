@@ -392,6 +392,10 @@ std::vector<Entry> setup_entries() {
     entries.push_back({"D18-10-3-MUST-001", "receive-setup-with-unknown-option",
         "setup-continues-with-unknown-options-ignored", true, false, FirstWrite::Subscribe,
         unknown_option_definition, unknown_option_observe});
+    // The catalog names the same scenario for D18-10-3-MUST-002.
+    entries.push_back({"D18-10-3-MUST-002", "receive-setup-with-unknown-option",
+        "setup-continues-with-unknown-options-ignored", true, false, FirstWrite::Subscribe,
+        unknown_option_definition, unknown_option_observe});
     entries.push_back({"D18-3-3-MUST-NOT-002", "complete-publisher-requests-while-session-remains-open",
         "control-stream-not-closed-during-session", true, false, FirstWrite::TrackStatus,
         control_open_definition, control_open_observe});

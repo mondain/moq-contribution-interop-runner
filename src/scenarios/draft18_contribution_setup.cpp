@@ -168,9 +168,6 @@ std::vector<Draft18ContributionProbe> setup_probes(std::chrono::milliseconds dea
         observe_setup("observe-webtransport-publisher-setup", deadline), setup_observation(false)));
 
     const char* continues = "setup-continues-with-unknown-options-ignored";
-    result.push_back(make_probe("D18-10-3-MUST-002", continues,
-        setup_then_request("receive-setup-with-unknown-option", unknown_options(false, false),
-                           discovery_request(), deadline), setup_continues));
     result.push_back(make_probe("D18-10-3-MUST-003", continues,
         setup_then_request("receive-setup-with-duplicate-unknown-options", unknown_options(true, false),
                            discovery_request(), deadline), setup_continues));

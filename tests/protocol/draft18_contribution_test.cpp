@@ -17,7 +17,7 @@ using namespace test;
 TEST(Draft18ContributionRegistry, NamesEveryScenarioOfTheFirstBatch) {
     const std::set<std::string> expected{
         "observe-publisher-setup-options", "observe-webtransport-publisher-setup",
-        "receive-setup-with-unknown-option", "receive-setup-with-duplicate-unknown-options",
+        "receive-setup-with-duplicate-unknown-options",
         "setup-unknown-grease-options-and-duplicates",
         "receive-setup-token-register-exceeding-cache-limit",
         "receive-oversize-setup-register-then-use-its-alias"};
@@ -82,7 +82,6 @@ TEST(Draft18ContributionSetup, UnknownSetupOptionsAreSentThenASessionSurvivalReq
     const auto probes = draft18_contribution_probes();
     struct Row { const char* scenario; const char* requirement; };
     const std::vector<Row> rows{
-        {"receive-setup-with-unknown-option", "D18-10-3-MUST-002"},
         {"receive-setup-with-duplicate-unknown-options", "D18-10-3-MUST-003"},
         {"setup-unknown-grease-options-and-duplicates", "D18-14-MUST-001"},
         {"setup-unknown-grease-options-and-duplicates", "D18-14-MUST-008"},
@@ -102,8 +101,7 @@ TEST(Draft18ContributionSetup, UnknownSetupOptionsAreSentThenASessionSurvivalReq
         ASSERT_FALSE(options.empty());
         for (const auto& option : options) EXPECT_TRUE(option.type == 0x9d || option.type == 0x11c);
         EXPECT_EQ(options.front().type, 0x9du);
-        if (std::string_view(row.scenario) != "receive-setup-with-unknown-option")
-            EXPECT_EQ(options[0].type, options[1].type);  // an unknown duplicate
+        EXPECT_EQ(options[0].type, options[1].type);  // an unknown duplicate
         if (std::string_view(row.scenario) == "setup-unknown-grease-options-and-duplicates")
             EXPECT_EQ(options.back().type, 0x11cu);  // even, integer valued
         // One valid discovery request follows the peer's SETUP.
@@ -282,16 +280,16 @@ TEST(Draft18ContributionEvaluators, ScoresRowsFromRawContexts) {
     };
     const auto answer = [](PeerView& v) { v.when("ok", v.sent(1), [&] { v.data(1, ok()); }); };
     const auto none = [](PeerView&) {};
-    EXPECT_EQ(outcome({context_for("receive-setup-with-unknown-option", "D18-10-3-MUST-002",
-                                   setup_with({}), answer)}, "D18-10-3-MUST-002"),
+    EXPECT_EQ(outcome({context_for("receive-setup-with-duplicate-unknown-options", "D18-10-3-MUST-003",
+                                   setup_with({}), answer)}, "D18-10-3-MUST-003"),
               OutcomeState::Pass);
-    EXPECT_EQ(outcome({context_for("receive-setup-with-unknown-option", "D18-10-3-MUST-002",
+    EXPECT_EQ(outcome({context_for("receive-setup-with-duplicate-unknown-options", "D18-10-3-MUST-003",
                                    setup_with({}), [](PeerView& v) {
                                        v.when("close", v.sent(1), [&] {
                                            v.push(transport::PeerCloseEvent{
                                                transport::CloseErrorSpace::Application, 3, {}});
                                        });
-                                   })}, "D18-10-3-MUST-002"),
+                                   })}, "D18-10-3-MUST-003"),
               OutcomeState::Fail);
     // D18-14-MUST-NOT-001 names five scenarios; one passing context is not enough.
     auto grease = context_for("setup-unknown-grease-options-and-duplicates", "D18-14-MUST-NOT-001",

@@ -12,7 +12,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 119> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 118> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -89,7 +89,6 @@ inline constexpr std::array<std::string_view, 119> kDraft18ExecutableScenarios{
     // Draft-18 publisher-contribution probe families (gap-closing block).
     "observe-publisher-setup-options",
     "observe-webtransport-publisher-setup",
-    "receive-setup-with-unknown-option",
     "receive-setup-with-duplicate-unknown-options",
     "setup-unknown-grease-options-and-duplicates",
     "receive-setup-token-register-exceeding-cache-limit",

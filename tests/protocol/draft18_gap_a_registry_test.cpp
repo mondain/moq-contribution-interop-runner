@@ -6,16 +6,25 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace moq::interop {
 namespace {
 
 TEST(Draft18GapARegistry, ScenarioListMatchesProbeProfilesExactly) {
     const auto probes = scenarios::draft18_gap_a_probes();
-    ASSERT_EQ(probes.size(), app::kDraft18GapAScenarios.size());
+    // One scenario may serve several requirement rows (the catalog names
+    // receive-setup-with-unknown-option for two), so scenarios are compared
+    // in first-appearance order without repeats.
+    std::vector<std::string> unique_ids;
+    for (const auto& probe : probes)
+        if (std::find(unique_ids.begin(), unique_ids.end(), probe.definition.id) == unique_ids.end())
+            unique_ids.push_back(probe.definition.id);
+    ASSERT_EQ(unique_ids.size(), app::kDraft18GapAScenarios.size());
+    for (std::size_t i = 0; i < unique_ids.size(); ++i)
+        EXPECT_EQ(unique_ids[i], app::kDraft18GapAScenarios[i]);
     std::set<std::string> requirements;
     for (std::size_t i = 0; i < probes.size(); ++i) {
-        EXPECT_EQ(probes[i].definition.id, app::kDraft18GapAScenarios[i]);
         EXPECT_TRUE(requirements.insert(probes[i].requirement_id).second) << probes[i].requirement_id;
         EXPECT_TRUE(scenarios::draft18_gap_a_scenario(probes[i].definition.id));
         EXPECT_TRUE(app::executable_scenario(18, probes[i].definition.id));

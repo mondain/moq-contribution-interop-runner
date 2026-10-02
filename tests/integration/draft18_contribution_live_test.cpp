@@ -81,7 +81,7 @@ TEST(Draft18ContributionLive, RunsSetupUriAndSurvivalContextsThroughTheRunManage
          .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
          .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
          .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
-    const std::vector<std::string> ids{"receive-setup-with-unknown-option",
+    const std::vector<std::string> ids{"receive-setup-with-duplicate-unknown-options",
                                        "observe-publisher-setup-options",
                                        "connect-publisher-to-native-uri-with-query"};
     const auto started = manager.start({app::DraftVersion::Draft18, app::TransportKind::NativeQuic,
@@ -128,7 +128,7 @@ TEST(Draft18ContributionLive, RunsSetupUriAndSurvivalContextsThroughTheRunManage
     }
     const auto run = store->load(started.id);
     ASSERT_EQ(run.state, storage::RunState::Finalized);
-    EXPECT_EQ(outcome_of(run, "D18-10-3-MUST-002"), requirements::OutcomeState::Pass);
+    EXPECT_EQ(outcome_of(run, "D18-10-3-MUST-003"), requirements::OutcomeState::Pass);
     EXPECT_EQ(outcome_of(run, "D18-10-3-MUST-NOT-001"), requirements::OutcomeState::Pass);
     EXPECT_EQ(outcome_of(run, "D18-10-3-1-2-MUST-005"), requirements::OutcomeState::Pass);
     // Rows whose scenarios were not selected remain unscored.

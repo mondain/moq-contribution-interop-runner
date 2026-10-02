@@ -209,7 +209,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-102/175 draft-18 and 76/175 draft-21 applicable, testable MUST/MUST NOT rows
+151/175 draft-18 and 141/175 draft-21 applicable, testable MUST/MUST NOT rows
 have executable bindings for every named scenario and evaluator. Partially
 registered families remain incomplete. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
