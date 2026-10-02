@@ -37,7 +37,7 @@ const std::vector<std::string_view> kClaimedRows{
     "D21-6-4-2-2-MUST-157", "D21-6-4-2-2-MUST-158", "D21-6-4-2-2-MUST-NOT-156",
     "D21-2-2-MUST-020", "D21-3-6-MUST-070", "D21-4-2-MUST-089", "D21-6-3-MUST-NOT-146",
     "D21-6-2-MUST-139", "D21-3-3-1-MUST-NOT-057",
-    "D21-8-9-MUST-264", "D21-8-9-MUST-265", "D21-8-9-MUST-269", "D21-8-9-MUST-271",
+    "D21-2-2-MUST-NOT-018", "D21-8-9-MUST-264", "D21-8-9-MUST-265", "D21-8-9-MUST-269", "D21-8-9-MUST-271",
     "D21-9-1-4-MUST-308",
 };
 

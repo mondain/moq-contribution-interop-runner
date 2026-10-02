@@ -135,10 +135,10 @@ TEST(Draft21GapAProbe, RowsMapToTheCatalogScenariosAndEvaluators) {
     std::set<std::string> rows;
     for (const auto& candidate : probes) rows.insert(candidate.requirement_id);
     EXPECT_EQ(rows, (std::set<std::string>{
-        "D21-2-2-MUST-020", "D21-3-3-1-MUST-NOT-057", "D21-3-6-MUST-070", "D21-4-2-MUST-089",
+        "D21-2-2-MUST-020", "D21-2-2-MUST-NOT-018", "D21-3-3-1-MUST-NOT-057", "D21-3-6-MUST-070", "D21-4-2-MUST-089",
         "D21-6-2-MUST-139", "D21-6-3-MUST-NOT-146", "D21-6-4-2-2-MUST-157",
         "D21-6-4-2-2-MUST-158", "D21-6-4-2-2-MUST-NOT-156"}));
-    EXPECT_EQ(probes.size(), 11u);
+    EXPECT_EQ(probes.size(), 13u);
 }
 
 // ----------------------------------------------------- response before FIN
@@ -511,6 +511,113 @@ TEST(Draft21GapAProbe, RangeUpdateMustBeAcknowledgedBeforeObjectsAreTrusted) {
     data(t, 6, subgroup(0x30, 7, {9}), true);
     t.timed_out = true;
     EXPECT_EQ(evaluate_draft21_gap_a_probe(t, p), std::nullopt);
+}
+
+// ------------------------------------------------------- subgroup splitting
+
+TEST(Draft21GapAProbe, ASubgroupIsNotSplitAcrossStreamsExceptAfterAPrematureResetOrOutOfOrder) {
+    std::vector<Draft21GapProbe> storage;
+    const auto& p = probe("d21-subscribe-single-subgroup", storage);
+    EXPECT_EQ(p.definition.writes[0].bytes,
+              b({3, 0, 14, 1, 1, 1, 'n', 1, 't', 2, 0x10, 1, 0x11, 3, 7, 0, 0}));
+    struct Stream { unsigned id; Bytes payload; bool fin; bool reset; };
+    const auto build = [&](std::vector<Stream> streams, bool timed_out = true) {
+        auto t = start(p);
+        accept(t, p, 0, 1);
+        data(t, 1, subscribe_ok());
+        for (auto& stream : streams) {
+            data(t, stream.id, std::move(stream.payload), stream.fin);
+            if (stream.reset) t.events.push_back(transport::PeerResetEvent{stream.id, 1});
+        }
+        t.timed_out = timed_out;
+        t.complete = !timed_out;
+        return t;
+    };
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {9}), true, false}}), p),
+              std::optional<bool>{true});
+    // The same Subgroup on a second stream while the first finished cleanly.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {0}), true, false},
+                                                  {10, subgroup(0x30, 7, {1}), true, false}}), p),
+              std::optional<bool>{false});
+    // ... or is still open.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {0}), false, false},
+                                                  {10, subgroup(0x30, 7, {1}), false, false}}, false), p),
+              std::optional<bool>{false});
+    // A premature reset of the first stream permits the restart.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {0}), false, true},
+                                                  {10, subgroup(0x30, 7, {1}), true, false}}), p),
+              std::optional<bool>{true});
+    // A reset after the FIN does not make the stream premature.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {0}), true, true},
+                                                  {10, subgroup(0x30, 7, {1}), true, false}}), p),
+              std::optional<bool>{false});
+    // Objects forced out of Object ID order may use another stream.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {5, 6}), true, false},
+                                                  {10, subgroup(0x30, 7, {3}), true, false}}), p),
+              std::optional<bool>{true});
+    // Different Subgroups (explicit IDs, mode 0b10) of one Group are separate streams.
+    auto first = subgroup(0x34, 7, {});
+    first.insert(first.begin() + 3, std::byte{1});
+    first.push_back(std::byte{0}); first.push_back(std::byte{1}); first.push_back(std::byte{'x'});
+    auto second = subgroup(0x34, 7, {});
+    second.insert(second.begin() + 3, std::byte{2});
+    second.push_back(std::byte{0}); second.push_back(std::byte{1}); second.push_back(std::byte{'x'});
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, first, true, false}, {10, second, true, false}}), p),
+              std::optional<bool>{true});
+    // The same Subgroup ID in a different Group is another Subgroup.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {0}), true, false},
+                                                  {10, subgroup(0x30, 8, {0}), true, false}}), p),
+              std::optional<bool>{true});
+    // Nothing delivered, or an early stop without a violation, has no verdict.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({}), p), std::nullopt);
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build({{6, subgroup(0x30, 7, {9}), true, false}}, false), p),
+              std::nullopt);
+}
+
+TEST(Draft21GapAProbe, RestartAfterResetNeedsAnObservedResetCausedByTheUpdate) {
+    std::vector<Draft21GapProbe> storage;
+    const auto& p = probe("d21-subgroup-restart-after-reset", storage);
+    ASSERT_EQ(p.definition.writes.size(), 2u);
+    // REQUEST_UPDATE (Request ID 3) raising the Start Location to Group 7, Object 10.
+    EXPECT_EQ(p.definition.writes[1].bytes, b({2, 0, 6, 3, 1, 0x21, 2, 7, 10}));
+    const auto build = [&](bool ack, bool reset_after_update, bool restart, bool reset_before_update = false) {
+        auto t = start(p);
+        accept(t, p, 0, 1);
+        data(t, 1, subscribe_ok());
+        data(t, 6, subgroup(0x30, 7, {9}));
+        if (reset_before_update) t.events.push_back(transport::PeerResetEvent{6, 1});
+        accept(t, p, 1, 1);
+        if (ack) data(t, 1, request_ok());
+        if (reset_after_update) t.events.push_back(transport::PeerResetEvent{6, 1});
+        if (restart) data(t, 10, subgroup(0x30, 7, {10}), true);
+        t.timed_out = true;
+        t.complete = false;
+        return t;
+    };
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(true, true, true), p), std::optional<bool>{true});
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(true, true, false), p), std::optional<bool>{true});
+    // No reset, so the exception was never exercised.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(true, false, false), p), std::nullopt);
+    // A restart without any reset is a split.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(true, false, true), p), std::optional<bool>{false});
+    // The update must be acknowledged.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(false, true, true), p), std::nullopt);
+    // A reset that predates the update was not caused by it.
+    EXPECT_EQ(evaluate_draft21_gap_a_probe(build(true, false, false, true), p), std::nullopt);
+    // The update is held back until a subscription stream is open.
+    const auto& gate = p.definition.writes[1].evidence_ready;
+    ASSERT_TRUE(gate);
+    auto waiting = start(p);
+    accept(waiting, p, 0, 1);
+    data(waiting, 1, subscribe_ok());
+    const auto gate_input = [&](const RawProbeTranscript& t) {
+        return RawProbeGateInput{std::span<const RawProbeAcceptedWrite>(t.writes).first(1), t.events};
+    };
+    EXPECT_FALSE(gate(gate_input(waiting)));
+    data(waiting, 6, subgroup(0x30, 7, {9}), true);
+    EXPECT_FALSE(gate(gate_input(waiting)));  // finished: nothing left to reset
+    data(waiting, 10, subgroup(0x30, 7, {10}));
+    EXPECT_TRUE(gate(gate_input(waiting)));
 }
 
 // -------------------------------------------------------- stimulus integrity

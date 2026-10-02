@@ -124,6 +124,17 @@ Bytes bounded_update() {
     return frame(2, body);
 }
 
+// Section 9.5.1: raise the Start Location to Group 7, Object 10 (past Object 9).
+Bytes raise_start_update() {
+    Bytes body;
+    integer(body, 3);
+    Bytes params;
+    location_filter(params, 0, {kGroup, kObject + 1});
+    integer(body, 1);
+    body.insert(body.end(), params.begin(), params.end());
+    return frame(2, body);
+}
+
 // Section 8.9: USE_ALIAS 0 names no registered Alias in this session, so the
 // update fails and Section 9.5.1 obliges the publisher to end the subscription.
 Bytes failing_update() { return bytes({2, 0, 6, 3, 1, 3, 2, 2, 0}); }
@@ -210,6 +221,7 @@ struct StreamData {
     std::size_t first_event{0};
     bool fin{false};
     bool reset{false};
+    std::size_t reset_event{0};
     bool overrun{false};  // data arrived after FIN or reset
 };
 using Streams = std::map<transport::StreamId, StreamData>;
@@ -254,6 +266,7 @@ Collected collect(std::span<const transport::TransportEvent> events) {
             }
             auto [found, inserted] = result.streams.try_emplace(reset->stream_id);
             if (inserted) found->second.first_event = index;
+            if (!found->second.reset) found->second.reset_event = index;
             found->second.reset = true;
         }
     }
@@ -445,7 +458,14 @@ struct Delivery {
     bool established{false};
     bool request_error{false};
     std::uint64_t alias{0};
-    std::vector<std::pair<transport::StreamId, Subgroup>> streams;  // by arrival
+    std::vector<std::pair<transport::StreamId, Subgroup>> streams;  // by stream ID
+    // Parallel to `streams`.
+    struct Facts {
+        bool fin;
+        bool reset;
+        std::size_t reset_event;
+    };
+    std::vector<Facts> facts;
     std::size_t seen_terminal{0};
     std::size_t open{0};
 };
@@ -482,6 +502,7 @@ Delivery delivery_of(const RawProbeTranscript& t, const Collected& collected) {
         if (!subgroup.header || subgroup.malformed || subgroup.alias != result.alias) continue;
         if (stream.fin || stream.reset) ++result.seen_terminal; else ++result.open;
         result.streams.emplace_back(id, std::move(subgroup));
+        result.facts.push_back({stream.fin, stream.reset, stream.reset_event});
     }
     return result;
 }
@@ -584,6 +605,64 @@ State control_stream_lifetime(const RawProbeTranscript& t, const Collected& coll
     return State::Pending;
 }
 
+// Section 2.2: Objects of one Subgroup must not be sent on different streams
+// of a subscription unless an earlier stream was reset prematurely (a FIN, or a
+// reset after the FIN, is a complete stream) or upstream conditions forced the
+// later stream's Objects out of Object ID order.
+bool subgroup_split_violation(const Delivery& delivery) {
+    std::map<std::pair<std::uint64_t, std::uint64_t>, std::vector<std::size_t>> by_subgroup;
+    for (std::size_t index = 0; index < delivery.streams.size(); ++index) {
+        const auto& subgroup = delivery.streams[index].second;
+        if (!subgroup.subgroup_id) continue;  // mode 0b01 before its first Object
+        by_subgroup[{subgroup.group, *subgroup.subgroup_id}].push_back(index);
+    }
+    for (const auto& [subgroup_key, indexes] : by_subgroup) {
+        for (std::size_t position = 1; position < indexes.size(); ++position) {
+            const auto earlier = indexes[position - 1];
+            const auto later = indexes[position];
+            const auto& facts = delivery.facts[earlier];
+            if (facts.reset && !facts.fin) continue;  // premature reset permits a restart
+            const auto& before = delivery.streams[earlier].second.objects;
+            const auto& after = delivery.streams[later].second.objects;
+            if (!before.empty() && !after.empty()) {
+                std::uint64_t highest = 0;
+                for (const auto& object : before) highest = std::max(highest, object.id);
+                if (after.front().id < highest) continue;  // forced out of Object ID order
+            }
+            // A later stream with no Object yet cannot be called a split.
+            if (after.empty()) continue;
+            return true;
+        }
+    }
+    return false;
+}
+
+State single_subgroup(const Delivery& delivery, bool window_ended) {
+    if (delivery.request_error) return State::Inconclusive;
+    if (!delivery.established) return window_ended ? State::Inconclusive : State::Pending;
+    if (subgroup_split_violation(delivery)) return State::Fail;
+    if (!window_ended) return State::Pending;
+    return delivery.streams.empty() ? State::Inconclusive : State::Pass;
+}
+
+// The update raises the Start Location, so an open stream must be reset
+// (Section 11.3.2). A restart on a new stream is then permitted.
+State restart_after_reset(const RawProbeTranscript& t, const Collected& collected,
+                          const Delivery& delivery, bool window_ended) {
+    if (delivery.request_error) return State::Inconclusive;
+    if (!delivery.established) return window_ended ? State::Inconclusive : State::Pending;
+    if (subgroup_split_violation(delivery)) return State::Fail;
+    if (!window_ended) return State::Pending;
+    const auto response = response_of(t, collected, 0);
+    if (t.writes.size() < 2 || !t.writes[1].delivery_event_count || !response.stream ||
+        !has_type(response.messages, kRequestOk) || has_type(response.messages, kRequestError))
+        return State::Inconclusive;
+    const auto update_marker = *t.writes[1].delivery_event_count;
+    for (const auto& facts : delivery.facts)
+        if (facts.reset && !facts.fin && facts.reset_event >= update_marker) return State::Pass;
+    return State::Inconclusive;  // nothing was reset, so the exception was never exercised
+}
+
 State observe(const RawProbeTranscript& t, Draft21GapAspect aspect, const Fixture& fixture,
               bool window_ended) {
     if (t.writes.empty() || !t.stimulus_delivered) return State::Pending;
@@ -618,6 +697,10 @@ State observe(const RawProbeTranscript& t, Draft21GapAspect aspect, const Fixtur
         }
         return bounded_range(delivery_of(t, collected), window_ended);
     }
+    case Draft21GapAspect::SingleSubgroup:
+        return single_subgroup(delivery_of(t, collected), window_ended);
+    case Draft21GapAspect::SubgroupRestartAfterReset:
+        return restart_after_reset(t, collected, delivery_of(t, collected), window_ended);
     case Draft21GapAspect::DatagramSupport:
         return State::Pending;
     }
@@ -652,6 +735,22 @@ RawProbeWrite new_request(Bytes payload, bool fin = false) {
 RawProbeWrite update_on_stream_zero(Bytes payload) {
     RawProbeWrite result{RawProbeChannel::NewBidi, std::move(payload), false, 0, {}};
     result.peer_response_ready = subscribe_ok_ready;
+    return result;
+}
+
+// The update is only sent while a subgroup stream of the subscription is open:
+// a stream that already finished has nothing left to reset.
+RawProbeWrite update_while_stream_open(Bytes payload) {
+    auto result = update_on_stream_zero(std::move(payload));
+    result.evidence_ready = [](const RawProbeGateInput& input) {
+        RawProbeTranscript t;
+        t.writes.assign(input.prior_writes.begin(), input.prior_writes.end());
+        t.events.assign(input.events.begin(), input.events.end());
+        const auto collected = collect(t.events);
+        if (!collected.bounded || t.writes.empty() || !t.writes[0].delivery_event_count) return false;
+        const auto delivery = delivery_of(t, collected);
+        return delivery.established && delivery.open != 0;
+    };
     return result;
 }
 
@@ -720,6 +819,13 @@ std::vector<Draft21GapProbe> profiles(std::chrono::milliseconds deadline, const 
     add("D21-3-3-1-MUST-NOT-057", "d21-subscribe-bounded-location-range",
         "d21-subscription-objects-within-effective-location-range", Draft21GapAspect::BoundedRange,
         {new_request(subscribe(fixture, true, Filter::BoundedObject))});
+    add("D21-2-2-MUST-NOT-018", "d21-subscribe-single-subgroup",
+        "d21-subgroup-stream-splitting-respects-exceptions", Draft21GapAspect::SingleSubgroup,
+        {new_request(subscribe(fixture, true, Filter::WholeGroup))});
+    add("D21-2-2-MUST-NOT-018", "d21-subgroup-restart-after-reset",
+        "d21-subgroup-stream-splitting-respects-exceptions", Draft21GapAspect::SubgroupRestartAfterReset,
+        {new_request(subscribe(fixture, true, Filter::WholeGroup)),
+         update_while_stream_open(raise_start_update())});
     add("D21-3-3-1-MUST-NOT-057", "d21-update-subscription-location-range",
         "d21-subscription-objects-within-effective-location-range", Draft21GapAspect::UpdatedRange,
         {new_request(subscribe(fixture, false, Filter::None)), update_on_stream_zero(bounded_update())});
@@ -783,7 +889,9 @@ std::optional<bool> evaluate_draft21_gap_a_probe(const RawProbeTranscript& t, co
     // The window probes end at their deadline, so a timed-out context still
     // carries a full observation. Everything else must have completed.
     const bool window = p.aspect == Draft21GapAspect::BoundedRange ||
-                        p.aspect == Draft21GapAspect::UpdatedRange;
+                        p.aspect == Draft21GapAspect::UpdatedRange ||
+                        p.aspect == Draft21GapAspect::SingleSubgroup ||
+                        p.aspect == Draft21GapAspect::SubgroupRestartAfterReset;
     if (!t.complete && !(window && t.timed_out)) return {};
     RawProbeTranscript prefix = t;
     const auto end = std::find_if(t.events.begin(), t.events.end(), terminal);

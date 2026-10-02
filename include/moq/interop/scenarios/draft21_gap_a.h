@@ -36,6 +36,10 @@ enum class Draft21GapAspect {
     BoundedRange,
     // Section 3.3.1 and 9.5.1: a REQUEST_UPDATE that sets the Location filter.
     UpdatedRange,
+    // Section 2.2: one Subgroup is not split across streams unless a stream
+    // was reset prematurely or Objects are forced out of Object ID order.
+    SingleSubgroup,
+    SubgroupRestartAfterReset,
 };
 
 struct Draft21GapProbe {
