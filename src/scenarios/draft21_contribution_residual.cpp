@@ -14,6 +14,7 @@
 // requests would; this is not scored.
 
 #include "draft21_contribution_support.h"
+#include "draft21_contribution_residual_internal.h"
 
 #include "moq/interop/wire/draft21/publish.h"
 #include "moq/interop/wire/draft21/token.h"
@@ -25,22 +26,15 @@ namespace moq::interop::scenarios::d21c {
 namespace {
 
 using namespace shared;
+using namespace residual;
 
 constexpr std::uint64_t kTargetGroup = 0;
 constexpr std::uint64_t kTargetObject = 1;
 constexpr std::uint64_t kFetchHeaderType = 0x5;
-constexpr std::uint64_t kPublish = 0x1d;
 constexpr std::uint64_t kPublishSkipped = 0xf;
 constexpr std::uint64_t kSubscribeTracks = 0x51;
 
 // ---- helpers ---------------------------------------------------------------
-Bytes location_pair(std::uint64_t group, std::uint64_t object) {
-    Bytes result;
-    put_vi(result, group);
-    put_vi(result, object);
-    return result;
-}
-
 // LOCATION_FILTER (0x21, Section 9.20.10): Start Group/Object, End Group delta and
 // End Object. The range is inclusive (Section 3.3.1); an omitted End Object is the
 // separate all-objects-of-the-End-Group form, while an End Object of 0 ends at
@@ -58,94 +52,12 @@ Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t las
     return location_range(group, first, 0, last);
 }
 
-RawProbeDefinition residual_definition() {
-    // PUBLISH_NAMESPACE announcements are acknowledged by base_definition().
-    return base_definition("");
-}
-
 // Follow-up written on the stream opened by write `base` once its
 // SUBSCRIBE_OK is complete.
 RawProbeWrite follow_up(Bytes bytes, std::size_t base, bool fin = false) {
     RawProbeWrite write{RawProbeChannel::NewBidi, std::move(bytes), fin, base};
     write.peer_response_ready = subscribe_ok_ready;
     return write;
-}
-
-struct Object {
-    std::uint64_t group{0};
-    std::uint64_t id{0};
-    bool data{true};  // false for an Object Status
-    transport::StreamId stream{0};
-    bool datagram{false};
-    Bytes payload;
-};
-
-// Section 11.3.1: the Subgroup streams (unidirectional, publisher-initiated)
-// carrying `alias`, each with the Objects received so far.
-struct AliasStream {
-    transport::StreamId id{0};
-    SubgroupParse parsed;
-};
-
-std::vector<AliasStream> subgroup_streams(const View& view, std::uint64_t alias) {
-    std::vector<AliasStream> result;
-    for (const auto& [id, stream] : view.streams()) {
-        if ((id & 3u) != 2u) continue;
-        auto parsed = parse_subgroup(stream.bytes);
-        if (parsed.header && parsed.alias == alias) result.push_back({id, std::move(parsed)});
-    }
-    return result;
-}
-
-// Section 11.2: Object Datagram. Only the fields needed to place the Object.
-std::optional<Object> parse_datagram_object(const DatagramRecord& datagram, std::uint64_t alias) {
-    wire::Cursor cursor(datagram.data);
-    const auto flags = read_vi(cursor);
-    const auto track = flags ? read_vi(cursor) : std::nullopt;
-    const auto group = track ? read_vi(cursor) : std::nullopt;
-    if (!flags || !track || !group || *track != alias) return std::nullopt;
-    std::uint64_t object = 0;
-    if ((*flags & 0x04u) == 0) {
-        const auto value = read_vi(cursor);
-        if (!value) return std::nullopt;
-        object = *value;
-    }
-    // Without a Status the remainder of the datagram is the payload (Section 11.2).
-    Bytes payload;
-    const bool has_payload = (*flags & 0x20u) == 0;
-    if (has_payload) {
-        if ((*flags & 0x08u) == 0 && !read_n(cursor, 1)) return std::nullopt;
-        if ((*flags & 0x01u) != 0) {
-            const auto length = read_vi(cursor);
-            if (!length || *length > 65535 || !read_n(cursor, static_cast<std::size_t>(*length))) return std::nullopt;
-        }
-        const auto rest = read_n(cursor, cursor.remaining());
-        if (rest) payload.assign(rest->begin(), rest->end());
-    }
-    return Object{*group, object, has_payload, 0, true, std::move(payload)};
-}
-
-std::vector<Object> delivered_objects(const View& view, std::uint64_t alias) {
-    std::vector<Object> result;
-    for (const auto& stream : subgroup_streams(view, alias))
-        for (const auto& object : stream.parsed.objects)
-            result.push_back({object.group, object.object, !object.status, stream.id, false, object.payload});
-    for (const auto& datagram : view.datagrams())
-        if (const auto object = parse_datagram_object(datagram, alias)) result.push_back(*object);
-    return result;
-}
-
-// The Track Alias is the first field of SUBSCRIBE_OK (Section 9.7).
-std::optional<std::uint64_t> alias_of(const View& view, std::size_t write) {
-    const auto frames = view.write_frames(write);
-    if (frames.empty() || frames.front().type != kSubscribeOk) return std::nullopt;
-    wire::Cursor body(frames.front().body);
-    return read_vi(body);
-}
-
-bool rejected(const View& view, std::size_t write) {
-    const auto frames = view.write_frames(write);
-    return !frames.empty() && frames.front().type == kRequestError;
 }
 
 // ---- Section 3.1: one copy per matching subscription (D21-3-1-MUST-041) -----
@@ -496,27 +408,6 @@ Spec cancelled_fill_spec() {
 // closes that stream, handing the publisher capacity again, and watches whether a
 // skipped track is published afterwards. "The Publisher MUST NOT send a PUBLISH
 // for a Track for a given SUBSCRIBE_TRACKS after PUBLISH_SKIPPED has been sent."
-struct TrackName {
-    Namespace track_namespace;
-    Bytes name;
-    bool operator==(const TrackName& other) const {
-        return track_namespace == other.track_namespace && name == other.name;
-    }
-};
-
-std::optional<Namespace> read_namespace(wire::Cursor& cursor) {
-    const auto count = read_vi(cursor);
-    if (!count || *count > 32) return std::nullopt;
-    Namespace result;
-    for (std::uint64_t index = 0; index < *count; ++index) {
-        const auto length = read_vi(cursor);
-        const auto field = length ? read_n(cursor, static_cast<std::size_t>(*length)) : std::nullopt;
-        if (!field || field->empty()) return std::nullopt;
-        result.emplace_back(field->begin(), field->end());
-    }
-    return result;
-}
-
 struct SkippedTrack {
     TrackName track;
     std::size_t event{0};
@@ -543,64 +434,8 @@ std::vector<SkippedTrack> skipped_tracks(const View& view, const Namespace& pref
 // ---- Requests the publisher opens ---------------------------------------------------
 // The contexts below send nothing: the runner answers what the publisher opens
 // (RawProbeCourtesy) and reads what the publisher puts on the wire.
-constexpr std::uint64_t kRequestUpdate = 0x2;
 constexpr std::uint64_t kGoaway = 0x10;
 constexpr std::uint64_t kPublishNamespace = 0x6;
-
-struct PublishRecord {
-    transport::StreamId stream{0};
-    std::size_t first_event{0};
-    TrackName track;
-    std::uint64_t alias{0};
-    // The first of the publisher's FIN, its reset or its PUBLISH_DONE on the stream.
-    std::optional<std::size_t> terminated;
-    // The runner's volunteered answer to this PUBLISH.
-    std::optional<RawProbeCourtesyKind> response;
-    std::size_t response_event{0};
-    std::size_t updates{0};  // REQUEST_UPDATE messages after the PUBLISH
-};
-
-std::optional<std::size_t> earliest(std::optional<std::size_t> left, std::optional<std::size_t> right) {
-    if (!left) return right;
-    if (!right) return left;
-    return std::min(*left, *right);
-}
-
-std::vector<PublishRecord> publish_records(const View& view) {
-    std::vector<PublishRecord> result;
-    for (const auto& [id, record] : view.streams()) {
-        if ((id & 3u) != 0u) continue;
-        const auto frames = view.frames(record);
-        if (frames.empty() || frames.front().type != kPublish) continue;
-        wire::Cursor body(frames.front().body);
-        if (!read_vi(body)) continue;
-        auto name_space = read_namespace(body);
-        const auto length = name_space ? read_vi(body) : std::nullopt;
-        const auto name = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
-        const auto alias = name ? read_vi(body) : std::nullopt;
-        if (!name_space || !name || !alias) continue;
-        PublishRecord publish;
-        publish.stream = id;
-        publish.first_event = record.first_event;
-        publish.track = {std::move(*name_space), Bytes(name->begin(), name->end())};
-        publish.alias = *alias;
-        publish.terminated = earliest(record.fin_event, record.reset_event);
-        for (std::size_t index = 1; index < frames.size(); ++index) {
-            if (frames[index].type == kPublishDone)
-                publish.terminated = earliest(publish.terminated, frames[index].event);
-            if (frames[index].type == kRequestUpdate) ++publish.updates;
-        }
-        for (const auto& write : view.courtesy_writes()) {
-            if (write.stream_id != id || publish.response) continue;
-            if (write.kind != RawProbeCourtesyKind::PublishOk && write.kind != RawProbeCourtesyKind::PublishError)
-                continue;
-            publish.response = write.kind;
-            publish.response_event = write.event_count;
-        }
-        result.push_back(std::move(publish));
-    }
-    return result;
-}
 
 // Tracks the publisher announced with PUBLISH on a request stream it opened.
 struct PublishedTrack {
@@ -670,21 +505,6 @@ bool simultaneous(const PublishRecord& left, const PublishRecord& right) {
     return established(left) && established(right) &&
            (!left.terminated || *left.terminated > right.first_event) &&
            (!right.terminated || *right.terminated > left.first_event);
-}
-
-RawProbeDefinition observing(RawProbeCourtesy courtesy) {
-    auto definition = base_definition("");
-    definition.courtesy = courtesy;
-    // Rejecting a PUBLISH can make a publisher give up.
-    definition.publisher_exit_is_evidence = courtesy.publish == RawProbePublishResponse::Reject ||
-                                            courtesy.publish == RawProbePublishResponse::RejectAfterObject;
-    return definition;
-}
-
-RawProbeCourtesy accepting_publishes() {
-    RawProbeCourtesy result;
-    result.publish = RawProbePublishResponse::Accept;
-    return result;
 }
 
 // ---- Section 3.1.2 lines 1080-1084: one Track Alias per Track (D21-3-1-2-MUST-NOT-048)
