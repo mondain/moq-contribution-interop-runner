@@ -406,6 +406,11 @@ inline bool subscriber_notify_scenario(unsigned draft, std::string_view scenario
                           scenario == "d21-publish-established-subscriber-sends-publish-state-notify");
 }
 
+inline bool established_update_scenario(unsigned draft, std::string_view scenario) {
+    return draft == 21 && (scenario == "d21-group-order-in-subscription-update" ||
+                          scenario == "d21-duplicate-request-update-id");
+}
+
 inline bool request_goaway_scenario(unsigned draft, std::string_view scenario) {
     return (draft == 18 && scenario == "receive-two-goaways-on-same-request-stream") ||
         (draft == 21 && (scenario == "d21-duplicate-request-goaway" ||
@@ -480,6 +485,7 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (immutable_repeat_scenario(draft,scenario) || object_repeat_scenario(draft,scenario)) return true;
     if (fetch_first_object_scenario(draft,scenario) || fetch_group_order_scenario(draft,scenario)) return true;
     if (subscriber_notify_scenario(draft,scenario) ||
+        established_update_scenario(draft,scenario) ||
         (draft == 21 && scenario == "d21-publish-state-notify-on-fetch")) return true;
     if (discovery_overlap_scenario(draft,scenario)) return true;
     if (announcement_gap_scenario(draft, scenario) || gap_raw_scenario(draft, scenario)) return true;

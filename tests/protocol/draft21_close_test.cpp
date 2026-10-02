@@ -28,6 +28,8 @@ TEST(Draft21CloseProbes, DefinesIndependentReceiverStimuli) {
         EXPECT_EQ(app::scenario_requires_track(21, probe.definition.id),
                   probe.definition.id == "d21-publish-state-notify-on-fetch" ||
                   probe.definition.id == "d21-subscriber-sends-publish-state-notify" ||
+                  probe.definition.id == "d21-group-order-in-subscription-update" ||
+                  probe.definition.id == "d21-duplicate-request-update-id" ||
                   probe.definition.id == "d21-publish-established-subscriber-sends-publish-state-notify");
         EXPECT_FALSE(probe.requirement_id.empty());
         EXPECT_FALSE(probe.evaluator_id.empty());
@@ -533,7 +535,7 @@ std::vector<EstablishedFixture> established_fixtures() {
          bytes({4, 0, 4, 0, 0, 4, 1})},
         {"d21-discovery-update-invalid-forward", "D21-9-20-19-MUST-460",
          "d21-forward-bounds-protocol-violation",
-         bytes({0x51, 0, 3, 1, 0, 0}), bytes({2, 0, 4, 3, 1, 0x10, 255}),
+         bytes({0x51, 0, 5, 1, 0, 1, 0x10, 0}), bytes({2, 0, 4, 3, 1, 0x10, 255}),
          bytes({7, 0, 1, 0})},
         {"d21-duplicate-request-update-id", "D21-6-4-2-1-MUST-155",
          "d21-duplicate-invalid-request-id",
@@ -892,6 +894,47 @@ TEST(Draft21CloseProbes, ConfiguredFetchUsesExactTrackAndScopedTypedSuccess) {
     EXPECT_THROW(draft21_close_probes(std::chrono::milliseconds{1000},
                  {std::vector<std::byte>(4096, std::byte{'n'})}, bytes({'t'})),
                  std::invalid_argument);
+}
+
+TEST(Draft21CloseProbes, DiscoveryUpdateStartsWithForwardZeroSubscribeTracks) {
+    // Sections 9.18.1 and 9.20.19: FORWARD 0 is legal on SUBSCRIBE_TRACKS.
+    // The default FORWARD of 1 made publishers push PUBLISH messages the
+    // probe never answers, ending the session before the invalid update.
+    const auto probes = draft21_close_probes();
+    const auto* probe = established_probe(probes, "d21-discovery-update-invalid-forward");
+    ASSERT_NE(probe, nullptr);
+    ASSERT_EQ(probe->definition.writes.size(), 2u);
+    EXPECT_EQ(probe->definition.writes[0].bytes, bytes({0x51, 0, 5, 1, 0, 1, 0x10, 0}));
+    EXPECT_EQ(probe->definition.writes[1].bytes, bytes({2, 0, 4, 3, 1, 0x10, 255}));
+}
+
+TEST(Draft21CloseProbes, UpdateBaselineSubscribesUseConfiguredTrack) {
+    const auto probes = draft21_close_probes(std::chrono::milliseconds{250},
+                                            {bytes({'n'})}, bytes({'t'}));
+    for (const char* id : {"d21-group-order-in-subscription-update",
+                          "d21-duplicate-request-update-id"}) {
+        SCOPED_TRACE(id);
+        const auto* probe = established_probe(probes, id);
+        ASSERT_NE(probe, nullptr);
+        EXPECT_EQ(probe->definition.writes[0].bytes, bytes({3, 0, 7, 1, 1, 1, 'n', 1, 't', 0}));
+        EXPECT_TRUE(app::scenario_requires_track(21, id));
+        EXPECT_TRUE(app::established_update_scenario(21, id));
+    }
+}
+
+TEST(Draft21CloseProbes, UpdateBaselineProofRecoversConfiguredTrack) {
+    const auto probes = draft21_close_probes();
+    for (const char* id : {"d21-group-order-in-subscription-update",
+                          "d21-duplicate-request-update-id"}) {
+        SCOPED_TRACE(id);
+        const auto* probe = established_probe(probes, id);
+        ASSERT_NE(probe, nullptr);
+        auto fixture = established_fixtures()[std::string(id) == "d21-duplicate-request-update-id" ? 2 : 0];
+        fixture.initial = bytes({3, 0, 7, 1, 1, 1, 'n', 1, 't', 0});
+        EXPECT_EQ(evaluate_draft21_close_probe(established_transcript(fixture), *probe), true);
+        fixture.initial = bytes({3, 0, 7, 1, 1, 1, 'n', 1, 't', 1});
+        EXPECT_FALSE(evaluate_draft21_close_probe(established_transcript(fixture), *probe).has_value());
+    }
 }
 
 TEST(Draft21CloseProbes, ConfiguredFetchProofRecoversOnlyStrictActualRequestTarget) {

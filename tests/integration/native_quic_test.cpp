@@ -1207,14 +1207,16 @@ TEST(NativeQuicLive, EstablishedServerUpdateProbesUseActualResponseAndSameReques
             {.bind_address = "127.0.0.1", .advertised_address = "127.0.0.1", .port_start = 0, .port_end = 0,
              .maximum_active_runs = 1, .certificate_path = pem.certificate(), .private_key_path = pem.key()});
         const auto started = manager.start({app::DraftVersion::Draft21, app::TransportKind::NativeQuic,
-            app::RunMode::Observed, {fixture.scenario}, std::chrono::milliseconds(1500), std::nullopt});
+            app::RunMode::Observed, {fixture.scenario}, std::chrono::milliseconds(1500),
+            fixture.discovery ? std::optional<app::TrackFixture>{} : std::optional<app::TrackFixture>{app::TrackFixture{{"n"}, "t"}}});
         ASSERT_EQ(started.status, app::RunStartStatus::Started);
         auto client = test::PicoquicTestClient::create({.port = started.endpoint.port,
             .alpn = bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
         ASSERT_NE(client, nullptr);
         ASSERT_TRUE(pump_until(*client, [&] { const auto setup = client->stream(3); return setup && setup->data.size() == 4; }));
         ASSERT_TRUE(client->send_stream(2, bytes({0xaf, 0, 0, 0}), false));
-        const auto initial = fixture.discovery ? bytes({0x51, 0, 3, 1, 0, 0}) : bytes({3, 0, 5, 1, 0, 1, 'x', 0});
+        const auto initial = fixture.discovery ? bytes({0x51, 0, 5, 1, 0, 1, 0x10, 0})
+            : bytes({3, 0, 7, 1, 1, 1, 'n', 1, 't', 0});
         ASSERT_TRUE(pump_until(*client, [&] { const auto request = client->stream(1); return request && request->data.size() == initial.size(); }));
         EXPECT_EQ(client->stream(1)->data, initial);
         // Both responses exercise legal EXPIRES. SUBSCRIBE_OK additionally
