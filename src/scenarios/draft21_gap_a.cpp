@@ -702,6 +702,7 @@ State observe(const RawProbeTranscript& t, Draft21GapAspect aspect, const Fixtur
     case Draft21GapAspect::SubgroupRestartAfterReset:
         return restart_after_reset(t, collected, delivery_of(t, collected), window_ended);
     case Draft21GapAspect::DatagramSupport:
+    case Draft21GapAspect::DatagramNegotiation:
         return State::Pending;
     }
     return State::Pending;
@@ -769,7 +770,8 @@ std::vector<Draft21GapProbe> profiles(std::chrono::milliseconds deadline, const 
         definition.response_ready = [aspect, fixture](const RawProbeTranscript& t) {
             // The range probes need the whole window unless an Object already
             // proves a violation; every other probe settles on its evidence.
-            if (aspect == Draft21GapAspect::DatagramSupport) {
+            if (aspect == Draft21GapAspect::DatagramSupport ||
+                aspect == Draft21GapAspect::DatagramNegotiation) {
                 const auto state = datagram_support(t);
                 return state == State::Pass || state == State::Fail;
             }
@@ -816,6 +818,14 @@ std::vector<Draft21GapProbe> profiles(std::chrono::milliseconds deadline, const 
     for (const char* scenario : {"d21-native-quic-datagram-support", "d21-webtransport-h3-datagram-support"})
         add("D21-6-2-MUST-139", scenario, "d21-quic-datagram-extension-supported",
             Draft21GapAspect::DatagramSupport, session_probe());
+    // Section 6.2: "MUST be supported and negotiated". Negotiation is visible on
+    // the transport independently of what the publisher compiled in: a client
+    // that did not offer the extension is refused by the listener and never
+    // completes MOQT SETUP, which is a failure of the negotiation duty.
+    for (const char* scenario : {"d21-native-quic-without-datagram-negotiation",
+                                 "d21-webtransport-h3-without-datagram-negotiation"})
+        add("D21-6-2-MUST-140", scenario, "d21-no-moqt-session-without-quic-datagram-negotiation",
+            Draft21GapAspect::DatagramNegotiation, session_probe());
     add("D21-3-3-1-MUST-NOT-057", "d21-subscribe-bounded-location-range",
         "d21-subscription-objects-within-effective-location-range", Draft21GapAspect::BoundedRange,
         {new_request(subscribe(fixture, true, Filter::BoundedObject))});
@@ -868,7 +878,8 @@ std::vector<Draft21GapProbe> draft21_gap_a_probes(std::chrono::milliseconds dead
 
 std::optional<bool> evaluate_draft21_gap_a_probe(const RawProbeTranscript& t, const Draft21GapProbe& p) {
     if (t.scenario_id != p.definition.id || p.definition.deadline.count() <= 0) return {};
-    if (p.aspect == Draft21GapAspect::DatagramSupport) {
+    if (p.aspect == Draft21GapAspect::DatagramSupport ||
+        p.aspect == Draft21GapAspect::DatagramNegotiation) {
         // No request is needed to prove DATAGRAM negotiation, and a publisher
         // that lacks it never completes a stimulus; judge the transport events.
         if (t.harness_failed) return {};

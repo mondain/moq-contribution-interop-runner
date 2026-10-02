@@ -239,7 +239,7 @@ std::optional<OutcomeState> draft21_gap_a_announcement_state(
 
 
 bool draft21_gap_a_scenarios_are_alternatives(const Requirement& row) {
-    return row.id == "D21-6-2-MUST-139";
+    return row.id == "D21-6-2-MUST-139" || row.id == "D21-6-2-MUST-140";
 }
 
 std::optional<Draft21GapARawResult> draft21_gap_a_raw_result(
