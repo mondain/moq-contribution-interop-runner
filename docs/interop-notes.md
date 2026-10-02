@@ -123,13 +123,25 @@ errors, and are now fixed:
   requests, which the runner-as-subscriber probes do not answer. The bundled
   adapter runs moqxr with `--forward 0 --paced` for those probes.
 
-Effect on the sweep (rows with at least one scored result): draft 18 went from 34
-passing and 49 failing rows to 57 and 22; draft 21 from 29 passing and 41 failing
-to 42 and 26, with no passing row lost. Runs ending in a run-level error fell from
-225 to about 70; the remaining ones are scenarios whose stimulus moqxr cannot
-serve (it implements no FETCH, only serves namespace `media`, does not advertise
-`MAX_REQUEST_UPDATES` or a token cache size, and answers the runner's own
-unanswered PUBLISH requests by exiting).
+Effect on the sweep (rows with at least one scored result, final run on the merged
+tree): draft 18 went from 34 passing and 49 failing rows to 56 and 30; draft 21 from
+29 passing and 39 failing to 42 and 31. Runs ending in a run-level error fell from
+225 to 60; the remaining ones are scenarios whose stimulus moqxr cannot serve (it
+implements no FETCH, only serves namespace `media`, does not advertise
+`MAX_REQUEST_UPDATES` or a token cache size, and exits when its own PUBLISH requests
+go unanswered). Failing rows rose in the second half of the work on purpose: a
+liveness follow-up (below) now turns 14 rows that used to stay unscored into proven
+failures.
+
+Two rows that passed in the first sweep, `D18-10-MUST-008` (unknown control message
+type) and `D18-3-4-MUST-001` (unknown unidirectional stream type), fail now. Their
+evaluator accepts any session close, and in the first sweep moqxr closed the session
+by itself after its unanswered announcement timed out, which counted as the required
+close. With the announcement answered, moqxr stays up, logs that it is skipping the
+unhandled control message, and serves a follow-up request, so the failure is real.
+An evaluator that accepts any close can still be satisfied by a publisher's unrelated
+close; closes that precede the delivered stimulus should not count, and that
+tightening is not done yet.
 
 ### Deviations from the drafts confirmed with wire evidence
 
@@ -159,6 +171,21 @@ so the runner leaves them unscored; the evidence above comes from probes that
 followed the violating input with a valid request and observed that moqxr kept
 serving. A liveness check that scores this automatically has not been implemented.
 
+### Rows proven by a liveness follow-up
+
+For probes whose draft rule is an unconditional "MUST close the session", the runner
+sends a valid SUBSCRIBE for the configured track 500 ms after the violating input.
+If the publisher serves it with a SUBSCRIBE_OK and never closes the session, the row
+fails on wire evidence; silence, a refusal or any close leaves the previous outcome
+unchanged. Against moqxr 0.4.1 this turned 14 rows (26 scenario and transport pairs) from unscored into FAIL:
+`D18-10-4-MUST-002`, `-005`, `-007` (control-stream GOAWAY),
+`D18-10-3-1-1-MUST-001`, `-002` and `D18-10-3-1-2-MUST-001`, `-002` (server SETUP
+AUTHORITY and PATH), `D18-1-4-3-MUST-003`, `D18-10-MUST-008`, `D18-3-4-MUST-001`,
+`D21-9-2-MUST-327`, `D21-9-2-MUST-331`, `D21-9-MUST-285` and `D21-8-3-MUST-233`.
+The 500 ms bound is a time bound, not proof of delivery order: QUIC does not order
+data across streams, so a publisher that leaves one stream unread for longer while
+serving another could be wrongly failed. See [scoring-and-audit.md](scoring-and-audit.md).
+
 ### Not adjudicated or not scoreable
 
 - `D18-10-18-MUST-004` and `D18-10-19-MUST-004` (authorization of a discovery request)
@@ -166,10 +193,9 @@ serving. A liveness check that scores this automatically has not been implemente
   policy refuses; moqxr has no policy that refuses a token, so they stay unscored
   for it. They previously scored FAIL on the unproven assumption that the publisher
   denied the built-in `interop-denied` value.
-- `D21-9-20-19-MUST-460` still scores FAIL because the scenario
-  `d21-discovery-update-invalid-forward` sends SUBSCRIBE_TRACKS with the default
-  FORWARD, so moqxr publishes its catalog and gives up before reading the update.
-  This is a runner-side defect that is not yet fixed.
+- `D21-9-20-19-MUST-460`: the scenario now starts from a SUBSCRIBE_TRACKS with
+  FORWARD 0, so the earlier false FAIL is gone. moqxr appears to ignore a
+  REQUEST_UPDATE on a SUBSCRIBE_TRACKS stream, so the row stays unscored.
 - `D18-10-12-2-MUST-004` is ambiguous: moqxr implements no FETCH and answers every
   FETCH with REQUEST_ERROR 0x1 and a close, and the draft's MUST arguably applies
   only to publishers that implement FETCH.
