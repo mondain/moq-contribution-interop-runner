@@ -554,6 +554,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-draft18-contribution-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME draft18-contribution COMMAND moq-interop-draft18-contribution-tests)
 
+    add_executable(moq-interop-raw-probe-auto-accept-tests tests/protocol/raw_probe_auto_accept_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-auto-accept-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME raw-probe-auto-accept COMMAND moq-interop-raw-probe-auto-accept-tests)
+
     add_executable(moq-interop-draft18-peer-close-tests tests/protocol/draft18_peer_close_test.cpp)
     target_link_libraries(moq-interop-draft18-peer-close-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)
     target_compile_definitions(moq-interop-draft18-peer-close-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

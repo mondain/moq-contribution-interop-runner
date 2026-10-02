@@ -220,6 +220,23 @@ bool RawProbeController::flush(RawProbeAcceptedWrite& pending) {
     }
     return true;
 }
+void RawProbeController::send_auto_replies() {
+    if (!definition_.auto_accept_ready || !transcript_.peer_setup_received) return;
+    for (const auto& [id, candidate] : auto_accept_candidates_) {
+        if (auto_accept_replied_.contains(id) || cancelled_peer_requests_.contains(id)) continue;
+        if (peer_request_stream_ == id ||
+            (definition_.peer_request_ready && !peer_request_stream_ &&
+             definition_.peer_request_ready(candidate))) continue;
+        if (!definition_.auto_accept_ready(candidate)) continue;
+        if (auto_accept_replied_.size() >= definition_.auto_accept_limit) return;
+        const auto result = transport_.write(id, definition_.auto_accept_reply, false);
+        if (result.status == transport::TransportStatus::WouldBlock && result.accepted == 0) continue;
+        if (result.status != transport::TransportStatus::Success ||
+            result.accepted != definition_.auto_accept_reply.size()) { fail(); return; }
+        auto_accept_replied_.insert(id);
+        transcript_.auto_replies.push_back({id, transcript_.events.size()});
+    }
+}
 const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now) {
     if (transcript_.complete || transcript_.harness_failed || transcript_.timed_out) return transcript_;
     if (!started_at_) started_at_ = now;
@@ -238,6 +255,8 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             }
         }
         if (peer_request_stream_ && cancelled_peer_requests_.contains(*peer_request_stream_)) return;
+        send_auto_replies();
+        if (transcript_.harness_failed) return;
         while (next_write_ < transcript_.writes.size()) {
             auto& pending = transcript_.writes[next_write_];
             if (pending.write.reuse_write_stream) {
@@ -301,6 +320,14 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (definition_.peer_setup_ready && definition_.peer_setup_ready(candidate))
                     transcript_.peer_setup_received = true;
             }
+            if (definition_.auto_accept_ready && (data->stream_id & 3u) == 0u) {
+                if (!transcript_.transport_established) { fail(); break; }
+                if ((!auto_accept_candidates_.contains(data->stream_id) && auto_accept_candidates_.size() >= 64) ||
+                    data->data.size() > kMaximumSetupBytes) { fail(); break; }
+                auto& candidate = auto_accept_candidates_[data->stream_id];
+                if (data->data.size() > kMaximumSetupBytes - candidate.size()) { fail(); break; }
+                candidate.insert(candidate.end(), data->data.begin(), data->data.end());
+            }
             const bool opener_accepted = std::any_of(transcript_.writes.begin(),transcript_.writes.end(),[](const auto& write) {
                 return write.write.channel == RawProbeChannel::PeerBidi && !write.write.reuse_write_stream && write.delivery_event_count;
             });
@@ -343,6 +370,37 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
     return transcript_;
 }
 const RawProbeTranscript& RawProbeController::transcript() const noexcept { return transcript_; }
+
+namespace {
+// Each automatic reply answers a peer-opened bidirectional stream whose bytes,
+// as received before the reply, satisfied the definition's predicate.
+bool auto_replies_valid(const RawProbeTranscript& transcript, const RawProbeDefinition& definition) {
+    if (!definition.auto_accept_ready) return transcript.auto_replies.empty();
+    if (transcript.auto_replies.size() > definition.auto_accept_limit) return false;
+    std::set<transport::StreamId> seen;
+    std::size_t previous_marker = 0;
+    for (const auto& reply : transcript.auto_replies) {
+        if ((reply.stream_id & 3u) != 0u || !seen.insert(reply.stream_id).second ||
+            reply.delivery_event_count > transcript.events.size() ||
+            reply.delivery_event_count < previous_marker) return false;
+        previous_marker = reply.delivery_event_count;
+        std::vector<std::byte> request;
+        bool peer_setup = false;
+        for (std::size_t i = 0; i < reply.delivery_event_count; ++i) {
+            const auto* data = std::get_if<transport::StreamDataEvent>(&transcript.events[i]);
+            if (data && (data->stream_id & 3u) == 2u) peer_setup = true;
+            if (data && data->stream_id == reply.stream_id) {
+                if (data->data.size() > kMaximumSetupBytes - request.size()) return false;
+                request.insert(request.end(), data->data.begin(), data->data.end());
+            }
+            if (const auto* reset = std::get_if<transport::PeerResetEvent>(&transcript.events[i]);
+                reset && reset->stream_id == reply.stream_id) return false;
+        }
+        if (!peer_setup || !definition.auto_accept_ready(request)) return false;
+    }
+    return true;
+}
+}  // namespace
 
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition) {
@@ -462,6 +520,7 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
         }
     }
     if (marked && !transcript.writes.empty() && previous_marker != *transcript.delivery_event_count) return false;
+    if (!auto_replies_valid(transcript, definition)) return false;
     bool terminated = false;
     for (const auto& event : transcript.events) {
         if (terminated) return false;

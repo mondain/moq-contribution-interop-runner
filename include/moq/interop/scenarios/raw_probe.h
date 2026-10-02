@@ -44,6 +44,21 @@ struct RawProbeDefinition {
     std::chrono::milliseconds deadline{1000};
     std::function<bool(const RawProbeTranscript&)> response_ready{};
     std::function<bool(std::span<const std::byte>)> peer_request_ready{};
+    // Publisher-initiated requests answered with a fixed reply on their own
+    // streams, so a publisher that waits for its earlier requests to be
+    // accepted keeps going. Every peer-opened bidirectional stream whose
+    // received bytes satisfy `auto_accept_ready` gets `auto_accept_reply`
+    // once, after peer SETUP, up to `auto_accept_limit` streams. A stream that
+    // `peer_request_ready` selects as the stimulus target is left to the
+    // explicit writes.
+    std::function<bool(std::span<const std::byte>)> auto_accept_ready{};
+    std::vector<std::byte> auto_accept_reply{};
+    std::size_t auto_accept_limit{0};
+};
+struct RawProbeAutoReply {
+    transport::StreamId stream_id{0};
+    // Number of transport events observed when the reply was fully accepted.
+    std::size_t delivery_event_count{0};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
@@ -64,6 +79,7 @@ struct RawProbeTranscript {
     std::string scenario_id;
     RawProbeAcceptedWrite setup;
     std::vector<RawProbeAcceptedWrite> writes;
+    std::vector<RawProbeAutoReply> auto_replies;
     bool transport_established{false};
     std::size_t max_datagram_payload{0};
     bool peer_setup_received{false};
@@ -91,6 +107,7 @@ public:
     const RawProbeTranscript& transcript() const noexcept;
 private:
     bool flush(RawProbeAcceptedWrite& write);
+    void send_auto_replies();
     void fail();
     transport::SessionTransport& transport_;
     RawProbeDefinition definition_;
@@ -99,6 +116,8 @@ private:
     std::size_t peer_setup_bytes_count_{0};
     std::map<transport::StreamId, std::vector<std::byte>> peer_request_candidates_;
     std::set<transport::StreamId> cancelled_peer_requests_;
+    std::map<transport::StreamId, std::vector<std::byte>> auto_accept_candidates_;
+    std::set<transport::StreamId> auto_accept_replied_;
     std::optional<transport::StreamId> peer_request_stream_;
     std::size_t peer_request_bytes_count_{0};
     std::optional<RawProbeClock::time_point> delivered_at_;
