@@ -70,10 +70,12 @@ scenarios::Draft21SetupProbe draft21_setup_probe(std::string_view scenario) {
     if (scenario == kDraft21DuplicateUnknownOptionScenario) {
         return scenarios::Draft21SetupProbe::DuplicateUnknownOption;
     }
-    if (scenario == kDraft21ServerAuthorityScenario) {
+    if (scenario == kDraft21ServerAuthorityScenario ||
+        scenario == "d21-webtransport-server-sends-authority") {
         return scenarios::Draft21SetupProbe::ServerAuthority;
     }
-    if (scenario == kDraft21ServerPathScenario) {
+    if (scenario == kDraft21ServerPathScenario ||
+        scenario == "d21-webtransport-server-sends-path") {
         return scenarios::Draft21SetupProbe::ServerPath;
     }
     return scenarios::Draft21SetupProbe::None;
@@ -1058,6 +1060,10 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (config.draft == DraftVersion::Draft18 && id == kDuplicateSubscribeScenario &&
             config.timeout < 3ms)
             return {RunStartStatus::InvalidConfig, {}, {}};
+        // Draft-21 gap slice A: transport-specific announcement scenarios.
+        if (draft == 21 && gap_webtransport_only_scenario(id) &&
+            config.transport != TransportKind::WebTransport)
+            return {RunStartStatus::Unsupported, {}, {}};
         if (immutable_repeat_scenario(draft, id) || object_repeat_scenario(draft, id) ||
             fetch_first_object_scenario(draft, id) || fetch_group_order_scenario(draft, id) ||
             (config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch") ||

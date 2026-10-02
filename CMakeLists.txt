@@ -230,7 +230,8 @@ target_compile_options(moq-interop-draft18-evaluators PRIVATE
 )
 
 add_library(moq-interop-draft21-evaluators
-    src/requirements/draft21_evaluators.cpp)
+    src/requirements/draft21_evaluators.cpp
+    src/requirements/draft21_gap_a.cpp)
 target_link_libraries(moq-interop-draft21-evaluators PUBLIC
     moq-interop-requirements moq-interop-scenarios)
 target_compile_options(moq-interop-draft21-evaluators PRIVATE
@@ -544,6 +545,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-draft21-evaluators GTest::gtest_main)
     add_test(NAME draft21-evaluators
              COMMAND moq-interop-draft21-evaluators-tests)
+
+    # Draft-21 completeness-gap slice A.
+    add_executable(moq-interop-draft21-gap-a-tests
+                   tests/protocol/draft21_gap_a_test.cpp)
+    target_compile_definitions(moq-interop-draft21-gap-a-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-gap-a-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements
+        moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME draft21-gap-a COMMAND moq-interop-draft21-gap-a-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

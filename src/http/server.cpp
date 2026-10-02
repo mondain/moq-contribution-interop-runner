@@ -613,6 +613,11 @@ public:
                         append_profile(draft,profile.definition.id,"webtransport");
                     }
                 }
+                // Draft-21 gap slice A: announcement-controller scenarios.
+                for (const auto id : app::kDraft21GapAnnouncementScenarios) {
+                    if (!app::gap_webtransport_only_scenario(id)) append_profile(21, id, "native-quic");
+                    if (!app::gap_native_only_scenario(id)) append_profile(21, id, "webtransport");
+                }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
                     auto driven = profiles.at(index);

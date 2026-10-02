@@ -1,4 +1,5 @@
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft21_gap_a.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
 #include "moq/interop/scenarios/draft21_request.h"
@@ -518,6 +519,8 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
         bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
+    // Slice A completeness-gap bindings (draft21_gap_a.cpp).
+    for (auto& binding : draft21_gap_a_bindings()) bindings.push_back(std::move(binding));
     return bindings;
 }
 

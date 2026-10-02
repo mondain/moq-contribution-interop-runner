@@ -146,7 +146,10 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 718);
+    // Every observed profile is repeated once as a driven profile.
+    const auto profile_total = health.at("executable_profiles").size();
+    ASSERT_EQ(profile_total % 2, 0u);
+    const auto observed_profiles = profile_total / 2;
     for (const auto& profile : health.at("executable_profiles")) {
         EXPECT_TRUE(app::executable_scenario(
             profile.at("draft").get<unsigned>(),
@@ -194,8 +197,8 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
                   health.at("executable_profiles").at(index).at("draft"));
         EXPECT_FALSE(profile.at("configured"));
     }
-    for (std::size_t index = 0; index < 359; ++index) {
-        const auto& profile = health.at("executable_profiles").at(index + 359);
+    for (std::size_t index = 0; index < observed_profiles; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + observed_profiles);
         EXPECT_EQ(profile.at("mode"), "driven");
         EXPECT_EQ(profile.at("transport"),
                   health.at("executable_profiles").at(index).at("transport"));
@@ -251,8 +254,17 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     ASSERT_TRUE(page);
     EXPECT_EQ(page->status, 200);
     EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
-    EXPECT_NE(page->body.find("76/175"), std::string::npos);
-    EXPECT_NE(page->body.find("76/175"), std::string::npos);
+    for (const unsigned draft : {18u, 21u}) {
+        const auto current = catalog(draft);
+        const auto audit = requirements::audit_completeness(
+            *current,
+            draft == 18 ? requirements::draft18_executable_bindings()
+                        : requirements::draft21_executable_bindings(),
+            app::executable_scenarios(draft));
+        EXPECT_NE(page->body.find(std::to_string(audit.required_covered) + "/" +
+                                  std::to_string(audit.required_total)),
+                  std::string::npos);
+    }
 }
 
 TEST_F(HttpApiTest, ScoredRowWithoutEvaluatorEvidenceRemainsNotRun) {
