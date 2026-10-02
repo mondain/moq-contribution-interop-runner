@@ -32,12 +32,29 @@ std::optional<Fixture> transcript_fixture(const RawProbeTranscript& transcript) 
     }
     return std::nullopt;
 }
+
+// The credentials a token scenario sent: the first AUTHORIZATION TOKEN of a request
+// the runner wrote. A USE_VALUE token carries the invalid credential, a REGISTER
+// token the expired one.
+Draft21TokenCredentials transcript_credentials(const RawProbeTranscript& transcript) {
+    Draft21TokenCredentials result;
+    for (const auto& write : transcript.writes) {
+        const auto token = recover_token(write.write.bytes);
+        if (!token || !token->token_type) continue;
+        const Draft21TokenCredential credential{*token->token_type, token->value};
+        if (token->alias_type == wire::draft21::TokenAliasType::UseValue && !result.invalid)
+            result.invalid = credential;
+        else if (token->alias_type == wire::draft21::TokenAliasType::Register && !result.expired)
+            result.expired = credential;
+    }
+    return result;
+}
 }  // namespace
 
 std::vector<Draft21ContributionProbe> draft21_contribution_probes(
     std::chrono::milliseconds deadline, std::vector<std::vector<std::byte>> track_namespace,
-    std::vector<std::byte> track_name) {
-    const Fixture fixture{std::move(track_namespace), std::move(track_name)};
+    std::vector<std::byte> track_name, Draft21TokenCredentials credentials) {
+    const Fixture fixture{std::move(track_namespace), std::move(track_name), std::move(credentials)};
     if (deadline.count() <= 0 || !fixture_valid(fixture))
         throw std::invalid_argument("invalid draft-21 contribution probe configuration");
     std::vector<Draft21ContributionProbe> result;
@@ -82,8 +99,8 @@ std::optional<bool> evaluate_draft21_contribution_probe(
     if (!fixture) return std::nullopt;
     std::vector<Draft21ContributionProbe> candidates;
     try {
-        candidates = draft21_contribution_probes(probe.definition.deadline,
-                                                 fixture->track_namespace, fixture->track_name);
+        candidates = draft21_contribution_probes(probe.definition.deadline, fixture->track_namespace,
+                                                 fixture->track_name, transcript_credentials(transcript));
     } catch (const std::invalid_argument&) {
         return std::nullopt;
     }

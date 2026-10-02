@@ -930,7 +930,8 @@ public:
             for (const auto& field : run_config.track_fixture->namespace_fields)
                 contribution_namespace.push_back(bytes_of(field));
             auto profiles = scenarios::draft21_contribution_probes(run_config.timeout,
-                std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name));
+                std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name),
+                scenarios::Draft21TokenCredentials{config.invalid_auth_token, config.expired_auth_token});
             const auto found = std::find_if(profiles.begin(), profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown contribution probe");

@@ -304,6 +304,8 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-publisher-client-goaway-request",
     "d21-publisher-delete-with-pending-alias-uses",
     "d21-subgroup-completion-withheld-acknowledgments",
+    "d21-request-well-formed-invalid-token",
+    "d21-expired-token-alias-lifetime",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

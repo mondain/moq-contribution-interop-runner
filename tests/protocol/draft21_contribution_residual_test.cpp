@@ -77,7 +77,8 @@ TEST(ContributionResidual, RegistryAndBindingsCoverTheNewScenarios) {
           "d21-publisher-update-credit-limit", "d21-publisher-update-credit-per-stream",
           "d21-publisher-update-zero-unlimited", "d21-publisher-client-goaway-control",
           "d21-publisher-client-goaway-request", "d21-publisher-delete-with-pending-alias-uses",
-          "d21-subgroup-completion-withheld-acknowledgments"}) {
+          "d21-subgroup-completion-withheld-acknowledgments", "d21-request-well-formed-invalid-token",
+          "d21-expired-token-alias-lifetime"}) {
         EXPECT_TRUE(app::draft21_contribution_scenario(21, scenario)) << scenario;
         EXPECT_TRUE(app::raw_probe_scenario(21, scenario)) << scenario;
         EXPECT_NO_THROW(find_probe(probes(), scenario)) << scenario;
@@ -905,6 +906,146 @@ TEST(ContributionResidual, AnUncommittedSubgroupMustBeResetWhenItsTimerExpires) 
     refused.reply(refused.stream_of(0), request_error(0x10), true);
     EXPECT_TRUE(probe.definition.response_ready(refused.partial()));
     EXPECT_EQ(judge(probe, refused.finish()), std::nullopt);
+}
+
+// ---- Section 8.9: operator-configured credentials ----------------------------------------------------------
+const std::vector<Draft21ContributionProbe>& token_probes() {
+    static const auto value = draft21_contribution_probes(
+        std::chrono::milliseconds{1000}, {}, cbytes({'x'}),
+        Draft21TokenCredentials{Draft21TokenCredential{4, cbytes({'b', 'a', 'd'})},
+                                Draft21TokenCredential{4, cbytes({'o', 'l', 'd'})}});
+    return value;
+}
+
+TEST(ContributionResidual, TokenScenariosSendNothingWithoutAConfiguredCredential) {
+    for (const char* scenario : {"d21-request-well-formed-invalid-token", "d21-expired-token-alias-lifetime"}) {
+        const auto& probe = find_probe(probes(), scenario);
+        EXPECT_TRUE(probe.definition.writes.empty()) << scenario;
+        ContributionRun run(probe);
+        // Ready at once and never scored: there is no stimulus to judge.
+        EXPECT_TRUE(probe.definition.response_ready(run.partial())) << scenario;
+        EXPECT_EQ(evaluate_draft21_contribution_probe(run.finish(), probe), std::nullopt) << scenario;
+    }
+}
+
+TEST(ContributionResidual, InvalidTokenIsSentAsUseValueOfTheConfiguredType) {
+    const auto& probe = find_probe(token_probes(), "d21-request-well-formed-invalid-token");
+    EXPECT_EQ(probe.requirement_id, "D21-8-9-MUST-270");
+    ASSERT_EQ(probe.definition.writes.size(), 1u);
+    // TRACK_STATUS (0xd), Request ID 1, track "x", one AUTHORIZATION TOKEN (0x03) holding a
+    // USE_VALUE token (Alias Type 3, Token Type 4, Value "bad").
+    EXPECT_EQ(probe.definition.writes[0].bytes,
+              cbytes({0xd, 0, 12, 1, 0, 1, 'x', 1, 3, 5, 3, 4, 'b', 'a', 'd'}));
+}
+
+std::optional<bool> invalid_token_outcome(const Bytes& response, bool fin = true) {
+    const auto& probe = find_probe(token_probes(), "d21-request-well-formed-invalid-token");
+    ContributionRun run(probe);
+    run.deliver(0);
+    if (!response.empty()) run.reply(run.stream_of(0), response, fin);
+    return judge(probe, run.finish());
+}
+
+TEST(ContributionResidual, WellFormedInvalidTokenIsRejectedWithMalformedAuthToken) {
+    // REQUEST_ERROR MALFORMED_AUTH_TOKEN (0x4).
+    EXPECT_EQ(invalid_token_outcome(request_error(0x4)), true);
+    // The invalid credential was accepted, or rejected as something else.
+    EXPECT_EQ(invalid_token_outcome(request_ok()), false);
+    EXPECT_EQ(invalid_token_outcome(request_error(0x1)), false);
+    EXPECT_EQ(invalid_token_outcome(request_error(0x10)), false);
+    // NOT_SUPPORTED means the Token Type is not understood: the precondition is unmet.
+    EXPECT_EQ(invalid_token_outcome(request_error(0x3)), std::nullopt);
+    EXPECT_EQ(invalid_token_outcome({}), std::nullopt);
+    const auto& probe = find_probe(token_probes(), "d21-request-well-formed-invalid-token");
+    ContributionRun pending(probe);
+    pending.deliver(0);
+    EXPECT_FALSE(probe.definition.response_ready(pending.partial()));
+    // A session close (the structural error) is not the message-level rejection.
+    ContributionRun closed(probe);
+    closed.deliver(0);
+    closed.event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0x16, {}});
+    EXPECT_EQ(judge(probe, closed.finish()), std::nullopt);
+}
+
+TEST(ContributionResidual, ExpiredTokenScenarioRegistersUsesAndRegistersAgain) {
+    const auto& probe = find_probe(token_probes(), "d21-expired-token-alias-lifetime");
+    EXPECT_EQ(probe.requirement_id, "D21-8-9-MUST-273");
+    ASSERT_EQ(probe.definition.writes.size(), 3u);
+    // REGISTER Alias 1 (Alias Type 1, Token Type 4, Value "old"), then USE_ALIAS Alias 1
+    // (Alias Type 2), then REGISTER Alias 1 again.
+    EXPECT_EQ(probe.definition.writes[0].bytes,
+              cbytes({0xd, 0, 13, 1, 0, 1, 'x', 1, 3, 6, 1, 1, 4, 'o', 'l', 'd'}));
+    EXPECT_EQ(probe.definition.writes[1].bytes, cbytes({0xd, 0, 9, 3, 0, 1, 'x', 1, 3, 2, 2, 1}));
+    EXPECT_EQ(probe.definition.writes[2].bytes,
+              cbytes({0xd, 0, 13, 5, 0, 1, 'x', 1, 3, 6, 1, 1, 4, 'o', 'l', 'd'}));
+    EXPECT_TRUE(static_cast<bool>(probe.definition.writes[1].evidence_ready));
+    EXPECT_TRUE(static_cast<bool>(probe.definition.writes[2].evidence_ready));
+}
+
+struct ExpiredRun {
+    Bytes registration = request_error(0x5);
+    Bytes use = request_error(0x5);
+    std::optional<Bytes> second_registration;
+    std::optional<std::uint64_t> close_code;
+    std::optional<std::uint64_t> unknown_code;
+    bool second_sent = true;
+};
+
+std::optional<bool> expired_outcome(const ExpiredRun& spec) {
+    const auto& probe = find_probe(token_probes(), "d21-expired-token-alias-lifetime");
+    ContributionRun run(probe);
+    run.deliver(0);
+    run.reply(run.stream_of(0), spec.registration, true);
+    if (!spec.use.empty()) {
+        run.deliver(1);
+        run.reply(run.stream_of(1), spec.use, true);
+        if (spec.second_sent) {
+            run.deliver(2);
+            if (spec.second_registration) run.reply(run.stream_of(2), *spec.second_registration, true);
+            if (spec.close_code)
+                run.event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, *spec.close_code, {}});
+        }
+    }
+    auto transcript = run.finish();
+    transcript.unknown_auth_token_alias_compatibility_code = spec.unknown_code;
+    return judge(probe, transcript);
+}
+
+TEST(ContributionResidual, ExpiredTokenAliasIsRetainedUntilDeleted) {
+    ExpiredRun retained;
+    retained.close_code = 0x14;
+    // EXPIRED_AUTH_TOKEN for the Alias use, then DUPLICATE_AUTH_TOKEN_ALIAS for the repeat.
+    EXPECT_EQ(expired_outcome(retained), true);
+    // The Alias use fails as something else: not retained as an expired token.
+    ExpiredRun other = retained;
+    other.use = request_error(0x1);
+    EXPECT_EQ(expired_outcome(other), false);
+    // A compatibility profile that maps UNKNOWN_AUTH_TOKEN_ALIAS to a code: it was dropped.
+    ExpiredRun dropped = retained;
+    dropped.use = request_error(0x31);
+    dropped.unknown_code = 0x31;
+    EXPECT_EQ(expired_outcome(dropped), false);
+    // Registering the Alias again succeeded or failed softly instead of closing the session.
+    ExpiredRun reregistered = retained;
+    reregistered.close_code = std::nullopt;
+    reregistered.second_registration = request_error(0x5);
+    EXPECT_EQ(expired_outcome(reregistered), false);
+    // The credential did not expire, so nothing is shown.
+    ExpiredRun fresh = retained;
+    fresh.registration = request_ok();
+    EXPECT_EQ(expired_outcome(fresh), std::nullopt);
+    // The Alias use succeeded or went unanswered.
+    ExpiredRun accepted = retained;
+    accepted.use = request_ok();
+    EXPECT_EQ(expired_outcome(accepted), std::nullopt);
+    // No decision about the repeat registration yet.
+    ExpiredRun undecided = retained;
+    undecided.close_code = std::nullopt;
+    EXPECT_EQ(expired_outcome(undecided), std::nullopt);
+    // A close with another code is not a duplicate-alias close.
+    ExpiredRun elsewhere = retained;
+    elsewhere.close_code = 0x3;
+    EXPECT_EQ(expired_outcome(elsewhere), std::nullopt);
 }
 
 }  // namespace

@@ -3,9 +3,11 @@
 // Internal helpers shared by the draft-21 contribution profile sources. This
 // header is private to src/scenarios and is not part of the runner API.
 
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft21/setup.h"
+#include "moq/interop/wire/draft21/token.h"
 
 #include <cstdint>
 #include <functional>
@@ -26,6 +28,8 @@ constexpr std::size_t kMaximumTotalBytes = 1u << 20;
 struct Fixture {
     Namespace track_namespace;
     Bytes track_name;
+    // Operator-supplied credentials for the token rows; absent means those scenarios send nothing.
+    Draft21TokenCredentials credentials{};
 };
 
 bool fixture_valid(const Fixture& fixture);
@@ -65,6 +69,9 @@ Bytes token_value(std::uint64_t alias_type, std::optional<std::uint64_t> alias,
 
 // ---- decoding -------------------------------------------------------------
 std::optional<Fixture> recover_fixture(std::span<const std::byte> request);
+// The first AUTHORIZATION TOKEN (0x03) parameter of a SUBSCRIBE, FETCH or TRACK_STATUS
+// the runner wrote, decoded; absent when the request carries none.
+std::optional<wire::draft21::Token> recover_token(std::span<const std::byte> request);
 
 struct Frame {
     std::uint64_t type{0};
@@ -109,6 +116,8 @@ public:
     const std::optional<PeerCloseInfo>& close() const noexcept { return close_; }
     // Courtesy responses the runner volunteered (empty for gate views).
     const std::vector<RawProbeCourtesyWrite>& courtesy_writes() const noexcept { return courtesy_; }
+    // REQUEST_ERROR code a compatibility profile maps to UNKNOWN_AUTH_TOKEN_ALIAS, if configured.
+    std::optional<std::uint64_t> unknown_alias_code() const noexcept { return unknown_alias_code_; }
     const std::optional<wire::draft21::SetupMessage>& peer_setup() const noexcept { return peer_setup_; }
     std::optional<std::uint64_t> peer_option(std::uint64_t type) const;
     const StreamRecord* stream(transport::StreamId id) const;
@@ -134,6 +143,7 @@ private:
     std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
     bool window_ended_{false};
+    std::optional<std::uint64_t> unknown_alias_code_;
     std::vector<RawProbeCourtesyWrite> courtesy_;
     std::map<transport::StreamId, StreamRecord> streams_;
     std::vector<DatagramRecord> datagrams_;

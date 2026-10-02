@@ -1165,6 +1165,115 @@ Spec uncommitted_subgroup_spec() {
         true);
 }
 
+// ---- Section 8.9 lines 3270-3271 and 3288-3292: operator-configured credentials -----------
+// The runner cannot mint a credential for a Token Type, so these two scenarios send
+// what the operator supplied for a Token Type the publisher is configured to understand
+// (RunManager options --invalid-auth-token and --expired-auth-token). Without a
+// credential nothing is sent and the context ends unscored.
+constexpr std::uint64_t kRequestErrorMalformedToken = 0x4;  // Section 12.3, Table 19
+constexpr std::uint64_t kRequestErrorNotSupported = 0x3;
+constexpr std::uint64_t kRequestErrorExpiredToken = 0x5;
+constexpr std::uint64_t kDuplicateAuthTokenAlias = 0x14;    // Section 12.2, Table 18
+constexpr std::uint64_t kAuthorization = 0x03;
+constexpr std::uint64_t kTrackStatus = 0xd;
+
+Bytes token_status(std::uint64_t request_id, const Fixture& fixture, const Bytes& token) {
+    return request_frame(kTrackStatus, request_id, fixture, true, {param_lp(kAuthorization, token)});
+}
+
+std::optional<std::uint64_t> request_error_code(const std::vector<Frame>& frames) {
+    if (frames.empty() || frames.front().type != kRequestError) return std::nullopt;
+    wire::Cursor body(frames.front().body);
+    return read_vi(body);
+}
+
+bool answered(const View& view, std::size_t write) {
+    if (!view.write_frames(write).empty()) return true;
+    const auto* stream = view.write_stream(write);
+    return stream && (stream->fin || stream->reset);
+}
+
+Spec invalid_token_spec() {
+    return spec("d21-request-well-formed-invalid-token",
+        {{"D21-8-9-MUST-270", "d21-invalid-token-message-error"}},
+        [](const Fixture& fixture) {
+            auto definition = residual_definition();
+            // USE_VALUE (Alias Type 3): Token Type and Value, no Alias.
+            if (fixture.credentials.invalid)
+                definition.writes.push_back(request_write(token_status(1, fixture,
+                    token_value(3, std::nullopt, fixture.credentials.invalid->token_type,
+                                fixture.credentials.invalid->value))));
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            if (view.write_bytes(0).empty()) return {true, std::nullopt};  // no credential configured
+            const auto frames = view.write_frames(0);
+            if (frames.empty()) return {view.close().has_value(), std::nullopt};
+            // "The receiver of a message containing a well-formed Token structure that is
+            // otherwise invalid MUST reject that message with an MALFORMED_AUTH_TOKEN error."
+            if (frames.front().type == kRequestOk) return {true, false};
+            const auto code = request_error_code(frames);
+            if (!code) return {true, std::nullopt};
+            // NOT_SUPPORTED says the Token Type is not understood: the precondition is unmet.
+            if (*code == kRequestErrorNotSupported) return {true, std::nullopt};
+            return {true, *code == kRequestErrorMalformedToken};
+        },
+        false);
+}
+
+RawProbeWrite after_response(Bytes bytes, std::size_t previous) {
+    RawProbeWrite write = request_write(std::move(bytes), true);
+    write.evidence_ready = [previous](const RawProbeGateInput& input) {
+        const View view(input.prior_writes, input.events);
+        return view.valid() && answered(view, previous);
+    };
+    return write;
+}
+
+// The expired credential is registered under Alias 1 (the message fails, yet "MUST
+// register the Token Alias ... even if the message fails"), then used by Alias and
+// registered a second time. "If a receiver detects that an authorization token has
+// expired, it MUST retain the registered Alias until it is deleted by the sender ...
+// Any message that references an expired token with Alias Type USE_ALIAS fails with
+// EXPIRED_AUTH_TOKEN", and registering a registered Alias again closes the session
+// with DUPLICATE_AUTH_TOKEN_ALIAS.
+Spec expired_token_alias_spec() {
+    return spec("d21-expired-token-alias-lifetime",
+        {{"D21-8-9-MUST-273", "d21-expired-token-alias-retained-until-delete"}},
+        [](const Fixture& fixture) {
+            auto definition = residual_definition();
+            if (!fixture.credentials.expired) return definition;
+            const auto& credential = *fixture.credentials.expired;
+            definition.writes.push_back(request_write(token_status(1, fixture,
+                token_value(1, 1, credential.token_type, credential.value)), true));
+            definition.writes.push_back(after_response(token_status(3, fixture,
+                token_value(2, 1, std::nullopt, {})), 0));
+            definition.writes.push_back(after_response(token_status(5, fixture,
+                token_value(1, 1, credential.token_type, credential.value)), 1));
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            if (view.write_bytes(0).empty()) return {true, std::nullopt};  // no credential configured
+            const auto registration = view.write_frames(0);
+            // The credential must really be expired: a registration that succeeds proves nothing.
+            if (!registration.empty() && registration.front().type != kRequestError) return {true, std::nullopt};
+            if (!answered(view, 1)) return {view.close().has_value(), std::nullopt};
+            const auto use = view.write_frames(1);
+            if (use.empty()) return {true, std::nullopt};
+            const auto code = request_error_code(use);
+            if (!code) return {true, std::nullopt};
+            // An Alias the receiver no longer knows (UNKNOWN_AUTH_TOKEN_ALIAS) means it was dropped.
+            if (view.unknown_alias_code() && *code == *view.unknown_alias_code()) return {true, false};
+            if (*code != kRequestErrorExpiredToken) return {true, false};
+            // Still registered, so registering it again before a DELETE is a duplicate.
+            const auto* close = view.close() ? &*view.close() : nullptr;
+            if (close && close->application && close->code == kDuplicateAuthTokenAlias) return {true, true};
+            if (!view.write_frames(2).empty()) return {true, false};
+            return {close != nullptr, std::nullopt};
+        },
+        false);
+}
+
 }  // namespace
 
 std::vector<Spec> residual_specs() {
@@ -1187,6 +1296,8 @@ std::vector<Spec> residual_specs() {
     result.push_back(client_goaway_spec("d21-publisher-client-goaway-request", false));
     result.push_back(pending_alias_delete_spec());
     result.push_back(uncommitted_subgroup_spec());
+    result.push_back(invalid_token_spec());
+    result.push_back(expired_token_alias_spec());
     return result;
 }
 

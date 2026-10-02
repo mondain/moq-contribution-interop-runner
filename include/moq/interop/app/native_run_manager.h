@@ -2,6 +2,7 @@
 
 #include "moq/interop/app/types.h"
 #include "moq/interop/requirements/catalog.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/storage/run_store.h"
 #include "moq/interop/transport/native_quic_listener.h"
 
@@ -31,6 +32,11 @@ struct NativeRunManagerConfig {
     std::filesystem::path driver_tls_ca{};
     std::filesystem::path driver_log_root{};
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
+    // Credentials, for a Token Type the publisher under test is configured to
+    // understand, used by the draft-21 token rows D21-8-9-MUST-270 (invalid) and
+    // D21-8-9-MUST-273 (expired). The runner cannot create these itself.
+    std::optional<scenarios::Draft21TokenCredential> invalid_auth_token{};
+    std::optional<scenarios::Draft21TokenCredential> expired_auth_token{};
 };
 
 enum class RunStartStatus {
