@@ -1,5 +1,6 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/scenarios/draft18_peer_close.h"
 #include "moq/interop/scenarios/draft18_request.h"
 #include "moq/interop/scenarios/draft18_response.h"
@@ -322,12 +323,22 @@ std::vector<Outcome> evaluate_draft18(
     const auto immutable_profiles = scenarios::draft18_immutable_repeat_probes();
     const auto object_profiles = scenarios::draft18_object_repeat_probes();
     const auto goaway_profiles = scenarios::draft18_request_goaway_probes();
+    const auto gap_a_profiles = scenarios::draft18_gap_a_probes();
     for (const auto& requirement : catalog.requirements) {
         OutcomeState state = OutcomeState::NotRun;
         if (requirement.applicability != Applicability::Applicable) {
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (std::any_of(gap_a_profiles.begin(), gap_a_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, gap_a_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_draft18_gap_a_probe(
+                        *context.raw_probe, profile, context.webtransport);
+                });
         } else if (std::any_of(peer_profiles.begin(), peer_profiles.end(), [&](const auto& profile) {
                        return profile.requirement_id == requirement.id;
                    })) {
@@ -633,6 +644,10 @@ std::vector<ExecutableBinding> draft18_executable_bindings() {
                           {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
     for (const auto& profile : scenarios::draft18_subscription_cancel_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_gap_a_probes()) {
         result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
                           {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }

@@ -7,6 +7,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/scenarios/draft18_peer_close.h"
 #include "moq/interop/scenarios/draft18_request.h"
 #include "moq/interop/scenarios/draft18_response.h"
@@ -404,6 +405,22 @@ public:
     std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
         const RunConfig& run_config, std::string_view id) const {
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
+        if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_scenario(id)) {
+            std::vector<std::vector<std::byte>> name_space;
+            std::vector<std::byte> name{std::byte{'x'}};
+            if (run_config.track_fixture) {
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    name_space.push_back(bytes_of(field));
+                name = bytes_of(run_config.track_fixture->track_name);
+            } else if (scenarios::draft18_gap_a_requires_track(id)) {
+                throw std::invalid_argument("gap-A probe requires a track fixture");
+            }
+            auto profiles = scenarios::draft18_gap_a_probes(run_config.timeout, name_space, name);
+            const auto found = std::find_if(profiles.begin(), profiles.end(),
+                [id](const auto& profile) { return profile.definition.id == id; });
+            if (found == profiles.end()) return std::nullopt;
+            return std::move(found->definition);
+        }
         if (auto definition = resolve_track_probe(run_config, id)) return definition;
         const auto find = [id](auto profiles) -> std::optional<scenarios::RawProbeDefinition> {
             const auto found = std::find_if(profiles.begin(), profiles.end(),
@@ -1073,6 +1090,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             if (!scenarios::discovery_overlap_namespace_valid(fields))
                 return {RunStartStatus::InvalidConfig, {}, {}};
         }
+        if (config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_native_only(id) &&
+            config.transport != TransportKind::NativeQuic)
+            return {RunStartStatus::Unsupported, {}, {}};
         if (config.draft == DraftVersion::Draft18) {
             const auto profiles = scenarios::draft18_close_profiles();
             const auto found = std::find_if(profiles.begin(), profiles.end(), [&id](const auto& profile) {

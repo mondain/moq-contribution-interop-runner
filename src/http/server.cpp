@@ -2,6 +2,7 @@
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/scenarios/draft18_peer_close.h"
 #include "moq/interop/scenarios/draft18_request.h"
 #include "moq/interop/scenarios/draft18_response.h"
@@ -612,6 +613,10 @@ public:
                         append_profile(draft,profile.definition.id,"native-quic");
                         append_profile(draft,profile.definition.id,"webtransport");
                     }
+                }
+                for (const auto& profile : scenarios::draft18_gap_a_probes()) {
+                    append_profile(18, profile.definition.id, "native-quic");
+                    if (!profile.native_only) append_profile(18, profile.definition.id, "webtransport");
                 }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
