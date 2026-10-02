@@ -44,6 +44,11 @@ struct RawProbeDefinition {
     std::chrono::milliseconds deadline{1000};
     std::function<bool(const RawProbeTranscript&)> response_ready{};
     std::function<bool(std::span<const std::byte>)> peer_request_ready{};
+    // Answers each parameter-free PUBLISH_NAMESPACE the publisher opens with
+    // REQUEST_OK, as a subscriber must for the publisher to proceed (draft 18
+    // Section 10.15). The answers are recorded in the transcript, are not part
+    // of the stimulus, and cannot be combined with PeerBidi writes.
+    bool acknowledge_publisher_namespace{false};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
@@ -60,8 +65,15 @@ struct RawProbeGateInput {
     std::span<const RawProbeAcceptedWrite> prior_writes;
     std::span<const transport::TransportEvent> events;
 };
+// A REQUEST_OK the controller wrote on a publisher-opened request stream.
+struct RawProbeAcknowledgement {
+    transport::StreamId stream_id{0};
+    // Transport events observed when the answer was fully accepted.
+    std::size_t event_count{0};
+};
 struct RawProbeTranscript {
     std::string scenario_id;
+    std::vector<RawProbeAcknowledgement> acknowledgements;
     RawProbeAcceptedWrite setup;
     std::vector<RawProbeAcceptedWrite> writes;
     bool transport_established{false};
@@ -101,6 +113,10 @@ private:
     std::set<transport::StreamId> cancelled_peer_requests_;
     std::optional<transport::StreamId> peer_request_stream_;
     std::size_t peer_request_bytes_count_{0};
+    std::map<transport::StreamId, std::vector<std::byte>> acknowledgement_candidates_;
+    std::set<transport::StreamId> acknowledgement_pending_;
+    std::set<transport::StreamId> acknowledged_;
+    void acknowledge_publisher_namespaces();
     std::optional<RawProbeClock::time_point> delivered_at_;
     std::optional<RawProbeClock::time_point> started_at_;
     std::size_t next_write_{0};

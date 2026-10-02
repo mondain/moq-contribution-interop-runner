@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/raw_probe.h"
+#include "moq/interop/wire/draft18/messages.h"
 #include <algorithm>
 #include <stdexcept>
 #include <set>
@@ -144,7 +145,11 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
         (definition_.start_after_peer_setup && !definition_.peer_setup_ready) ||
         (std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
             return write.channel == RawProbeChannel::PeerBidi;
-        }) && !definition_.peer_request_ready))
+        }) && !definition_.peer_request_ready) ||
+        (definition_.acknowledge_publisher_namespace &&
+         std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
+             return write.channel == RawProbeChannel::PeerBidi;
+         })))
         throw std::invalid_argument("invalid raw probe definition");
     transcript_.scenario_id = definition_.id;
     transcript_.setup.write = {RawProbeChannel::NewUni, definition_.setup_bytes, false};
@@ -219,6 +224,27 @@ bool RawProbeController::flush(RawProbeAcceptedWrite& pending) {
         pending.fin_accepted = true;
     }
     return true;
+}
+void RawProbeController::acknowledge_publisher_namespaces() {
+    static const std::vector<std::byte> request_ok = [] {
+        wire::ByteWriter output(16);
+        wire::draft18::encode_message(wire::draft18::RequestOkMessage{{}, {}}, output);
+        return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+    }();
+    for (auto it = acknowledgement_pending_.begin(); it != acknowledgement_pending_.end();) {
+        const auto id = *it;
+        if (cancelled_peer_requests_.contains(id)) { it = acknowledgement_pending_.erase(it); continue; }
+        const auto result = transport_.write(id, request_ok, false);
+        if (result.status == transport::TransportStatus::WouldBlock && result.accepted == 0) { ++it; continue; }
+        if (result.status != transport::TransportStatus::Success || result.accepted != request_ok.size()) {
+            // A closing or reset stream cannot be answered; nothing is scored from it.
+            it = acknowledgement_pending_.erase(it);
+            continue;
+        }
+        acknowledged_.insert(id);
+        transcript_.acknowledgements.push_back({id, transcript_.events.size()});
+        it = acknowledgement_pending_.erase(it);
+    }
 }
 const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now) {
     if (transcript_.complete || transcript_.harness_failed || transcript_.timed_out) return transcript_;
@@ -301,6 +327,23 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (definition_.peer_setup_ready && definition_.peer_setup_ready(candidate))
                     transcript_.peer_setup_received = true;
             }
+            if (definition_.acknowledge_publisher_namespace && (data->stream_id & 3u) == 0u &&
+                !acknowledged_.contains(data->stream_id) &&
+                !acknowledgement_pending_.contains(data->stream_id) &&
+                (acknowledgement_candidates_.contains(data->stream_id) || acknowledgement_candidates_.size() < 64)) {
+                auto& candidate = acknowledgement_candidates_[data->stream_id];
+                if (candidate.size() + data->data.size() <= kMaximumSetupBytes) {
+                    candidate.insert(candidate.end(), data->data.begin(), data->data.end());
+                    wire::Cursor cursor(candidate);
+                    const auto decoded = wire::draft18::decode_message(wire::draft18::StreamRole::Request, cursor, {});
+                    const auto* message = std::get_if<wire::draft18::Message>(&decoded);
+                    const auto* announce = message ? std::get_if<wire::draft18::PublishNamespaceMessage>(message) : nullptr;
+                    if (announce && announce->parameters.empty() && !announce->track_namespace.fields.empty() &&
+                        !(announce->track_namespace.fields.front().size() == 1 &&
+                          announce->track_namespace.fields.front().front() == std::byte{'.'}))
+                        acknowledgement_pending_.insert(data->stream_id);
+                }
+            }
             const bool opener_accepted = std::any_of(transcript_.writes.begin(),transcript_.writes.end(),[](const auto& write) {
                 return write.write.channel == RawProbeChannel::PeerBidi && !write.write.reuse_write_stream && write.delivery_event_count;
             });
@@ -331,6 +374,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         }
     }
     // All events in this batch were already observed before any new writes.
+    if (!transcript_.harness_failed && transcript_.transport_established) acknowledge_publisher_namespaces();
     if (!transcript_.harness_failed) send();
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {

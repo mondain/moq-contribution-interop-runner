@@ -9,7 +9,7 @@ namespace moq::interop::app {
 // Scenario IDs executed by the draft-18 gap-A raw probes
 // (include/moq/interop/scenarios/draft18_gap_a.h). Keep in step with
 // gap_a::*_entries(); tests/protocol/draft18_gap_a_registry_test.cpp checks it.
-inline constexpr std::array<std::string_view, 26> kDraft18GapAScenarios{
+inline constexpr std::array<std::string_view, 29> kDraft18GapAScenarios{
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "establish-moqt-with-datagram-capable-peer",
@@ -36,10 +36,14 @@ inline constexpr std::array<std::string_view, 26> kDraft18GapAScenarios{
     "publisher-rejects-subscribe-request",
     "publish-objects-before-within-and-after-subscription-range",
     "joining-fetch-after-forward-enabled-and-track-advanced",
+    // Slice B (src/scenarios/draft18_gap_b.cpp).
+    "publisher-queries-track-status-before-resuming-publication",
+    "publish-with-and-without-parameter-extension-negotiation",
+    "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters",
 };
 
 // The subset that names a configured track fixture in its stimulus.
-inline constexpr std::array<std::string_view, 22> kDraft18GapATrackScenarios{
+inline constexpr std::array<std::string_view, 24> kDraft18GapATrackScenarios{
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "register-delete-then-use-token-alias",
@@ -62,6 +66,8 @@ inline constexpr std::array<std::string_view, 22> kDraft18GapATrackScenarios{
     "publisher-rejects-subscribe-request",
     "publish-objects-before-within-and-after-subscription-range",
     "joining-fetch-after-forward-enabled-and-track-advanced",
+    "publish-with-and-without-parameter-extension-negotiation",
+    "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters",
 };
 
 template <std::size_t A, std::size_t B>
