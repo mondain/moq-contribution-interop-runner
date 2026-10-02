@@ -257,7 +257,8 @@ jq -e --arg id "${run_id}" '
         "transport": "native-quic",
         "mode": "observed",
         "scenarios": ["foundation/persistence"],
-        "timeout_ms": 30000
+        "timeout_ms": 30000,
+        "publisher_capabilities": {"fetch": true}
     }
 ' <<<"${persisted}" >/dev/null
 assert_runtime_hardening "${REPLACEMENT}"

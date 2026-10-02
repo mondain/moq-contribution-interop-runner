@@ -129,7 +129,8 @@ tree): draft 18 went from 34 passing and 49 failing rows to 57 and 30; draft 21 
 225 to 56; the remaining ones are scenarios whose stimulus moqxr cannot serve (it
 implements no FETCH, only serves namespace `media`, does not advertise
 `MAX_REQUEST_UPDATES` or a token cache size, and exits when its own PUBLISH requests
-go unanswered). Failing rows rose in the second half of the work on purpose: a
+go unanswered). The FETCH part of that is now handled by the capability declaration
+described next, so those runs no longer have to end in an error. Failing rows rose in the second half of the work on purpose: a
 liveness follow-up (below) now turns 14 rows that used to stay unscored into proven
 failures.
 
@@ -228,6 +229,39 @@ serving another could be wrongly failed. See [scoring-and-audit.md](scoring-and-
   draft 21 rows moqxr never answered the TRACK_STATUS and the session ended
   (`-270` and `-273` stayed `not_run`). Do not supply these credentials for moqxr:
   the four rows are not scoreable against it and are reported as `not_run`.
+
+## moqxr declares no FETCH
+
+moqxr is a live publisher with no cache. It does not implement FETCH: it answers
+every FETCH with REQUEST_ERROR 0x1 ("unsupported request stream") and closes the
+session. The drafts allow that (draft 18 Section 4, draft 21 Section 1.5: an
+endpoint that is not a relay MAY implement only a subset), so the runner treats it
+as a declaration, not a failure. Start the runner for moqxr with
+`--publisher-no-fetch`, or send `"publisher_capabilities": {"fetch": false}` with
+a run; see [http-api.md](http-api.md#declaring-publisher-capabilities).
+
+Effect, measured against `openmoq-publisher` 0.4.1 with the bundled adapter over
+native QUIC:
+
+- Run alone and without the declaration, the 45 FETCH-dependent scenarios (23 in
+  draft 18, 22 in draft 21) ended in 13 run-level `error` verdicts (9 in draft 18,
+  4 in draft 21), 1 `fail` (draft 18) and 31 `incomplete`. None of them could
+  produce a pass, and the error runs scored nothing at all.
+- With the declaration, each of those 45 selections is refused up front with 422
+  `scenario_requires_publisher_capability`; nothing is started.
+- With the declaration, a selection that mixes them with other scenarios skips the
+  FETCH ones (a `context_skipped` event each) and runs the rest. A draft 18 run of
+  four independent and four FETCH scenarios finished `fail` on the independent
+  ones (moqxr findings) instead of `error` at the first FETCH context; a draft 21
+  run of three and four finished `incomplete`. Rows whose every scenario needs
+  FETCH are `not_applicable` and leave the denominators (27 draft 18 rows and 25
+  draft 21 rows; for example the draft 18 required denominator is 1470 instead of
+  1730). Rows that mix FETCH and other scenarios are unchanged.
+- The NOT_SUPPORTED answer that the drafts ask of a limited endpoint is separate
+  work in moqxr (item M-17 of the [punch list](moqxr-punch-list.md)). The runner
+  sends no FETCH to a publisher that declared it away, so it does not check that
+  answer. A scenario that sends a FETCH to such a publisher and requires
+  NOT_SUPPORTED could be added later as an optional row; it does not exist today.
 
 ## Limitations recorded for moqxr
 

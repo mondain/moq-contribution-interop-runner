@@ -55,7 +55,8 @@ MOQXR_BIN=$M/build/openmoq-publisher $R/build/moq-interop-runner \
   --tls-cert $T/cert.pem --tls-key $T/key.pem \
   --driver-executable $R/adapters/moqxr/run.sh \
   --driver-fixture $M/tests/fixtures/locmaf-publisher.mp4 \
-  --driver-log-root $T/logs &
+  --driver-log-root $T/logs \
+  --publisher-no-fetch &
 
 curl -s -X POST http://127.0.0.1:19811/api/v1/runs -H 'Content-Type: application/json' -d '{
   "draft": 21, "transport": "webtransport", "mode": "driven",
@@ -398,7 +399,8 @@ limited endpoint does with a request it does not implement:
 - **Effect on runner results:** the rows that need FETCH to be served
   (for example D18-10-12-2-MUST-004, the Joining Fetch rule) cannot be scored
   against moqxr and stay `not_run`/ambiguous; that is expected. The runner side of
-  this is listed under "Runner-side follow-ups".
+  this was listed under "Runner-side follow-ups" and is done there (the runner
+  now accepts a no-FETCH declaration).
 
 ### M-18 WebTransport does not validate publisher datagrams or peer data streams
 
@@ -495,10 +497,16 @@ the runner's expectation is not what the draft requires.)
 
 These come out of the same results but belong to the runner repository:
 
-- **FETCH-based scenarios against a live publisher.** About ten scenarios start with
-  a FETCH and end in a run-level error against moqxr ("received unsupported request
-  stream"). The runner should let a publisher declare that it has no cache, and report
-  those scenarios as not applicable instead of an error.
+- **FETCH-based scenarios against a live publisher. Done.** 45 scenarios (23 in
+  draft 18, 22 in draft 21) start with a FETCH and used to end in a run-level error
+  against moqxr ("received unsupported request stream"). The runner now lets a
+  publisher declare that it has no FETCH (`--publisher-no-fetch`, or
+  `"publisher_capabilities": {"fetch": false}` in a run): those scenarios are skipped,
+  rows that need only them are `not_applicable`, and a selection of only such
+  scenarios is refused with 422 `scenario_requires_publisher_capability`. Start the
+  runner with `--publisher-no-fetch` when you reproduce a finding against moqxr, and
+  do not select FETCH scenarios alone. M-17 above stays moqxr work; the declaration
+  does not test the NOT_SUPPORTED answer. See [interop-notes.md](interop-notes.md).
 - **Draft 21 AUTHORITY/PATH rows (M-08)** are scored through the announcement
   controller and do not use the liveness follow-up; their rule only checks that the
   PUBLISH came after the runner's SETUP was written.

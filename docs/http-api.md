@@ -60,6 +60,49 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
 | `timeout_ms` | 2 to 3600000. For multi-scenario runs it applies to each context. |
 | `track` | Optional for receiver-error probes in observed mode, required for most scenarios and always required in driven mode. `namespace_hex` is an array of 0 to 32 nonempty hex strings; `name_hex` is the possibly empty hex Track Name. The decoded namespace plus name is limited to 4096 bytes. Hex preserves arbitrary bytes. |
+| `publisher_capabilities` | Optional object declaring what the publisher does not implement; see below. Absent means the publisher is fully capable. |
+
+### Declaring publisher capabilities
+
+The drafts let an endpoint that is not a relay implement only the subset of MOQT
+it needs (draft 18 Section 4, draft 21 Section 1.5), so a live publisher with no
+cache may legitimately have no FETCH. A run can say so:
+
+```json
+{"publisher_capabilities": {"fetch": false}}
+```
+
+`fetch` is the only capability so far and must be a boolean. Unknown names, other
+value types and a non-object are rejected with 400 `invalid_publisher_capabilities`.
+`{}` declares nothing.
+
+The runner can also carry a startup default, `--publisher-no-fetch`, so a driven
+setup declares it once. The effective declaration of a run is the value in its
+request when it gives one, otherwise the startup default, otherwise capable. An
+explicit `{"fetch": true}` therefore overrides `--publisher-no-fetch` for that
+run, and `{"fetch": false}` works without the flag. `GET /healthz` reports the
+startup default as `publisher_capability_defaults`.
+
+When `fetch` is `false`:
+
+- A run whose selected scenarios all need FETCH is refused with 422
+  `scenario_requires_publisher_capability`; the message names the first scenario
+  and the capability. No run, listener or publisher process is created.
+- In a run that mixes both kinds, the scenarios that need FETCH are skipped: no
+  listener context and no publisher process is started for them, and each gets a
+  `context_skipped` event with the detail `publisher declared no FETCH support`.
+  The selection is still recorded as requested.
+- A catalog row whose named scenarios all need FETCH is reported `not_applicable`
+  for the run, with the reason, and leaves the required, weighted and coverage
+  denominators. A row that also names a scenario that does not need FETCH is not
+  touched and keeps the rule that every named scenario must run. Skipped
+  scenarios therefore never turn a run into `error` or `fail`.
+
+The effective declaration is stored with the run: `config.publisher_capabilities`
+in the run record, a `publisher_capabilities` event (`detail` `fetch=false` or
+`fetch=true`) as the first event of every run, and the exports below. The
+`executable_profiles` entries in `/healthz` carry `requires_fetch` for each
+scenario; [scenario-reference.md](scenario-reference.md) lists them.
 
 List the executable scenario IDs for a profile from `/healthz`:
 
@@ -153,6 +196,8 @@ normal runs include:
 | `publisher_process` | Driven mode: the adapter process result (`status`, `exit_code`, `term_signal`, and `stdout_log` and `stderr_log` with `path`, `bytes`, `sha256`) |
 | `publisher_exit_after_refusal` | The publisher exited after the runner refused or rejected it; not a harness fault |
 | `harness_error` | The publisher process failed in a way that makes the context unusable |
+| `publisher_capabilities` | First event of every run: the effective declaration, `fetch=true` or `fetch=false`. It belongs to the run, so it has no `scenario_id` |
+| `context_skipped` | The scenario was not started because the publisher declared it does not implement a capability it needs; `detail` is `publisher declared no FETCH support` |
 | `runner_recovery` | Added at restart to a run that was interrupted |
 
 Events tied to a scored requirement carry its `requirement_id`; the JSON export
@@ -166,19 +211,27 @@ lists them per requirement in `evidence_sequences`.
   `evidence_sequences`) and `evidence` (the full event list). A row's `outcome`
   aggregates its observations: `pass`, `fail`, `not_run`, `not_testable`,
   `not_applicable`, `error` for an inconsistent set, or `null` when the run
-  recorded nothing for it.
+  recorded nothing for it. A scored row declared not applicable for the run
+  (see the publisher capabilities above) is `not_applicable` and carries a
+  `not_applicable_reason`, `null` for every other row. The document also has
+  `publisher_capabilities` and `skipped_scenarios` (`scenario_id`, `reason`).
 - `GET /results/{id}.tap` is TAP 14, one test point per selected scenario. A
   point is `ok` only when every applicable row bound to that scenario passed
   (or the scenario has none and is marked `# SKIP`). Failed, incomplete and
   errored scenarios are `not ok`; the YAML block gives `result` (`pass`,
-  `fail`, `incomplete`, `skip`, `error`), counts and `scoring_profile`.
+  `fail`, `incomplete`, `skip`, `error`), counts and `scoring_profile`. A
+  scenario skipped by a capability declaration is `ok ... # SKIP publisher
+  declared no FETCH support` (its YAML block adds `skip_reason`), and a comment
+  line after the plan records `publisher_capabilities fetch=false`.
   Because most runs leave rows `not_run`, TAP points are often `not ok` for
   scenarios that are merely incomplete.
 - `GET /results/{id}` is the HTML report. It accepts `strength` (`MUST`,
   `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`), `outcome` (`pass`, `fail`,
   `not_run`, `not_testable`, `not_applicable`, `unobserved`, `error`), `section`
   and `scenario` query filters. Invalid filters return 400
-  `invalid_report_filter`.
+  `invalid_report_filter`. A run that declared no FETCH shows a "Publisher
+  capabilities" section naming the skipped scenarios, and each not applicable
+  row states its reason in text.
 - `GET /results` lists up to 100 runs and summarizes completeness by draft and
   transport.
 
@@ -203,9 +256,10 @@ stored in the current database. A pass or fail observation is not proof of
 conformance; inspect the run's evidence.
 
 `GET /healthz` returns `status`, `database.ready`, `supported_drafts`, the
-`validator` build identity and `executable_profiles`: one entry per
-`draft`, `transport`, `mode` and `scenario` with a `configured` flag that is true
-only when the TLS material (and, for `driven`, an adapter) is set.
+`validator` build identity, `publisher_capability_defaults` and
+`executable_profiles`: one entry per `draft`, `transport`, `mode` and `scenario`
+with a `configured` flag that is true only when the TLS material (and, for
+`driven`, an adapter) is set, and a `requires_fetch` flag.
 
 ## Error codes
 
@@ -215,12 +269,14 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 |---|---|---|
 | 400 | `invalid_json` | Body is not valid JSON |
 | 400 | `invalid_run_config` | Missing or invalid field, bad hex, out-of-range `timeout_ms`, scenario needs `track`, driven without `track`, or a track the scenario cannot use |
+| 400 | `invalid_publisher_capabilities` | `publisher_capabilities` is not an object, names an unknown capability, or gives a non-boolean value |
 | 400 | `missing_draft`, `unsupported_draft` | `draft` query parameter absent or not 18 or 21 |
 | 400 | `invalid_pagination` | `limit` or `offset` invalid |
 | 400 | `invalid_report_filter` | HTML report filter invalid |
 | 404 | `run_not_found`, `not_found` | Unknown run or path |
 | 409 | `run_finalized` | Stop requested for a finalized run |
 | 409 | `run_not_active` | The run is not active in this process |
+| 422 | `scenario_requires_publisher_capability` | Every selected scenario needs a capability the run declares the publisher does not implement (today only FETCH); the message names the first scenario and the capability |
 | 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. Unsupported scenarios are never silently scored |
 | 500 | `internal_error` | Unexpected failure |
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |

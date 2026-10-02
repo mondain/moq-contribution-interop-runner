@@ -547,6 +547,52 @@ address that host can reach and publish the UDP range. Driver logs are kept in t
   match. Without them those rows stay `not_run`. The details are in
   [scenario-reference.md](scenario-reference.md).
 
+### Declaring what your publisher does not implement
+
+The drafts allow an endpoint that is not a relay to implement only the part of MOQT
+it needs, and a limited endpoint SHOULD answer a message it does not support with
+NOT_SUPPORTED instead of ignoring it (draft 18 Section 4, draft 21 Section 1.5).
+A live publisher with no cache or history, such as moqxr, normally has no FETCH. Not
+implementing FETCH is not a conformance failure, so tell the runner instead of
+letting 45 scenarios (23 in draft 18, 22 in draft 21) that start with a FETCH end in
+run-level errors:
+
+```sh
+# once, when starting the runner
+build/moq-interop-runner ... --publisher-no-fetch
+
+# or per run
+curl -sS -X POST http://127.0.0.1:8080/api/v1/runs -H 'Content-Type: application/json' -d '{
+  "draft": 18, "transport": "native-quic", "mode": "driven", "timeout_ms": 8000,
+  "scenarios": ["receive-unknown-message-type", "cancel-fetch-request-with-open-data-stream"],
+  "publisher_capabilities": {"fetch": false},
+  "track": {"namespace_hex": ["6d65646961"], "name_hex": "766964655f31"}}'
+```
+
+A value in the run wins over the flag (`{"fetch": true}` re-enables FETCH scenarios
+for one run on a runner started with `--publisher-no-fetch`). What you see:
+
+- A selection that contains only FETCH scenarios is refused with 422
+  `scenario_requires_publisher_capability`. Remove the declaration, or select
+  scenarios your publisher can run.
+- In a mixed selection the FETCH scenarios are skipped: no context and no publisher
+  process, one `context_skipped` event each (`publisher declared no FETCH support`),
+  `# SKIP` in the TAP export. They do not turn the run into `error` or `fail`.
+- Catalog rows whose every scenario needs FETCH are `not_applicable` and are left
+  out of the required, weighted and coverage scores, so the denominators describe
+  what your publisher can be asked. A row that also names a scenario that does not
+  need FETCH stays `not_run`; the runner never hides a scenario a row needs. The
+  JSON export and the HTML report give the reason for every `not_applicable` row.
+- Scenarios not tagged `requires_fetch` still run in full, including ones that
+  exercise behavior you may not implement for other reasons; those show up as
+  ordinary `fail` or `not_run` rows.
+
+The declaration is stored with the run (`config.publisher_capabilities` and a
+`publisher_capabilities` event), so a result says what it was run against. `fetch`
+is the only capability so far. To see which scenarios are affected, read
+`requires_fetch` in `GET /healthz`, or the list in
+[scenario-reference.md](scenario-reference.md#scenarios-that-need-fetch).
+
 ## 8. Interpreting results
 
 | Outcome | Meaning |
@@ -555,7 +601,7 @@ address that host can reach and publish the UDP range. Driver logs are kept in t
 | `fail` | The wire evidence contradicts the requirement |
 | `not_run` | The row is testable but the scenario did not run, did not complete, or the publisher did not produce the behavior |
 | `not_testable` | The runner cannot observe this behavior; a reason and draft citation are recorded |
-| `not_applicable` | The statement does not apply to a contribution publisher |
+| `not_applicable` | The statement does not apply to a contribution publisher, or (a scored row) every scenario it names needs a capability this run declared your publisher does not implement; the export says which |
 
 The run verdict is `pass`, `fail` (any applicable MUST or MUST NOT failed),
 `incomplete` (nothing failed but some applicable rows are `not_run`) or `error` (the
@@ -595,6 +641,8 @@ file and the lines you read, and what you believe the draft requires.
 | 503 `publisher_ports_exhausted` | All ports in `--publisher-port-start`..`--publisher-port-end` are in use, or the scenario needs two. Widen the range; finish or stop (`POST /api/v1/runs/{id}/stop -d ''`) active runs |
 | 503 `publisher_listener_unavailable` | The runner has no `--tls-cert`/`--tls-key` |
 | 422 `unsupported_run_config` | Unknown scenario ID, typed and raw scenarios mixed in one run, or `mode` `driven` without `--driver-executable` |
+| 422 `scenario_requires_publisher_capability` | Every selected scenario needs FETCH and the run (or `--publisher-no-fetch`) declares the publisher has none. See "Declaring what your publisher does not implement" |
+| 400 `invalid_publisher_capabilities` | `publisher_capabilities` is not an object, names something other than `fetch`, or `fetch` is not a boolean |
 | 400 `invalid_run_config` | The scenario needs `track`; `driven` always needs `track`; `timeout_ms` below 2 or above 3600000; bad hex in the track |
 | Publisher cannot connect to the endpoint | Wrong scheme for the transport: native QUIC is `moqt://host:port/moq`, WebTransport is `https://host:port/moq`. Or `--publisher-advertise` is not reachable from the publisher (use the container network address, not 127.0.0.1) |
 | WebTransport CONNECT rejected | The client does not meet the strict profile above, or sent an `Origin` the operator did not allow with `--publisher-origin` |
