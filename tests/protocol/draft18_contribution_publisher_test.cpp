@@ -152,6 +152,18 @@ TEST(Draft18ContributionPublisher, UnknownRequestErrorCodeDoesNotCloseTheSession
             });
         }).result, std::optional<bool>{false});
         EXPECT_EQ(run(p, publish_request(), [](PeerView&) {}).result, std::nullopt);
+        // An orderly NO_ERROR close (section 3.5) after the only announcement was refused is
+        // the same for a known code, so it does not show the unknown code closed the session.
+        EXPECT_EQ(run(p, publish_request(), [](PeerView& v) {
+            v.when("close", v.sent(1), [&] {
+                v.push(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0, {}});
+            });
+        }).result, std::nullopt);
+        EXPECT_EQ(run(p, publish_request(), [](PeerView& v) {
+            v.when("close", v.sent(1), [&] {
+                v.push(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 3, {}});
+            });
+        }).result, std::optional<bool>{false});
     }
 }
 

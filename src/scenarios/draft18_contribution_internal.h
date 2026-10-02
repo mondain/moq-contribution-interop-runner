@@ -37,6 +37,7 @@ inline constexpr std::uint64_t kErrorGoingAway = 0x6;
 inline constexpr std::uint64_t kErrorDoesNotExist = 0x10;
 inline constexpr std::uint64_t kErrorInvalidRange = 0x11;
 // Section 15.10.1: session termination codes.
+inline constexpr std::uint64_t kCloseNoError = 0x0;
 inline constexpr std::uint64_t kCloseProtocolViolation = 0x3;
 inline constexpr std::uint64_t kCloseAuthTokenCacheOverflow = 0x13;
 inline constexpr std::uint64_t kGreaseOdd = 0x9D;
