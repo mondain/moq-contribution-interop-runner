@@ -8,6 +8,7 @@
 
 #include "moq/interop/wire/draft21/publish.h"
 
+#include <algorithm>
 #include <set>
 
 namespace moq::interop::scenarios::d21c {

@@ -1,5 +1,7 @@
 #include "draft21_contribution_residual_internal.h"
 
+#include <algorithm>
+
 namespace moq::interop::scenarios::d21c::residual {
 
 using namespace shared;
