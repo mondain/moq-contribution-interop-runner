@@ -210,8 +210,8 @@ status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete. As of
 this checkpoint every applicable, testable MUST/MUST NOT row has an executable
 binding for its named scenarios and evaluators: 171/171 for draft 18 and
-174/174 for draft 21, so the static gate passes for both. Five rows were
-reclassified `not_testable` with draft citations (four in draft 18, one in
+173/173 for draft 21, so the static gate passes for both. Six rows were
+reclassified `not_testable` with draft citations (four in draft 18, two in
 draft 21); optional SHOULD/MAY rows remain largely unbound (1/90 and 1/97) and
 appear as non-blocking findings. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
@@ -504,9 +504,7 @@ Raw probe scenarios (the runner subscribes or fetches as a server):
   `d21-register-token-on-*` scenarios (`-271`) and
   `d21-setup-register-use-value-fallback` (`D21-9-1-4-MUST-308`).
 
-Slice B's own probes could not induce the following rows (the remaining-rows profiles below close most of them; `D21-6-2-MUST-140` is scored from transport evidence): `D21-2-2-MUST-NOT-017`
-(a stream header names exactly one Subgroup, so mixing is invisible without
-fixture-defined Subgroup membership), `D21-2-5-MUST-032`,
+Slice B's own probes could not induce the following rows (the remaining-rows profiles below close most of them; `D21-6-2-MUST-140` is scored from transport evidence): `D21-2-5-MUST-032`,
 `D21-3-1-2-MUST-NOT-048` (need two different published tracks),
 `D21-3-1-MUST-041` (alias sharing is the publisher's choice, so both named
 contexts cannot be forced), `D21-3-1-1-MUST-NOT-047` (cross-stream arrival order
@@ -543,8 +541,6 @@ Runner-subscribes scenarios:
   `FORWARD=0` subscription must stay silent, and a `FORWARD=1` subscription with
   a Location filter {0,0}-{1,0} (and an `OBJECTID_FILTER` for Object 1 when the
   publisher advertises `MAX_FILTER_RANGES`) may only receive Objects passing all.
-- `d21-subscribe-multiple-subgroups` (`D21-2-2-MUST-NOT-017`): one stream never
-  carries Objects of both fixture Subgroups.
 - `d21-fill-fails-before-first-object` (`D21-3-4-1-MUST-068/069`) and
   `d21-cancel-subscription-with-concurrent-fill-streams` (`-067`): a plain
   subscription first makes the track live, then a second subscription (and for

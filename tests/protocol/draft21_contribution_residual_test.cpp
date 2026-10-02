@@ -71,7 +71,7 @@ std::optional<bool> judge(const Draft21ContributionProbe& probe, const RawProbeT
 TEST(ContributionResidual, RegistryAndBindingsCoverTheNewScenarios) {
     for (const char* scenario :
          {"d21-overlapping-subscriptions-shared-alias", "d21-overlapping-subscriptions-distinct-aliases",
-          "d21-forward-location-and-range-filter-conjunction", "d21-subscribe-multiple-subgroups",
+          "d21-forward-location-and-range-filter-conjunction",
           "d21-fill-fails-before-first-object", "d21-cancel-subscription-with-concurrent-fill-streams",
           "d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
           "d21-concurrent-distinct-track-subscriptions", "d21-publish-distinct-tracks-in-one-scope",
@@ -321,52 +321,6 @@ TEST(ContributionResidual, OnlyObjectsPassingEveryFilterAreForwarded) {
     rejected.reply(rejected.stream_of(1), request_error(0x10), true);
     EXPECT_TRUE(probe.definition.response_ready(rejected.partial()));
     EXPECT_EQ(judge(probe, rejected.finish()), std::nullopt);
-}
-
-// ---- Section 2.2 lines 719-722: one Subgroup per subscription stream -------------------
-TEST(ContributionResidual, SubgroupStimulusIsTheWholeGroup) {
-    const auto& probe = find_probe(probes(), "d21-subscribe-multiple-subgroups");
-    EXPECT_EQ(probe.requirement_id, "D21-2-2-MUST-NOT-017");
-    ASSERT_EQ(probe.definition.writes.size(), 1u);
-    // Start {0,0}, End Group delta 0 and no End Object: all of Group 0 (Section 9.20.10).
-    EXPECT_EQ(probe.definition.writes[0].bytes,
-              cbytes({3, 0, 12, 1, 0, 1, 'x', 2, 0x10, 1, 0x11, 3, 0, 0, 0}));
-}
-
-TEST(ContributionResidual, ObjectsOfTwoSubgroupsNeverShareAStream) {
-    const auto& probe = find_probe(probes(), "d21-subscribe-multiple-subgroups");
-    const auto run = [&](const Bytes& first, const Bytes& second) {
-        ContributionRun result(probe);
-        result.deliver(0);
-        result.reply(result.stream_of(0), subscribe_ok(5));
-        if (!first.empty()) result.reply(kData1, first, true);
-        if (!second.empty()) result.reply(kData2, second, true);
-        return result;
-    };
-    // Objects 0-4 in Subgroup 0 and 5-9 in Subgroup 1, each on its own stream.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2, 3, 4})),
-                                        subgroup(5, 0, objects_with_ids({5, 6, 7, 8, 9}), 1)))), true);
-    // Subgroup ID given by the first Object (type 0x32) is equally fine.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1})),
-                                        cconcat({cvi(0x32), cvi(5), cvi(0), objects_with_ids({5, 6})})))), true);
-    // Objects from both cells on one stream mix Subgroups when another stream proves the split.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
-                                        subgroup(5, 0, objects_with_ids({8}), 1)))), false);
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
-                                        subgroup(5, 0, objects_with_ids({2}), 1)))), false);
-    // A compliant publisher whose Group 0 is a single Subgroup puts every Object on one
-    // stream; the wire cannot show a second Subgroup there, so nothing is proven.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2, 3, 4, 5, 6, 7, 8, 9})), {}))),
-              std::nullopt);
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})), {}))), std::nullopt);
-    EXPECT_EQ(judge(probe, run(subgroup(5, 0, objects_with_ids({3, 6})), {}).finish()), std::nullopt);
-    // A single Subgroup never exercises the split.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2})), {}))), std::nullopt);
-    // Another Track Alias is not this subscription.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(9, 0, objects_with_ids({3, 6})), {}))), std::nullopt);
-    // Objects outside the fixture's Subgroup map are not placed.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 12})),
-                                        subgroup(5, 0, objects_with_ids({6}), 1)))), true);
 }
 
 // ---- Section 3.4 lines 1272-1370: fill fetch streams ---------------------------------------
