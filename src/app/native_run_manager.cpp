@@ -1080,7 +1080,8 @@ public:
         const bool object_repeat = object_repeat_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool group_order = fetch_group_order_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool notify_fetch = run_config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch";
-        const bool notify_direction = subscriber_notify_scenario(static_cast<unsigned>(run_config.draft),id);
+        const bool notify_direction = subscriber_notify_scenario(static_cast<unsigned>(run_config.draft),id) ||
+            established_update_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool gap_a = gap_raw_scenario(static_cast<unsigned>(run_config.draft), id);
         if (!fetch && !subscription && !fetch_response && !request_response && !range_filter && !discovery_overlap && !first_fetch && !group_order && !immutable_repeat && !object_repeat && !notify_fetch && !notify_direction && !gap_a) return std::nullopt;
         if (!run_config.track_fixture) throw std::invalid_argument("track probe requires a track fixture");
@@ -1362,7 +1363,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (immutable_repeat_scenario(draft, id) || object_repeat_scenario(draft, id) ||
             fetch_first_object_scenario(draft, id) || fetch_group_order_scenario(draft, id) ||
             (config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch") ||
-            subscriber_notify_scenario(draft, id)) {
+            subscriber_notify_scenario(draft, id) || established_update_scenario(draft, id)) {
             std::vector<std::vector<std::byte>> fields;
             for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
             if (!scenarios::fetch_first_object_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))

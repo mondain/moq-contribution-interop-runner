@@ -226,7 +226,8 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
                 app::object_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 (draft == 21 && id == "d21-publish-state-notify-on-fetch") ||
                 app::gap_raw_scenario(static_cast<unsigned>(draft),id) ||
-                app::subscriber_notify_scenario(static_cast<unsigned>(draft),id);
+                app::subscriber_notify_scenario(static_cast<unsigned>(draft),id) ||
+                app::established_update_scenario(static_cast<unsigned>(draft),id);
         })) {
             std::vector<std::vector<std::byte>> fields;
             for (const auto& field : track_fixture->namespace_fields) {

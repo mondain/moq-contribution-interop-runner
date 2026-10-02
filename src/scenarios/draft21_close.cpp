@@ -447,7 +447,8 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     // value but is outside REQUEST_UPDATE's scope; FORWARD255 is in scope
     // for track discovery but outside its permitted range.
     add("D21-9-20-1-MUST-404", "d21-group-order-in-subscription-update",
-        "d21-out-of-scope-parameter-protocol-violation", bidi, subscribe({}, 0));
+        "d21-out-of-scope-parameter-protocol-violation", bidi,
+        track_request(track, 3));
     result.back().definition.writes.push_back(
         {bidi, frame(2, bytes({3, 1, 0x22, 1})), false, 0,
          [](auto input) { return successful_response_ready(
@@ -464,7 +465,8 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
          [](auto input) { return successful_response_ready(
              input, wire::draft21::ResponseContext::SubscribeTracks); }});
     add("D21-6-4-2-1-MUST-155", "d21-duplicate-request-update-id",
-        "d21-duplicate-invalid-request-id", bidi, subscribe({}, 0), 4);
+        "d21-duplicate-invalid-request-id", bidi,
+        track_request(track, 3), 4);
     result.back().definition.writes.push_back(
         {bidi, frame(2, bytes({3, 0})), false, 0,
          [](auto input) { return successful_response_ready(
@@ -523,7 +525,10 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
 std::optional<bool> evaluate_draft21_close_probe(
     const RawProbeTranscript& transcript, const Draft21CloseProbe& probe) {
     const bool fetch_context = probe.definition.id == "d21-publish-state-notify-on-fetch";
-    const bool subscribe_context = probe.definition.id == "d21-subscriber-sends-publish-state-notify";
+    // These contexts open with a SUBSCRIBE for the run's configured track.
+    const bool subscribe_context = probe.definition.id == "d21-subscriber-sends-publish-state-notify" ||
+        probe.definition.id == "d21-group-order-in-subscription-update" ||
+        probe.definition.id == "d21-duplicate-request-update-id";
     const bool publish_context = probe.definition.id ==
         "d21-publish-established-subscriber-sends-publish-state-notify";
     if (!fetch_context && !subscribe_context && !publish_context)
