@@ -36,6 +36,98 @@ private:
     std::filesystem::path path_;
 };
 
+
+// Schema version 2, verbatim from before publisher capabilities existed.
+constexpr const char* kVersionTwoSchema = R"SQL(CREATE TABLE schema_meta (
+    version INTEGER NOT NULL CHECK (version = 2)
+);
+INSERT INTO schema_meta(version) VALUES (2);
+
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    draft INTEGER NOT NULL CHECK (draft IN (18, 21)),
+    transport INTEGER NOT NULL CHECK (transport IN (0, 1)),
+    mode INTEGER NOT NULL CHECK (mode IN (0, 1)),
+    timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),
+    state INTEGER NOT NULL CHECK (state IN (0, 1)),
+    created_at_unix_ns INTEGER NOT NULL,
+    finalized_at_unix_ns INTEGER,
+    CHECK ((state = 0 AND finalized_at_unix_ns IS NULL) OR
+           (state = 1 AND finalized_at_unix_ns IS NOT NULL AND
+            finalized_at_unix_ns > created_at_unix_ns))
+);
+
+CREATE TABLE run_builds (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    source_revision TEXT NOT NULL
+);
+
+CREATE TABLE build_dependencies (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    PRIMARY KEY (run_id, name)
+);
+
+CREATE TABLE selected_scenarios (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    scenario_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, position)
+);
+
+CREATE TABLE run_track_fixtures (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    track_name TEXT NOT NULL
+);
+
+CREATE TABLE run_track_namespace_fields (
+    run_id TEXT NOT NULL REFERENCES run_track_fixtures(run_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    value TEXT NOT NULL,
+    PRIMARY KEY (run_id, position)
+);
+
+CREATE TABLE evidence_events (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK (sequence >= 0),
+    monotonic_time_ns INTEGER NOT NULL,
+    wall_time_unix_ns INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    connection_id TEXT,
+    stream_id TEXT,
+    request_id TEXT,
+    scenario_id TEXT,
+    requirement_id TEXT,
+    PRIMARY KEY (run_id, sequence)
+);
+
+CREATE TABLE final_scores (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    verdict INTEGER NOT NULL CHECK (verdict BETWEEN 0 AND 3),
+    required_earned TEXT NOT NULL,
+    required_possible TEXT NOT NULL,
+    weighted_earned TEXT NOT NULL,
+    weighted_possible TEXT NOT NULL,
+    coverage_earned TEXT NOT NULL,
+    coverage_possible TEXT NOT NULL
+);
+
+CREATE TABLE outcomes (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    requirement_id TEXT NOT NULL,
+    state INTEGER NOT NULL CHECK (state BETWEEN 0 AND 4),
+    PRIMARY KEY (run_id, requirement_id),
+    UNIQUE (run_id, position)
+);
+
+CREATE INDEX runs_newest_idx ON runs(created_at_unix_ns DESC, id DESC);
+CREATE INDEX evidence_events_page_idx ON evidence_events(run_id, sequence);
+)SQL";
+
 app::BuildInfo sample_build() {
     return {
         std::string{"0.1.0\0' ; DROP TABLE runs; --", 30},
@@ -86,11 +178,11 @@ requirements::ScoreSummary sample_score() {
     };
 }
 
-TEST(RunStoreTest, CreatesVersionTwoSchemaAndEnablesForeignKeys) {
+TEST(RunStoreTest, CreatesCurrentSchemaAndEnablesForeignKeys) {
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());
 
-    EXPECT_EQ(store.schema_version(), 2);
+    EXPECT_EQ(store.schema_version(), 3);
     EXPECT_TRUE(store.foreign_keys_enabled());
 }
 
@@ -187,7 +279,7 @@ TEST(RunStoreTest, MigratesVersionOneMetadataAndPreservesExistingRuns) {
     ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
 
     SqliteRunStore store(database.path(), sample_build());
-    EXPECT_EQ(store.schema_version(), 2);
+    EXPECT_EQ(store.schema_version(), 3);
     ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
     sqlite3_stmt* query = nullptr;
     ASSERT_EQ(sqlite3_prepare_v2(
@@ -485,6 +577,75 @@ TEST(RunStoreTest, ListsNewestFirstWithStablePaginationAndIdTieBreaker) {
     EXPECT_EQ(page1.items[0].config.timeout, 12'345ms);
 
     EXPECT_THROW((store.list({.limit = 101, .offset = 0})), std::invalid_argument);
+}
+
+
+TEST(RunStoreTest, DefaultsToACapablePublisherAndRoundTripsDeclaredCapabilities) {
+    TemporaryDatabase database;
+    SqliteRunStore store(database.path(), sample_build());
+    const auto capable = store.create_run(sample_config());
+    EXPECT_TRUE(store.load(capable).config.publisher_capabilities.fetch);
+
+    auto config = sample_config();
+    config.publisher_capabilities.fetch = false;
+    const auto declared = store.create_run(config);
+    EXPECT_FALSE(store.load(declared).config.publisher_capabilities.fetch);
+    // The run list carries the declaration too, newest first.
+    const auto page = store.list({2, 0});
+    ASSERT_EQ(page.items.size(), 2u);
+    EXPECT_EQ(page.items[0].id, declared);
+    EXPECT_FALSE(page.items[0].config.publisher_capabilities.fetch);
+    EXPECT_TRUE(page.items[1].config.publisher_capabilities.fetch);
+    store.finalize(declared, sample_score(), {});
+    EXPECT_FALSE(store.load(declared).config.publisher_capabilities.fetch);
+}
+
+TEST(RunStoreTest, MigratesVersionTwoDatabasesAndTreatsOldRunsAsCapable) {
+    TemporaryDatabase database;
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    // The version 2 schema as shipped before publisher capabilities, plus one run.
+    ASSERT_EQ(sqlite3_exec(raw, kVersionTwoSchema, nullptr, nullptr, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(
+                  raw,
+                  "INSERT INTO runs(id,draft,transport,mode,timeout_ms,state,created_at_unix_ns) "
+                  "VALUES('legacy-v2',18,0,0,1000,0,100);"
+                  "INSERT INTO run_builds VALUES('legacy-v2','0.1','abc');"
+                  "INSERT INTO selected_scenarios VALUES('legacy-v2',0,'fetch-publisher-track-range');",
+                  nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        EXPECT_EQ(store.schema_version(), 3);
+        const auto legacy = store.load("legacy-v2");
+        EXPECT_EQ(legacy.config.scenario_ids, (std::vector<std::string>{"fetch-publisher-track-range"}));
+        EXPECT_TRUE(legacy.config.publisher_capabilities.fetch);
+        auto config = sample_config();
+        config.publisher_capabilities.fetch = false;
+        EXPECT_FALSE(store.load(store.create_run(config)).config.publisher_capabilities.fetch);
+    }
+    // Reopening a migrated database is a no-op.
+    SqliteRunStore reopened(database.path(), sample_build());
+    EXPECT_EQ(reopened.schema_version(), 3);
+    EXPECT_EQ(reopened.list({10, 0}).total, 2u);
+}
+
+TEST(RunStoreTest, SchemaRejectsAnUnknownCapabilityValue) {
+    TemporaryDatabase database;
+    app::RunId id;
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        id = store.create_run(sample_config());
+    }
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(raw, "PRAGMA foreign_keys=ON", nullptr, nullptr, nullptr), SQLITE_OK);
+    const std::string sql =
+        "UPDATE run_publisher_capabilities SET fetch=2 WHERE run_id='" + id + "'";
+    EXPECT_EQ(sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, nullptr), SQLITE_CONSTRAINT);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
 }
 
 }  // namespace
