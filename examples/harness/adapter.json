@@ -1,0 +1,9 @@
+{
+  "adapter_id": "acme-example",
+  "driver_contract_version": 1,
+  "entrypoint": "adapter.sh",
+  "publisher_binary_environment": "ACME_PUB_BIN",
+  "supported_drafts": [18, 21],
+  "supported_transports": ["native_quic", "webtransport"],
+  "protocol_expectations": "none; logs and exit status are diagnostic only"
+}
