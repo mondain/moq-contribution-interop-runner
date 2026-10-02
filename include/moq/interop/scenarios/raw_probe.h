@@ -9,6 +9,7 @@
 #include <span>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -44,6 +45,12 @@ struct RawProbeDefinition {
     std::chrono::milliseconds deadline{1000};
     std::function<bool(const RawProbeTranscript&)> response_ready{};
     std::function<bool(std::span<const std::byte>)> peer_request_ready{};
+    // Opt-in courtesy that is not part of the scored stimulus: a PUBLISH_NAMESPACE
+    // the publisher opens on its own request stream is acknowledged with an empty
+    // REQUEST_OK (draft 21 Section 9.3), as a subscriber that wants the publisher
+    // to carry on serving requests would. Acknowledgements are never recorded as
+    // transcript writes and are listed in `acknowledged_namespace_streams`.
+    bool acknowledge_publisher_namespaces{false};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
@@ -76,6 +83,10 @@ struct RawProbeTranscript {
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
+    // Request streams whose PUBLISH_NAMESPACE was acknowledged by the opt-in
+    // courtesy (RawProbeDefinition::acknowledge_publisher_namespaces), with the
+    // transport event count when the acknowledgement was fully accepted.
+    std::vector<std::pair<transport::StreamId, std::size_t>> acknowledged_namespace_streams;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -97,6 +108,9 @@ private:
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;
     std::size_t peer_setup_bytes_count_{0};
+    void acknowledge_publisher_namespaces();
+    std::map<transport::StreamId, std::vector<std::byte>> namespace_candidates_;
+    std::map<transport::StreamId, std::size_t> namespace_ack_offsets_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_request_candidates_;
     std::set<transport::StreamId> cancelled_peer_requests_;
     std::optional<transport::StreamId> peer_request_stream_;

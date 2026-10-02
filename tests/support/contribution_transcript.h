@@ -121,6 +121,7 @@ public:
         }
         accepted.accepted = accepted.write.bytes.size();
         accepted.fin_accepted = accepted.write.fin;
+        accepted.operation_accepted = write.operation == scenarios::RawProbeOperation::StopSending;
         accepted.delivery_event_count = transcript_.events.size();
         delivered_ = transcript_.events.size();
     }

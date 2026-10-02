@@ -15,6 +15,9 @@ std::vector<Spec> all_specs() {
     auto objects = object_specs();
     result.insert(result.end(), std::make_move_iterator(objects.begin()),
                   std::make_move_iterator(objects.end()));
+    auto residual = residual_specs();
+    result.insert(result.end(), std::make_move_iterator(residual.begin()),
+                  std::make_move_iterator(residual.end()));
     return result;
 }
 
@@ -54,6 +57,21 @@ std::vector<Draft21ContributionProbe> draft21_contribution_probes(
     return result;
 }
 
+namespace {
+bool terminal_event(const transport::TransportEvent& event) {
+    return std::holds_alternative<transport::PeerCloseEvent>(event) ||
+           std::holds_alternative<transport::LocalCloseEvent>(event) ||
+           std::holds_alternative<transport::IdleTimeoutEvent>(event) ||
+           std::holds_alternative<transport::TransportErrorEvent>(event) ||
+           std::holds_alternative<transport::EventQueueOverflowEvent>(event);
+}
+const Spec* spec_of(const std::vector<Spec>& specs, const std::string& scenario) {
+    for (const auto& spec : specs)
+        if (spec.scenario == scenario) return &spec;
+    return nullptr;
+}
+}  // namespace
+
 std::optional<bool> evaluate_draft21_contribution_probe(
     const RawProbeTranscript& transcript, const Draft21ContributionProbe& probe) {
     if (probe.draft != 21 || probe.definition.deadline.count() <= 0) return std::nullopt;
@@ -71,17 +89,31 @@ std::optional<bool> evaluate_draft21_contribution_probe(
                candidate.evaluator_id == probe.evaluator_id &&
                candidate.definition.id == probe.definition.id;
     });
-    if (expected == candidates.end() || transcript.scenario_id != expected->definition.id ||
-        !raw_probe_stimulus_valid(transcript, expected->definition))
-        return std::nullopt;
-    const View view(transcript);
-    if (!view.valid()) return std::nullopt;
-    for (const auto& spec : all_specs()) {
-        if (spec.scenario != probe.definition.id) continue;
-        for (const auto& row : spec.rows) {
-            if (probe.requirement_id == row.requirement && probe.evaluator_id == row.evaluator)
-                return judge_for(spec, row)(view).result;
+    if (expected == candidates.end() || transcript.scenario_id != expected->definition.id) return std::nullopt;
+    const auto specs = all_specs();
+    const auto* spec = spec_of(specs, probe.definition.id);
+    if (!spec) return std::nullopt;
+    // A window scenario judges the evidence collected until its window ended:
+    // the deadline passed or the peer closed. Everything else must complete.
+    RawProbeTranscript prefix = transcript;
+    bool window_ended = false;
+    if (spec->window && !transcript.harness_failed && transcript.stimulus_delivered) {
+        const auto end = std::find_if(transcript.events.begin(), transcript.events.end(), terminal_event);
+        const bool closed = end != transcript.events.end();
+        window_ended = transcript.timed_out || closed;
+        if (window_ended) {
+            prefix.events.assign(transcript.events.begin(), end);
+            prefix.complete = true;
+            prefix.timed_out = false;
         }
+    }
+    if (!raw_probe_stimulus_valid(prefix, expected->definition)) return std::nullopt;
+    View view(prefix);
+    if (!view.valid()) return std::nullopt;
+    view.set_window_ended(window_ended);
+    for (const auto& row : spec->rows) {
+        if (probe.requirement_id == row.requirement && probe.evaluator_id == row.evaluator)
+            return judge_for(*spec, row)(view).result;
     }
     return std::nullopt;
 }

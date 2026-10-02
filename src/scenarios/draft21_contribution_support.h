@@ -115,12 +115,18 @@ public:
     std::optional<transport::StreamId> write_stream_id(std::size_t index) const;
     // Transport event count at which write `index` was fully accepted.
     std::optional<std::size_t> write_event(std::size_t index) const;
+    // True when the observation window of a `Spec::window` scenario is over: the
+    // context timed out or the peer ended the session, so no further evidence
+    // can arrive. Always false for scenarios that must finish on evidence.
+    bool window_ended() const noexcept { return window_ended_; }
+    void set_window_ended(bool value) noexcept { window_ended_ = value; }
     std::vector<Frame> frames(const StreamRecord& record) const;
     std::vector<Frame> write_frames(std::size_t index) const;
 
 private:
     std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
+    bool window_ended_{false};
     std::map<transport::StreamId, StreamRecord> streams_;
     std::vector<DatagramRecord> datagrams_;
     std::optional<PeerCloseInfo> close_;
@@ -165,10 +171,16 @@ struct Spec {
     std::vector<RowBinding> rows;
     Builder build;
     Judge judge;
+    // Absence rules (nothing outside a filter, exactly N copies) need the whole
+    // observation window: a timed-out or peer-closed transcript is judged on its
+    // prefix with View::window_ended() set, instead of being unscorable.
+    bool window{false};
 };
 
 std::vector<Spec> session_specs();
 std::vector<Spec> object_specs();
+// Rows closed by the remaining-rows slice (draft21_contribution_residual.cpp).
+std::vector<Spec> residual_specs();
 
 // Frame type constants used across profiles.
 constexpr std::uint64_t kSubscribeOk = 0x4;
