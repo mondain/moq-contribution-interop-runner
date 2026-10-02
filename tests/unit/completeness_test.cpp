@@ -127,7 +127,7 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
         const auto report = audit_completeness(
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
-        EXPECT_EQ(report.required_total, draft == 18 ? 174u : 175u);
+        EXPECT_EQ(report.required_total, draft == 18 ? 173u : 175u);
         // Coverage only grows from the 76-row baseline; every uncovered row
         // must remain a blocking finding so the gate cannot be satisfied by
         // omission.

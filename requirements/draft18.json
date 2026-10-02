@@ -5360,14 +5360,10 @@
       "actor": "endpoint",
       "summary": "Reject a structurally well-formed but otherwise invalid AUTHORIZATION TOKEN parameter with MALFORMED_AUTH_TOKEN.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "receive-well-formed-token-with-invalid-known-type-value"
-      ],
-      "evaluators": [
-        "request-error-malformed-auth-token"
-      ],
-      "rationale": "Use an agreed token type with an invalid value while keeping the outer Token encoding valid. The request-level MALFORMED_AUTH_TOKEN result is distinct from KEY_VALUE_FORMATTING_ERROR and from a valid token lacking authorization."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Whether a structurally well-formed token is otherwise invalid (draft lines 3168-3169) depends on the semantics of its Token Type, and draft 18 defines no token type: Table 12 (lines 6580-6588) lists only reserved type 0 and the greasing codes, and lines 3153-3155 leave type 0 to out-of-band negotiation. The invalidity precondition is therefore not a protocol-level fact the runner can establish, even with a cooperating publisher, so a REQUEST_ERROR code or an acceptance cannot be attributed to a token being invalid."
     },
     {
       "id": "D18-10-2-2-MUST-009",
