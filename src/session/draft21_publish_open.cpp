@@ -76,6 +76,7 @@ PublishOpenResult PublishOpenState::on_client_stream(
         }
         if (std::holds_alternative<wire::DecodeError>(decoded)) {
             result.close_error = kProtocolViolation;
+            result.decode_detail = std::get<wire::DecodeError>(decoded).detail;
             return result;
         }
         const auto& frame = std::get<wire::draft21::RequestFrame>(decoded);
@@ -102,6 +103,7 @@ PublishOpenResult PublishOpenState::on_client_stream(
             const auto value = std::get<std::span<const std::byte>>(field);
             if (value.empty()) {
                 result.close_error = kProtocolViolation;
+                result.decode_detail = "empty draft-21 namespace field";
                 return result;
             }
             name_bytes += value.size();
@@ -146,6 +148,7 @@ PublishOpenResult PublishOpenState::on_client_stream(
     }
     if (std::holds_alternative<wire::DecodeError>(decoded)) {
         result.close_error = kProtocolViolation;
+        result.decode_detail = std::get<wire::DecodeError>(decoded).detail;
         return result;
     }
     auto publish = std::get<wire::draft21::PublishMessage>(decoded);

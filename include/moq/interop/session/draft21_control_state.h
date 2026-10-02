@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace moq::interop::session::draft21 {
@@ -17,6 +18,8 @@ struct ControlResult {
     std::vector<wire::draft21::ControlMessage> messages;
     std::optional<std::uint64_t> close_error;
     bool harness_limit = false;
+    // Wire decoder detail when close_error stems from a malformed message.
+    std::optional<std::string> decode_detail;
 };
 
 // Draft-21-only control-stream state. The caller owns QUIC I/O and sends

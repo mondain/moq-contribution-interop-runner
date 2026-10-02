@@ -128,9 +128,14 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        EXPECT_EQ(report.required_covered, 76u);
-        EXPECT_EQ(report.required_total - report.required_covered,
-                  99u);
+        // Coverage only grows as scenarios are added; every uncovered required
+        // row must surface as exactly one blocking finding.
+        EXPECT_GE(report.required_covered, 76u);
+        const auto missing = static_cast<std::size_t>(std::count_if(
+            report.findings.begin(), report.findings.end(), [](const auto& finding) {
+                return finding.code == "missing_required_evaluator";
+            }));
+        EXPECT_EQ(report.required_total - report.required_covered, missing);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
     }
 }

@@ -65,6 +65,50 @@ OutcomeState uri_option(const Draft21AnnouncementContext& context, std::uint64_t
     return exchange_observed(context) ? OutcomeState::Pass : OutcomeState::NotRun;
 }
 
+using Namespace = std::vector<std::vector<std::byte>>;
+
+bool field_is(const Namespace& name_space, std::string_view value) {
+    if (name_space.empty() || name_space.front().size() != value.size()) return false;
+    for (std::size_t index = 0; index < value.size(); ++index)
+        if (name_space.front()[index] != static_cast<std::byte>(static_cast<unsigned char>(value[index])))
+            return false;
+    return true;
+}
+
+bool begins_with_period(const Namespace& name_space) {
+    return !name_space.empty() && !name_space.front().empty() &&
+           name_space.front().front() == std::byte{'.'};
+}
+
+enum class Publication { Track, Namespace };
+
+// Scores a "must not publish under namespace X" row. A publication observed
+// on the wire is a failure. A pass needs a fully set up session that stayed
+// alive through the whole observation window without such a publication; a
+// publisher that never connected or closed early proves nothing.
+template <class Forbidden>
+OutcomeState absence_of_publication(const Draft21AnnouncementContext& context,
+                                    Forbidden forbidden) {
+    if (!has_peer_setup(context)) return OutcomeState::NotRun;
+    for (const auto& event : context.evidence) {
+        const bool track = event.kind == Draft21AnnouncementEventKind::PublishObserved;
+        const bool name_space = event.kind == Draft21AnnouncementEventKind::NamespaceObserved;
+        if (!track && !name_space) continue;
+        if (forbidden(track ? Publication::Track : Publication::Namespace, event.track_namespace))
+            return OutcomeState::Fail;
+    }
+    return context.window_elapsed ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+bool malformed_detail_contains(const Draft21AnnouncementContext& context,
+                               std::string_view needle) {
+    return std::any_of(context.evidence.begin(), context.evidence.end(),
+        [&](const Draft21AnnouncementEvent& event) {
+            return event.kind == Draft21AnnouncementEventKind::MalformedPublisherMessage &&
+                   event.detail.find(needle) != std::string::npos;
+        });
+}
+
 }  // namespace
 
 std::optional<OutcomeState> draft21_gap_a_announcement_state(
@@ -114,6 +158,82 @@ std::optional<OutcomeState> draft21_gap_a_announcement_state(
         }
         return std::nullopt;
     }
+    if (id == "D21-2-4-2-MUST-NOT-026") {
+        if (!owns("d21-attempt-unregistered-period-namespace-publication",
+                  "d21-no-unregistered-reserved-namespace-publication")) return std::nullopt;
+        // ".session" is the one namespace this draft registers (Section 6.5).
+        return absence_of_publication(context, [](Publication, const Namespace& name_space) {
+            return begins_with_period(name_space) && !field_is(name_space, ".session");
+        });
+    }
+    if (id == "D21-2-4-2-MUST-NOT-028") {
+        if (!owns("d21-attempt-single-period-namespace-use",
+                  "d21-no-originated-use-of-single-period-namespace")) return std::nullopt;
+        return absence_of_publication(context, [](Publication, const Namespace& name_space) {
+            return field_is(name_space, ".");
+        });
+    }
+    if (id == "D21-2-4-2-MUST-NOT-029") {
+        if (!owns("d21-attempt-single-period-track-publication",
+                  "d21-no-tracks-under-single-period")) return std::nullopt;
+        return absence_of_publication(context, [](Publication kind, const Namespace& name_space) {
+            return kind == Publication::Track && field_is(name_space, ".");
+        });
+    }
+    if (id == "D21-2-4-2-MUST-NOT-030") {
+        if (!owns("d21-attempt-single-period-namespace-publication",
+                  "d21-no-namespaces-under-single-period")) return std::nullopt;
+        return absence_of_publication(context, [](Publication kind, const Namespace& name_space) {
+            return kind == Publication::Namespace && field_is(name_space, ".");
+        });
+    }
+    if (id == "D21-6-5-MUST-NOT-166") {
+        if (!owns("d21-application-track-publication-under-session",
+                  "d21-no-application-track-publication-under-session")) return std::nullopt;
+        return absence_of_publication(context, [](Publication kind, const Namespace& name_space) {
+            return kind == Publication::Track && field_is(name_space, ".session");
+        });
+    }
+    if (id == "D21-6-5-MUST-NOT-167") {
+        if (!owns("d21-application-namespace-publication-under-session",
+                  "d21-no-application-namespace-publication-under-session")) return std::nullopt;
+        return absence_of_publication(context, [](Publication kind, const Namespace& name_space) {
+            return kind == Publication::Namespace && field_is(name_space, ".session");
+        });
+    }
+    if (id == "D21-8-3-MUST-NOT-230") {
+        if (!owns("d21-publisher-key-value-type-deltas", "d21-emitted-key-value-types-within-uint64"))
+            return std::nullopt;
+        // SETUP options, PUBLISH parameters and Track Properties are all
+        // Key-Value-Pairs lists whose decoder checks the running type sum.
+        if (malformed_detail_contains(context, "type overflow")) return OutcomeState::Fail;
+        return has_peer_setup(context) && exchange_observed(context) ? OutcomeState::Pass
+                                                                     : OutcomeState::NotRun;
+    }
+    if (id == "D21-8-7-MUST-250") {
+        if (!owns("d21-publisher-emitted-namespace-fields", "d21-emitted-namespace-fields-nonempty"))
+            return std::nullopt;
+        if (malformed_detail_contains(context, "empty draft-21 namespace field"))
+            return OutcomeState::Fail;
+        // A pass needs at least one decoded namespace field to have been emitted.
+        const bool decoded_field = std::any_of(context.evidence.begin(), context.evidence.end(),
+            [](const Draft21AnnouncementEvent& event) {
+                return event.kind == Draft21AnnouncementEventKind::PublishObserved &&
+                       !event.track_namespace.empty();
+            });
+        return decoded_field && has_peer_setup(context) ? OutcomeState::Pass
+                                                        : OutcomeState::NotRun;
+    }
+    if (id == "D21-7-5-MUST-206") {
+        if (!owns("d21-publisher-namespace-routing-announcement",
+                  "d21-explicit-namespace-publication-for-routing")) return std::nullopt;
+        // Only an explicit PUBLISH_NAMESPACE for the configured namespace
+        // satisfies the duty; a bare PUBLISH never does. Absence is not
+        // scored as a failure because the wire cannot show that the publisher
+        // intended to request routing.
+        return context.namespace_announced && has_peer_setup(context) ? OutcomeState::Pass
+                                                                      : OutcomeState::NotRun;
+    }
     return std::nullopt;
 }
 
@@ -148,6 +268,33 @@ std::vector<ExecutableBinding> draft21_gap_a_bindings() {
          "d21-required-version-setup-options", {"peer_setup_received"}},
         {21, "D21-6-3-2-MUST-150", "d21-webtransport-required-setup-options",
          "d21-required-version-setup-options", {"peer_setup_received"}},
+        {21, "D21-2-4-2-MUST-NOT-026", "d21-attempt-unregistered-period-namespace-publication",
+         "d21-no-unregistered-reserved-namespace-publication",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-2-4-2-MUST-NOT-028", "d21-attempt-single-period-namespace-use",
+         "d21-no-originated-use-of-single-period-namespace",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-2-4-2-MUST-NOT-029", "d21-attempt-single-period-track-publication",
+         "d21-no-tracks-under-single-period",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-2-4-2-MUST-NOT-030", "d21-attempt-single-period-namespace-publication",
+         "d21-no-namespaces-under-single-period",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-6-5-MUST-NOT-166", "d21-application-track-publication-under-session",
+         "d21-no-application-track-publication-under-session",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-6-5-MUST-NOT-167", "d21-application-namespace-publication-under-session",
+         "d21-no-application-namespace-publication-under-session",
+         {"local_setup_sent", "peer_setup_received"}},
+        {21, "D21-8-3-MUST-NOT-230", "d21-publisher-key-value-type-deltas",
+         "d21-emitted-key-value-types-within-uint64",
+         {"peer_setup_received", "publish_observed", "response_delivered"}},
+        {21, "D21-8-7-MUST-250", "d21-publisher-emitted-namespace-fields",
+         "d21-emitted-namespace-fields-nonempty",
+         {"peer_setup_received", "publish_observed"}},
+        {21, "D21-7-5-MUST-206", "d21-publisher-namespace-routing-announcement",
+         "d21-explicit-namespace-publication-for-routing",
+         {"peer_setup_received", "namespace_observed", "namespace_response_delivered"}},
     };
 }
 

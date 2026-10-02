@@ -31,6 +31,9 @@ const std::vector<std::string_view> kClaimedRows{
     "D21-9-1-2-MUST-NOT-299", "D21-9-1-1-MUST-294", "D21-9-1-2-MUST-301",
     "D21-9-1-1-MUST-296", "D21-9-1-2-MUST-303", "D21-9-1-2-MUST-304",
     "D21-6-3-2-MUST-150",
+    "D21-2-4-2-MUST-NOT-026", "D21-2-4-2-MUST-NOT-028", "D21-2-4-2-MUST-NOT-029",
+    "D21-2-4-2-MUST-NOT-030", "D21-6-5-MUST-NOT-166", "D21-6-5-MUST-NOT-167",
+    "D21-8-3-MUST-NOT-230", "D21-8-7-MUST-250", "D21-7-5-MUST-206",
 };
 
 using scenarios::Draft21AnnouncementContext;
@@ -187,6 +190,166 @@ TEST(Draft21GapA, RequiredSetupOptionsDependOnTransport) {
     webtransport.peer_setup_options.clear();
     webtransport.webtransport = false;
     EXPECT_EQ(state(webtransport, "D21-6-3-2-MUST-150"), OutcomeState::NotRun);
+}
+
+scenarios::Draft21AnnouncementEvent publication(Draft21AnnouncementEventKind kind,
+                                                std::string_view first_field) {
+    scenarios::Draft21AnnouncementEvent event{kind, 0, 0};
+    event.track_namespace = {to_bytes(first_field), to_bytes("x")};
+    return event;
+}
+
+// A fully set up session that stayed alive through the observation window.
+Draft21AnnouncementContext quiet_window(std::string scenario) {
+    Draft21AnnouncementContext context;
+    context.scenario_id = std::move(scenario);
+    context.window_elapsed = true;
+    context.evidence = {
+        {Draft21AnnouncementEventKind::TransportEstablished, std::nullopt, std::nullopt},
+        {Draft21AnnouncementEventKind::LocalSetupSent, 3, std::nullopt},
+        {Draft21AnnouncementEventKind::PeerSetupReceived, 2, std::nullopt}};
+    return context;
+}
+
+struct AttemptCase {
+    const char* row;
+    const char* scenario;
+    const char* forbidden_first_field;
+    Draft21AnnouncementEventKind forbidden_kind;
+    bool other_kind_is_violation;
+};
+
+TEST(Draft21GapA, ReservedNamespaceAttemptsPassOnlyAfterAQuietLiveWindow) {
+    using Kind = Draft21AnnouncementEventKind;
+    const std::vector<AttemptCase> cases{
+        {"D21-2-4-2-MUST-NOT-026", "d21-attempt-unregistered-period-namespace-publication", ".custom",
+         Kind::PublishObserved, true},
+        {"D21-2-4-2-MUST-NOT-028", "d21-attempt-single-period-namespace-use", ".",
+         Kind::PublishObserved, true},
+        {"D21-2-4-2-MUST-NOT-029", "d21-attempt-single-period-track-publication", ".",
+         Kind::PublishObserved, false},
+        {"D21-2-4-2-MUST-NOT-030", "d21-attempt-single-period-namespace-publication", ".",
+         Kind::NamespaceObserved, false},
+        {"D21-6-5-MUST-NOT-166", "d21-application-track-publication-under-session", ".session",
+         Kind::PublishObserved, false},
+        {"D21-6-5-MUST-NOT-167", "d21-application-namespace-publication-under-session", ".session",
+         Kind::NamespaceObserved, false},
+    };
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.row);
+        auto context = quiet_window(test.scenario);
+        EXPECT_EQ(state(context, test.row), OutcomeState::Pass);
+
+        auto early = context;
+        early.window_elapsed = false;
+        EXPECT_EQ(state(early, test.row), OutcomeState::NotRun);
+
+        auto never_set_up = context;
+        never_set_up.evidence.pop_back();
+        EXPECT_EQ(state(never_set_up, test.row), OutcomeState::NotRun);
+
+        auto wrong_scenario = context;
+        wrong_scenario.scenario_id = "d21-publisher-request-stream-placement";
+        EXPECT_EQ(state(wrong_scenario, test.row), OutcomeState::NotRun);
+
+        auto violated = context;
+        violated.evidence.push_back(publication(test.forbidden_kind, test.forbidden_first_field));
+        EXPECT_EQ(state(violated, test.row), OutcomeState::Fail);
+        // A violation is a failure even when the window did not elapse.
+        violated.window_elapsed = false;
+        EXPECT_EQ(state(violated, test.row), OutcomeState::Fail);
+
+        // An ordinary namespace is never a violation.
+        auto ordinary = context;
+        ordinary.evidence.push_back(publication(Kind::PublishObserved, "media"));
+        ordinary.evidence.push_back(publication(Kind::NamespaceObserved, "media"));
+        EXPECT_EQ(state(ordinary, test.row), OutcomeState::Pass);
+
+        // The other publication kind violates only the broad rows.
+        const auto other_kind = test.forbidden_kind == Kind::PublishObserved
+            ? Kind::NamespaceObserved : Kind::PublishObserved;
+        auto other = context;
+        other.evidence.push_back(publication(other_kind, test.forbidden_first_field));
+        EXPECT_EQ(state(other, test.row),
+                  test.other_kind_is_violation ? OutcomeState::Fail : OutcomeState::Pass);
+    }
+}
+
+TEST(Draft21GapA, SessionNamespaceIsRegisteredButOtherPeriodNamespacesAreNot) {
+    auto context = quiet_window("d21-attempt-unregistered-period-namespace-publication");
+    context.evidence.push_back(publication(Draft21AnnouncementEventKind::PublishObserved, ".session"));
+    EXPECT_EQ(state(context, "D21-2-4-2-MUST-NOT-026"), OutcomeState::Pass);
+    context.evidence.push_back(publication(Draft21AnnouncementEventKind::NamespaceObserved, ".x"));
+    EXPECT_EQ(state(context, "D21-2-4-2-MUST-NOT-026"), OutcomeState::Fail);
+    // The single period begins with a period and has no registration either.
+    auto single = quiet_window("d21-attempt-unregistered-period-namespace-publication");
+    single.evidence.push_back(publication(Draft21AnnouncementEventKind::PublishObserved, "."));
+    EXPECT_EQ(state(single, "D21-2-4-2-MUST-NOT-026"), OutcomeState::Fail);
+    // ".sessions" is not ".session".
+    auto longer = quiet_window("d21-application-track-publication-under-session");
+    longer.evidence.push_back(publication(Draft21AnnouncementEventKind::PublishObserved, ".sessions"));
+    EXPECT_EQ(state(longer, "D21-6-5-MUST-NOT-166"), OutcomeState::Pass);
+}
+
+TEST(Draft21GapA, EmittedKeyValueTypeDeltasFailOnlyOnObservedOverflow) {
+    auto context = exchange("d21-publisher-key-value-type-deltas");
+    EXPECT_EQ(state(context, "D21-8-3-MUST-NOT-230"), OutcomeState::Pass);
+    auto incomplete = context;
+    incomplete.complete = false;
+    EXPECT_EQ(state(incomplete, "D21-8-3-MUST-NOT-230"), OutcomeState::NotRun);
+    for (const auto* detail : {"draft-21 key-value type overflow", "SETUP option type overflow",
+                               "draft-21 parameter type overflow", "Track Property type overflow"}) {
+        SCOPED_TRACE(detail);
+        auto overflow = incomplete;
+        overflow.evidence.push_back(
+            {Draft21AnnouncementEventKind::MalformedPublisherMessage, 0, std::nullopt});
+        overflow.evidence.back().detail = detail;
+        EXPECT_EQ(state(overflow, "D21-8-3-MUST-NOT-230"), OutcomeState::Fail);
+    }
+    // Some other malformed message is not a type-delta violation.
+    auto other = incomplete;
+    other.evidence.push_back(
+        {Draft21AnnouncementEventKind::MalformedPublisherMessage, 0, std::nullopt});
+    other.evidence.back().detail = "empty draft-21 namespace field";
+    EXPECT_EQ(state(other, "D21-8-3-MUST-NOT-230"), OutcomeState::NotRun);
+}
+
+TEST(Draft21GapA, EmittedNamespaceFieldsMustBeNonEmpty) {
+    auto context = exchange("d21-publisher-emitted-namespace-fields");
+    EXPECT_EQ(state(context, "D21-8-7-MUST-250"), OutcomeState::NotRun);  // no decoded field yet
+    context.evidence[2].track_namespace = {to_bytes("media")};
+    EXPECT_EQ(state(context, "D21-8-7-MUST-250"), OutcomeState::Pass);
+    // A zero-field namespace is legal but proves nothing about field contents.
+    context.evidence[2].track_namespace.clear();
+    EXPECT_EQ(state(context, "D21-8-7-MUST-250"), OutcomeState::NotRun);
+    context.evidence.push_back(
+        {Draft21AnnouncementEventKind::MalformedPublisherMessage, 0, std::nullopt});
+    context.evidence.back().detail = "empty draft-21 namespace field";
+    EXPECT_EQ(state(context, "D21-8-7-MUST-250"), OutcomeState::Fail);
+}
+
+TEST(Draft21GapA, RoutingNeedsAnExplicitNamespacePublication) {
+    auto context = exchange("d21-publisher-namespace-routing-announcement");
+    // A PUBLISH alone never satisfies the duty (and is not scored as a failure).
+    EXPECT_EQ(state(context, "D21-7-5-MUST-206"), OutcomeState::NotRun);
+    context.namespace_announced = true;
+    EXPECT_EQ(state(context, "D21-7-5-MUST-206"), OutcomeState::Pass);
+    context.scenario_id = "d21-publisher-request-stream-placement";
+    EXPECT_EQ(state(context, "D21-7-5-MUST-206"), OutcomeState::NotRun);
+}
+
+TEST(Draft21GapA, ReservedNamespaceScenariosRequireMatchingFixtures) {
+    using app::gap_fixture_valid;
+    EXPECT_TRUE(gap_fixture_valid("d21-attempt-single-period-track-publication", {".", "x"}));
+    EXPECT_FALSE(gap_fixture_valid("d21-attempt-single-period-track-publication", {".x"}));
+    EXPECT_FALSE(gap_fixture_valid("d21-attempt-single-period-track-publication", {}));
+    EXPECT_TRUE(gap_fixture_valid("d21-attempt-unregistered-period-namespace-publication", {".x"}));
+    EXPECT_FALSE(gap_fixture_valid("d21-attempt-unregistered-period-namespace-publication", {"."}));
+    EXPECT_FALSE(gap_fixture_valid("d21-attempt-unregistered-period-namespace-publication", {".session"}));
+    EXPECT_FALSE(gap_fixture_valid("d21-attempt-unregistered-period-namespace-publication", {"media"}));
+    EXPECT_TRUE(gap_fixture_valid("d21-application-namespace-publication-under-session", {".session", "a"}));
+    EXPECT_FALSE(gap_fixture_valid("d21-application-namespace-publication-under-session", {".sessions"}));
+    EXPECT_TRUE(gap_fixture_valid("d21-publisher-emitted-namespace-fields", {"anything"}));
 }
 
 }  // namespace

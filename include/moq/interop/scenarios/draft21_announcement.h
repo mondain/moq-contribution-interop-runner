@@ -37,6 +37,9 @@ enum class Draft21AnnouncementEventKind {
     ProtocolViolation,
     PeerClosed,
     HarnessLimit,
+    // The publisher sent a malformed SETUP, PUBLISH or PUBLISH_NAMESPACE; the
+    // decoder detail names the violated wire rule (slice A).
+    MalformedPublisherMessage,
 };
 
 struct Draft21AnnouncementEvent {
@@ -45,6 +48,10 @@ struct Draft21AnnouncementEvent {
     std::optional<std::uint64_t> request_id;
     std::optional<std::uint64_t> application_close_code;
     std::vector<std::uint64_t> setup_option_types;
+    // Slice A: namespace carried by PublishObserved / NamespaceObserved and the
+    // wire decoder detail carried by MalformedPublisherMessage.
+    std::vector<std::vector<std::byte>> track_namespace;
+    std::string detail;
 };
 
 // One decoded Setup Option as received from the publisher (slice A).
@@ -77,6 +84,8 @@ struct Draft21AnnouncementContext {
     std::string scenario_id;
     std::optional<Draft21ExpectedConnectionUri> expected_uri;
     bool window_elapsed{false};
+    // A PUBLISH_NAMESPACE for the expected namespace was observed and answered.
+    bool namespace_announced{false};
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -109,11 +118,13 @@ private:
         transport::StreamId stream_id;
         std::uint64_t request_id;
         bool target;
+        bool reject{false};
     };
     struct PendingNamespace {
         transport::StreamId stream_id;
         std::uint64_t request_id;
         bool forbidden_dot;
+        bool target{false};
     };
     struct PendingWrite {
         transport::StreamId stream_id;
@@ -131,7 +142,9 @@ private:
                 std::optional<std::uint64_t> request_id = std::nullopt,
                 std::optional<std::uint64_t> application_close_code =
                     std::nullopt,
-                std::vector<std::uint64_t> setup_option_types = {});
+                std::vector<std::uint64_t> setup_option_types = {},
+                std::vector<std::vector<std::byte>> track_namespace = {},
+                std::string detail = {});
     void fail_harness();
     void close_protocol(std::uint64_t error,
                         std::optional<transport::StreamId> stream_id);
@@ -162,6 +175,7 @@ private:
     bool transport_established_{false};
     bool local_setup_opened_{false};
     bool harness_failed_{false};
+    bool routing_mode_{false};
 };
 
 }  // namespace moq::interop::scenarios

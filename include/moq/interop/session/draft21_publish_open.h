@@ -9,6 +9,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace moq::interop::session::draft21 {
@@ -27,6 +28,9 @@ struct PublishOpenResult {
     bool unsupported_message = false;
     bool unsupported_followup = false;
     bool incomplete_request = false;
+    // Wire decoder detail when close_error stems from a malformed PUBLISH or
+    // PUBLISH_NAMESPACE (for example an empty namespace field).
+    std::optional<std::string> decode_detail;
 };
 
 // Decodes only the first PUBLISH on client-initiated request streams.

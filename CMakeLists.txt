@@ -556,6 +556,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-draft21-evaluators GTest::gtest_main)
     add_test(NAME draft21-gap-a COMMAND moq-interop-draft21-gap-a-tests)
 
+    add_executable(moq-interop-draft21-gap-a-controller-tests
+                   tests/protocol/draft21_gap_a_controller_test.cpp)
+    target_link_libraries(moq-interop-draft21-gap-a-controller-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-gap-a-controller
+             COMMAND moq-interop-draft21-gap-a-controller-tests)
+
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
     add_test(NAME version COMMAND moq-interop-unit-tests)

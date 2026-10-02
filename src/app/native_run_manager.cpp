@@ -274,6 +274,8 @@ storage::EvidenceEvent stored_draft21_evidence(
         result.kind = "peer_closed"; break;
     case scenarios::Draft21AnnouncementEventKind::HarnessLimit:
         result.kind = "harness_limit"; break;
+    case scenarios::Draft21AnnouncementEventKind::MalformedPublisherMessage:
+        result.kind = "protocol_violation"; break;
     }
     result.detail = source.application_close_code
         ? "draft-21 peer application close code " +
@@ -289,6 +291,23 @@ storage::EvidenceEvent stored_draft21_evidence(
                 if (index != 0) result.detail += ",";
                 result.detail += std::to_string(source.setup_option_types[index]);
             }
+        }
+    }
+    // Slice A: keep the decoded values the evaluators relied on.
+    if (source.kind == scenarios::Draft21AnnouncementEventKind::PeerSetupReceived &&
+        !source.detail.empty()) {
+        result.detail += "; option values (type=hex or integer): " + source.detail;
+    }
+    if (source.kind == scenarios::Draft21AnnouncementEventKind::MalformedPublisherMessage) {
+        result.detail = "draft-21 malformed publisher message: " + source.detail;
+    }
+    if ((source.kind == scenarios::Draft21AnnouncementEventKind::PublishObserved ||
+         source.kind == scenarios::Draft21AnnouncementEventKind::NamespaceObserved) &&
+        !source.track_namespace.empty()) {
+        result.detail = "draft-21 publisher request namespace fields (hex): ";
+        for (std::size_t index = 0; index < source.track_namespace.size(); ++index) {
+            if (index != 0) result.detail += "/";
+            result.detail += hex_bytes(source.track_namespace[index]);
         }
     }
     result.scenario_id = scenario_id;
@@ -1084,6 +1103,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (draft == 21 && gap_webtransport_only_scenario(id) &&
             config.transport != TransportKind::WebTransport)
             return {RunStartStatus::Unsupported, {}, {}};
+        if (draft == 21 && announcement_gap_scenario(21, id) && config.track_fixture &&
+            !gap_fixture_valid(id, config.track_fixture->namespace_fields))
+            return {RunStartStatus::InvalidConfig, {}, {}};
         if (draft == 21 && gap_native_only_scenario(id) &&
             config.transport != TransportKind::NativeQuic)
             return {RunStartStatus::Unsupported, {}, {}};
