@@ -344,6 +344,10 @@ public:
     struct Worker {
         RunId id;
         transport::BoundEndpoint endpoint;
+        // Second port held for the whole run when a definition offers a
+        // replacement session; claimed in start() under the same lock and
+        // released with the run's own port, so it can never leak mid-run.
+        std::optional<std::uint16_t> replacement_port;
         std::atomic<bool> stop_requested{false};
         std::atomic<bool> finished{false};
         std::thread thread;
@@ -788,6 +792,7 @@ public:
         {
             std::lock_guard lock(mutex);
             reserved_ports.erase(worker->endpoint.port);
+            if (worker->replacement_port) reserved_ports.erase(*worker->replacement_port);
         }
         worker->finished = true;
     }
@@ -801,23 +806,11 @@ public:
         // port and path, observed alongside the first session.
         std::unique_ptr<transport::SessionTransport> replacement;
         std::string replacement_uri;
-        std::optional<std::uint16_t> replacement_port;
         if (definition.offer_replacement_session) {
-            std::uint16_t port = 0;
-            if (config.port_start != 0) {
-                std::lock_guard lock(mutex);
-                for (auto candidate = config.port_start; candidate <= config.port_end; ++candidate) {
-                    if (candidate == worker->endpoint.port || reserved_ports.contains(candidate)) continue;
-                    port = candidate;
-                    break;
-                }
-                if (port == 0) throw std::runtime_error("no free port for the replacement session listener");
-                reserved_ports.insert(port);
-                replacement_port = port;
-            }
+            // The port was reserved by start(); ephemeral mode binds port 0.
+            const std::uint16_t port = worker->replacement_port.value_or(0);
             auto created = create_listener(run_config, port, Tuning{std::nullopt, std::nullopt, std::nullopt, false, kReplacementPath});
             if (!created.listener) {
-                if (replacement_port) { std::lock_guard lock(mutex); reserved_ports.erase(*replacement_port); }
                 throw std::runtime_error("replacement session listener could not be created");
             }
             replacement = std::move(created.listener);
@@ -831,12 +824,9 @@ public:
             std::function<void()> release;
             ~ReplacementGuard() { release(); }
         } guard{[&] {
-            // Runs after the controller (declared next) is gone.
+            // Runs after the controller (declared next) is gone. The port
+            // reservation itself is released with the run.
             replacement.reset();
-            if (replacement_port) {
-                std::lock_guard lock(mutex);
-                reserved_ports.erase(*replacement_port);
-            }
         }};
         scenarios::RawProbeController controller(listener, std::move(definition), replacement.get(),
                                                  std::move(replacement_uri));
@@ -1382,14 +1372,12 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             }
         }
     }
-    // A replacement session needs a second port beside the run's own.
-    if (impl_->config.port_start != 0 && impl_->config.port_end == impl_->config.port_start &&
-        std::any_of(definitions.begin(), definitions.end(),
-                    [](const auto& definition) { return definition.offer_replacement_session; }))
-        return {RunStartStatus::PortExhausted, {}, {}};
+    const bool needs_replacement = std::any_of(definitions.begin(), definitions.end(),
+        [](const auto& definition) { return definition.offer_replacement_session; });
     std::lock_guard lock(impl_->mutex);
     impl_->reap_finished();
-    if (impl_->reserved_ports.size() >= impl_->config.maximum_active_runs) {
+    // Capacity counts runs, not ports: a replacement run holds two ports.
+    if (impl_->workers.size() >= impl_->config.maximum_active_runs) {
         return {RunStartStatus::PortExhausted, {}, {}};
     }
     std::unique_ptr<transport::SessionTransport> listener;
@@ -1425,13 +1413,27 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     }
     if (!listener) return {RunStartStatus::PortExhausted, {}, {}};
 
+    // A replacement session needs a second port beside the run's own; claim
+    // it now so an accepted run can never fail for want of one.
+    std::optional<std::uint16_t> replacement_port;
+    if (needs_replacement && !ephemeral) {
+        for (std::uint32_t candidate = impl_->config.port_start; candidate <= impl_->config.port_end; ++candidate) {
+            if (candidate == endpoint.port || impl_->reserved_ports.contains(static_cast<std::uint16_t>(candidate))) continue;
+            replacement_port = static_cast<std::uint16_t>(candidate);
+            break;
+        }
+        if (!replacement_port) return {RunStartStatus::PortExhausted, {}, {}};
+    }
+
     const auto id = impl_->store->create_run(config);
     auto worker = std::make_unique<Impl::Worker>();
     worker->id = id;
     worker->endpoint = endpoint;
+    worker->replacement_port = replacement_port;
     auto* worker_ptr = worker.get();
     impl_->workers.push_back(std::move(worker));
     impl_->reserved_ports.insert(endpoint.port);
+    if (replacement_port) impl_->reserved_ports.insert(*replacement_port);
     try {
         worker_ptr->thread = std::thread(
             [this, worker_ptr, listener = std::move(listener), config, definitions = std::move(definitions)] () mutable {
@@ -1440,6 +1442,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     } catch (...) {
         impl_->workers.pop_back();
         impl_->reserved_ports.erase(endpoint.port);
+        if (replacement_port) impl_->reserved_ports.erase(*replacement_port);
         const requirements::ScoreSummary failure{
             requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
         impl_->store->finalize(id, failure, {});
