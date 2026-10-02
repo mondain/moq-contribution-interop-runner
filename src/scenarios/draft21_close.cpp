@@ -233,9 +233,12 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     add("D21-6-4-2-1-MUST-154", "d21-request-id-wrong-sender-parity",
         "d21-wrong-parity-invalid-request-id", bidi,
         bytes({0x50, 0, 3, 0, 0, 0}), 4);
+    // The first request has zero Track Namespace fields (Section 4.1: all
+    // namespaces), which any publisher can accept; one for an unknown prefix
+    // could be refused and the session ended before the duplicate is read.
     add("D21-6-4-2-1-MUST-155", "d21-duplicate-request-id-across-streams",
         "d21-duplicate-invalid-request-id", bidi,
-        bytes({0x50, 0, 5, 1, 1, 1, 'n', 0}), 4);
+        bytes({0x50, 0, 3, 1, 0, 0}), 4);
     result.back().definition.writes.push_back(
         {bidi, bytes({0x50, 0, 5, 1, 1, 1, 'm', 0}), false});
 
