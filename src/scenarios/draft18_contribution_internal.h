@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -407,5 +408,7 @@ std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseco
                                                           const Fixture& fixture);
 std::vector<Draft18ContributionProbe> publisher_initiated_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> object_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
+std::vector<Draft18ContributionProbe> goaway_probes(std::chrono::milliseconds deadline);
+std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadline);
 
 }  // namespace moq::interop::scenarios::contribution

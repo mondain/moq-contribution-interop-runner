@@ -223,7 +223,9 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution_setup.cpp
     src/scenarios/draft18_contribution_subscribe.cpp
     src/scenarios/draft18_contribution_publisher.cpp
-    src/scenarios/draft18_contribution_objects.cpp)
+    src/scenarios/draft18_contribution_objects.cpp
+    src/scenarios/draft18_contribution_goaway.cpp
+    src/scenarios/draft18_contribution_uri.cpp)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -347,6 +349,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-native-quic-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
+    # Draft-18 publisher-contribution probes through the real run manager.
+    add_executable(moq-interop-draft18-contribution-live-tests
+                   tests/integration/draft18_contribution_live_test.cpp)
+    target_link_libraries(moq-interop-draft18-contribution-live-tests PRIVATE
+        moq-interop-test-client moq-interop-runs GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft18-contribution-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft18-contribution-live COMMAND moq-interop-draft18-contribution-live-tests)
+    set_tests_properties(draft18-contribution-live PROPERTIES RESOURCE_LOCK "native-test-ports")
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -485,7 +497,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-draft18-contribution-tests tests/protocol/draft18_contribution_test.cpp
         tests/protocol/draft18_contribution_subscribe_test.cpp
         tests/protocol/draft18_contribution_publisher_test.cpp
-        tests/protocol/draft18_contribution_objects_test.cpp)
+        tests/protocol/draft18_contribution_objects_test.cpp
+        tests/protocol/draft18_contribution_goaway_test.cpp
+        tests/protocol/draft18_contribution_uri_test.cpp)
     target_link_libraries(moq-interop-draft18-contribution-tests PRIVATE moq-interop-scenarios
         moq-interop-requirements moq-interop-draft18-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-draft18-contribution-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

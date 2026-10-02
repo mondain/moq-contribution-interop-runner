@@ -74,6 +74,8 @@ struct RawProbeTranscript {
     std::optional<std::size_t> delivery_event_count;
     std::vector<transport::TransportEvent> events;
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
+    // The moqt:// URI the runner named for the publisher's connection.
+    std::optional<std::string> connection_uri{};
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);

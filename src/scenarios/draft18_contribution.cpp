@@ -40,6 +40,8 @@ std::vector<Draft18ContributionProbe> draft18_contribution_probes(
     append(contribution::subscription_probes(deadline, fixture));
     append(contribution::publisher_initiated_probes(deadline));
     append(contribution::object_probes(deadline, fixture));
+    append(contribution::goaway_probes(deadline));
+    append(contribution::uri_probes(deadline));
     return result;
 }
 

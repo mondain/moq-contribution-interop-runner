@@ -35,6 +35,10 @@ std::optional<bool> evaluate_draft18_contribution_probe(
     const RawProbeTranscript& transcript, const Draft18ContributionProbe& profile,
     bool webtransport = false);
 
+// Query component the runner appends to the publisher's connection URI for a
+// scenario, or an empty view (section 10.3.1.2).
+std::string_view draft18_contribution_connection_query(std::string_view id);
+
 bool draft18_contribution_scenario(std::string_view id);
 bool draft18_contribution_requires_track(std::string_view id);
 bool draft18_contribution_fixture_valid(

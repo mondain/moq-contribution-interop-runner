@@ -128,7 +128,7 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        const std::size_t expected_covered = draft == 18 ? 112u : 76u;
+        const std::size_t expected_covered = draft == 18 ? 118u : 76u;
         EXPECT_EQ(report.required_covered, expected_covered);
         EXPECT_EQ(report.required_total - report.required_covered,
                   175u - expected_covered);
