@@ -91,6 +91,9 @@ esac
 # subscriber: with --forward 1 moqxr also pushes a PUBLISH of its own that those
 # probes do not answer, so it waits and exits with a failure status.
 # This chooses moqxr CLI options; it never changes what a scenario expects.
+# Probes that judge what the publisher does after the runner answers its own PUBLISH
+# (for example d21-publish-namespace-ok-with-track-properties) must stay in the default
+# push mode: in await-subscribe mode moqxr never sends the PUBLISH, so no evidence exists.
 if [[ "$draft" == 21 ]]; then
     case $(jq -r '.scenario_id' "$request_file") in
         d21-largest-object-* | d21-publish-done-* | d21-publisher-namespace-redirect | \
@@ -145,7 +148,6 @@ if [[ "$draft" == 21 ]]; then
         d21-parameter-invalid-message-scope | \
         d21-parameter-type-delta-overflow | \
         d21-publish-established-subscriber-sends-publish-state-notify | \
-        d21-publish-namespace-ok-with-track-properties | \
         d21-publish-update-ok-with-track-properties | \
         d21-publisher-request-response-before-fin | \
         d21-range-filter-default-zero-limit | \
