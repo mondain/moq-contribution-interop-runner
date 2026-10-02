@@ -490,6 +490,10 @@ public:
             ? std::string(gap_native_uri_path_and_query(scenario)) : std::string("/moq");
         auto uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
                    authority_of(worker) + tail;
+        // Section 3.1.1: one scenario names a moqt URI with no host.
+        if (run_config.draft == DraftVersion::Draft18 && run_config.transport == TransportKind::NativeQuic &&
+            scenarios::draft18_contribution_empty_host_scenario(scenario))
+            return "moqt://:" + std::to_string(worker->endpoint.port) + "/moq";
         // Some contribution scenarios check how the publisher reports a URI query.
         if (run_config.draft == DraftVersion::Draft18 && run_config.transport == TransportKind::NativeQuic) {
             const auto query = scenarios::draft18_contribution_connection_query(scenario);
@@ -617,7 +621,8 @@ public:
                     handle = start_context_driver(worker, run_config, current_id, driver);
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
-                const bool process_error = retire_driver();
+                const bool process_error = retire_driver() &&
+                    !scenarios::draft18_contribution_empty_host_scenario(current_id);
                 if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
@@ -782,6 +787,9 @@ public:
                 if (transcript.complete || transcript.harness_failed || transcript.timed_out || now >= deadline) break;
                 if (handle.valid()) {
                     const auto process = driver->poll(handle);
+                    // A publisher may decline the host-less URI of the section 3.1.1 scenario.
+                    if (process.status != DriverStatus::Running && !transcript.transport_established &&
+                        scenarios::draft18_contribution_empty_host_scenario(transcript.scenario_id)) break;
                     if (driver_failed(process) ||
                         (process.status != DriverStatus::Running && !transcript.transport_established))
                         throw std::runtime_error("publisher process failed during raw context");

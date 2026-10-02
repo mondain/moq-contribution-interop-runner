@@ -7,6 +7,7 @@ constexpr std::uint64_t kOptionPath = 0x01;
 constexpr std::uint64_t kOptionAuthority = 0x05;
 constexpr std::string_view kQueryScenario = "connect-publisher-to-native-uri-with-query";
 constexpr std::string_view kQuery = "interop=1";
+constexpr std::string_view kEmptyHostScenario = "connect-with-empty-host-moqt-uri";
 
 struct UriParts {
     std::string authority;
@@ -65,6 +66,26 @@ std::optional<bool> setup_matches_uri(const RawProbeTranscript& transcript, bool
     return option_value(control->setup_options, kOptionPath) == std::optional<std::string>{expected};
 }
 
+// Section 3.1.1: the host portion of the authority, after any userinfo, is
+// empty (for example moqt://:4443/path).
+bool authority_has_empty_host(const std::string& authority) {
+    const auto at = authority.rfind('@');
+    const auto hostport = std::string_view(authority).substr(at == std::string::npos ? 0 : at + 1);
+    if (!hostport.empty() && hostport.front() == '[') return false;
+    return hostport.substr(0, hostport.find(':')).empty();
+}
+
+// Section 3.1.1: a client MUST NOT use a moqt URI whose authority has an empty
+// host. The runner names such a URI; a QUIC connection reaching the listener
+// shows that the publisher used it anyway. A publisher that refuses leaves no
+// wire evidence, so that outcome is not scored.
+std::optional<bool> empty_host_uri_not_used(const RawProbeTranscript& transcript, bool webtransport) {
+    if (webtransport || !transcript.connection_uri) return std::nullopt;
+    const auto uri = split_uri(*transcript.connection_uri);
+    if (!uri || !authority_has_empty_host(uri->authority)) return std::nullopt;
+    return transcript.transport_established ? std::optional<bool>{false} : std::nullopt;
+}
+
 }  // namespace
 
 std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadline) {
@@ -83,12 +104,21 @@ std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadl
         "connect-publisher-to-native-uri-with-path", Component::Path);
     add("D18-10-3-1-2-MUST-005", "setup-path-includes-question-mark-and-query",
         "connect-publisher-to-native-uri-with-query", Component::PathWithQuery);
+    // The publisher is not expected to complete SETUP on this URI, so the context
+    // starts without waiting for it and ends once a connection is seen.
+    result.push_back(make_probe("D18-3-1-1-MUST-NOT-001", "empty-host-uri-not-used-for-session",
+        RawProbeDefinition{std::string(kEmptyHostScenario), setup_message({}), {}, false, {}, deadline,
+            [](const RawProbeTranscript& transcript) { return transcript.transport_established; }, {}},
+        empty_host_uri_not_used));
     return result;
 }
 
 }  // namespace moq::interop::scenarios::contribution
 
 namespace moq::interop::scenarios {
+bool draft18_contribution_empty_host_scenario(std::string_view id) {
+    return id == contribution::kEmptyHostScenario;
+}
 std::string_view draft18_contribution_connection_query(std::string_view id) {
     return id == contribution::kQueryScenario ? contribution::kQuery : std::string_view{};
 }

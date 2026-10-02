@@ -633,6 +633,15 @@ In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, its picoquic client
 did not negotiate QUIC DATAGRAM for either draft, so both attempts ended at the
 transport gate before publisher behavior could be scored. This is an interop
 observation, not a validator pass or a reason to bypass that draft requirement.
+A 2026-10-01 re-check with build `g478d6c0.dirty` found the same: over raw QUIC
+the runner closes the session with PROTOCOL_VIOLATION "QUIC DATAGRAM not
+negotiated" before SETUP. The same build negotiates DATAGRAM over WebTransport,
+so driven draft-18 contribution runs against `moqxr` use `webtransport`. The
+adapter adds `--publish-catalog` for the scenarios that observe a
+publisher-originated PUBLISH (`publish-track-under-single-period-namespace`,
+`application-publish-track-in-session-namespace` and
+`publish-distinct-content-tracks-in-same-scope`), because `moqxr` only
+originates PUBLISH for its catalog track on request.
 
 The optional test peer exercises the actual HTTP-created run and production
 native listener for both drafts without depending on a particular publisher:

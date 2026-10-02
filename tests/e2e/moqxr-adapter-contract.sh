@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -95,4 +95,18 @@ if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
     printf 'mismatched transport endpoint unexpectedly accepted\n' >&2
     exit 1
 fi
+# Scenarios that observe a publisher-originated PUBLISH ask moqxr to publish its catalog track.
+for scenario in publish-track-under-single-period-namespace application-publish-track-in-session-namespace \
+                publish-distinct-content-tracks-in-same-scope scenario-without-publish; do
+    make_request 18 webtransport 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+    jq --arg scenario "$scenario" '.scenario_id = $scenario' "$test_dir/request.json" >"$test_dir/request.next"
+    mv "$test_dir/request.next" "$test_dir/request.json"
+    output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+    if [[ "$scenario" == scenario-without-publish ]]; then
+        [[ "$output" != *"<--publish-catalog>"* ]]
+    else
+        [[ "$output" == *"<--publish-catalog>"* ]]
+    fi
+done
 printf 'moqxr adapter contract passed\n'

@@ -498,5 +498,6 @@ std::vector<Draft18ContributionProbe> goaway_probes(std::chrono::milliseconds de
 std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> closure_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
+std::vector<Draft18ContributionProbe> origination_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 
 }  // namespace moq::interop::scenarios::contribution

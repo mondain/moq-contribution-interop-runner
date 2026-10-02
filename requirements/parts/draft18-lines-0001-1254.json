@@ -598,14 +598,10 @@
       "actor": "publisher",
       "summary": "Do not send Objects from two distinct Subgroups on the same stream when delivering a subscription.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "subscribe-to-multiple-subgroups"
-      ],
-      "evaluators": [
-        "subscription-stream-has-one-subgroup"
-      ],
-      "rationale": "The contribution publisher sends subscription streams under Section 5.1. Group and Subgroup identities in SUBGROUP_HEADER (Section 11.4.2) allow the harness to check stream isolation; this statement is not a FETCH-stream rule."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 11.4.2 (lines 5227-5230) makes every Object on a Subgroup stream belong to the one Subgroup named by that stream's single SUBGROUP_HEADER, and an Object carries no Subgroup field of its own. Objects of two distinct Subgroups on one stream therefore have no wire representation: a receiver can only read them as one Subgroup, so the violation is decided inside the publisher before serialization and no byte sequence, even from a cooperating publisher, exhibits it. The separate rule that one Subgroup must not span streams (lines 869-871, second clause) is a different statement."
     },
     {
       "id": "D18-2-2-MUST-NOT-002",
