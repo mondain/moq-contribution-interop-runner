@@ -519,7 +519,8 @@ std::vector<Draft18ContributionProbe> object_probes(std::chrono::milliseconds de
 std::vector<Draft18ContributionProbe> goaway_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> uri_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> closure_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
-std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
+std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture,
+                                                      const std::optional<std::string>& denied_token);
 std::vector<Draft18ContributionProbe> origination_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 // Section 10.2.2 rows that need an operator-supplied credential (draft18_contribution_token.cpp).
 std::vector<Draft18ContributionProbe> token_probes(std::chrono::milliseconds deadline, const Fixture& fixture,

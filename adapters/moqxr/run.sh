@@ -146,7 +146,6 @@ if [[ "$draft" == 21 ]]; then
         d21-parameter-type-delta-overflow | \
         d21-publish-established-subscriber-sends-publish-state-notify | \
         d21-publish-namespace-ok-with-track-properties | \
-        d21-publish-request-error-oversized-reason | \
         d21-publish-update-ok-with-track-properties | \
         d21-publisher-request-response-before-fin | \
         d21-range-filter-default-zero-limit | \

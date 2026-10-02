@@ -145,8 +145,10 @@ bool redelivered(const RawProbeTranscript& transcript) {
     return false;
 }
 
-std::optional<bool> unauthorized_not_accepted(const RawProbeTranscript& transcript, bool) {
-    if (!bounded(transcript)) return std::nullopt;
+std::optional<bool> unauthorized_not_accepted(const RawProbeTranscript& transcript, bool configured) {
+    // Without an operator-declared denied credential the publisher may legitimately
+    // grant the request (an open policy authorizes every subscriber): nothing is provable.
+    if (!configured || !bounded(transcript)) return std::nullopt;
     const auto reply = write_reply(transcript, 0);
     if (reply.messages.empty()) return std::nullopt;
     if (request_error(reply)) return true;
@@ -154,13 +156,14 @@ std::optional<bool> unauthorized_not_accepted(const RawProbeTranscript& transcri
     return std::nullopt;
 }
 
-d18::Parameters denied_credentials() {
-    return {{0x03, d18::Token{d18::TokenAliasType::UseValue, std::nullopt, 0, text(kDeniedToken)}}};
+d18::Parameters denied_credentials(const std::optional<std::string>& denied) {
+    return {{0x03, d18::Token{d18::TokenAliasType::UseValue, std::nullopt, 0, text(denied ? std::string_view(*denied) : kDeniedToken)}}};
 }
 
 }  // namespace
 
-std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture) {
+std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds deadline, const Fixture& fixture,
+                                                      const std::optional<std::string>& denied_token) {
     std::vector<Draft18ContributionProbe> result;
     const d18::Parameters forwarding{forward_parameter(1)};
     const auto subscribe = [&](std::uint64_t id, d18::Parameters parameters) {
@@ -221,14 +224,18 @@ std::vector<Draft18ContributionProbe> exchange_probes(std::chrono::milliseconds 
     const auto prefix = d18::TrackNamespace{fixture.track_namespace.empty() ? Namespace{text("a")} : fixture.track_namespace};
     result.push_back(make_probe("D18-10-18-MUST-004", "unauthorized-namespace-subscription-not-accepted",
         RawProbeDefinition{"receive-subscribe-namespace-denied-by-configured-authorization-policy", setup_message({}),
-            {{RawProbeChannel::NewBidi, encode(d18::SubscribeNamespaceMessage{kSubscribeId, prefix, denied_credentials()}), false}},
+            {{RawProbeChannel::NewBidi, encode(d18::SubscribeNamespaceMessage{kSubscribeId, prefix, denied_credentials(denied_token)}), false}},
             true, setup_ready, deadline, first_response_or_close(0), {}},
-        unauthorized_not_accepted, true));
+        [configured = denied_token.has_value()](const RawProbeTranscript& transcript, bool) {
+            return unauthorized_not_accepted(transcript, configured);
+        }, true));
     result.push_back(make_probe("D18-10-19-MUST-004", "unauthorized-namespace-subscription-not-accepted",
         RawProbeDefinition{"receive-subscribe-tracks-denied-by-configured-authorization-policy", setup_message({}),
-            {{RawProbeChannel::NewBidi, encode(d18::SubscribeTracksMessage{kSubscribeId, prefix, denied_credentials()}), false}},
+            {{RawProbeChannel::NewBidi, encode(d18::SubscribeTracksMessage{kSubscribeId, prefix, denied_credentials(denied_token)}), false}},
             true, setup_ready, deadline, first_response_or_close(0), {}},
-        unauthorized_not_accepted, true));
+        [configured = denied_token.has_value()](const RawProbeTranscript& transcript, bool) {
+            return unauthorized_not_accepted(transcript, configured);
+        }, true));
     return result;
 }
 
