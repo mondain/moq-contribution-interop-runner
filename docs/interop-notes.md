@@ -124,9 +124,9 @@ errors, and are now fixed:
   adapter runs moqxr with `--forward 0 --paced` for those probes.
 
 Effect on the sweep (rows with at least one scored result, final run on the merged
-tree): draft 18 went from 34 passing and 49 failing rows to 56 and 30; draft 21 from
-29 passing and 39 failing to 42 and 31. Runs ending in a run-level error fell from
-225 to 60; the remaining ones are scenarios whose stimulus moqxr cannot serve (it
+tree): draft 18 went from 34 passing and 49 failing rows to 57 and 30; draft 21 from
+29 passing and 39 failing to 41 and 30. Runs ending in a run-level error fell from
+225 to 56; the remaining ones are scenarios whose stimulus moqxr cannot serve (it
 implements no FETCH, only serves namespace `media`, does not advertise
 `MAX_REQUEST_UPDATES` or a token cache size, and exits when its own PUBLISH requests
 go unanswered). Failing rows rose in the second half of the work on purpose: a
@@ -139,9 +139,15 @@ evaluator accepts any session close, and in the first sweep moqxr closed the ses
 by itself after its unanswered announcement timed out, which counted as the required
 close. With the announcement answered, moqxr stays up, logs that it is skipping the
 unhandled control message, and serves a follow-up request, so the failure is real.
-An evaluator that accepts any close can still be satisfied by a publisher's unrelated
-close; closes that precede the delivered stimulus should not count, and that
-tightening is not done yet.
+Close evaluators no longer take the first close whenever it happens. A close is read
+as the publisher's reaction only when it follows the delivered stimulus and arrives
+within 1.5 s of the last stimulus write (longer for probes with a liveness follow-up),
+and, for rules that accept any close code, only when it is not a NO_ERROR close.
+Closes that fail these tests leave the row unscored. This removed passes and fails
+that depended on moqxr's own read timeout (about two seconds after it announces its
+namespace, closing with code 0), for example `D21-6-4-1-MUST-153` and
+`D21-11-MUST-503`. The peer-close and response probe families, where the publisher
+opens the request stream, keep their own close handling and are not covered yet.
 
 ### Deviations from the drafts confirmed with wire evidence
 
@@ -162,7 +168,6 @@ tightening is not done yet.
 | REQUEST_UPDATE_OK carries no LARGEST_OBJECT | Include LARGEST_OBJECT (draft 21 lines 5243-5246) | D21-9-20-18-MUST-456 |
 | Rejects a Range Filter with code 0x1 (UNAUTHORIZED) when MAX_FILTER_RANGES is unadvertised, which means zero | INVALID_FILTER (draft 21 lines 1226 and 3602-3607) | D21-3-3-2-MUST-065, D21-9-1-6-MUST-315 |
 | Ignores control-stream GOAWAY frames (logged as unhandled) | Duplicate or oversized GOAWAY, and a 1-byte GOAWAY body, require PROTOCOL_VIOLATION (draft 21 lines 3440 and 3679-3709) | D21-9-2-MUST-327, D21-9-2-MUST-331, D21-9-MUST-285 |
-| Accepts Track Properties in a REQUEST_OK and a responder-side REQUEST_UPDATE | PROTOCOL_VIOLATION (draft 21 lines 3763-3764 and 3854) | D21-9-3-MUST-337, D21-9-5-MUST-344 |
 
 Some of these currently score as `not_run` instead of `fail` because moqxr stays
 silent where the draft requires a close (for example the GOAWAY rows, the
@@ -188,6 +193,11 @@ serving another could be wrongly failed. See [scoring-and-audit.md](scoring-and-
 
 ### Not adjudicated or not scoreable
 
+- `D21-9-3-MUST-337` and `D21-9-5-MUST-344`: moqxr accepts Track Properties in a
+  REQUEST_OK and a responder-side REQUEST_UPDATE and carries on, which the drafts
+  forbid (draft 21 lines 3763-3764 and 3854). The runner cannot prove it, because
+  moqxr stays silent and the probe family has no liveness follow-up. An earlier FAIL
+  for `D21-9-3-MUST-337` came from moqxr's own timeout close and was removed.
 - `D18-10-18-MUST-004` and `D18-10-19-MUST-004` (authorization of a discovery request)
   score only when `--denied-authorization-token` names a credential the publisher's
   policy refuses; moqxr has no policy that refuses a token, so they stay unscored
