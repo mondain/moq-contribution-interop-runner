@@ -5,6 +5,7 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <set>
@@ -36,6 +37,39 @@ struct RawProbeWrite {
     std::function<std::optional<std::vector<std::byte>>(const RawProbeGateInput&)> prepare_bytes{};
 };
 struct RawProbeTranscript;
+// How the runner answers requests a publisher opens (draft 21, Sections 9.3, 9.4
+// and 9.5). A REQUEST_OK without parameters accepts; REQUEST_ERROR UNINTERESTED
+// followed by a FIN rejects (Section 6.4.2.3).
+enum class RawProbePublishResponse {
+    Ignore,
+    Accept,
+    Reject,
+    // Reject only once an Object for the PUBLISH's Track Alias has been received,
+    // so the publisher is known to have been producing.
+    RejectAfterObject,
+};
+enum class RawProbeUpdateResponse {
+    Ignore,
+    Accept,
+    // Accept at once, except that a message carrying an AUTHORIZATION TOKEN with
+    // Alias Type USE_ALIAS is answered only after `hold`.
+    HoldAliasUses,
+};
+struct RawProbeCourtesy {
+    // Acknowledge each PUBLISH_NAMESPACE with REQUEST_OK.
+    bool acknowledge_namespaces{false};
+    RawProbePublishResponse publish{RawProbePublishResponse::Ignore};
+    // Responses to REQUEST_UPDATE messages the publisher sends on its requests.
+    RawProbeUpdateResponse update{RawProbeUpdateResponse::Ignore};
+    std::chrono::milliseconds hold{300};
+};
+enum class RawProbeCourtesyKind { NamespaceOk, PublishOk, PublishError, UpdateOk };
+struct RawProbeCourtesyWrite {
+    transport::StreamId stream_id{0};
+    // Transport events observed when the response was fully accepted.
+    std::size_t event_count{0};
+    RawProbeCourtesyKind kind{RawProbeCourtesyKind::NamespaceOk};
+};
 // Transport credit the runner advertises for the context, so a scenario can
 // bound what the publisher may open. Unset values keep the listener defaults.
 struct RawProbeListenerLimits {
@@ -51,13 +85,16 @@ struct RawProbeDefinition {
     std::chrono::milliseconds deadline{1000};
     std::function<bool(const RawProbeTranscript&)> response_ready{};
     std::function<bool(std::span<const std::byte>)> peer_request_ready{};
-    // Opt-in courtesy that is not part of the scored stimulus: a PUBLISH_NAMESPACE
-    // the publisher opens on its own request stream is acknowledged with an empty
-    // REQUEST_OK (draft 21 Section 9.3), as a subscriber that wants the publisher
-    // to carry on serving requests would. Acknowledgements are never recorded as
-    // transcript writes and are listed in `acknowledged_namespace_streams`.
-    bool acknowledge_publisher_namespaces{false};
+    // Opt-in courtesy responses to requests the publisher opens on its own request
+    // streams. They are not part of the scored stimulus and are never transcript
+    // writes; each one is listed in RawProbeTranscript::courtesy_writes with the
+    // transport event count at which it was fully accepted, so evaluators can
+    // order it against what the publisher sent. Draft 21 only.
+    RawProbeCourtesy courtesy{};
     RawProbeListenerLimits listener_limits{};
+    // The scenario withholds or rejects what the publisher asked for, so a publisher
+    // that then exits with an error is part of what was observed, not a broken run.
+    bool publisher_exit_is_evidence{false};
 };
 struct RawProbeAcceptedWrite {
     RawProbeWrite write;
@@ -90,10 +127,8 @@ struct RawProbeTranscript {
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
-    // Request streams whose PUBLISH_NAMESPACE was acknowledged by the opt-in
-    // courtesy (RawProbeDefinition::acknowledge_publisher_namespaces), with the
-    // transport event count when the acknowledgement was fully accepted.
-    std::vector<std::pair<transport::StreamId, std::size_t>> acknowledged_namespace_streams;
+    // Responses sent by RawProbeDefinition::courtesy, in the order accepted.
+    std::vector<RawProbeCourtesyWrite> courtesy_writes;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -101,10 +136,12 @@ std::optional<bool> evaluate_raw_probe_close(
     const RawProbeTranscript& transcript, const RawProbeDefinition& definition,
     std::optional<std::uint64_t> expected_close);
 
+class PublisherCourtesy;
 class RawProbeController {
 public:
     RawProbeController(transport::SessionTransport& transport,
                        RawProbeDefinition definition);
+    ~RawProbeController();
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
 private:
@@ -115,9 +152,7 @@ private:
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;
     std::size_t peer_setup_bytes_count_{0};
-    void acknowledge_publisher_namespaces();
-    std::map<transport::StreamId, std::vector<std::byte>> namespace_candidates_;
-    std::map<transport::StreamId, std::size_t> namespace_ack_offsets_;
+    std::unique_ptr<PublisherCourtesy> courtesy_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_request_candidates_;
     std::set<transport::StreamId> cancelled_peer_requests_;
     std::optional<transport::StreamId> peer_request_stream_;

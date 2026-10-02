@@ -207,7 +207,9 @@ std::vector<Frame> parse_frames(const StreamRecord& record, bool& malformed) {
     return result;
 }
 
-View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {}
+View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {
+    courtesy_ = transcript.courtesy_writes;
+}
 
 View::View(std::span<const RawProbeAcceptedWrite> writes,
            std::span<const transport::TransportEvent> events)

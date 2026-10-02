@@ -75,7 +75,10 @@ const Spec* spec_of(const std::vector<Spec>& specs, const std::string& scenario)
 std::optional<bool> evaluate_draft21_contribution_probe(
     const RawProbeTranscript& transcript, const Draft21ContributionProbe& probe) {
     if (probe.draft != 21 || probe.definition.deadline.count() <= 0) return std::nullopt;
-    const auto fixture = transcript_fixture(transcript);
+    auto fixture = transcript_fixture(transcript);
+    // A context that sends nothing carries no request to recover the fixture from,
+    // and its stimulus does not depend on the fixture.
+    if (!fixture && probe.definition.writes.empty()) fixture = Fixture{{}, {std::byte{'x'}}};
     if (!fixture) return std::nullopt;
     std::vector<Draft21ContributionProbe> candidates;
     try {

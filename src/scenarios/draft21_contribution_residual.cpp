@@ -16,6 +16,7 @@
 #include "draft21_contribution_support.h"
 
 #include "moq/interop/wire/draft21/publish.h"
+#include "moq/interop/wire/draft21/token.h"
 
 #include <map>
 #include <set>
@@ -49,7 +50,7 @@ Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t las
 
 RawProbeDefinition residual_definition() {
     auto definition = base_definition("");
-    definition.acknowledge_publisher_namespaces = true;
+    definition.courtesy.acknowledge_namespaces = true;
     return definition;
 }
 
@@ -71,6 +72,7 @@ struct Object {
     bool data{true};  // false for an Object Status
     transport::StreamId stream{0};
     bool datagram{false};
+    Bytes payload;
 };
 
 struct SubgroupStream {
@@ -115,17 +117,20 @@ std::optional<SubgroupStream> parse_subgroup_stream(transport::StreamId id, cons
         const auto payload_length = read_vi(local);
         if (!payload_length) break;
         bool data = true;
+        Bytes payload;
         if (*payload_length == 0) {
             if (!read_vi(local)) break;
             data = false;
-        } else if (*payload_length > kMaximumTotalBytes ||
-                   !read_n(local, static_cast<std::size_t>(*payload_length))) {
-            break;
+        } else {
+            if (*payload_length > kMaximumTotalBytes) break;
+            const auto block = read_n(local, static_cast<std::size_t>(*payload_length));
+            if (!block) break;
+            payload.assign(block->begin(), block->end());
         }
         const std::uint64_t object = previous ? *previous + *delta + 1 : *delta;
         if (mode == 1u && !previous) result.subgroup_id = object;
         previous = object;
-        result.objects.push_back({*group, object, data, id, false});
+        result.objects.push_back({*group, object, data, id, false, std::move(payload)});
         cursor = local;
     }
     return result;
@@ -154,7 +159,19 @@ std::optional<Object> parse_datagram_object(const DatagramRecord& datagram, std:
         if (!value) return std::nullopt;
         object = *value;
     }
-    return Object{*group, object, (*flags & 0x20u) == 0, 0, true};
+    // Without a Status the remainder of the datagram is the payload (Section 11.2).
+    Bytes payload;
+    const bool has_payload = (*flags & 0x20u) == 0;
+    if (has_payload) {
+        if ((*flags & 0x08u) == 0 && !read_n(cursor, 1)) return std::nullopt;
+        if ((*flags & 0x01u) != 0) {
+            const auto length = read_vi(cursor);
+            if (!length || *length > 65535 || !read_n(cursor, static_cast<std::size_t>(*length))) return std::nullopt;
+        }
+        const auto rest = read_n(cursor, cursor.remaining());
+        if (rest) payload.assign(rest->begin(), rest->end());
+    }
+    return Object{*group, object, has_payload, 0, true, std::move(payload)};
 }
 
 std::vector<Object> delivered_objects(const View& view, std::uint64_t alias) {
@@ -640,6 +657,456 @@ Spec skipped_publish_spec() {
         true);
 }
 
+// ---- Requests the publisher opens ---------------------------------------------------
+// The contexts below send nothing: the runner answers what the publisher opens
+// (RawProbeCourtesy) and reads what the publisher puts on the wire.
+constexpr std::uint64_t kPublishDone = 0xb;
+constexpr std::uint64_t kRequestUpdate = 0x2;
+constexpr std::uint64_t kGoaway = 0x10;
+constexpr std::uint64_t kPublishNamespace = 0x6;
+
+struct PublishRecord {
+    transport::StreamId stream{0};
+    std::size_t first_event{0};
+    TrackName track;
+    std::uint64_t alias{0};
+    // The first of the publisher's FIN, its reset or its PUBLISH_DONE on the stream.
+    std::optional<std::size_t> terminated;
+    // The runner's volunteered answer to this PUBLISH.
+    std::optional<RawProbeCourtesyKind> response;
+    std::size_t response_event{0};
+    std::size_t updates{0};  // REQUEST_UPDATE messages after the PUBLISH
+};
+
+std::optional<std::size_t> earliest(std::optional<std::size_t> left, std::optional<std::size_t> right) {
+    if (!left) return right;
+    if (!right) return left;
+    return std::min(*left, *right);
+}
+
+std::vector<PublishRecord> publish_records(const View& view) {
+    std::vector<PublishRecord> result;
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 0u) continue;
+        const auto frames = view.frames(record);
+        if (frames.empty() || frames.front().type != kPublish) continue;
+        wire::Cursor body(frames.front().body);
+        if (!read_vi(body)) continue;
+        auto name_space = read_namespace(body);
+        const auto length = name_space ? read_vi(body) : std::nullopt;
+        const auto name = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
+        const auto alias = name ? read_vi(body) : std::nullopt;
+        if (!name_space || !name || !alias) continue;
+        PublishRecord publish;
+        publish.stream = id;
+        publish.first_event = record.first_event;
+        publish.track = {std::move(*name_space), Bytes(name->begin(), name->end())};
+        publish.alias = *alias;
+        publish.terminated = earliest(record.fin_event, record.reset_event);
+        for (std::size_t index = 1; index < frames.size(); ++index) {
+            if (frames[index].type == kPublishDone)
+                publish.terminated = earliest(publish.terminated, frames[index].event);
+            if (frames[index].type == kRequestUpdate) ++publish.updates;
+        }
+        for (const auto& write : view.courtesy_writes()) {
+            if (write.stream_id != id || publish.response) continue;
+            if (write.kind != RawProbeCourtesyKind::PublishOk && write.kind != RawProbeCourtesyKind::PublishError)
+                continue;
+            publish.response = write.kind;
+            publish.response_event = write.event_count;
+        }
+        result.push_back(std::move(publish));
+    }
+    return result;
+}
+
+bool established(const PublishRecord& record) { return record.response == RawProbeCourtesyKind::PublishOk; }
+
+// Both subscriptions were open at once: neither ended before the other began.
+bool simultaneous(const PublishRecord& left, const PublishRecord& right) {
+    return established(left) && established(right) &&
+           (!left.terminated || *left.terminated > right.first_event) &&
+           (!right.terminated || *right.terminated > left.first_event);
+}
+
+RawProbeDefinition observing(RawProbeCourtesy courtesy) {
+    auto definition = base_definition("");
+    definition.courtesy = courtesy;
+    // Rejecting a PUBLISH can make a publisher give up.
+    definition.publisher_exit_is_evidence = courtesy.publish == RawProbePublishResponse::Reject ||
+                                            courtesy.publish == RawProbePublishResponse::RejectAfterObject;
+    return definition;
+}
+
+RawProbeCourtesy accepting_publishes() {
+    RawProbeCourtesy result;
+    result.acknowledge_namespaces = true;
+    result.publish = RawProbePublishResponse::Accept;
+    return result;
+}
+
+// ---- Section 3.1.2 lines 1080-1084: one Track Alias per Track (D21-3-1-2-MUST-NOT-048)
+// "The same Track Alias MUST NOT be used by a publisher to refer to two different
+// Tracks simultaneously in the same session." Every PUBLISH is accepted so the
+// subscriptions are Established together.
+Spec distinct_aliases_spec() {
+    return spec("d21-concurrent-distinct-track-subscriptions",
+        {{"D21-3-1-2-MUST-NOT-048", "d21-distinct-active-tracks-have-distinct-aliases"}},
+        [](const Fixture&) { return observing(accepting_publishes()); },
+        [](const View& view) -> Judgement {
+            const auto records = publish_records(view);
+            bool distinct_pair = false;
+            for (std::size_t first = 0; first < records.size(); ++first) {
+                for (std::size_t second = first + 1; second < records.size(); ++second) {
+                    if (!simultaneous(records[first], records[second]) ||
+                        records[first].track == records[second].track) continue;
+                    if (records[first].alias == records[second].alias) return {true, false};
+                    distinct_pair = true;
+                }
+            }
+            if (!view.window_ended()) return {false, std::nullopt};
+            return {true, distinct_pair ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
+// ---- Section 2.5 lines 885-890: one Full Track Name per content (D21-2-5-MUST-032) ---
+// Tracks published together whose Objects differ at a Location they share have
+// different content, so they must have different Full Track Names. A pair that
+// reuses a name for such Objects fails; a pair with distinct names and different
+// content shows the rule holding.
+const Object* object_at(const std::vector<Object>& objects, const Object& wanted) {
+    for (const auto& object : objects)
+        if (object.data && object.group == wanted.group && object.id == wanted.id) return &object;
+    return nullptr;
+}
+
+std::optional<bool> contents_differ(const std::vector<Object>& left, const std::vector<Object>& right) {
+    std::optional<bool> result;
+    for (const auto& object : left) {
+        if (!object.data) continue;
+        const auto* other = object_at(right, object);
+        if (!other) continue;
+        if (object.payload != other->payload) return true;
+        result = false;
+    }
+    return result;
+}
+
+Spec distinct_tracks_spec() {
+    return spec("d21-publish-distinct-tracks-in-one-scope",
+        {{"D21-2-5-MUST-032", "d21-different-track-content-has-distinct-full-track-name"}},
+        [](const Fixture&) { return observing(accepting_publishes()); },
+        [](const View& view) -> Judgement {
+            const auto records = publish_records(view);
+            bool distinct_content = false;
+            for (std::size_t first = 0; first < records.size(); ++first) {
+                for (std::size_t second = first + 1; second < records.size(); ++second) {
+                    if (!simultaneous(records[first], records[second])) continue;
+                    const auto differ = contents_differ(delivered_objects(view, records[first].alias),
+                                                        delivered_objects(view, records[second].alias));
+                    if (!differ || !*differ) continue;
+                    if (records[first].track == records[second].track) return {true, false};
+                    distinct_content = true;
+                }
+            }
+            if (!view.window_ended()) return {false, std::nullopt};
+            return {true, distinct_content ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
+// ---- Section 3.1.1 lines 1068-1071: no Objects for a request that ends in error ---------
+// The runner rejects the publisher's PUBLISH. Objects sent before the publisher could
+// know are allowed (Section 3.1, lines 1038-1043), so only what the publisher starts
+// after it has visibly reacted counts: a new Subgroup stream or datagram for the
+// rejected Track Alias that arrives after the publisher ended its side of the
+// rejected request stream with FIN or reset.
+struct Production {
+    std::optional<std::size_t> first;
+    std::optional<std::size_t> last_start;
+};
+
+Production production_of(const View& view, std::uint64_t alias) {
+    Production result;
+    const auto note = [&](std::size_t event) {
+        if (!result.first || event < *result.first) result.first = event;
+        if (!result.last_start || event > *result.last_start) result.last_start = event;
+    };
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 2u) continue;
+        const auto parsed = parse_subgroup_stream(id, record);
+        if (parsed && parsed->alias == alias) note(record.first_event);
+    }
+    for (const auto& datagram : view.datagrams())
+        if (parse_datagram_object(datagram, alias)) note(datagram.event);
+    return result;
+}
+
+Spec rejected_publish_spec(const char* scenario, bool after_object) {
+    return spec(scenario, {{"D21-3-1-1-MUST-NOT-047", "d21-error-subscription-has-no-object-delivery"}},
+        [after_object](const Fixture&) {
+            RawProbeCourtesy courtesy;
+            courtesy.acknowledge_namespaces = true;
+            courtesy.publish = after_object ? RawProbePublishResponse::RejectAfterObject
+                                            : RawProbePublishResponse::Reject;
+            return observing(courtesy);
+        },
+        [after_object](const View& view) -> Judgement {
+            bool reacted = false;
+            for (const auto& record : publish_records(view)) {
+                if (record.response != RawProbeCourtesyKind::PublishError) continue;
+                const auto& stream = *view.stream(record.stream);
+                // The publisher's reaction: its own FIN or reset after the rejection was sent.
+                std::optional<std::size_t> reaction;
+                if (stream.fin_event && *stream.fin_event >= record.response_event) reaction = stream.fin_event;
+                if (stream.reset_event && *stream.reset_event >= record.response_event)
+                    reaction = earliest(reaction, stream.reset_event);
+                const auto production = production_of(view, record.alias);
+                // The second scenario needs the publisher seen producing before the rejection.
+                if (after_object && (!production.first || *production.first >= record.response_event)) continue;
+                if (!reaction) continue;
+                reacted = true;
+                if (production.last_start && *production.last_start > *reaction) return {true, false};
+            }
+            if (!view.window_ended()) return {false, std::nullopt};
+            return {true, reacted ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
+// ---- Section 9.1.7 lines 3611-3618: REQUEST_UPDATE credit (D21-9-1-7-MUST-NOT-316) -----
+// The runner announces MAX_REQUEST_UPDATES (Option 0x08), accepts the publisher's
+// PUBLISH and answers none of its REQUEST_UPDATEs, so every update stays outstanding
+// and the count per stream is exactly what the publisher sent.
+constexpr std::uint64_t kUpdateLimit = 2;
+
+std::size_t streams_at_limit(const std::vector<PublishRecord>& records) {
+    return static_cast<std::size_t>(std::count_if(records.begin(), records.end(), [](const PublishRecord& record) {
+        return record.updates == kUpdateLimit;
+    }));
+}
+
+bool over_limit(const std::vector<PublishRecord>& records) {
+    return std::any_of(records.begin(), records.end(), [](const PublishRecord& record) {
+        return record.updates > kUpdateLimit;
+    });
+}
+
+Spec update_credit_spec(const char* scenario, bool per_stream) {
+    return spec(scenario, {{"D21-9-1-7-MUST-NOT-316", "d21-publisher-update-outstanding-limit"}},
+        [](const Fixture&) {
+            auto definition = observing(accepting_publishes());
+            // SETUP (0x2f00) with the numeric option MAX_REQUEST_UPDATES.
+            definition.setup_bytes = bytes_of({0xaf, 0, 0, 2, 8, static_cast<unsigned>(kUpdateLimit)});
+            // Updates are never answered, which can make a publisher give up.
+            definition.publisher_exit_is_evidence = true;
+            return definition;
+        },
+        [per_stream](const View& view) -> Judgement {
+            const auto records = publish_records(view);
+            if (over_limit(records)) return {true, false};
+            if (!view.window_ended()) return {false, std::nullopt};
+            // The limit is exercised only once a stream has spent it; for the per-stream
+            // scenario two streams each spend all of it, so the limit is not shared.
+            const auto spent = streams_at_limit(records);
+            return {true, spent >= (per_stream ? 2u : 1u) ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
+// "A value of 0 means the endpoint does not limit REQUEST_UPDATE concurrency. If not
+// present, the default value is 0": no credit is ever exhausted, so the publisher may
+// leave several updates outstanding on one stream.
+Spec unlimited_updates_spec() {
+    return spec("d21-publisher-update-zero-unlimited",
+        {{"D21-9-1-7-MUST-NOT-316", "d21-publisher-update-outstanding-limit"}},
+        [](const Fixture&) {
+            auto definition = observing(accepting_publishes());
+            definition.setup_bytes = bytes_of({0xaf, 0, 0, 2, 8, 0});
+            definition.publisher_exit_is_evidence = true;
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            if (!view.window_ended()) return {false, std::nullopt};
+            const auto records = publish_records(view);
+            // Two outstanding updates show the publisher did not treat zero as no credit
+            // or as a single credit.
+            const bool several = std::any_of(records.begin(), records.end(), [](const PublishRecord& record) {
+                return record.updates >= 2;
+            });
+            return {true, several ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
+// ---- Section 9.2 lines 3650-3652: a client GOAWAY has an empty URI (D21-9-2-MUST-318) ----
+// The publisher is the client. Its GOAWAY may sit on its control stream or on a request
+// stream; each scenario reads one place. No stimulus can make a publisher send one, so
+// the contexts only observe.
+struct ObservedGoaway {
+    bool empty_uri{false};
+};
+
+std::optional<ObservedGoaway> goaway_in(const Frame& frame) {
+    if (frame.type != kGoaway) return std::nullopt;
+    wire::Cursor body(frame.body);
+    const auto length = read_vi(body);
+    if (!length) return std::nullopt;
+    return ObservedGoaway{*length == 0};
+}
+
+std::vector<ObservedGoaway> control_goaways(const View& view) {
+    std::vector<ObservedGoaway> result;
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 2u) continue;
+        const auto frames = view.frames(record);
+        // The control stream is the one whose first message is SETUP (type 0x2f00).
+        if (frames.empty() || frames.front().type != 0x2f00) continue;
+        for (std::size_t index = 1; index < frames.size(); ++index)
+            if (const auto goaway = goaway_in(frames[index])) result.push_back(*goaway);
+    }
+    return result;
+}
+
+std::vector<ObservedGoaway> request_goaways(const View& view) {
+    std::vector<ObservedGoaway> result;
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 0u) continue;
+        for (const auto& frame : view.frames(record))
+            if (const auto goaway = goaway_in(frame)) result.push_back(*goaway);
+    }
+    return result;
+}
+
+Spec client_goaway_spec(const char* scenario, bool on_control_stream) {
+    return spec(scenario, {{"D21-9-2-MUST-318", "d21-client-goaway-empty-uri"}},
+        [](const Fixture&) { return observing(accepting_publishes()); },
+        [on_control_stream](const View& view) -> Judgement {
+            const auto goaways = on_control_stream ? control_goaways(view) : request_goaways(view);
+            if (std::any_of(goaways.begin(), goaways.end(), [](const auto& goaway) { return !goaway.empty_uri; }))
+                return {true, false};
+            if (!view.window_ended()) return {false, std::nullopt};
+            return {true, goaways.empty() ? std::nullopt : std::optional<bool>{true}};
+        },
+        true);
+}
+
+// ---- Section 8.9 lines 3336-3337: DELETE only after every USE_ALIAS was answered ----------
+// "Senders MUST NOT send DELETE for an alias while any message using USE_ALIAS with that
+// alias has not received a response." The runner holds back its answer to each message
+// that uses an Alias, then answers it. A DELETE that reaches the runner before the
+// answer to an earlier use was even written cannot have waited for it.
+enum class TokenAction { Delete, Register, UseAlias };
+
+struct AliasMessage {
+    TokenAction action{TokenAction::UseAlias};
+    std::uint64_t alias{0};
+    transport::StreamId stream{0};
+    std::size_t frame_index{0};
+    std::size_t event{0};
+};
+
+// AUTHORIZATION TOKEN parameters (0x03) of a publisher request message.
+std::vector<wire::draft21::Token> tokens_of(std::uint64_t type, const Bytes& body_bytes) {
+    std::vector<wire::draft21::Token> result;
+    wire::Cursor body(body_bytes);
+    if (!read_vi(body)) return result;
+    if (type == kPublishNamespace || type == kPublish) {
+        auto name_space = read_namespace(body);
+        if (!name_space) return result;
+        if (type == kPublish) {
+            const auto length = read_vi(body);
+            if (!length || !read_n(body, static_cast<std::size_t>(*length)) || !read_vi(body)) return result;
+        }
+    } else if (type != kRequestUpdate) {
+        return result;
+    }
+    const auto count = read_vi(body);
+    if (!count) return result;
+    std::uint64_t parameter = 0;
+    for (std::uint64_t index = 0; index < *count; ++index) {
+        const auto delta = read_vi(body);
+        if (!delta) return result;
+        parameter += *delta;
+        if ((parameter & 1u) == 0u) {
+            if (!read_vi(body)) return result;
+            continue;
+        }
+        const auto length = read_vi(body);
+        const auto value = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
+        if (!value) return result;
+        if (parameter != 0x03) continue;
+        const auto token = wire::draft21::decode_token(*value);
+        if (const auto* decoded = std::get_if<wire::draft21::Token>(&token)) result.push_back(*decoded);
+    }
+    return result;
+}
+
+std::vector<AliasMessage> alias_messages(const View& view) {
+    std::vector<AliasMessage> result;
+    for (const auto& [id, record] : view.streams()) {
+        if ((id & 3u) != 0u) continue;
+        const auto frames = view.frames(record);
+        for (std::size_t index = 0; index < frames.size(); ++index) {
+            for (const auto& token : tokens_of(frames[index].type, frames[index].body)) {
+                if (!token.alias) continue;
+                AliasMessage message{TokenAction::UseAlias, *token.alias, id, index, frames[index].event};
+                if (token.alias_type == wire::draft21::TokenAliasType::Delete) message.action = TokenAction::Delete;
+                else if (token.alias_type == wire::draft21::TokenAliasType::Register) message.action = TokenAction::Register;
+                else if (token.alias_type != wire::draft21::TokenAliasType::UseAlias) continue;
+                result.push_back(message);
+            }
+        }
+    }
+    return result;
+}
+
+// The event at which the runner wrote its answer to frame `index` of `stream`, if it did.
+std::optional<std::size_t> answer_event(const View& view, transport::StreamId stream, std::size_t index) {
+    std::size_t seen = 0;
+    for (const auto& write : view.courtesy_writes()) {
+        if (write.stream_id != stream) continue;
+        if (seen++ == index) return write.event_count;
+    }
+    return std::nullopt;
+}
+
+Spec pending_alias_delete_spec() {
+    return spec("d21-publisher-delete-with-pending-alias-uses",
+        {{"D21-8-9-MUST-NOT-281", "d21-no-delete-with-unanswered-alias-use"}},
+        [](const Fixture&) {
+            auto courtesy = accepting_publishes();
+            courtesy.update = RawProbeUpdateResponse::HoldAliasUses;
+            auto definition = observing(courtesy);
+            // MAX_AUTH_TOKEN_CACHE_SIZE (Option 0x04) of 4096 lets the publisher register tokens.
+            definition.setup_bytes = bytes_of({0xaf, 0, 0, 3, 4, 0x90, 0});
+            definition.publisher_exit_is_evidence = true;
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            const auto messages = alias_messages(view);
+            bool compliant_delete = false;
+            for (const auto& retirement : messages) {
+                if (retirement.action != TokenAction::Delete) continue;
+                bool used = false;
+                for (const auto& use : messages) {
+                    if (use.action != TokenAction::UseAlias || use.alias != retirement.alias ||
+                        use.event >= retirement.event) continue;
+                    used = true;
+                    const auto answer = answer_event(view, use.stream, use.frame_index);
+                    // `answer` counts the events seen when the answer was written, so an answer
+                    // is after the DELETE only if more events than the DELETE's index preceded it.
+                    if (!answer || *answer > retirement.event) return {true, false};
+                }
+                compliant_delete = compliant_delete || used;
+            }
+            if (!view.window_ended()) return {false, std::nullopt};
+            return {true, compliant_delete ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
+}
+
 }  // namespace
 
 std::vector<Spec> residual_specs() {
@@ -651,6 +1118,16 @@ std::vector<Spec> residual_specs() {
     result.push_back(failed_fill_spec());
     result.push_back(cancelled_fill_spec());
     result.push_back(skipped_publish_spec());
+    result.push_back(distinct_aliases_spec());
+    result.push_back(distinct_tracks_spec());
+    result.push_back(rejected_publish_spec("d21-reject-publish-before-object-production", false));
+    result.push_back(rejected_publish_spec("d21-rejected-subscribe-no-delivery", true));
+    result.push_back(update_credit_spec("d21-publisher-update-credit-limit", false));
+    result.push_back(update_credit_spec("d21-publisher-update-credit-per-stream", true));
+    result.push_back(unlimited_updates_spec());
+    result.push_back(client_goaway_spec("d21-publisher-client-goaway-control", true));
+    result.push_back(client_goaway_spec("d21-publisher-client-goaway-request", false));
+    result.push_back(pending_alias_delete_spec());
     return result;
 }
 

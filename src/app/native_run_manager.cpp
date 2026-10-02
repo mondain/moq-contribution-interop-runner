@@ -575,6 +575,11 @@ public:
         store->finalize(worker->id, summary, outcomes);
     }
 
+    static bool publisher_exit_expected(const scenarios::RawProbeTranscript& transcript,
+                                        bool exit_is_evidence) {
+        return refused_for_missing_datagram(transcript) || (exit_is_evidence && !transcript.harness_failed);
+    }
+
     static bool refused_for_missing_datagram(const scenarios::RawProbeTranscript& transcript) {
         constexpr std::string_view reason = "QUIC DATAGRAM not negotiated";
         if (transcript.transport_established || transcript.harness_failed || transcript.events.size() != 1)
@@ -631,16 +636,18 @@ public:
                 if (worker->stop_requested) break;
                 if (run_config.mode == RunMode::Driven)
                     handle = start_context_driver(worker, run_config, current_id, driver);
+                const bool exit_is_evidence = definitions[index].publisher_exit_is_evidence;
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
                 const bool process_error = retire_driver();
-                if (process_error && refused_for_missing_datagram(transcript)) {
-                    // The listener refused a client that never offered QUIC DATAGRAM
-                    // (draft 21 Section 6.2), so a publisher that then exits with an
-                    // error is the consequence of the observed refusal, not a harness
-                    // failure; the transport evidence stays scoreable.
+                if (process_error && publisher_exit_expected(transcript, exit_is_evidence)) {
+                    // The runner itself caused this exit: it refused a client that never offered
+                    // QUIC DATAGRAM (draft 21 Section 6.2), or the scenario withholds or rejects
+                    // what the publisher asked for. A publisher that gives up afterwards is the
+                    // consequence of what was observed, not a harness failure, so the transport
+                    // evidence stays scoreable.
                     append_context_event(worker, current_id, "publisher_exit_after_refusal",
-                                         "publisher process exited after QUIC DATAGRAM refusal");
+                                         "publisher process exited after the runner refused or rejected it");
                 } else if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
@@ -849,6 +856,20 @@ public:
         append_write(transcript.setup);
         for (const auto& write : transcript.writes) append_write(write);
         store->append_events(worker->id,std::span(&stimulus,1));
+        for (const auto& courtesy : transcript.courtesy_writes) {
+            // Responses the runner volunteered to requests the publisher opened;
+            // they are context for the transcript, not part of the stimulus proof.
+            storage::EvidenceEvent event = stimulus;
+            event.kind = "raw_probe_courtesy_write";
+            event.stream_id = std::to_string(courtesy.stream_id);
+            const char* kind = "namespace_ok";
+            if (courtesy.kind == scenarios::RawProbeCourtesyKind::PublishOk) kind = "publish_ok";
+            else if (courtesy.kind == scenarios::RawProbeCourtesyKind::PublishError) kind = "publish_error";
+            else if (courtesy.kind == scenarios::RawProbeCourtesyKind::UpdateOk) kind = "update_ok";
+            event.detail = std::string("courtesy=") + kind + " accepted_event_count=" +
+                std::to_string(courtesy.event_count) + " ordinal=" + std::to_string(worker->context_ordinal);
+            store->append_events(worker->id, std::span(&event, 1));
+        }
         if (run_config.draft == DraftVersion::Draft18 &&
             scenarios::draft18_contribution_scenario(transcript.scenario_id)) {
             storage::EvidenceEvent uri = stimulus;

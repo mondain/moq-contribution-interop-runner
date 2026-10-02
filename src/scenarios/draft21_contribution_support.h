@@ -107,6 +107,8 @@ public:
     const std::map<transport::StreamId, StreamRecord>& streams() const noexcept { return streams_; }
     const std::vector<DatagramRecord>& datagrams() const noexcept { return datagrams_; }
     const std::optional<PeerCloseInfo>& close() const noexcept { return close_; }
+    // Courtesy responses the runner volunteered (empty for gate views).
+    const std::vector<RawProbeCourtesyWrite>& courtesy_writes() const noexcept { return courtesy_; }
     const std::optional<wire::draft21::SetupMessage>& peer_setup() const noexcept { return peer_setup_; }
     std::optional<std::uint64_t> peer_option(std::uint64_t type) const;
     const StreamRecord* stream(transport::StreamId id) const;
@@ -132,6 +134,7 @@ private:
     std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
     bool window_ended_{false};
+    std::vector<RawProbeCourtesyWrite> courtesy_;
     std::map<transport::StreamId, StreamRecord> streams_;
     std::vector<DatagramRecord> datagrams_;
     std::optional<PeerCloseInfo> close_;

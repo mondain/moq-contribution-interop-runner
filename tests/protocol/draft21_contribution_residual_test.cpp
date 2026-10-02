@@ -71,12 +71,17 @@ TEST(ContributionResidual, RegistryAndBindingsCoverTheNewScenarios) {
          {"d21-overlapping-subscriptions-shared-alias", "d21-overlapping-subscriptions-distinct-aliases",
           "d21-forward-location-and-range-filter-conjunction", "d21-subscribe-multiple-subgroups",
           "d21-fill-fails-before-first-object", "d21-cancel-subscription-with-concurrent-fill-streams",
-          "d21-subscribe-tracks-publish-skipped-then-capacity-recovers"}) {
+          "d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
+          "d21-concurrent-distinct-track-subscriptions", "d21-publish-distinct-tracks-in-one-scope",
+          "d21-reject-publish-before-object-production", "d21-rejected-subscribe-no-delivery",
+          "d21-publisher-update-credit-limit", "d21-publisher-update-credit-per-stream",
+          "d21-publisher-update-zero-unlimited", "d21-publisher-client-goaway-control",
+          "d21-publisher-client-goaway-request", "d21-publisher-delete-with-pending-alias-uses"}) {
         EXPECT_TRUE(app::draft21_contribution_scenario(21, scenario)) << scenario;
         EXPECT_TRUE(app::raw_probe_scenario(21, scenario)) << scenario;
         EXPECT_NO_THROW(find_probe(probes(), scenario)) << scenario;
-        // Every context asks for the unscored PUBLISH_NAMESPACE acknowledgement.
-        EXPECT_TRUE(find_probe(probes(), scenario).definition.acknowledge_publisher_namespaces) << scenario;
+        // Every context acknowledges a PUBLISH_NAMESPACE (the publisher-initiated ones say so below).
+        EXPECT_TRUE(find_probe(probes(), scenario).definition.courtesy.acknowledge_namespaces) << scenario;
     }
 }
 
@@ -527,6 +532,317 @@ TEST(ContributionResidual, SkippedTrackMustNotBePublishedLater) {
     rejected.reply(rejected.stream_of(0), request_error(0x30), true);
     EXPECT_TRUE(probe.definition.response_ready(rejected.partial()));
     EXPECT_EQ(judge(probe, rejected.finish()), std::nullopt);
+}
+
+// ---- Requests the publisher opens ----------------------------------------------------------
+// Peer-initiated bidirectional streams are 0, 4, 8; the runner's volunteered answers are
+// stamped with RawProbeCourtesyKind in the order the controller would write them.
+using Kind = RawProbeCourtesyKind;
+
+Bytes publish_body(std::uint64_t request_id, const Bytes& name, std::uint64_t alias, const Bytes& parameters) {
+    return cconcat({cvi(request_id), cbytes({1, 1, 'n'}), cvi(name.size()), name, cvi(alias), parameters});
+}
+Bytes publish_with(const Bytes& name, std::uint64_t alias, std::uint64_t request_id = 0,
+                   const Bytes& parameters = cbytes({0})) {
+    return cframe(0x1d, publish_body(request_id, name, alias, parameters));
+}
+Bytes update_with(std::uint64_t request_id, const Bytes& parameters = cbytes({0})) {
+    return cframe(0x2, cconcat({cvi(request_id), parameters}));
+}
+Bytes publish_done() { return cframe(0xb, cbytes({0, 0, 0})); }
+// One AUTHORIZATION TOKEN parameter (0x03, length-prefixed), `token` being the Token structure.
+Bytes token_parameter(const Bytes& token) {
+    return cconcat({cbytes({1, 3}), cvi(token.size()), token});
+}
+Bytes register_token(std::uint64_t alias) { return cconcat({cvi(1), cvi(alias), cvi(0), cbytes({'k'})}); }
+Bytes use_alias_token(std::uint64_t alias) { return cconcat({cvi(2), cvi(alias)}); }
+Bytes delete_token(std::uint64_t alias) { return cconcat({cvi(0), cvi(alias)}); }
+
+ContributionRun observing_run(const Draft21ContributionProbe& probe, Bytes peer_setup = cbytes({0xaf, 0, 0, 0})) {
+    return ContributionRun(probe, std::move(peer_setup));
+}
+
+TEST(ContributionResidual, PublisherInitiatedContextsSendNothingAndUseTheCourtesy) {
+    struct Case { const char* scenario; RawProbePublishResponse publish; };
+    for (const auto& item : {Case{"d21-concurrent-distinct-track-subscriptions", RawProbePublishResponse::Accept},
+                             Case{"d21-publish-distinct-tracks-in-one-scope", RawProbePublishResponse::Accept},
+                             Case{"d21-reject-publish-before-object-production", RawProbePublishResponse::Reject},
+                             Case{"d21-rejected-subscribe-no-delivery", RawProbePublishResponse::RejectAfterObject},
+                             Case{"d21-publisher-update-credit-limit", RawProbePublishResponse::Accept},
+                             Case{"d21-publisher-update-credit-per-stream", RawProbePublishResponse::Accept},
+                             Case{"d21-publisher-update-zero-unlimited", RawProbePublishResponse::Accept},
+                             Case{"d21-publisher-client-goaway-control", RawProbePublishResponse::Accept},
+                             Case{"d21-publisher-client-goaway-request", RawProbePublishResponse::Accept},
+                             Case{"d21-publisher-delete-with-pending-alias-uses", RawProbePublishResponse::Accept}}) {
+        const auto& probe = find_probe(probes(), item.scenario);
+        EXPECT_TRUE(probe.definition.writes.empty()) << item.scenario;
+        EXPECT_TRUE(probe.definition.courtesy.acknowledge_namespaces) << item.scenario;
+        EXPECT_EQ(probe.definition.courtesy.publish, item.publish) << item.scenario;
+    }
+    const auto& hold = find_probe(probes(), "d21-publisher-delete-with-pending-alias-uses");
+    EXPECT_EQ(hold.definition.courtesy.update, RawProbeUpdateResponse::HoldAliasUses);
+    EXPECT_EQ(find_probe(probes(), "d21-publisher-update-credit-limit").definition.courtesy.update,
+              RawProbeUpdateResponse::Ignore);
+}
+
+// ---- Section 3.1.2 lines 1080-1084 ------------------------------------------------------------
+ContributionRun two_tracks(const Draft21ContributionProbe& probe, std::uint64_t first_alias,
+                           std::uint64_t second_alias, const Bytes& second_name = cbytes({'v'})) {
+    auto run = observing_run(probe);
+    run.reply(0, publish_with(cbytes({'c'}), first_alias, 2));
+    run.courtesy(0, Kind::PublishOk);
+    run.reply(4, publish_with(second_name, second_alias, 4));
+    run.courtesy(4, Kind::PublishOk);
+    return run;
+}
+
+TEST(ContributionResidual, ConcurrentTracksNeedDistinctAliases) {
+    const auto& probe = find_probe(probes(), "d21-concurrent-distinct-track-subscriptions");
+    EXPECT_EQ(probe.requirement_id, "D21-3-1-2-MUST-NOT-048");
+    EXPECT_EQ(judge(probe, windowed(two_tracks(probe, 0, 1))), true);
+    // Two different Tracks sharing an alias while both are Established.
+    EXPECT_EQ(judge(probe, windowed(two_tracks(probe, 3, 3))), false);
+    EXPECT_TRUE(probe.definition.response_ready(two_tracks(probe, 3, 3).partial()));
+    EXPECT_FALSE(probe.definition.response_ready(two_tracks(probe, 0, 1).partial()));
+    // The same Track under two aliases is not two Tracks sharing one.
+    EXPECT_EQ(judge(probe, windowed(two_tracks(probe, 3, 3, cbytes({'c'})))), std::nullopt);
+    // The first subscription ended before the second began, so they never overlapped.
+    auto sequential = observing_run(probe);
+    sequential.reply(0, publish_with(cbytes({'c'}), 3, 2));
+    sequential.courtesy(0, Kind::PublishOk);
+    sequential.reply(0, publish_done(), true);
+    sequential.reply(4, publish_with(cbytes({'v'}), 3, 4));
+    sequential.courtesy(4, Kind::PublishOk);
+    EXPECT_EQ(judge(probe, windowed(sequential)), std::nullopt);
+    // A PUBLISH the runner rejected, or never answered, is not Established.
+    auto rejected = observing_run(probe);
+    rejected.reply(0, publish_with(cbytes({'c'}), 3, 2));
+    rejected.courtesy(0, Kind::PublishError);
+    rejected.reply(4, publish_with(cbytes({'v'}), 3, 4));
+    rejected.courtesy(4, Kind::PublishOk);
+    EXPECT_EQ(judge(probe, windowed(rejected)), std::nullopt);
+    auto single = observing_run(probe);
+    single.reply(0, publish_with(cbytes({'c'}), 3, 2));
+    single.courtesy(0, Kind::PublishOk);
+    EXPECT_EQ(judge(probe, windowed(single)), std::nullopt);
+    // Before the window ends a pass is not yet settled.
+    EXPECT_EQ(judge(probe, two_tracks(probe, 0, 1).finish()), std::nullopt);
+}
+
+// ---- Section 2.5 lines 885-890 ----------------------------------------------------------------------
+TEST(ContributionResidual, DifferentContentNeedsDifferentFullTrackNames) {
+    const auto& probe = find_probe(probes(), "d21-publish-distinct-tracks-in-one-scope");
+    EXPECT_EQ(probe.requirement_id, "D21-2-5-MUST-032");
+    const auto with_objects = [&](const Bytes& second_name, const Bytes& first_payload, const Bytes& second_payload) {
+        auto run = two_tracks(probe, 0, 1, second_name);
+        run.reply(kData1, subgroup(0, 0, object_data(0, first_payload)), true);
+        run.reply(kData2, subgroup(1, 0, object_data(0, second_payload)), true);
+        return run;
+    };
+    // Two names, two contents at the same Location: the names distinguish the content.
+    EXPECT_EQ(judge(probe, windowed(with_objects(cbytes({'v'}), cbytes({'a'}), cbytes({'b'})))), true);
+    // One name carrying two different contents at once.
+    EXPECT_EQ(judge(probe, windowed(with_objects(cbytes({'c'}), cbytes({'a'}), cbytes({'b'})))), false);
+    // The same content under two names (or one) shows nothing about different content.
+    EXPECT_EQ(judge(probe, windowed(with_objects(cbytes({'v'}), cbytes({'a'}), cbytes({'a'})))), std::nullopt);
+    // Objects at no shared Location cannot be compared.
+    auto apart = two_tracks(probe, 0, 1);
+    apart.reply(kData1, subgroup(0, 0, object_data(0, cbytes({'a'}))), true);
+    apart.reply(kData2, subgroup(1, 0, object_data(1, cbytes({'b'}))), true);
+    EXPECT_EQ(judge(probe, windowed(apart)), std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(two_tracks(probe, 0, 1))), std::nullopt);
+}
+
+// ---- Section 3.1.1 lines 1068-1071 ----------------------------------------------------------------------
+TEST(ContributionResidual, NothingStartsForARejectedPublishAfterThePublisherReacted) {
+    const auto& probe = find_probe(probes(), "d21-reject-publish-before-object-production");
+    EXPECT_EQ(probe.requirement_id, "D21-3-1-1-MUST-NOT-047");
+    const auto run = [&](bool publisher_closes, bool object_after, bool object_before) {
+        auto result = observing_run(probe);
+        result.reply(0, publish_with(cbytes({'v'}), 3, 2));
+        if (object_before) result.reply(kData1, subgroup(3, 0, object_data(0, cbytes({'a'}))));
+        result.courtesy(0, Kind::PublishError);
+        if (publisher_closes) result.reply(0, {}, true);
+        if (object_after) result.reply(kData2, subgroup(3, 1, object_data(0, cbytes({'b'}))));
+        return result;
+    };
+    // The publisher ended the rejected request and then produced nothing for it.
+    EXPECT_EQ(judge(probe, windowed(run(true, false, false))), true);
+    // Objects already in flight before it reacted are allowed (Section 3.1).
+    EXPECT_EQ(judge(probe, windowed(run(true, false, true))), true);
+    // A new stream for the rejected alias after the publisher reacted.
+    EXPECT_EQ(judge(probe, windowed(run(true, true, false))), false);
+    // Without a visible reaction the publisher may simply not have learned yet.
+    EXPECT_EQ(judge(probe, windowed(run(false, true, false))), std::nullopt);
+    // A reset is a reaction too.
+    auto reset = run(false, false, false);
+    reset.event(transport::PeerResetEvent{0, 0});
+    reset.reply(kData2, subgroup(3, 1, object_data(0, cbytes({'b'}))));
+    EXPECT_EQ(judge(probe, windowed(reset)), false);
+    // Datagrams for the alias count as production as well.
+    auto datagram = run(true, false, false);
+    datagram.event(transport::DatagramEvent{cconcat({cvi(0x08), cvi(3), cvi(1), cvi(0), payload()})});
+    EXPECT_EQ(judge(probe, windowed(datagram)), false);
+    // Another alias is unrelated.
+    auto other = run(true, false, false);
+    other.reply(kData2, subgroup(9, 1, object_data(0, cbytes({'b'}))));
+    EXPECT_EQ(judge(probe, windowed(other)), true);
+    // A FIN seen before the rejection was sent says nothing about having learned of it.
+    auto early = observing_run(probe);
+    early.reply(0, publish_with(cbytes({'v'}), 3, 2));
+    early.reply(0, {}, true);
+    early.courtesy(0, Kind::PublishError);
+    early.reply(kData2, subgroup(3, 1, object_data(0, cbytes({'b'}))));
+    EXPECT_EQ(judge(probe, windowed(early)), std::nullopt);
+}
+
+TEST(ContributionResidual, TheSecondRejectionScenarioNeedsThepublisherToBeSeenProducing) {
+    const auto& probe = find_probe(probes(), "d21-rejected-subscribe-no-delivery");
+    const auto run = [&](bool object_before_rejection, bool production_after) {
+        auto result = observing_run(probe);
+        result.reply(0, publish_with(cbytes({'v'}), 3, 2));
+        if (object_before_rejection) result.reply(kData1, subgroup(3, 0, object_data(0, cbytes({'a'}))));
+        result.courtesy(0, Kind::PublishError);
+        result.reply(0, {}, true);
+        if (production_after) result.reply(kData2, subgroup(3, 1, object_data(0, cbytes({'b'}))));
+        return result;
+    };
+    EXPECT_EQ(judge(probe, windowed(run(true, false))), true);
+    EXPECT_EQ(judge(probe, windowed(run(true, true))), false);
+    // The publisher was never seen producing, so the rejection came before any production.
+    EXPECT_EQ(judge(probe, windowed(run(false, false))), std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(run(false, true))), std::nullopt);
+}
+
+// ---- Section 9.1.7 lines 3611-3618 ------------------------------------------------------------------------
+ContributionRun updates_run(const Draft21ContributionProbe& probe, std::initializer_list<std::size_t> per_stream) {
+    auto run = observing_run(probe);
+    transport::StreamId stream = 0;
+    std::uint64_t request = 2;
+    for (const auto count : per_stream) {
+        run.reply(stream, publish_with(cbytes({'t'}), stream + 1, request));
+        run.courtesy(stream, Kind::PublishOk);
+        for (std::size_t index = 0; index < count; ++index) run.reply(stream, update_with(3 + 2 * index));
+        stream += 4;
+        request += 2;
+    }
+    return run;
+}
+
+TEST(ContributionResidual, UpdateCreditIsAnnouncedAndNeverExceeded) {
+    const auto& limit = find_probe(probes(), "d21-publisher-update-credit-limit");
+    EXPECT_EQ(limit.requirement_id, "D21-9-1-7-MUST-NOT-316");
+    EXPECT_EQ(limit.definition.setup_bytes, cbytes({0xaf, 0, 0, 2, 8, 2}));
+    EXPECT_EQ(find_probe(probes(), "d21-publisher-update-credit-per-stream").definition.setup_bytes,
+              cbytes({0xaf, 0, 0, 2, 8, 2}));
+    // MAX_REQUEST_UPDATES is omitted-equivalent zero for the unlimited scenario.
+    EXPECT_EQ(find_probe(probes(), "d21-publisher-update-zero-unlimited").definition.setup_bytes,
+              cbytes({0xaf, 0, 0, 2, 8, 0}));
+    // Two outstanding updates is the whole credit.
+    EXPECT_EQ(judge(limit, windowed(updates_run(limit, {2}))), true);
+    // One more than the credit with no response between breaks the limit at once.
+    EXPECT_EQ(judge(limit, windowed(updates_run(limit, {3}))), false);
+    EXPECT_TRUE(limit.definition.response_ready(updates_run(limit, {3}).partial()));
+    EXPECT_FALSE(limit.definition.response_ready(updates_run(limit, {2}).partial()));
+    // Spending less than the credit never exercises the limit.
+    EXPECT_EQ(judge(limit, windowed(updates_run(limit, {1}))), std::nullopt);
+    EXPECT_EQ(judge(limit, windowed(updates_run(limit, {}))), std::nullopt);
+}
+
+TEST(ContributionResidual, UpdateCreditIsPerRequestStream) {
+    const auto& probe = find_probe(probes(), "d21-publisher-update-credit-per-stream");
+    // Each of two streams spends all of its credit, so the credit is not shared.
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {2, 2}))), true);
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {2}))), std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {2, 1}))), std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {2, 3}))), false);
+}
+
+TEST(ContributionResidual, ZeroOrOmittedUpdateLimitMeansUnlimited) {
+    const auto& probe = find_probe(probes(), "d21-publisher-update-zero-unlimited");
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {3}))), true);
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {2}))), true);
+    // At most one update never shows more than a single credit was assumed.
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {1}))), std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(updates_run(probe, {}))), std::nullopt);
+}
+
+// ---- Section 9.2 lines 3650-3652 ---------------------------------------------------------------------------
+Bytes goaway(const Bytes& uri) { return cframe(0x10, cconcat({cvi(uri.size()), uri, cvi(0)})); }
+
+TEST(ContributionResidual, ClientGoawayCarriesNoUri) {
+    const auto& control = find_probe(probes(), "d21-publisher-client-goaway-control");
+    const auto& request = find_probe(probes(), "d21-publisher-client-goaway-request");
+    EXPECT_EQ(control.requirement_id, "D21-9-2-MUST-318");
+    const auto on_control = [&](const Bytes& uri) {
+        auto run = observing_run(control);
+        run.reply(2, goaway(uri));
+        return run;
+    };
+    EXPECT_EQ(judge(control, windowed(on_control({}))), true);
+    EXPECT_EQ(judge(control, windowed(on_control(cbytes({'m', 'o', 'q'})))), false);
+    EXPECT_TRUE(control.definition.response_ready(on_control(cbytes({'m'})).partial()));
+    EXPECT_FALSE(control.definition.response_ready(on_control({}).partial()));
+    // A GOAWAY on a request stream is the other scenario's.
+    auto on_request = observing_run(request);
+    on_request.reply(0, publish_with(cbytes({'t'}), 1, 2));
+    on_request.courtesy(0, Kind::PublishOk);
+    on_request.reply(0, goaway({}));
+    EXPECT_EQ(judge(request, windowed(on_request)), true);
+    auto bad_request = observing_run(request);
+    bad_request.reply(0, publish_with(cbytes({'t'}), 1, 2));
+    bad_request.reply(0, goaway(cbytes({'x'})));
+    EXPECT_EQ(judge(request, windowed(bad_request)), false);
+    EXPECT_EQ(judge(control, windowed(on_request)), std::nullopt);
+    EXPECT_EQ(judge(request, windowed(on_control({}))), std::nullopt);
+    // No GOAWAY: nothing to score.
+    EXPECT_EQ(judge(control, windowed(observing_run(control))), std::nullopt);
+}
+
+// ---- Section 8.9 lines 3336-3337 -------------------------------------------------------------------------------
+TEST(ContributionResidual, DeleteWaitsForEveryAnswerToAnAliasUse) {
+    const auto& probe = find_probe(probes(), "d21-publisher-delete-with-pending-alias-uses");
+    EXPECT_EQ(probe.requirement_id, "D21-8-9-MUST-NOT-281");
+    // MAX_AUTH_TOKEN_CACHE_SIZE of 4096 (Option 0x04) so the publisher may register.
+    EXPECT_EQ(probe.definition.setup_bytes, cbytes({0xaf, 0, 0, 3, 4, 0x90, 0}));
+    const auto sequence = [&](bool delete_after_answer) {
+        auto run = observing_run(probe);
+        // Frame 0: PUBLISH registering Alias 1. Frame 1: REQUEST_UPDATE using it.
+        run.reply(0, publish_with(cbytes({'t'}), 1, 2, token_parameter(register_token(1))));
+        run.courtesy(0, Kind::PublishOk);
+        run.reply(0, update_with(3, token_parameter(use_alias_token(1))));
+        if (delete_after_answer) {
+            run.courtesy(0, Kind::UpdateOk);
+            run.reply(0, update_with(5, token_parameter(delete_token(1))));
+        } else {
+            run.reply(0, update_with(5, token_parameter(delete_token(1))));
+            run.courtesy(0, Kind::UpdateOk);
+        }
+        return run;
+    };
+    EXPECT_EQ(judge(probe, windowed(sequence(true))), true);
+    // The DELETE arrived before the answer to the earlier use was even written.
+    EXPECT_EQ(judge(probe, windowed(sequence(false))), false);
+    // A DELETE with no earlier use of the alias has nothing to wait for and proves no waiting.
+    auto unused = observing_run(probe);
+    unused.reply(0, publish_with(cbytes({'t'}), 1, 2));
+    unused.courtesy(0, Kind::PublishOk);
+    unused.reply(0, update_with(3, token_parameter(delete_token(1))));
+    EXPECT_EQ(judge(probe, windowed(unused)), std::nullopt);
+    // An alias use that is never answered while a DELETE follows is a violation.
+    auto unanswered = observing_run(probe);
+    unanswered.reply(0, publish_with(cbytes({'t'}), 1, 2));
+    unanswered.courtesy(0, Kind::PublishOk);
+    unanswered.reply(0, update_with(3, token_parameter(use_alias_token(1))));
+    unanswered.reply(0, update_with(5, token_parameter(delete_token(1))));
+    EXPECT_EQ(judge(probe, windowed(unanswered)), false);
+    // Other aliases do not interfere.
+    auto other = observing_run(probe);
+    other.reply(0, publish_with(cbytes({'t'}), 1, 2));
+    other.courtesy(0, Kind::PublishOk);
+    other.reply(0, update_with(3, token_parameter(use_alias_token(2))));
+    other.reply(0, update_with(5, token_parameter(delete_token(1))));
+    EXPECT_EQ(judge(probe, windowed(other)), std::nullopt);
 }
 
 }  // namespace
