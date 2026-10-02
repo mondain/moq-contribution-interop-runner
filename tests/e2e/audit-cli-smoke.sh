@@ -10,8 +10,22 @@ audit_bin=$2
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 test_dir=$(mktemp -d /tmp/moq-interop-audit.XXXXXX)
 runner_pid=
-http_port=19331
-udp_port=19332
+# Fixed ports made this test fail whenever anything else held them (a leftover runner, another
+# build's test run), so ask the kernel for free ones. The window between choosing and binding is
+# small; python3 is only needed here, so fall back to the old numbers without it.
+free_port() {
+    python3 - "$1" <<'PY' 2>/dev/null
+import socket, sys
+kind = socket.SOCK_DGRAM if sys.argv[1] == "udp" else socket.SOCK_STREAM
+with socket.socket(socket.AF_INET, kind) as probe:
+    probe.bind(("127.0.0.1", 0))
+    print(probe.getsockname()[1])
+PY
+}
+http_port=$(free_port tcp || true)
+udp_port=$(free_port udp || true)
+http_port=${http_port:-19331}
+udp_port=${udp_port:-19332}
 
 cleanup() {
     if [[ -n "$runner_pid" ]]; then
