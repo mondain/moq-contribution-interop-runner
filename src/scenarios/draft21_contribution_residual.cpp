@@ -1268,8 +1268,13 @@ Spec expired_token_alias_spec() {
         [](const View& view) -> Judgement {
             if (view.write_bytes(0).empty()) return {true, std::nullopt};  // no credential configured
             const auto registration = view.write_frames(0);
-            // The credential must really be expired: a registration that succeeds proves nothing.
-            if (!registration.empty() && registration.front().type != kRequestError) return {true, std::nullopt};
+            // The credential must really be expired: only EXPIRED_AUTH_TOKEN for the
+            // registration shows that. A success or any other error (UNAUTHORIZED,
+            // NOT_SUPPORTED, ...) leaves the precondition unmet.
+            if (!registration.empty()) {
+                const auto registration_code = request_error_code(registration);
+                if (!registration_code || *registration_code != kRequestErrorExpiredToken) return {true, std::nullopt};
+            }
             if (!answered(view, 1)) return {view.close().has_value(), std::nullopt};
             const auto use = view.write_frames(1);
             if (use.empty()) return {true, std::nullopt};

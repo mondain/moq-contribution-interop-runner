@@ -1034,6 +1034,14 @@ TEST(ContributionResidual, ExpiredTokenAliasIsRetainedUntilDeleted) {
     ExpiredRun fresh = retained;
     fresh.registration = request_ok();
     EXPECT_EQ(expired_outcome(fresh), std::nullopt);
+    // The registration failed for another reason (UNAUTHORIZED, NOT_SUPPORTED): the
+    // credential is not shown to be expired, whatever the Alias use then returns.
+    for (const std::uint8_t code : {0x1, 0x3}) {
+        ExpiredRun unrelated = retained;
+        unrelated.registration = request_error(code);
+        unrelated.use = request_error(0x1);
+        EXPECT_EQ(expired_outcome(unrelated), std::nullopt) << "registration error " << int(code);
+    }
     // The Alias use succeeded or went unanswered.
     ExpiredRun accepted = retained;
     accepted.use = request_ok();
