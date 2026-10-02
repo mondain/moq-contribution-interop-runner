@@ -609,7 +609,13 @@ bool auto_replies_valid(const RawProbeTranscript& transcript, const RawProbeDefi
 
 std::span<const NamespaceAnswerOptOut> namespace_answer_opt_outs() {
     static const std::vector<NamespaceAnswerOptOut> table = {
-        // OPTOUTS
+        // Empty on purpose. Every scenario whose subject is the publisher's reaction
+        // to a response the runner writes on the publisher's request stream (rejection,
+        // redirect, malformed or unknown response; PeerBidi writes or peer_request_ready)
+        // is skipped by apply_default_namespace_answer itself, and the credit-exhaustion
+        // probes that spend the only bidirectional stream on the announcement already
+        // carry their own acknowledgement. An entry here is for a probe that sets
+        // neither but whose announcement must stay unanswered.
     };
     return table;
 }

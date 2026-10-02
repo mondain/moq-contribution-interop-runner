@@ -1,4 +1,8 @@
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
+#include "moq/interop/scenarios/draft18_peer_close.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
+#include "moq/interop/scenarios/draft21_peer_close.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "../support/contribution_wire.h"
 
@@ -174,6 +178,39 @@ TEST(DefaultNamespaceAnswer, EnumeratedOptOutsAreRealScenariosWithReasons) {
         if (!seen.contains({other_draft, entry.scenario}))
             EXPECT_NE(apply_default_namespace_answer(other, other_draft), DefaultNamespaceAnswer::OptedOut);
     }
+}
+
+// The probes that write their own response to the publisher's request (a rejection,
+// a redirect, a malformed REQUEST_OK, an unknown error code) are never given the
+// default answer: the publisher's reaction to that one response is the subject.
+TEST(DefaultNamespaceAnswer, ProbesThatAnswerThePublishersRequestThemselvesAreNotAcknowledged) {
+    std::size_t checked = 0;
+    const auto expect_skipped = [&](RawProbeDefinition definition, unsigned draft) {
+        const bool writes_response = std::any_of(definition.writes.begin(), definition.writes.end(),
+            [](const auto& write) { return write.channel == RawProbeChannel::PeerBidi; });
+        if (!writes_response) return;
+        const auto decision = apply_default_namespace_answer(definition, draft);
+        // Draft 21 contribution probes carry their own auto_accept_* mechanism (which
+        // skips the stream the response targets); every other one is skipped outright.
+        EXPECT_NE(decision, DefaultNamespaceAnswer::Applied) << definition.id;
+        EXPECT_FALSE(definition.acknowledge_publisher_namespace_draft21 && !definition.auto_accept_ready)
+            << definition.id;
+        if (decision == DefaultNamespaceAnswer::TargetsRequest)
+            EXPECT_FALSE(definition.acknowledge_publisher_namespace) << definition.id;
+        ++checked;
+    };
+    for (auto& probe : draft18_peer_close_probes()) expect_skipped(std::move(probe.definition), 18);
+    for (auto& probe : draft21_peer_close_probes()) expect_skipped(std::move(probe.definition), 21);
+    for (auto& probe : draft18_contribution_probes()) expect_skipped(std::move(probe.definition), 18);
+    for (auto& probe : draft21_contribution_probes()) expect_skipped(std::move(probe.definition), 21);
+    EXPECT_GT(checked, 10u);
+    bool unknown_error = false;
+    for (auto& probe : draft18_contribution_probes())
+        if (probe.definition.id == "publisher-request-rejected-with-unknown-error") {
+            unknown_error = true;
+            EXPECT_NE(apply_default_namespace_answer(probe.definition, 18), DefaultNamespaceAnswer::Applied);
+        }
+    EXPECT_TRUE(unknown_error);
 }
 
 }  // namespace
