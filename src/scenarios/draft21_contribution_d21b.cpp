@@ -1090,6 +1090,78 @@ Spec grease_stop_sending_spec() {
     return spec;
 }
 
+// ---- Section 9.2: GOAWAY New Session URI --------------------------------------------
+Bytes goaway_frame(const std::string& uri) {
+    Bytes body;
+    put_lp(body, text_bytes(uri));
+    put_vi(body, 0);  // Timeout 0: migrate as quickly as possible
+    return frame(0x10, body);
+}
+
+struct UriParts {
+    std::string authority;
+    std::string path;
+};
+
+std::optional<UriParts> split_uri(const std::string& uri) {
+    const auto scheme = uri.find("://");
+    if (scheme == std::string::npos) return std::nullopt;
+    const auto start = scheme + 3;
+    const auto slash = uri.find('/', start);
+    if (slash == std::string::npos) return UriParts{uri.substr(start), "/"};
+    return UriParts{uri.substr(start, slash - start), uri.substr(slash)};
+}
+
+std::optional<std::string> option_text(const d21::SetupMessage& setup, std::uint64_t type) {
+    for (const auto& option : setup.options) {
+        if (option.type != type) continue;
+        const auto* bytes = std::get_if<Bytes>(&option.value);
+        if (!bytes) return std::nullopt;
+        std::string value;
+        for (const auto byte : *bytes) value.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
+        return value;
+    }
+    return std::nullopt;
+}
+
+Spec goaway_alternate_uri() {
+    Spec spec;
+    spec.scenario = "d21-publisher-goaway-alternate-uri";
+    spec.rows = {{"D21-9-2-MUST-329", "d21-client-migrates-to-provided-uri"}};
+    spec.build = [](const Fixture& fixture) {
+        auto definition = base_definition("");
+        // An established subscription is open when the GOAWAY arrives.
+        definition.writes.push_back(request_write(build_subscribe(fixture, 1, 0)));
+        definition.writes.push_back({RawProbeChannel::Control, goaway_frame("moqt://unbound.invalid/moq"), false});
+        definition.alternate_listener = true;
+        definition.bind_alternate_uri = [](RawProbeDefinition& bound, const std::string& uri) {
+            bound.writes[1].bytes = goaway_frame(uri);
+        };
+        return definition;
+    };
+    spec.judge = [](const View& view) -> Judgement {
+        const auto uri = view.alternate_uri();
+        if (!uri || !view.write_event(1)) return {false, std::nullopt};
+        // Only a session on the second listener shows the New Session URI was used.
+        bool established = false;
+        for (const auto& event : view.alternate_events())
+            if (std::holds_alternative<transport::ConnectionEstablishedEvent>(event)) established = true;
+        const auto setup = established ? peer_setup_from_events(view.alternate_events()) : std::nullopt;
+        if (!setup) return {false, std::nullopt};
+        // A native QUIC client builds AUTHORITY and PATH from the URI it connects to
+        // (Sections 9.1.1 and 9.1.2); an option that contradicts the URI shows another
+        // one was used.
+        const auto parts = split_uri(*uri);
+        if (!parts) return {true, std::nullopt};
+        const auto authority = option_text(*setup, 5);
+        const auto path = option_text(*setup, 1);
+        if ((authority && *authority != parts->authority) || (path && *path != parts->path))
+            return {true, false};
+        return {true, true};
+    };
+    return spec;
+}
+
 }  // namespace
 
 std::vector<Spec> d21b_specs() {
@@ -1118,6 +1190,7 @@ std::vector<Spec> d21b_specs() {
         "d21-filter-finds-immutable-property", true));
     result.push_back(grease_token_type_spec());
     result.push_back(grease_stop_sending_spec());
+    result.push_back(goaway_alternate_uri());
     return result;
 }
 

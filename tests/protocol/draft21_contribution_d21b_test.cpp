@@ -753,5 +753,60 @@ TEST(ContributionD21b, GreaseSetupOptionsAndRequestErrorContextsFeedTheSessionRo
     EXPECT_EQ(evaluate(error_closed, error_kept), false);
 }
 
+// ---- Section 9.2: GOAWAY New Session URI --------------------------------------------
+Bytes client_setup(const std::string& path, const std::string& authority) {
+    Bytes body;
+    if (!path.empty()) body = cconcat({body, cvi(1), cvi(path.size()), text(path)});
+    if (!authority.empty()) body = cconcat({body, cvi(path.empty() ? 5 : 4), cvi(authority.size()), text(authority)});
+    return cconcat({cbytes({0xaf, 0, static_cast<unsigned>(body.size() >> 8), static_cast<unsigned>(body.size() & 255)}), body});
+}
+
+TEST(ContributionD21b, MigrationIsShownOnlyByASessionOnTheSecondListener) {
+    const auto& probe = find_probe(probes(), "d21-publisher-goaway-alternate-uri");
+    EXPECT_TRUE(probe.definition.alternate_listener);
+    ASSERT_EQ(probe.definition.writes.size(), 2u);
+    EXPECT_EQ(probe.definition.writes[1].channel, RawProbeChannel::Control);
+    const std::string uri = "moqt://127.0.0.1:19700/moq";
+    auto bound = probe;
+    bound.definition.bind_alternate_uri(bound.definition, uri);
+    // GOAWAY: type 0x10, New Session URI (length-prefixed), Timeout 0.
+    EXPECT_EQ(bound.definition.writes[1].bytes,
+              cconcat({cbytes({0x10, 0, static_cast<unsigned>(uri.size() + 2), static_cast<unsigned>(uri.size())}),
+                       text(uri), cbytes({0})}));
+
+    const auto evaluate_with = [&](std::vector<transport::TransportEvent> alternate) {
+        ContributionRun run(bound);
+        run.deliver(0);
+        run.deliver(1);
+        auto transcript = run.finish();
+        transcript.alternate_uri = uri;
+        transcript.alternate_events = std::move(alternate);
+        // A migrating publisher may end the first session; that is not an end of observation.
+        return evaluate_draft21_contribution_probe(transcript, probe);
+    };
+    const transport::TransportEvent connected = transport::ConnectionEstablishedEvent{{}, {}, {}, 1200};
+    const auto setup_event = [](const Bytes& setup) { return transport::TransportEvent{transport::StreamDataEvent{2, setup, false}}; };
+    EXPECT_EQ(evaluate_with({connected, setup_event(client_setup("/moq", "127.0.0.1:19700"))}), true);
+    // A WebTransport session carries no AUTHORITY or PATH option.
+    EXPECT_EQ(evaluate_with({connected, setup_event(cbytes({0xaf, 0, 0, 0}))}), true);
+    // The connection names another path or authority than the URI it was given.
+    EXPECT_EQ(evaluate_with({connected, setup_event(client_setup("/other", "127.0.0.1:19700"))}), false);
+    EXPECT_EQ(evaluate_with({connected, setup_event(client_setup("/moq", "127.0.0.1:19701"))}), false);
+    // Nothing, or a connection without a SETUP, shows no migration.
+    EXPECT_EQ(evaluate_with({}), std::nullopt);
+    EXPECT_EQ(evaluate_with({connected}), std::nullopt);
+    EXPECT_EQ(evaluate_with({setup_event(client_setup("/moq", "127.0.0.1:19700"))}), std::nullopt);
+    // Without the run's second listener the proof cannot be rebuilt.
+    ContributionRun run(bound);
+    run.deliver(0);
+    run.deliver(1);
+    auto transcript = run.finish();
+    transcript.alternate_events = {connected, setup_event(cbytes({0xaf, 0, 0, 0}))};
+    EXPECT_EQ(evaluate_draft21_contribution_probe(transcript, probe), std::nullopt);
+    // A GOAWAY naming another URI than the run's listener is not the stimulus.
+    transcript.alternate_uri = "moqt://127.0.0.1:19999/moq";
+    EXPECT_EQ(evaluate_draft21_contribution_probe(transcript, probe), std::nullopt);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

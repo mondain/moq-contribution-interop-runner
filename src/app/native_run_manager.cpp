@@ -427,6 +427,38 @@ public:
         return {std::move(created.listener), endpoint, created.error};
     }
 
+    struct AlternateListener {
+        std::unique_ptr<transport::SessionTransport> listener;
+        transport::BoundEndpoint endpoint;
+    };
+
+    // A second listener on a free port of the configured range, for probes that
+    // send the publisher to another URI. The port stays reserved until released.
+    std::optional<AlternateListener> reserve_alternate_listener(const RunConfig& run_config,
+                                                                std::uint16_t primary_port) {
+        std::lock_guard lock(mutex);
+        const bool ephemeral = config.port_start == 0;
+        const auto attempts = ephemeral ? std::size_t{1} :
+            static_cast<std::size_t>(config.port_end - config.port_start) + 1;
+        for (std::size_t attempt = 0; attempt < attempts; ++attempt) {
+            const auto port = ephemeral ? std::uint16_t{0} :
+                static_cast<std::uint16_t>(config.port_start + attempt);
+            if (port != 0 && (port == primary_port || reserved_ports.contains(port))) continue;
+            auto created = create_listener(run_config, port);
+            if (!created.listener || created.endpoint.port == primary_port ||
+                reserved_ports.contains(created.endpoint.port)) continue;
+            reserved_ports.insert(created.endpoint.port);
+            if (!config.advertised_address.empty()) created.endpoint.address = config.advertised_address;
+            return AlternateListener{std::move(created.listener), created.endpoint};
+        }
+        return std::nullopt;
+    }
+
+    void release_alternate_listener(std::uint16_t port) {
+        std::lock_guard lock(mutex);
+        reserved_ports.erase(port);
+    }
+
     std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
         const RunConfig& run_config, std::string_view id) const {
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
@@ -736,8 +768,36 @@ public:
                        PublisherDriver* driver, DriverHandle handle) {
         const auto started = scenarios::RawProbeClock::now();
         const auto deadline = started + run_config.timeout;
-        scenarios::RawProbeController controller(listener,std::move(definition));
+        std::optional<AlternateListener> alternate;
+        std::optional<std::string> alternate_uri;
+        if (definition.alternate_listener) {
+            alternate = reserve_alternate_listener(run_config, worker->endpoint.port);
+            if (alternate) {
+                const auto host = alternate->endpoint.address.find(':') != std::string::npos
+                    ? "[" + alternate->endpoint.address + "]" : alternate->endpoint.address;
+                alternate_uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
+                                host + ":" + std::to_string(alternate->endpoint.port) + "/moq";
+                if (definition.bind_alternate_uri) definition.bind_alternate_uri(definition, *alternate_uri);
+            } else {
+                // The scenario needs a second port in the configured range; without
+                // one the context cannot be run, which is not a publisher failure.
+                append_context_event(worker, definition.id, "alternate_listener_unavailable",
+                    "no free port for the second listener");
+                scenarios::RawProbeTranscript unavailable;
+                unavailable.scenario_id = definition.id;
+                unavailable.timed_out = true;
+                return unavailable;
+            }
+        }
+        const struct Release {
+            NativeRunManager::Impl* self; std::optional<AlternateListener>* held;
+            ~Release() { if (*held) self->release_alternate_listener((*held)->endpoint.port); }
+        } release{this, &alternate};
+        scenarios::RawProbeController controller(listener, std::move(definition),
+            alternate ? alternate->listener.get() : nullptr);
+        if (alternate_uri) controller.set_alternate_uri(*alternate_uri);
         std::size_t recorded = 0;
+        std::size_t alternate_recorded = 0;
         std::string operational_error;
         try {
             while (!worker->stop_requested) {
@@ -787,6 +847,25 @@ public:
                     event.detail += " ordinal=" + std::to_string(worker->context_ordinal);
                     batch.push_back(std::move(event));
                 }
+                for (; alternate_recorded < transcript.alternate_events.size(); ++alternate_recorded) {
+                    storage::EvidenceEvent event;
+                    event.scenario_id = transcript.scenario_id;
+                    event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
+                    event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    event.kind = "raw_probe_alternate_event";
+                    const auto& source = transcript.alternate_events[alternate_recorded];
+                    event.detail = "alternate listener event variant=" + std::to_string(source.index());
+                    if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
+                        event.stream_id = std::to_string(data->stream_id);
+                        event.detail += " fin=" + std::string(data->fin ? "true" : "false") +
+                            " bytes=" + hex_bytes(data->data);
+                    } else if (const auto* close = std::get_if<transport::PeerCloseEvent>(&source)) {
+                        event.detail += " close code=" + std::to_string(close->error_code);
+                    }
+                    event.detail += " alternate_event_index=" + std::to_string(alternate_recorded) +
+                                    " ordinal=" + std::to_string(worker->context_ordinal);
+                    batch.push_back(std::move(event));
+                }
                 if (!batch.empty()) store->append_events(worker->id,batch);
                 if (transcript.complete || transcript.harness_failed || transcript.timed_out || now >= deadline) break;
                 if (handle.valid()) {
@@ -812,6 +891,7 @@ public:
             transcript.timed_out = true;
         transcript.unknown_auth_token_alias_compatibility_code = config.unknown_auth_token_alias_compatibility_code;
         transcript.denied_authorization_token = config.denied_authorization_token;
+        transcript.alternate_uri = alternate_uri;
         transcript.connection_uri = endpoint_uri(worker, run_config, transcript.scenario_id);
         storage::EvidenceEvent stimulus;
         stimulus.scenario_id = transcript.scenario_id;

@@ -385,6 +385,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME draft21-gap-a-live COMMAND moq-interop-draft21-gap-a-live-tests)
+    add_executable(moq-interop-draft21-d21b-live-tests
+                   tests/integration/draft21_d21b_live_test.cpp)
+    target_link_libraries(moq-interop-draft21-d21b-live-tests PRIVATE
+        moq-interop-test-client moq-interop-runs moq-interop-http
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-d21b-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft21-d21b-live COMMAND moq-interop-draft21-d21b-live-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -562,6 +571,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-probe-peer-stop-tests tests/protocol/raw_probe_peer_stop_test.cpp)
     target_link_libraries(moq-interop-raw-probe-peer-stop-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe-peer-stop COMMAND moq-interop-raw-probe-peer-stop-tests)
+
+    add_executable(moq-interop-raw-probe-alternate-tests tests/protocol/raw_probe_alternate_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-alternate-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME raw-probe-alternate COMMAND moq-interop-raw-probe-alternate-tests)
 
     add_executable(moq-interop-draft18-peer-close-tests tests/protocol/draft18_peer_close_test.cpp)
     target_link_libraries(moq-interop-draft18-peer-close-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)

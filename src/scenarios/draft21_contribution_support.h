@@ -117,6 +117,9 @@ public:
     // Operator-configured denied credential; absent when the publisher's
     // authorization policy is not controllable.
     const std::optional<std::string>& denied_token() const noexcept { return denied_token_; }
+    // URI of the runner-controlled second listener and what arrived there.
+    const std::optional<std::string>& alternate_uri() const noexcept { return alternate_uri_; }
+    std::span<const transport::TransportEvent> alternate_events() const noexcept { return alternate_events_; }
     std::optional<std::uint64_t> peer_option(std::uint64_t type) const;
     const StreamRecord* stream(transport::StreamId id) const;
     // Stream actually used by transcript write `index`, if it has one.
@@ -135,6 +138,8 @@ private:
     std::optional<PeerCloseInfo> close_;
     std::optional<wire::draft21::SetupMessage> peer_setup_;
     std::optional<std::string> denied_token_;
+    std::optional<std::string> alternate_uri_;
+    std::vector<transport::TransportEvent> alternate_events_;
 };
 
 // Splits complete framed messages; sets `malformed` for an impossible frame.

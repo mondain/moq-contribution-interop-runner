@@ -80,9 +80,14 @@ std::optional<bool> evaluate_draft21_contribution_probe(
                candidate.evaluator_id == probe.evaluator_id &&
                candidate.definition.id == probe.definition.id;
     });
-    if (expected == candidates.end() || transcript.scenario_id != expected->definition.id ||
-        !raw_probe_stimulus_valid(transcript, expected->definition))
-        return std::nullopt;
+    if (expected == candidates.end() || transcript.scenario_id != expected->definition.id) return std::nullopt;
+    auto definition = expected->definition;
+    if (definition.alternate_listener) {
+        // The GOAWAY names the runner's second listener, which only the run knew.
+        if (!transcript.alternate_uri || !definition.bind_alternate_uri) return std::nullopt;
+        definition.bind_alternate_uri(definition, *transcript.alternate_uri);
+    }
+    if (!raw_probe_stimulus_valid(transcript, definition)) return std::nullopt;
     const View view(transcript);
     if (!view.valid()) return std::nullopt;
     for (const auto& spec : all_specs()) {

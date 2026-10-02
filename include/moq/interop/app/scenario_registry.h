@@ -306,6 +306,7 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-filter-immutable-property",
     "d21-grease-auth-token-type",
     "d21-grease-stop-sending",
+    "d21-publisher-goaway-alternate-uri",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

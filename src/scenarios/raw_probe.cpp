@@ -143,8 +143,9 @@ bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expect
 }
 }
 RawProbeController::RawProbeController(transport::SessionTransport& transport,
-                                     RawProbeDefinition definition)
-    : transport_(transport), definition_(std::move(definition)) {
+                                     RawProbeDefinition definition,
+                                     transport::SessionTransport* alternate)
+    : transport_(transport), alternate_(alternate), definition_(std::move(definition)) {
     if (definition_.id.empty() || definition_.setup_bytes.empty() ||
         definition_.deadline.count() <= 0 || !valid_stages(definition_) ||
         (definition_.start_after_peer_setup && !definition_.peer_setup_ready) ||
@@ -362,6 +363,12 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
         } else if (const auto* stop = std::get_if<transport::PeerStopSendingEvent>(&observed)) {
             if ((stop->stream_id & 2u) == 0u) cancelled_peer_requests_.insert(stop->stream_id);
         } else if (std::holds_alternative<transport::PeerCloseEvent>(observed)) {
+            // A publisher that migrates ends this session and continues on the
+            // second listener, so its close is not the end of the observation.
+            if (definition_.alternate_listener && transcript_.stimulus_delivered) {
+                primary_closed_ = true;
+                break;
+            }
             transcript_.complete = transcript_.stimulus_delivered;
             if (!transcript_.complete) transcript_.timed_out = true;
             return transcript_;
@@ -374,8 +381,14 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             fail(); break;
         }
     }
+    if (alternate_ && transcript_.alternate_events.size() < kMaximumEvents) {
+        for (auto& event : alternate_->poll(256)) {
+            if (transcript_.alternate_events.size() >= kMaximumEvents) break;
+            transcript_.alternate_events.push_back(std::move(event));
+        }
+    }
     // All events in this batch were already observed before any new writes.
-    if (!transcript_.harness_failed) send();
+    if (!transcript_.harness_failed && !primary_closed_) send();
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {
         transcript_.complete = true;

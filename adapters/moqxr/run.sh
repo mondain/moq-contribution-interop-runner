@@ -69,7 +69,8 @@ if [[ "$draft" == 21 && "$transport" == webtransport ]]; then
         d21-largest-object-* | d21-publish-done-* | d21-publisher-namespace-redirect | \
         d21-publisher-subscribe-tracks-redirect | d21-publish-state-notify-* | d21-padding-*-emission | \
         d21-namespace-discovery-authorization | d21-track-discovery-* | d21-subgroup-early-handoff-reset | \
-        d21-filter-* | d21-grease-auth-token-type | d21-grease-stop-sending | d21-grease-setup-options)
+        d21-filter-* | d21-grease-auth-token-type | d21-grease-stop-sending | d21-grease-setup-options | \
+        d21-publisher-goaway-alternate-uri)
             args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
                   --namespace media --draft "$draft" --forward 0 --paced
                   --timeout "$timeout_seconds" --ca "$ca_cert")

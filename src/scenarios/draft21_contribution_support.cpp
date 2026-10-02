@@ -219,6 +219,8 @@ std::vector<Frame> parse_frames(const StreamRecord& record, bool& malformed) {
 
 View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {
     denied_token_ = transcript.denied_authorization_token;
+    alternate_uri_ = transcript.alternate_uri;
+    alternate_events_ = transcript.alternate_events;
 }
 
 View::View(std::span<const RawProbeAcceptedWrite> writes,

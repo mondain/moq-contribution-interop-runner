@@ -59,6 +59,11 @@ struct RawProbeDefinition {
     std::function<bool(std::span<const std::byte>)> auto_accept_ready{};
     std::vector<std::byte> auto_accept_reply{};
     std::size_t auto_accept_limit{0};
+    // The probe sends the publisher to a second listener the runner controls
+    // (a GOAWAY New Session URI). The runner opens that listener, tells the
+    // definition its URI, and records what arrives there as alternate events.
+    bool alternate_listener{false};
+    std::function<void(RawProbeDefinition&, const std::string&)> bind_alternate_uri{};
 };
 struct RawProbeAutoReply {
     transport::StreamId stream_id{0};
@@ -100,6 +105,11 @@ struct RawProbeTranscript {
     // Token value the operator configured the publisher's authorization policy
     // to refuse (Section 8.9). Absent when no policy is controllable.
     std::optional<std::string> denied_authorization_token{};
+    // URI of the runner-controlled second listener and the transport events
+    // observed there, in order. They are evidence only: the stimulus proof
+    // concerns the first connection alone.
+    std::optional<std::string> alternate_uri{};
+    std::vector<transport::TransportEvent> alternate_events;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -110,7 +120,10 @@ std::optional<bool> evaluate_raw_probe_close(
 class RawProbeController {
 public:
     RawProbeController(transport::SessionTransport& transport,
-                       RawProbeDefinition definition);
+                       RawProbeDefinition definition,
+                       transport::SessionTransport* alternate = nullptr);
+    // Records the URI of the second listener so completion checks can use it.
+    void set_alternate_uri(std::string uri) { transcript_.alternate_uri = std::move(uri); }
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
 private:
@@ -118,6 +131,8 @@ private:
     void send_auto_replies();
     void fail();
     transport::SessionTransport& transport_;
+    transport::SessionTransport* alternate_{nullptr};
+    bool primary_closed_{false};
     RawProbeDefinition definition_;
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;

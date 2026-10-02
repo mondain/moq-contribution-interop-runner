@@ -117,6 +117,8 @@ public:
             accepted.stream_id = transcript_.writes[*write.reuse_write_stream].stream_id;
         } else if (write.channel == scenarios::RawProbeChannel::PeerBidi) {
             accepted.stream_id = 0;
+        } else if (write.channel == scenarios::RawProbeChannel::Control) {
+            accepted.stream_id = transcript_.setup.stream_id;
         } else if (write.channel == scenarios::RawProbeChannel::Datagram) {
             accepted.stream_id = std::nullopt;
         } else if (write.channel == scenarios::RawProbeChannel::NewUni) {
