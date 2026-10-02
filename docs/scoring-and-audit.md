@@ -1,0 +1,184 @@
+# Scoring and Audit
+
+This document explains how the runner turns evidence into outcomes, weights,
+verdicts and scores, how to read the numbers in a result, and how the
+`moq-interop-audit` program, the release audit script and the sanitizer and fuzz
+scripts check the runner itself. The design rationale is in
+[moq-contribution-interop-runner-design.md](moq-contribution-interop-runner-design.md).
+The checked-in draft text files in this directory are the only source of
+expected behavior; no publisher implementation defines it.
+
+## Outcome states
+
+Every catalog row of the selected draft ends a run in exactly one state per
+observation:
+
+| State | Meaning |
+|---|---|
+| `pass` | The evidence from every required scenario context satisfies the requirement |
+| `fail` | Observed evidence contradicts the requirement. One contradicting observation dominates passing ones |
+| `not_run` | The row is testable, but its scenario contexts did not run, did not complete, or the publisher never produced the behavior needed to judge it |
+| `not_testable` | The behavior cannot be observed or expressed at the protocol boundary; the catalog records a reason and a draft citation |
+| `not_applicable` | The statement does not apply to a contribution publisher (or is informative) |
+
+`not_run` is not a failure. It usually means "the runner had no way to see this
+behavior from your publisher", for example because the publisher never sends a
+message the row is about, or an operator-supplied fixture was absent. Rows that
+are `not_testable` or `not_applicable` stay visible in the report and are
+excluded from every score.
+
+## Weights and verdicts
+
+| Strength | Weight | Effect |
+|---|---:|---|
+| MUST, MUST NOT | 10 | A `fail` makes the run verdict `fail` |
+| SHOULD, SHOULD NOT | 3 | Counted in the weighted score; a `fail` does not change the verdict |
+| MAY | 1 | Counted in the weighted score and coverage |
+
+The run verdict is:
+
+- `fail` when any applicable, testable MUST or MUST NOT row failed;
+- otherwise `incomplete` when any applicable, testable row is still `not_run`;
+- otherwise `pass`;
+- `error` when the runner could not establish or preserve a valid run: a publisher
+  that exits before connecting in driven mode, a listener or process failure, a
+  stopped raw-probe run, or an inconsistent outcome set.
+
+`incomplete` is the normal result today. Each scenario exercises a slice of the
+catalog, and a run that names a few scenarios leaves most rows `not_run`. A
+harness failure or `incomplete` run is not a publisher failure.
+
+## Scores
+
+Each run records three ratios, each as `{earned, possible}`:
+
+| Score | `earned` | `possible` |
+|---|---|---|
+| `required` | Weight of passed MUST and MUST NOT rows | Weight of all applicable, testable MUST and MUST NOT rows |
+| `weighted` | Weight of all passed applicable, testable rows | Weight of all applicable, testable rows |
+| `coverage` | Weight of rows that were executed (`pass` or `fail`) | Weight of all applicable, testable rows |
+
+With the current catalogs, `required.possible` is 1730 for each draft (173 rows
+times 10), and `weighted.possible` and `coverage.possible` were 1910 for
+draft 18 and 1917 for draft 21 in a recent run. A fresh run against a publisher
+typically shows small earned values and a large gap: for example a single
+`subscribe-to-publisher-track` run reported `required` 30 of 1730 with verdict
+`incomplete`. Do not read the earned/possible ratio as a percentage of
+conformance; read it together with coverage and the list of `not_run` rows.
+
+A row's outcome in the JSON export aggregates its observations: any `fail`
+wins, then `pass`; a single `not_run` stays `not_run`. A raw-probe row bound to
+several scenario contexts needs every named context to complete before it can
+pass; a run that exercises only one of them leaves the row incomplete. Outcomes
+from separate runs are never merged.
+
+## Static gate and live evidence
+
+Two different claims must not be confused:
+
+- The static gate (`moq-interop-audit`) proves that the catalog and the code
+  agree: every applicable, testable MUST/MUST NOT row names a registered scenario
+  and evaluator, and the source-keyword audit has classified every normative
+  keyword in the draft text. Its current result is 173 of 173 required rows bound
+  for each of draft 18 and draft 21, with optional (SHOULD/MAY) coverage of 1 of
+  90 and 1 of 97.
+- Live evidence is what a particular run observed from a particular publisher. A
+  binding is not proof that a publisher passed; many scenarios can only pass on
+  positive wire evidence and stay `not_run` when the publisher never produces the
+  behavior. Some rows score only with operator-supplied fixtures, such as token
+  credentials; see [scenario-reference.md](scenario-reference.md).
+
+## moq-interop-audit
+
+```sh
+build/moq-interop-audit --draft 18
+build/moq-interop-audit --draft 21 --format json
+build/moq-interop-audit --draft 18 --database /path/to/runs.sqlite3
+```
+
+Options: `--draft 18|21` (required), `--format text|json` (default `text`),
+`--docs DIR`, `--requirements DIR` and `--database PATH` (an existing run
+database). Without `--docs` and `--requirements` it uses the source tree, or
+`/usr/share/moq-interop` when that is absent (as in the Docker image).
+
+Text output:
+
+```text
+Draft 18 source 9e6b32cb7797c151e9e127374c1291af3ed546b2d453cd5bbb15946977eeeeb6
+Required executable coverage: 173/173
+Optional executable coverage: 1/90
+Source-keyword audit: complete
+Static gate: PASS (89 findings)
+```
+
+The findings are non-blocking notices about unbound optional rows. JSON output
+adds `source_revision`, `static_complete`, `source_audit`, `executable_coverage`,
+sorted per-requirement `findings` (each with `code`, `requirement_id`, `detail`
+and `blocking`), and `classified_residuals`: every `not_testable`,
+`not_applicable` and informative row with its reason, section and first line in
+the draft.
+
+With `--database`, the audit also checks stored execution evidence and adds
+`execution_audit` (`consistent`, `run_count`, `scored_rows`, `findings`, and a
+canonical SHA-256 per run). Findings include `missing_evaluator_evidence` (a
+passed row lacks its declared evidence), `stored_score_mismatch`,
+`unfinished_run`, `run_error`, `nondeterministic_result` (repeats of the same
+configuration disagree) and `scored_without_binding`. The canonical hash
+excludes run ID, timestamps and evidence arrival order; draft, transport,
+track, timeout, any compatibility mapping and the validator revision are part of
+the comparison group. Publisher identity is not stored, so compare repetitions
+only when the publisher binary and fixture are the same. Run the audit after
+the service has stopped creating runs. A zero-run audit can be consistent but
+proves no behavior.
+
+Exit status: 0 when the static gate passes (and the execution audit, if
+requested, is consistent), 1 when the gate or the execution audit has findings,
+2 for a usage or load error.
+
+## Release audit script
+
+`tests/e2e/release-audit.sh` produces and validates a release evidence
+artifact. It has two modes:
+
+```sh
+# Run every stage and write the artifact; the output directory must not exist.
+bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit \
+  "$PWD/build/moq-interop-audit" "moq-interop-runner:$(git rev-parse --short HEAD)" \
+  "$PWD/build/moq-interop-picoquic-peer" \
+  /path/to/openmoq-publisher /path/to/locmaf-publisher.mp4
+
+# Validate an existing artifact against the checked-in digests and revision.
+bash tests/e2e/release-audit.sh check /tmp/moq-interop-release-audit/release-audit.json
+```
+
+`run` accepts either only the output directory and audit program, or those two
+plus all four optional arguments (Docker image, native test peer, publisher
+executable, MP4 fixture). The image must be built from the exact current commit;
+a mismatched revision label is rejected. Omitting the optional arguments records
+the Docker and publisher stages as `missing`, which fails the gate.
+
+Required stages, all of which must be `pass` for `check` to succeed:
+`native_suite` (ctest), `asan_ubsan`, `fuzz_smoke`, `docker_d18_native`,
+`docker_d18_webtransport`, `docker_d21_native`, `docker_d21_webtransport`,
+`moqxr_d18_webtransport`, `moqxr_d21_webtransport`, `audit_d18` and
+`audit_d21`. The artifact (`release-audit.json`) also stores the source revision,
+the draft source digests, the static gate result for each draft, the external
+publisher version, executable SHA-256 and fixture SHA-256, plus logs, Docker
+run results and the repeat databases. `check` rejects revision drift, digest
+drift, missing or duplicate stages, and a missing publisher identity. The
+manually dispatched `Draft release audit` GitHub workflow builds a pinned
+publisher and a source-matched image and runs the same gate. Local runs require
+Clang with libFuzzer, Docker and `timeout`.
+
+## Sanitizer and fuzz scripts
+
+```sh
+bash tests/e2e/sanitizer-smoke.sh   # clang build with ASan and UBSan in build-asan/
+bash tests/e2e/fuzz-smoke.sh        # libFuzzer targets in build-fuzz/, bounded runs
+```
+
+`sanitizer-smoke.sh` builds and runs the focused tests `publisher-driver`,
+`run-store`, `execution-audit`, `webtransport-run-api` and `result-export` under
+address and undefined-behavior sanitizers. `fuzz-smoke.sh` builds the cursor,
+draft-18 message, draft-18 object and WebTransport stream fuzz targets and runs
+each for 500 executions with a 30 second limit. Both need Clang.
