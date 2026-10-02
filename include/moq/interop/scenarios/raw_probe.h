@@ -107,6 +107,14 @@ struct RawProbeDefinition {
     // Section 10.15). The answers are recorded in the transcript, are not part
     // of the stimulus, and cannot be combined with PeerBidi writes.
     bool acknowledge_publisher_namespace{false};
+    // The draft 21 form of the same acknowledgement (PUBLISH_NAMESPACE 0x6 and
+    // REQUEST_OK 0x7, draft 21 Sections 4.2 and 9.3). Exclusive with the draft 18
+    // flag; recorded in RawProbeTranscript::acknowledgements, not in `auto_replies`.
+    bool acknowledge_publisher_namespace_draft21{false};
+    // The scenario is about how the publisher behaves when its announcement is
+    // unanswered, answered differently, or when no bidirectional stream is spare,
+    // so the default acknowledgement (apply_default_namespace_answer) must not run.
+    bool no_default_namespace_answer{false};
     // Initial QUIC credit for peer-initiated bidirectional streams. The
     // harness adds the WebTransport CONNECT stream where it applies.
     std::optional<std::uint64_t> initial_peer_bidi_streams{};
@@ -205,6 +213,25 @@ struct RawProbeTranscript {
     // Responses sent by RawProbeDefinition::courtesy, in the order accepted.
     std::vector<RawProbeCourtesyWrite> courtesy_writes;
 };
+// Scenarios that opt out of the default answer to a publisher's PUBLISH_NAMESPACE,
+// with the reason each does.
+struct NamespaceAnswerOptOut {
+    unsigned draft;
+    std::string_view scenario;
+    std::string_view reason;
+};
+std::span<const NamespaceAnswerOptOut> namespace_answer_opt_outs();
+enum class DefaultNamespaceAnswer {
+    Applied,
+    OptedOut,        // no_default_namespace_answer, or listed in namespace_answer_opt_outs()
+    OwnMechanism,    // acknowledge_publisher_namespace* or auto_accept_* already set
+    TargetsRequest,  // PeerBidi writes or peer_request_ready address publisher requests
+    UnsupportedDraft,
+};
+// A subscriber must answer a publisher's PUBLISH_NAMESPACE (draft 18 Section
+// 10.15, draft 21 Section 4.2) before the publisher proceeds. Enables the draft's
+// acknowledgement on `definition` unless one of the cases above holds.
+DefaultNamespaceAnswer apply_default_namespace_answer(RawProbeDefinition& definition, unsigned draft);
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
 std::optional<bool> evaluate_raw_probe_close(
