@@ -64,6 +64,27 @@ TEST(Draft21CloseProbes, NamespaceAndParameterViolationsHaveLiteralDraft21Bytes)
     EXPECT_EQ(parity->expected_close, 4u);
 }
 
+TEST(Draft21CloseProbes, DuplicateRequestIdAcrossStreamsFirstRequestNeedsNoPublisherNamespace) {
+    const auto probes = draft21_close_probes();
+    const auto found = std::find_if(probes.begin(), probes.end(), [](const auto& probe) {
+        return probe.definition.id == "d21-duplicate-request-id-across-streams";
+    });
+    ASSERT_NE(found, probes.end());
+    ASSERT_EQ(found->definition.writes.size(), 2u);
+    // Section 6.4.2.1: the second request reuses Request ID 1 on another
+    // stream. The first request is a SUBSCRIBE_NAMESPACE with zero Track
+    // Namespace fields (Section 4.1: all namespaces), so no publisher has a
+    // reason to refuse it and end the session before the duplicate arrives; a
+    // refused request (an unknown namespace prefix) made moqxr close with
+    // NO_ERROR, which cannot be told apart from ignoring the duplicate.
+    EXPECT_EQ(found->definition.writes[0].channel, RawProbeChannel::NewBidi);
+    EXPECT_EQ(found->definition.writes[0].bytes, bytes({0x50, 0x00, 0x03, 0x01, 0x00, 0x00}));
+    EXPECT_EQ(found->definition.writes[1].channel, RawProbeChannel::NewBidi);
+    EXPECT_EQ(found->definition.writes[1].bytes,
+              bytes({0x50, 0x00, 0x05, 0x01, 0x01, 0x01, 'm', 0x00}));
+    EXPECT_EQ(found->expected_close, 4u);
+}
+
 TEST(Draft21CloseProbes, SetupReaderRetainsFragmentedInputAndRejectsOtherStreams) {
     const auto probes = draft21_close_probes();
     ASSERT_FALSE(probes.empty());
