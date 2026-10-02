@@ -239,7 +239,10 @@ std::optional<OutcomeState> draft21_gap_a_announcement_state(
 
 
 bool draft21_gap_a_scenarios_are_alternatives(const Requirement& row) {
-    return row.id == "D21-6-2-MUST-139" || row.id == "D21-6-2-MUST-140";
+    // Native vs WebTransport (6.2), and a publisher's own Track Alias assignment
+    // (3.1): only one of the two scenarios of those rows can occur in one run.
+    return row.id == "D21-6-2-MUST-139" || row.id == "D21-6-2-MUST-140" ||
+           row.id == "D21-3-1-MUST-041";
 }
 
 std::optional<Draft21GapARawResult> draft21_gap_a_raw_result(

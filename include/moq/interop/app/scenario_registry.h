@@ -285,6 +285,13 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-complete-subgroup-fin",
     "d21-subgroup-start-location-fin",
     "d21-subgroup-premature-close-reset",
+    // Remaining-rows slice (draft21_contribution_residual.cpp).
+    "d21-overlapping-subscriptions-shared-alias",
+    "d21-overlapping-subscriptions-distinct-aliases",
+    "d21-forward-location-and-range-filter-conjunction",
+    "d21-subscribe-multiple-subgroups",
+    "d21-fill-fails-before-first-object",
+    "d21-cancel-subscription-with-concurrent-fill-streams",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

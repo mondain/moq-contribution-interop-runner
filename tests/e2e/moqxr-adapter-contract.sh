@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.json" "$test_dir/request.next" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -63,6 +63,14 @@ check_case 18 native_quic 0
 check_case 21 native_quic 0
 check_case 18 webtransport 0
 check_case 21 webtransport 1
+
+# Scenarios in which the runner subscribes make moqxr await that SUBSCRIBE.
+make_request 21 webtransport 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d21-fill-fails-before-first-object"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+[[ "$output" == *"<--forward>"* && "$output" == *"<0>"* && "$output" != *"<1>"* ]]
 
 make_request 18 native_quic 00 766964655f31 "$test_dir/ca cert.pem"
 if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
