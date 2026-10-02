@@ -52,15 +52,11 @@ check_case() {
     else
         [[ "$output" == *"<raw>"* ]]
     fi
-    if [[ "$draft" == 21 && "$transport" == native_quic ]]; then
-        [[ "$output" == *"<--preannounce-tracks>"* ]]
-    else
-        [[ "$output" != *"<--preannounce-tracks>"* ]]
-    fi
+    [[ "$output" != *"<--preannounce-tracks>"* ]]
 }
 
 check_case 18 native_quic 0
-check_case 21 native_quic 0
+check_case 21 native_quic 1
 check_case 18 webtransport 0
 check_case 21 webtransport 1
 

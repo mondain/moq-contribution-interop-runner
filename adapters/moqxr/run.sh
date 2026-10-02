@@ -52,9 +52,7 @@ timeout_seconds=$(((timeout_ms + 999) / 1000))
 args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
       --namespace media --draft "$draft" --forward 0
       --timeout "$timeout_seconds" --ca "$ca_cert")
-if [[ "$draft" == 21 && "$transport" == native_quic ]]; then
-    args+=(--preannounce-tracks)
-elif [[ "$draft" == 21 && "$transport" == webtransport ]]; then
+if [[ "$draft" == 21 ]]; then
     # Scenarios in which the runner subscribes to the track (rather than observing
     # the publisher's own PUBLISH) need moqxr to wait for that SUBSCRIBE: --forward 0
     # selects its await-subscribe mode, whereas --forward 1 pushes PUBLISH requests
@@ -90,7 +88,7 @@ esac
 # own timeout outlasts the context so an idle publisher is stopped by the runner
 # rather than exiting with a failure status first.
 # This chooses moqxr CLI options; it never changes what a scenario expects.
-if [[ "$draft" == 21 && "$transport" == webtransport ]]; then
+if [[ "$draft" == 21 ]]; then
     case $(jq -r '.scenario_id' "$request_file") in
         d21-largest-object-* | d21-publish-done-* | d21-publisher-namespace-redirect | \
         d21-publisher-subscribe-tracks-redirect | d21-publish-state-notify-* | d21-padding-*-emission | \
