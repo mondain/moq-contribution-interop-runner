@@ -24,6 +24,8 @@
 namespace moq::interop::scenarios::d21c {
 namespace {
 
+using namespace shared;
+
 constexpr std::uint64_t kTargetGroup = 0;
 constexpr std::uint64_t kTargetObject = 1;
 constexpr std::uint64_t kFetchHeaderType = 0x5;
@@ -61,10 +63,6 @@ RawProbeDefinition residual_definition() {
     return base_definition("");
 }
 
-RawProbeWrite request_write(Bytes bytes, bool fin = false) {
-    return {RawProbeChannel::NewBidi, std::move(bytes), fin};
-}
-
 // Follow-up written on the stream opened by write `base` once its
 // SUBSCRIBE_OK is complete.
 RawProbeWrite follow_up(Bytes bytes, std::size_t base, bool fin = false) {
@@ -82,73 +80,19 @@ struct Object {
     Bytes payload;
 };
 
-struct SubgroupStream {
-    transport::StreamId stream{0};
-    std::uint64_t alias{0};
-    std::uint64_t group{0};
-    std::optional<std::uint64_t> subgroup_id;
-    std::vector<Object> objects;
+// Section 11.3.1: the Subgroup streams (unidirectional, publisher-initiated)
+// carrying `alias`, each with the Objects received so far.
+struct AliasStream {
+    transport::StreamId id{0};
+    SubgroupParse parsed;
 };
 
-// Section 11.3.1: Subgroup header and the Objects received so far. A property
-// block is skipped by its length; its contents do not matter to these rows.
-std::optional<SubgroupStream> parse_subgroup_stream(transport::StreamId id, const StreamRecord& record) {
-    wire::Cursor cursor(record.bytes);
-    const auto type = read_vi(cursor);
-    if (!type || *type >= 128 || (*type & 0x10u) == 0 || (*type & 0x06u) == 0x06u) return std::nullopt;
-    SubgroupStream result;
-    result.stream = id;
-    const auto alias = read_vi(cursor);
-    const auto group = alias ? read_vi(cursor) : std::nullopt;
-    if (!alias || !group) return std::nullopt;
-    result.alias = *alias;
-    result.group = *group;
-    const unsigned mode = static_cast<unsigned>((*type & 0x06u) >> 1u);
-    if (mode == 2u) {
-        const auto subgroup = read_vi(cursor);
-        if (!subgroup) return std::nullopt;
-        result.subgroup_id = *subgroup;
-    } else if (mode == 0u) {
-        result.subgroup_id = 0;
-    }
-    if ((*type & 0x20u) == 0u && !read_n(cursor, 1)) return std::nullopt;
-    std::optional<std::uint64_t> previous;
-    while (cursor.remaining() != 0) {
-        auto local = cursor;
-        const auto delta = read_vi(local);
-        if (!delta) break;
-        if ((*type & 0x01u) != 0u) {
-            const auto length = read_vi(local);
-            if (!length || *length > 65535 || !read_n(local, static_cast<std::size_t>(*length))) break;
-        }
-        const auto payload_length = read_vi(local);
-        if (!payload_length) break;
-        bool data = true;
-        Bytes payload;
-        if (*payload_length == 0) {
-            if (!read_vi(local)) break;
-            data = false;
-        } else {
-            if (*payload_length > kMaximumTotalBytes) break;
-            const auto block = read_n(local, static_cast<std::size_t>(*payload_length));
-            if (!block) break;
-            payload.assign(block->begin(), block->end());
-        }
-        const std::uint64_t object = previous ? *previous + *delta + 1 : *delta;
-        if (mode == 1u && !previous) result.subgroup_id = object;
-        previous = object;
-        result.objects.push_back({*group, object, data, id, false, std::move(payload)});
-        cursor = local;
-    }
-    return result;
-}
-
-std::vector<SubgroupStream> subgroup_streams(const View& view, std::uint64_t alias) {
-    std::vector<SubgroupStream> result;
+std::vector<AliasStream> subgroup_streams(const View& view, std::uint64_t alias) {
+    std::vector<AliasStream> result;
     for (const auto& [id, stream] : view.streams()) {
         if ((id & 3u) != 2u) continue;
-        auto parsed = parse_subgroup_stream(id, stream);
-        if (parsed && parsed->alias == alias) result.push_back(std::move(*parsed));
+        auto parsed = parse_subgroup(stream.bytes);
+        if (parsed.header && parsed.alias == alias) result.push_back({id, std::move(parsed)});
     }
     return result;
 }
@@ -184,7 +128,8 @@ std::optional<Object> parse_datagram_object(const DatagramRecord& datagram, std:
 std::vector<Object> delivered_objects(const View& view, std::uint64_t alias) {
     std::vector<Object> result;
     for (const auto& stream : subgroup_streams(view, alias))
-        for (const auto& object : stream.objects) result.push_back(object);
+        for (const auto& object : stream.parsed.objects)
+            result.push_back({object.group, object.object, !object.status, stream.id, false, object.payload});
     for (const auto& datagram : view.datagrams())
         if (const auto object = parse_datagram_object(datagram, alias)) result.push_back(*object);
     return result;
@@ -201,16 +146,6 @@ std::optional<std::uint64_t> alias_of(const View& view, std::size_t write) {
 bool rejected(const View& view, std::size_t write) {
     const auto frames = view.write_frames(write);
     return !frames.empty() && frames.front().type == kRequestError;
-}
-
-Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Judge judge, bool window) {
-    Spec result;
-    result.scenario = scenario;
-    result.rows = std::move(rows);
-    result.build = std::move(build);
-    result.judge = std::move(judge);
-    result.window = window;
-    return result;
 }
 
 // ---- Section 3.1: one copy per matching subscription (D21-3-1-MUST-041) -----
@@ -331,10 +266,10 @@ Spec filter_conjunction_spec() {
 }
 
 // ---- Section 2.2: one Subgroup per stream (D21-2-2-MUST-NOT-017) -------------
-std::optional<int> membership(const Object& object) {
-    if (object.group != 0 || !object.data) return std::nullopt;
-    if (object.id <= 4) return 0;
-    if (object.id <= 9) return 1;
+std::optional<int> membership(const ObjectRecord& object) {
+    if (object.group != 0 || object.status) return std::nullopt;
+    if (object.object <= 4) return 0;
+    if (object.object <= 9) return 1;
     return std::nullopt;
 }
 
@@ -368,10 +303,10 @@ Spec mixed_subgroup_spec() {
             bool stream_with_one = false;
             for (const auto& stream : subgroup_streams(view, *alias)) {
                 std::set<int> cells;
-                for (const auto& object : stream.objects)
+                for (const auto& object : stream.parsed.objects)
                     if (const auto cell = membership(object)) cells.insert(*cell);
                 if (cells.empty()) continue;
-                if (stream.subgroup_id) subgroup_ids.insert(*stream.subgroup_id);
+                if (stream.parsed.subgroup) subgroup_ids.insert(*stream.parsed.subgroup);
                 (cells.size() > 1 ? stream_with_both : stream_with_one) = true;
                 cells_seen.insert(cells.begin(), cells.end());
             }
@@ -605,82 +540,9 @@ std::vector<SkippedTrack> skipped_tracks(const View& view, const Namespace& pref
     return result;
 }
 
-// Tracks the publisher announced with PUBLISH on a request stream it opened.
-struct PublishedTrack {
-    TrackName track;
-    std::size_t event{0};
-};
-
-std::vector<PublishedTrack> published_tracks(const View& view) {
-    std::vector<PublishedTrack> result;
-    for (const auto& [id, record] : view.streams()) {
-        if ((id & 3u) != 0u) continue;
-        const auto frames = view.frames(record);
-        if (frames.empty() || frames.front().type != kPublish) continue;
-        wire::Cursor body(frames.front().body);
-        if (!read_vi(body)) continue;
-        auto name_space = read_namespace(body);
-        const auto length = name_space ? read_vi(body) : std::nullopt;
-        const auto name = length ? read_n(body, static_cast<std::size_t>(*length)) : std::nullopt;
-        if (!name_space || !name) continue;
-        result.push_back({{std::move(*name_space), Bytes(name->begin(), name->end())}, record.first_event});
-    }
-    return result;
-}
-
-Spec skipped_publish_spec() {
-    return spec("d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
-        {{"D21-4-1-MUST-NOT-084", "d21-skipped-publish-not-later-sent-for-same-attempt"}},
-        [](const Fixture& fixture) {
-            auto definition = residual_definition();
-            definition.initial_peer_bidi_streams = 1;
-            // The stream limit can leave a publisher waiting for credit until it gives up.
-            definition.publisher_exit_is_evidence = true;
-            definition.peer_request_ready = [](auto input) {
-                wire::Cursor cursor(input);
-                return std::holds_alternative<wire::draft21::PublishMessage>(wire::draft21::decode_publish(cursor));
-            };
-            Bytes body;
-            put_vi(body, 1);
-            put_namespace(body, fixture.track_namespace);
-            put_vi(body, 0);
-            definition.writes.push_back(request_write(frame(kSubscribeTracks, body)));
-            // REQUEST_ERROR UNINTERESTED (0x20, Section 12.3) with no retry and no reason,
-            // then FIN: the request is over and its stream is returned to the publisher.
-            Bytes error;
-            put_vi(error, 0x20);
-            put_vi(error, 0);
-            put_vi(error, 0);
-            RawProbeWrite reject{RawProbeChannel::PeerBidi, frame(kRequestError, error), true};
-            reject.evidence_ready = [namespace_fields = fixture.track_namespace](const RawProbeGateInput& input) {
-                const View view(input.prior_writes, input.events);
-                return view.valid() && !skipped_tracks(view, namespace_fields).empty();
-            };
-            definition.writes.push_back(std::move(reject));
-            return definition;
-        },
-        [](const View& view) -> Judgement {
-            const auto frames = view.write_frames(0);
-            if (!frames.empty() && frames.front().type == kRequestError) return {true, std::nullopt};
-            // The prefix is the namespace of the SUBSCRIBE_TRACKS this context sent.
-            const auto request = recover_fixture(view.write_bytes(0));
-            if (!request) return {view.close().has_value(), std::nullopt};
-            const auto skipped = skipped_tracks(view, request->track_namespace);
-            const auto published = published_tracks(view);
-            for (const auto& skip : skipped)
-                for (const auto& publish : published)
-                    if (publish.track == skip.track && publish.event > skip.event) return {true, false};
-            if (!view.window_ended()) return {false, std::nullopt};
-            // Pass needs a track that was skipped and the capacity hand-back to have happened.
-            return {true, !skipped.empty() && view.write_event(1) ? std::optional<bool>{true} : std::nullopt};
-        },
-        true);
-}
-
 // ---- Requests the publisher opens ---------------------------------------------------
 // The contexts below send nothing: the runner answers what the publisher opens
 // (RawProbeCourtesy) and reads what the publisher puts on the wire.
-constexpr std::uint64_t kPublishDone = 0xb;
 constexpr std::uint64_t kRequestUpdate = 0x2;
 constexpr std::uint64_t kGoaway = 0x10;
 constexpr std::uint64_t kPublishNamespace = 0x6;
@@ -738,6 +600,67 @@ std::vector<PublishRecord> publish_records(const View& view) {
         result.push_back(std::move(publish));
     }
     return result;
+}
+
+// Tracks the publisher announced with PUBLISH on a request stream it opened.
+struct PublishedTrack {
+    TrackName track;
+    std::size_t event{0};
+};
+
+std::vector<PublishedTrack> published_tracks(const View& view) {
+    std::vector<PublishedTrack> result;
+    for (const auto& record : publish_records(view)) result.push_back({record.track, record.first_event});
+    return result;
+}
+
+Spec skipped_publish_spec() {
+    return spec("d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
+        {{"D21-4-1-MUST-NOT-084", "d21-skipped-publish-not-later-sent-for-same-attempt"}},
+        [](const Fixture& fixture) {
+            auto definition = residual_definition();
+            definition.initial_peer_bidi_streams = 1;
+            // The stream limit can leave a publisher waiting for credit until it gives up.
+            definition.publisher_exit_is_evidence = true;
+            definition.peer_request_ready = [](auto input) {
+                wire::Cursor cursor(input);
+                return std::holds_alternative<wire::draft21::PublishMessage>(wire::draft21::decode_publish(cursor));
+            };
+            Bytes body;
+            put_vi(body, 1);
+            put_namespace(body, fixture.track_namespace);
+            put_vi(body, 0);
+            definition.writes.push_back(request_write(frame(kSubscribeTracks, body)));
+            // REQUEST_ERROR UNINTERESTED (0x20, Section 12.3) with no retry and no reason,
+            // then FIN: the request is over and its stream is returned to the publisher.
+            Bytes error;
+            put_vi(error, 0x20);
+            put_vi(error, 0);
+            put_vi(error, 0);
+            RawProbeWrite reject{RawProbeChannel::PeerBidi, frame(kRequestError, error), true};
+            reject.evidence_ready = [namespace_fields = fixture.track_namespace](const RawProbeGateInput& input) {
+                const View view(input.prior_writes, input.events);
+                return view.valid() && !skipped_tracks(view, namespace_fields).empty();
+            };
+            definition.writes.push_back(std::move(reject));
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            const auto frames = view.write_frames(0);
+            if (!frames.empty() && frames.front().type == kRequestError) return {true, std::nullopt};
+            // The prefix is the namespace of the SUBSCRIBE_TRACKS this context sent.
+            const auto request = recover_fixture(view.write_bytes(0));
+            if (!request) return {view.close().has_value(), std::nullopt};
+            const auto skipped = skipped_tracks(view, request->track_namespace);
+            const auto published = published_tracks(view);
+            for (const auto& skip : skipped)
+                for (const auto& publish : published)
+                    if (publish.track == skip.track && publish.event > skip.event) return {true, false};
+            if (!view.window_ended()) return {false, std::nullopt};
+            // Pass needs a track that was skipped and the capacity hand-back to have happened.
+            return {true, !skipped.empty() && view.write_event(1) ? std::optional<bool>{true} : std::nullopt};
+        },
+        true);
 }
 
 bool established(const PublishRecord& record) { return record.response == RawProbeCourtesyKind::PublishOk; }
@@ -854,8 +777,8 @@ Production production_of(const View& view, std::uint64_t alias) {
     };
     for (const auto& [id, record] : view.streams()) {
         if ((id & 3u) != 2u) continue;
-        const auto parsed = parse_subgroup_stream(id, record);
-        if (parsed && parsed->alias == alias) note(record.first_event);
+        const auto parsed = parse_subgroup(record.bytes);
+        if (parsed.header && parsed.alias == alias) note(record.first_event);
     }
     for (const auto& datagram : view.datagrams())
         if (parse_datagram_object(datagram, alias)) note(datagram.event);
@@ -1175,7 +1098,7 @@ Spec uncommitted_subgroup_spec() {
             if (!alias) return {view.close().has_value(), std::nullopt};
             bool unfinished = false;
             for (const auto& stream : subgroup_streams(view, *alias)) {
-                const auto* record = view.stream(stream.stream);
+                const auto* record = view.stream(stream.id);
                 if (!record || record->fin) continue;
                 if (record->reset) return {true, true};
                 unfinished = true;
@@ -1209,7 +1132,7 @@ std::optional<std::uint64_t> request_error_code(const std::vector<Frame>& frames
     return read_vi(body);
 }
 
-bool answered(const View& view, std::size_t write) {
+bool write_answered(const View& view, std::size_t write) {
     if (!view.write_frames(write).empty()) return true;
     const auto* stream = view.write_stream(write);
     return stream && (stream->fin || stream->reset);
@@ -1249,7 +1172,7 @@ RawProbeWrite after_response(Bytes bytes, std::size_t previous) {
     RawProbeWrite write = request_write(std::move(bytes), true);
     write.evidence_ready = [previous](const RawProbeGateInput& input) {
         const View view(input.prior_writes, input.events);
-        return view.valid() && answered(view, previous);
+        return view.valid() && write_answered(view, previous);
     };
     return write;
 }
@@ -1288,7 +1211,7 @@ Spec expired_token_alias_spec() {
                 const auto registration_code = request_error_code(registration);
                 if (!registration_code || *registration_code != kRequestErrorExpiredToken) return {true, std::nullopt};
             }
-            if (!answered(view, 1)) return {view.close().has_value(), std::nullopt};
+            if (!write_answered(view, 1)) return {view.close().has_value(), std::nullopt};
             const auto use = view.write_frames(1);
             if (use.empty()) return {true, std::nullopt};
             const auto code = request_error_code(use);
