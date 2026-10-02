@@ -10155,14 +10155,10 @@
       "actor": "publisher serializing an Object",
       "summary": "Use an empty Object payload unless its Object Status is registered as permitting a payload.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "d21-non-normal-object-empty-payload"
-      ],
-      "evaluators": [
-        "d21-object-status-payload-compatibility"
-      ],
-      "rationale": "Of this draft's statuses only Normal 0x0 permits payload; End of Group 0x3 and End of Track 0x4 do not. The registry exception is retained. FETCH has no Object Status field and does not use status markers for gaps."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 11.3.1 (lines 5979-5980) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 5835-5839) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5685-5687 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5678-5680)."
     },
     {
       "id": "D21-11-1-3-MUST-511",
