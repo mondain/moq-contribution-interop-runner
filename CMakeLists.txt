@@ -891,7 +891,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME draft21-catalog-part-07 COMMAND moq-interop-draft21-catalog-part-07-tests)
     # Draft-21 contribution profiles (session and object behavior).
     add_executable(moq-interop-draft21-contribution-tests
-        tests/protocol/draft21_contribution_test.cpp)
+        tests/protocol/draft21_contribution_test.cpp
+        tests/protocol/draft21_contribution_objects_test.cpp)
     target_link_libraries(moq-interop-draft21-contribution-tests PRIVATE
         moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-draft21-contribution-tests PRIVATE

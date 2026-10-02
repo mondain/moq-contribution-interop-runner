@@ -319,6 +319,46 @@ Configured runs record the chosen code in evidence and expose
 HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
 establish a standards assignment. A different response code fails the probe.
 
+Draft-21 contribution profiles (`src/scenarios/draft21_contribution_*.cpp`)
+each need a configured track fixture. Every context proves the publisher kept
+serving requests with a fresh request for that track, and only a complete,
+well-framed observation can pass or fail a row; a close, timeout or missing
+data leaves it `NOT_RUN`.
+
+- SETUP token registration: an oversized `REGISTER` is sent against the
+  publisher's announced `MAX_AUTH_TOKEN_CACHE_SIZE`, or its default of zero.
+  Only an application close with `AUTH_TOKEN_CACHE_OVERFLOW` (0x13) fails
+  `D21-9-1-4-MUST-NOT-307`.
+- GREASE: reserved SETUP options (odd, even and repeated) and an unknown
+  `REQUEST_ERROR` code sent to the publisher's own PUBLISH must leave the
+  session usable. A close is never scored against the publisher.
+- REQUEST_UPDATE accounting: single, pipelined successful and pipelined
+  failing updates are counted on the request stream and fenced by a later
+  TRACK_STATUS request. More responses than updates fails; fewer stays
+  `NOT_RUN` because the fence can overtake data. The `MAX_REQUEST_UPDATES`
+  contexts adapt to the publisher's announced limit (zero or omitted means
+  unlimited); only the mandated `TOO_MANY_REQUEST_UPDATES` (0x1B) close
+  proves the over-limit rule, because an immediate responder never observes it.
+- Response types: `SUBSCRIBE_OK` must answer an accepted SUBSCRIBE. FETCH with
+  a start far beyond any Largest Object requires `INVALID_RANGE`. The empty
+  track FETCH passes only on `INVALID_RANGE` since emptiness is not observable.
+  `NAMESPACE_DONE` ordering is scored only after an observed withdrawal.
+- Message Parameters in publisher-originated messages (SUBSCRIBE_OK and any
+  PUBLISH or PUBLISH_STATE_NOTIFY) are walked with the draft-21 type deltas:
+  an overflowing delta fails ordering, an undefined type fails negotiation,
+  and a repeated type outside tokens and range filters fails multiplicity.
+- Padding: a 128 KiB padding stream and a padding datagram are sent to the
+  publisher before an ordinary SUBSCRIBE. A publisher that stops draining the
+  stream stalls the probe and stays `NOT_RUN`.
+- Object delivery: Forward State 0 must deliver no Objects until a
+  `REQUEST_UPDATE` sets Forward 1. Two subscriptions or FETCHes differing only
+  in delivery parameters must carry identical payloads. Gap, forwarding
+  preference and FETCH datagram-flag profiles require a track containing
+  Group 7, Object 9 (as the first-object profiles do) and compare its
+  subscription delivery with a FETCH of the same Object. Datagram and Subgroup
+  header bits, Subgroup FIN after End of Group, and reset after Forward 0 are
+  scored from the Objects the publisher actually produces.
+
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
 stored execution evidence. The JSON output gains `execution_audit` with
 per-run canonical SHA-256 hashes, scored-row counts, and explicit findings for

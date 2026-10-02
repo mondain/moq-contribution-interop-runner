@@ -128,7 +128,7 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        const unsigned covered = draft == 21 ? 92u : 76u;
+        const unsigned covered = draft == 21 ? 107u : 76u;
         EXPECT_EQ(report.required_covered, covered);
         EXPECT_EQ(report.required_total - report.required_covered, 175u - covered);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());

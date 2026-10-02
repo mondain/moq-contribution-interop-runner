@@ -531,13 +531,10 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
     for (const auto& profile : scenarios::draft21_contribution_probes()) {
-        // These rows read the peer's session close as part of their evidence.
-        const bool close_evidence = profile.requirement_id == "D21-9-1-4-MUST-NOT-307" ||
-            profile.requirement_id == "D21-9-1-7-MUST-317";
-        std::vector<std::string> evidence{"raw_probe_stimulus", "raw_probe_transport_event"};
-        if (close_evidence) evidence.push_back("peer_close");
+        // A peer close is read when present but is not required evidence: most
+        // contexts pass because the session stays open.
         bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
-                            std::move(evidence)});
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
     return bindings;
 }

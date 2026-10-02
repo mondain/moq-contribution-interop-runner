@@ -146,7 +146,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 794);
+    ASSERT_EQ(health.at("executable_profiles").size(), 854);
     for (const auto& profile : health.at("executable_profiles")) {
         EXPECT_TRUE(app::executable_scenario(
             profile.at("draft").get<unsigned>(),
@@ -194,8 +194,8 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
                   health.at("executable_profiles").at(index).at("draft"));
         EXPECT_FALSE(profile.at("configured"));
     }
-    for (std::size_t index = 0; index < 397; ++index) {
-        const auto& profile = health.at("executable_profiles").at(index + 397);
+    for (std::size_t index = 0; index < 427; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + 427);
         EXPECT_EQ(profile.at("mode"), "driven");
         EXPECT_EQ(profile.at("transport"),
                   health.at("executable_profiles").at(index).at("transport"));

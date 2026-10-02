@@ -219,6 +219,21 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-publisher-parameter-multiplicity",
     "d21-inbound-padding-stream",
     "d21-inbound-padding-datagram",
+    "d21-successful-subscribe-object-delivery",
+    "d21-successful-subscribe-forward-zero",
+    "d21-subscribe-parameters-preserve-payload",
+    "d21-fetch-parameters-preserve-payload",
+    "d21-prior-group-gap-repeat",
+    "d21-prior-group-gap-singleton",
+    "d21-prior-object-gap-repeat",
+    "d21-prior-object-gap-singleton",
+    "d21-subscription-forwarding-preference",
+    "d21-fetch-datagram-preference",
+    "d21-object-datagram-flags",
+    "d21-subgroup-header-flags",
+    "d21-complete-subgroup-fin",
+    "d21-subgroup-start-location-fin",
+    "d21-subgroup-premature-close-reset",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

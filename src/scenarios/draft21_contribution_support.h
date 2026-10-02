@@ -100,8 +100,10 @@ struct DatagramRecord {
 class View {
 public:
     explicit View(const RawProbeTranscript& transcript);
+    // Gate callbacks only see the writes accepted so far and the events.
+    View(std::span<const RawProbeAcceptedWrite> writes,
+         std::span<const transport::TransportEvent> events);
     bool valid() const noexcept { return valid_; }
-    const RawProbeTranscript& transcript() const noexcept { return transcript_; }
     const std::map<transport::StreamId, StreamRecord>& streams() const noexcept { return streams_; }
     const std::vector<DatagramRecord>& datagrams() const noexcept { return datagrams_; }
     const std::optional<PeerCloseInfo>& close() const noexcept { return close_; }
@@ -111,11 +113,13 @@ public:
     // Stream actually used by transcript write `index`, if it has one.
     const StreamRecord* write_stream(std::size_t index) const;
     std::optional<transport::StreamId> write_stream_id(std::size_t index) const;
+    // Transport event count at which write `index` was fully accepted.
+    std::optional<std::size_t> write_event(std::size_t index) const;
     std::vector<Frame> frames(const StreamRecord& record) const;
     std::vector<Frame> write_frames(std::size_t index) const;
 
 private:
-    const RawProbeTranscript& transcript_;
+    std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
     std::map<transport::StreamId, StreamRecord> streams_;
     std::vector<DatagramRecord> datagrams_;

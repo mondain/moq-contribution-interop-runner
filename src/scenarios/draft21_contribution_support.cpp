@@ -207,11 +207,15 @@ std::vector<Frame> parse_frames(const StreamRecord& record, bool& malformed) {
     return result;
 }
 
-View::View(const RawProbeTranscript& transcript) : transcript_(transcript) {
-    if (transcript.events.size() > kMaximumEvents) { valid_ = false; return; }
+View::View(const RawProbeTranscript& transcript) : View(transcript.writes, transcript.events) {}
+
+View::View(std::span<const RawProbeAcceptedWrite> writes,
+           std::span<const transport::TransportEvent> events)
+    : writes_(writes) {
+    if (events.size() > kMaximumEvents) { valid_ = false; return; }
     std::size_t total = 0;
-    for (std::size_t index = 0; index < transcript.events.size(); ++index) {
-        const auto& event = transcript.events[index];
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
         if (const auto* data = std::get_if<transport::StreamDataEvent>(&event)) {
             if (data->data.size() > kMaximumTotalBytes - total) { valid_ = false; return; }
             total += data->data.size();
@@ -267,8 +271,13 @@ const StreamRecord* View::stream(transport::StreamId id) const {
 }
 
 std::optional<transport::StreamId> View::write_stream_id(std::size_t index) const {
-    if (index >= transcript_.writes.size()) return std::nullopt;
-    return transcript_.writes[index].stream_id;
+    if (index >= writes_.size()) return std::nullopt;
+    return writes_[index].stream_id;
+}
+
+std::optional<std::size_t> View::write_event(std::size_t index) const {
+    if (index >= writes_.size()) return std::nullopt;
+    return writes_[index].delivery_event_count;
 }
 
 const StreamRecord* View::write_stream(std::size_t index) const {
