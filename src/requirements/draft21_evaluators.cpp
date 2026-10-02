@@ -1,4 +1,5 @@
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft21_gap_a.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
 #include "moq/interop/scenarios/draft21_request.h"
@@ -313,6 +314,8 @@ std::vector<Outcome> evaluate_draft21_announcement(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (const auto gap = draft21_gap_a_announcement_state(requirement, context)) {
+            state = *gap;
         } else if (requirement.id == "D21-9-1-MUST-NOT-289") {
             if (context.setup_probe == scenarios::Draft21SetupProbe::None &&
                 peer_setup_received && includes(requirement.scenarios, kScenario) &&
@@ -518,6 +521,8 @@ std::vector<ExecutableBinding> draft21_executable_bindings() {
         bindings.push_back({21, profile.requirement_id, profile.definition.id, profile.evaluator_id,
                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
+    // Slice A completeness-gap bindings (draft21_gap_a.cpp).
+    for (auto& binding : draft21_gap_a_bindings()) bindings.push_back(std::move(binding));
     return bindings;
 }
 
@@ -541,6 +546,8 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
     const auto goaways = scenarios::draft21_request_goaway_probes();
     const auto immutable_profiles = scenarios::draft21_immutable_repeat_probes();
     const auto object_profiles = scenarios::draft21_object_repeat_probes();
+    const auto gap_a_probes = scenarios::draft21_gap_a_probes();
+    const auto gap_a_token_probes = scenarios::draft21_gap_a_token_probes();
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
     for (const auto& row : catalog.requirements) {
@@ -556,7 +563,12 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
             for (const auto& transcript : transcripts) {
                 if (includes(row.scenarios, transcript.scenario_id.c_str()))
                     ++contexts[transcript.scenario_id];
-                const auto result = raw_result(row, transcript, closes, requests, peers, responses, fetches, cancellations, fetch_responses, request_responses, ranges, overlaps, first_fetches, group_orders, goaways, immutable_profiles, object_profiles);
+                auto result = raw_result(row, transcript, closes, requests, peers, responses, fetches, cancellations, fetch_responses, request_responses, ranges, overlaps, first_fetches, group_orders, goaways, immutable_profiles, object_profiles);
+                if (!result) {
+                    // Slice A raw probes (draft21_gap_a.cpp).
+                    if (const auto gap = draft21_gap_a_raw_result(row, transcript, gap_a_probes, gap_a_token_probes))
+                        result = RawResult{gap->passed, gap->evaluator};
+                }
                 if (!result) continue;
                 if (!result->passed) {
                     state = OutcomeState::Fail;
@@ -565,11 +577,14 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
                 ++successful[transcript.scenario_id];
                 exercised.insert(result->evaluator);
             }
+            const auto scenario_succeeded = [&](const auto& scenario) {
+                return contexts[scenario] == 1 && successful[scenario] == 1;
+            };
+            const bool scenarios_settled = draft21_gap_a_scenarios_are_alternatives(row)
+                ? std::any_of(row.scenarios.begin(), row.scenarios.end(), scenario_succeeded)
+                : std::all_of(row.scenarios.begin(), row.scenarios.end(), scenario_succeeded);
             if (state != OutcomeState::Fail && !row.scenarios.empty() && !row.evaluators.empty() &&
-                std::all_of(row.scenarios.begin(), row.scenarios.end(),
-                    [&](const auto& scenario) {
-                        return contexts[scenario] == 1 && successful[scenario] == 1;
-                    }) && std::all_of(row.evaluators.begin(), row.evaluators.end(),
+                scenarios_settled && std::all_of(row.evaluators.begin(), row.evaluators.end(),
                     [&](const auto& evaluator) { return exercised.contains(evaluator); })) {
                 state = OutcomeState::Pass;
             }

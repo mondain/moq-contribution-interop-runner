@@ -221,7 +221,9 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18_gap_a_common.cpp
     src/scenarios/draft18_gap_a_setup.cpp
     src/scenarios/draft18_gap_a_discovery.cpp
-    src/scenarios/draft18_gap_a_object.cpp)
+    src/scenarios/draft18_gap_a_object.cpp
+    src/scenarios/draft21_gap_a.cpp
+    src/scenarios/draft21_gap_a_token.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -247,7 +249,8 @@ target_compile_options(moq-interop-draft18-evaluators PRIVATE
 )
 
 add_library(moq-interop-draft21-evaluators
-    src/requirements/draft21_evaluators.cpp)
+    src/requirements/draft21_evaluators.cpp
+    src/requirements/draft21_gap_a.cpp)
 target_link_libraries(moq-interop-draft21-evaluators PUBLIC
     moq-interop-requirements moq-interop-scenarios)
 target_compile_options(moq-interop-draft21-evaluators PRIVATE
@@ -367,6 +370,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME draft18-contribution-live COMMAND moq-interop-draft18-contribution-live-tests)
     set_tests_properties(draft18-contribution-live PROPERTIES RESOURCE_LOCK "native-test-ports")
+
+    add_executable(moq-interop-draft21-gap-a-live-tests
+                   tests/integration/draft21_gap_a_live_test.cpp)
+    target_link_libraries(moq-interop-draft21-gap-a-live-tests PRIVATE
+        moq-interop-test-client moq-interop-runs moq-interop-http
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-gap-a-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft21-gap-a-live COMMAND moq-interop-draft21-gap-a-live-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -607,6 +620,41 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-draft21-evaluators GTest::gtest_main)
     add_test(NAME draft21-evaluators
              COMMAND moq-interop-draft21-evaluators-tests)
+
+    # Draft-21 completeness-gap slice A.
+    add_executable(moq-interop-draft21-gap-a-tests
+                   tests/protocol/draft21_gap_a_test.cpp)
+    target_compile_definitions(moq-interop-draft21-gap-a-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-gap-a-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements
+        moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME draft21-gap-a COMMAND moq-interop-draft21-gap-a-tests)
+
+    add_executable(moq-interop-draft21-gap-a-controller-tests
+                   tests/protocol/draft21_gap_a_controller_test.cpp)
+    target_link_libraries(moq-interop-draft21-gap-a-controller-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-gap-a-controller
+             COMMAND moq-interop-draft21-gap-a-controller-tests)
+
+    add_executable(moq-interop-draft21-gap-a-probe-tests
+                   tests/protocol/draft21_gap_a_probe_test.cpp)
+    target_compile_definitions(moq-interop-draft21-gap-a-probe-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-gap-a-probe-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements
+        moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME draft21-gap-a-probe COMMAND moq-interop-draft21-gap-a-probe-tests)
+
+    add_executable(moq-interop-draft21-gap-a-token-tests
+                   tests/protocol/draft21_gap_a_token_test.cpp)
+    target_compile_definitions(moq-interop-draft21-gap-a-token-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft21-gap-a-token-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators
+        GTest::gtest_main)
+    add_test(NAME draft21-gap-a-token COMMAND moq-interop-draft21-gap-a-token-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

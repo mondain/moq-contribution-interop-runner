@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,9 @@ enum class Draft21AnnouncementEventKind {
     ProtocolViolation,
     PeerClosed,
     HarnessLimit,
+    // The publisher sent a malformed SETUP, PUBLISH or PUBLISH_NAMESPACE; the
+    // decoder detail names the violated wire rule (slice A).
+    MalformedPublisherMessage,
 };
 
 struct Draft21AnnouncementEvent {
@@ -44,6 +48,25 @@ struct Draft21AnnouncementEvent {
     std::optional<std::uint64_t> request_id;
     std::optional<std::uint64_t> application_close_code;
     std::vector<std::uint64_t> setup_option_types;
+    // Slice A: namespace carried by PublishObserved / NamespaceObserved and the
+    // wire decoder detail carried by MalformedPublisherMessage.
+    std::vector<std::vector<std::byte>> track_namespace;
+    std::string detail;
+};
+
+// One decoded Setup Option as received from the publisher (slice A).
+struct Draft21SetupOptionValue {
+    std::uint64_t type{0};
+    bool is_bytes{false};
+    std::uint64_t integer{0};
+    std::vector<std::byte> bytes;
+};
+
+// The moqt URI handed to a driven native-QUIC publisher, split into the pieces
+// Section 9.1.1 and 9.1.2 require in AUTHORITY and PATH.
+struct Draft21ExpectedConnectionUri {
+    std::string authority;
+    std::string path_and_query;
 };
 
 struct Draft21AnnouncementContext {
@@ -54,6 +77,15 @@ struct Draft21AnnouncementContext {
     Draft21SetupProbe setup_probe{Draft21SetupProbe::None};
     bool webtransport{false};
     std::vector<std::uint64_t> peer_setup_option_types;
+    // Slice A additions: decoded option values, the scenario being run, the
+    // URI given to a driven native publisher, and whether the observation
+    // window ended with a live, fully set up session.
+    std::vector<Draft21SetupOptionValue> peer_setup_options;
+    std::string scenario_id;
+    std::optional<Draft21ExpectedConnectionUri> expected_uri;
+    bool window_elapsed{false};
+    // A PUBLISH_NAMESPACE for the expected namespace was observed and answered.
+    bool namespace_announced{false};
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -73,6 +105,11 @@ public:
         Draft21SetupProbe setup_probe = Draft21SetupProbe::None,
         bool webtransport = false);
 
+    // Records the scenario and, for a driven native publisher, the connection
+    // URI so evaluators can compare the SETUP AUTHORITY and PATH options.
+    void configure_scenario(std::string scenario_id,
+                            std::optional<Draft21ExpectedConnectionUri> uri = std::nullopt);
+
     Draft21AnnouncementSnapshot poll(Draft21Clock::time_point now);
     [[nodiscard]] const Draft21AnnouncementContext& context() const noexcept;
 
@@ -81,11 +118,13 @@ private:
         transport::StreamId stream_id;
         std::uint64_t request_id;
         bool target;
+        bool reject{false};
     };
     struct PendingNamespace {
         transport::StreamId stream_id;
         std::uint64_t request_id;
         bool forbidden_dot;
+        bool target{false};
     };
     struct PendingWrite {
         transport::StreamId stream_id;
@@ -103,7 +142,9 @@ private:
                 std::optional<std::uint64_t> request_id = std::nullopt,
                 std::optional<std::uint64_t> application_close_code =
                     std::nullopt,
-                std::vector<std::uint64_t> setup_option_types = {});
+                std::vector<std::uint64_t> setup_option_types = {},
+                std::vector<std::vector<std::byte>> track_namespace = {},
+                std::string detail = {});
     void fail_harness();
     void close_protocol(std::uint64_t error,
                         std::optional<transport::StreamId> stream_id);
@@ -134,6 +175,7 @@ private:
     bool transport_established_{false};
     bool local_setup_opened_{false};
     bool harness_failed_{false};
+    bool routing_mode_{false};
 };
 
 }  // namespace moq::interop::scenarios

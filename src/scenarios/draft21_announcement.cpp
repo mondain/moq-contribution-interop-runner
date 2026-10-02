@@ -39,19 +39,30 @@ Draft21AnnouncementController::Draft21AnnouncementController(
     context_.webtransport = webtransport;
 }
 
+void Draft21AnnouncementController::configure_scenario(
+    std::string scenario_id, std::optional<Draft21ExpectedConnectionUri> uri) {
+    // Section 7.5: the routing scenario is complete once the publisher's
+    // explicit PUBLISH_NAMESPACE for the fixture namespace has been answered.
+    routing_mode_ = scenario_id == "d21-publisher-namespace-routing-announcement";
+    context_.scenario_id = std::move(scenario_id);
+    context_.expected_uri = std::move(uri);
+}
+
 void Draft21AnnouncementController::record(
     Draft21AnnouncementEventKind kind,
     std::optional<transport::StreamId> stream_id,
     std::optional<std::uint64_t> request_id,
     std::optional<std::uint64_t> application_close_code,
-    std::vector<std::uint64_t> setup_option_types) {
+    std::vector<std::uint64_t> setup_option_types,
+    std::vector<std::vector<std::byte>> track_namespace, std::string detail) {
     if (context_.evidence.size() >= kMaximumEvidence) {
         fail_harness();
         return;
     }
     context_.evidence.push_back({kind, stream_id, request_id,
                                  application_close_code,
-                                 std::move(setup_option_types)});
+                                 std::move(setup_option_types),
+                                 std::move(track_namespace), std::move(detail)});
 }
 
 void Draft21AnnouncementController::fail_harness() {
@@ -78,6 +89,9 @@ void Draft21AnnouncementController::handle_control(
         return;
     }
     if (result.close_error) {
+        if (result.decode_detail)
+            record(Draft21AnnouncementEventKind::MalformedPublisherMessage,
+                   stream_id, std::nullopt, std::nullopt, {}, {}, *result.decode_detail);
         close_protocol(*result.close_error, stream_id);
         return;
     }
@@ -85,11 +99,38 @@ void Draft21AnnouncementController::handle_control(
         const auto* setup = std::get_if<wire::draft21::SetupMessage>(&message);
         if (!setup) continue;
         context_.peer_setup_option_types.clear();
-        for (const auto& option : setup->options)
+        context_.peer_setup_options.clear();
+        for (const auto& option : setup->options) {
             context_.peer_setup_option_types.push_back(option.type);
+            Draft21SetupOptionValue value;
+            value.type = option.type;
+            if (const auto* bytes =
+                    std::get_if<std::vector<std::byte>>(&option.value)) {
+                value.is_bytes = true;
+                value.bytes = *bytes;
+            } else {
+                value.integer = std::get<std::uint64_t>(option.value);
+            }
+            context_.peer_setup_options.push_back(std::move(value));
+        }
+        std::string values;
+        for (const auto& value : context_.peer_setup_options) {
+            if (!values.empty()) values += ';';
+            values += std::to_string(value.type) + '=';
+            if (!value.is_bytes) {
+                values += std::to_string(value.integer);
+                continue;
+            }
+            constexpr char digits[] = "0123456789abcdef";
+            for (const auto byte : value.bytes) {
+                const auto v = std::to_integer<unsigned>(byte);
+                values += digits[v >> 4];
+                values += digits[v & 15];
+            }
+        }
         record(Draft21AnnouncementEventKind::PeerSetupReceived, stream_id,
                std::nullopt, std::nullopt,
-               context_.peer_setup_option_types);
+               context_.peer_setup_option_types, {}, std::move(values));
         if (!context_.webtransport) continue;
         if (std::find(context_.peer_setup_option_types.begin(),
                       context_.peer_setup_option_types.end(), 5u) !=
@@ -193,6 +234,10 @@ void Draft21AnnouncementController::handle_request(
             record(Draft21AnnouncementEventKind::InvalidRequestOpener,
                    event.stream_id);
         }
+        if (result.decode_detail)
+            record(Draft21AnnouncementEventKind::MalformedPublisherMessage,
+                   event.stream_id, std::nullopt, std::nullopt, {}, {},
+                   *result.decode_detail);
         close_protocol(*result.close_error, event.stream_id);
         return;
     }
@@ -200,23 +245,33 @@ void Draft21AnnouncementController::handle_request(
         record(Draft21AnnouncementEventKind::UnsupportedStream,
                event.stream_id);
     }
+    const auto single_period = [](const std::vector<std::vector<std::byte>>& name_space) {
+        return !name_space.empty() &&
+               name_space.front() == std::vector<std::byte>{std::byte{'.'}};
+    };
     if (result.publish_namespace) {
-        record(Draft21AnnouncementEventKind::NamespaceObserved,
-               event.stream_id, result.publish_namespace->request_id);
         const auto& name_space = result.publish_namespace->track_namespace;
-        const bool forbidden_dot = !name_space.empty() &&
-            name_space.front() == std::vector<std::byte>{std::byte{'.'}};
+        record(Draft21AnnouncementEventKind::NamespaceObserved,
+               event.stream_id, result.publish_namespace->request_id,
+               std::nullopt, {}, name_space);
+        const bool forbidden_dot = single_period(name_space);
         pending_namespaces_.push_back({event.stream_id,
-            result.publish_namespace->request_id, forbidden_dot});
+            result.publish_namespace->request_id, forbidden_dot,
+            !forbidden_dot && name_space == expected_namespace_});
     }
     if (!result.publish) return;
-    const bool target = result.publish->track_namespace == expected_namespace_ &&
+    // Section 2.4.2: a request referencing the single-period namespace is
+    // rejected and never counts as the target publication.
+    const bool reject = single_period(result.publish->track_namespace);
+    const bool target = !reject &&
+                        result.publish->track_namespace == expected_namespace_ &&
                         result.publish->track_name == expected_track_name_;
     context_.target_publish_seen |= target;
     record(Draft21AnnouncementEventKind::PublishObserved,
-           event.stream_id, result.publish->request_id);
+           event.stream_id, result.publish->request_id, std::nullopt, {},
+           result.publish->track_namespace);
     pending_publications_.push_back(
-        {event.stream_id, result.publish->request_id, target});
+        {event.stream_id, result.publish->request_id, target, reject});
 }
 
 void Draft21AnnouncementController::handle_event(
@@ -319,13 +374,17 @@ void Draft21AnnouncementController::queue_pending_responses() {
         }
         writes_.push_back({ns.stream_id,
                            {output.bytes().begin(), output.bytes().end()},
-                           0, false, false, ns.request_id, true,
+                           0, false, ns.target, ns.request_id, true,
                            ns.forbidden_dot});
     }
     pending_namespaces_.clear();
     for (const auto& publish : pending_publications_) {
         wire::ByteWriter output(16);
-        if (!wire::draft21::encode_empty_publish_ok(output)) {
+        const bool encoded = publish.reject
+            ? !wire::draft21::encode_request_error(
+                  {0x10, 0, {}, std::nullopt}, false, false, output).has_value()
+            : wire::draft21::encode_empty_publish_ok(output);
+        if (!encoded) {
             fail_harness();
             return;
         }
@@ -371,6 +430,7 @@ void Draft21AnnouncementController::flush_writes() {
         } else if (front.namespace_response) {
             record(Draft21AnnouncementEventKind::NamespaceResponseDelivered,
                    front.stream_id, front.request_id);
+            context_.namespace_announced |= front.target_response;
         } else {
             record(Draft21AnnouncementEventKind::ResponseDelivered,
                    front.stream_id, front.request_id);
@@ -395,11 +455,16 @@ Draft21AnnouncementSnapshot Draft21AnnouncementController::poll(
         flush_writes();
         queue_pending_responses();
         flush_writes();
-        if (context_.target_publish_seen && context_.response_delivered &&
+        if (((context_.target_publish_seen && context_.response_delivered) ||
+             (routing_mode_ && context_.namespace_announced)) &&
             control_.phase() == session::draft21::ControlPhase::Active) {
             context_.complete = true;
             status_ = Draft21AnnouncementStatus::Passed;
         } else if (now - *started_ >= timeout_) {
+            // The session was still alive and fully set up when the
+            // observation window ended (no peer close was seen).
+            context_.window_elapsed =
+                control_.phase() == session::draft21::ControlPhase::Active;
             status_ = Draft21AnnouncementStatus::TimedOut;
         }
     }

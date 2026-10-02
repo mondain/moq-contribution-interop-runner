@@ -19,6 +19,8 @@
 #include "moq/interop/scenarios/discovery_overlap.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/fetch_group_order.h"
+#include "moq/interop/scenarios/draft21_gap_a.h"
+#include "moq/interop/scenarios/draft21_gap_a_token.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
@@ -72,10 +74,12 @@ scenarios::Draft21SetupProbe draft21_setup_probe(std::string_view scenario) {
     if (scenario == kDraft21DuplicateUnknownOptionScenario) {
         return scenarios::Draft21SetupProbe::DuplicateUnknownOption;
     }
-    if (scenario == kDraft21ServerAuthorityScenario) {
+    if (scenario == kDraft21ServerAuthorityScenario ||
+        scenario == "d21-webtransport-server-sends-authority") {
         return scenarios::Draft21SetupProbe::ServerAuthority;
     }
-    if (scenario == kDraft21ServerPathScenario) {
+    if (scenario == kDraft21ServerPathScenario ||
+        scenario == "d21-webtransport-server-sends-path") {
         return scenarios::Draft21SetupProbe::ServerPath;
     }
     return scenarios::Draft21SetupProbe::None;
@@ -274,6 +278,8 @@ storage::EvidenceEvent stored_draft21_evidence(
         result.kind = "peer_closed"; break;
     case scenarios::Draft21AnnouncementEventKind::HarnessLimit:
         result.kind = "harness_limit"; break;
+    case scenarios::Draft21AnnouncementEventKind::MalformedPublisherMessage:
+        result.kind = "protocol_violation"; break;
     }
     result.detail = source.application_close_code
         ? "draft-21 peer application close code " +
@@ -289,6 +295,23 @@ storage::EvidenceEvent stored_draft21_evidence(
                 if (index != 0) result.detail += ",";
                 result.detail += std::to_string(source.setup_option_types[index]);
             }
+        }
+    }
+    // Slice A: keep the decoded values the evaluators relied on.
+    if (source.kind == scenarios::Draft21AnnouncementEventKind::PeerSetupReceived &&
+        !source.detail.empty()) {
+        result.detail += "; option values (type=hex or integer): " + source.detail;
+    }
+    if (source.kind == scenarios::Draft21AnnouncementEventKind::MalformedPublisherMessage) {
+        result.detail = "draft-21 malformed publisher message: " + source.detail;
+    }
+    if ((source.kind == scenarios::Draft21AnnouncementEventKind::PublishObserved ||
+         source.kind == scenarios::Draft21AnnouncementEventKind::NamespaceObserved) &&
+        !source.track_namespace.empty()) {
+        result.detail = "draft-21 publisher request namespace fields (hex): ";
+        for (std::size_t index = 0; index < source.track_namespace.size(); ++index) {
+            if (index != 0) result.detail += "/";
+            result.detail += hex_bytes(source.track_namespace[index]);
         }
     }
     result.scenario_id = scenario_id;
@@ -452,12 +475,20 @@ public:
                (result.status == DriverStatus::Exited && result.exit_code.value_or(1) != 0);
     }
 
-    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config,
-                             std::string_view scenario = {}) const {
+    static std::string authority_of(const Worker* worker) {
         const auto host = worker->endpoint.address.find(':') != std::string::npos
             ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
+        return host + ":" + std::to_string(worker->endpoint.port);
+    }
+
+    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config,
+                             std::string_view scenario = {}) const {
+        const auto tail = run_config.transport == TransportKind::NativeQuic &&
+                run_config.draft == DraftVersion::Draft21 &&
+                announcement_gap_scenario(21, scenario)
+            ? std::string(gap_native_uri_path_and_query(scenario)) : std::string("/moq");
         auto uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
-               host + ":" + std::to_string(worker->endpoint.port) + "/moq";
+                   authority_of(worker) + tail;
         // Some contribution scenarios check how the publisher reports a URI query.
         if (run_config.draft == DraftVersion::Draft18 && run_config.transport == TransportKind::NativeQuic) {
             const auto query = scenarios::draft18_contribution_connection_query(scenario);
@@ -633,12 +664,8 @@ public:
                 run_raw_family(worker, listener, run_config, std::move(definitions));
             } else {
                 if (run_config.mode == RunMode::Driven) {
-                    const auto host = worker->endpoint.address.find(':') != std::string::npos
-                        ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
-                    const std::string endpoint =
-                        (run_config.transport == TransportKind::WebTransport
-                            ? "https://" : "moqt://") + host + ":" +
-                        std::to_string(worker->endpoint.port) + "/moq";
+                    const std::string endpoint = endpoint_uri(
+                        worker, run_config, run_config.scenario_ids.front());
                     DriverRequest request;
                     request.executable = config.driver_executable;
                     request.arguments = config.driver_arguments;
@@ -873,7 +900,8 @@ public:
         const bool group_order = fetch_group_order_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool notify_fetch = run_config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch";
         const bool notify_direction = subscriber_notify_scenario(static_cast<unsigned>(run_config.draft),id);
-        if (!fetch && !subscription && !fetch_response && !request_response && !range_filter && !discovery_overlap && !first_fetch && !group_order && !immutable_repeat && !object_repeat && !notify_fetch && !notify_direction) return std::nullopt;
+        const bool gap_a = gap_raw_scenario(static_cast<unsigned>(run_config.draft), id);
+        if (!fetch && !subscription && !fetch_response && !request_response && !range_filter && !discovery_overlap && !first_fetch && !group_order && !immutable_repeat && !object_repeat && !notify_fetch && !notify_direction && !gap_a) return std::nullopt;
         if (!run_config.track_fixture) throw std::invalid_argument("track probe requires a track fixture");
         std::vector<std::vector<std::byte>> name_space;
         for (const auto& field : run_config.track_fixture->namespace_fields)
@@ -884,6 +912,14 @@ public:
             if (found == profiles.end()) throw std::invalid_argument("unknown track probe");
             return std::move(found->definition);
         };
+        if (gap_a) {
+            const auto name = bytes_of(run_config.track_fixture->track_name);
+            auto probes = scenarios::draft21_gap_a_probes(run_config.timeout, name_space, name);
+            const auto found = std::find_if(probes.begin(), probes.end(),
+                [&](const auto& profile) { return profile.definition.id == id; });
+            if (found != probes.end()) return std::move(found->definition);
+            return execute(scenarios::draft21_gap_a_token_probes(run_config.timeout, name_space, name));
+        }
         if (immutable_repeat) return execute(run_config.draft == DraftVersion::Draft18
             ? scenarios::draft18_immutable_repeat_probes(run_config.timeout, name_space,
                 bytes_of(run_config.track_fixture->track_name))
@@ -1023,6 +1059,21 @@ public:
             run_config.timeout,
             draft21_setup_probe(run_config.scenario_ids.front()),
             run_config.transport == TransportKind::WebTransport);
+        {
+            // Slice A: the controller needs the scenario and, for a driven
+            // native publisher, the exact URI it was handed.
+            std::optional<scenarios::Draft21ExpectedConnectionUri> uri;
+            const auto& scenario = run_config.scenario_ids.front();
+            if (run_config.mode == RunMode::Driven &&
+                run_config.transport == TransportKind::NativeQuic &&
+                announcement_gap_scenario(21, scenario) &&
+                gap_native_only_scenario(scenario)) {
+                uri = scenarios::Draft21ExpectedConnectionUri{
+                    authority_of(worker),
+                    std::string(gap_native_uri_path_and_query(scenario))};
+            }
+            controller.configure_scenario(scenario, std::move(uri));
+        }
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();
@@ -1107,6 +1158,22 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (config.draft == DraftVersion::Draft18 && id == kDuplicateSubscribeScenario &&
             config.timeout < 3ms)
             return {RunStartStatus::InvalidConfig, {}, {}};
+        // Draft-21 gap slice A: transport-specific announcement scenarios.
+        if (draft == 21 && gap_webtransport_only_scenario(id) &&
+            config.transport != TransportKind::WebTransport)
+            return {RunStartStatus::Unsupported, {}, {}};
+        if (draft == 21 && announcement_gap_scenario(21, id) && config.track_fixture &&
+            !gap_fixture_valid(id, config.track_fixture->namespace_fields))
+            return {RunStartStatus::InvalidConfig, {}, {}};
+        if (gap_raw_scenario(draft, id) && config.track_fixture) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
+            if (!scenarios::fetch_first_object_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
+                return {RunStartStatus::InvalidConfig, {}, {}};
+        }
+        if (draft == 21 && gap_native_only_scenario(id) &&
+            config.transport != TransportKind::NativeQuic)
+            return {RunStartStatus::Unsupported, {}, {}};
         if (immutable_repeat_scenario(draft, id) || object_repeat_scenario(draft, id) ||
             fetch_first_object_scenario(draft, id) || fetch_group_order_scenario(draft, id) ||
             (config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch") ||

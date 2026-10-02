@@ -69,6 +69,7 @@ ControlResult ControlState::on_peer_data(
         if (std::holds_alternative<wire::DecodeError>(decoded)) {
             phase_ = ControlPhase::Closing;
             result.close_error = kProtocolViolation;
+            result.decode_detail = std::get<wire::DecodeError>(decoded).detail;
             return result;
         }
         auto message = std::get<wire::draft21::ControlMessage>(decoded);

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "moq/interop/app/draft18_gap_a_scenarios.h"
+#include "moq/interop/app/scenario_registry_d21a.h"
 
 #include <algorithm>
 #include <array>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace moq::interop::app {
 
@@ -248,7 +250,19 @@ inline constexpr auto kDraft18AllExecutableScenarios =
 
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     if (draft == 18) return kDraft18AllExecutableScenarios;
-    if (draft == 21) return kDraft21ExecutableScenarios;
+    if (draft == 18) return kDraft18ExecutableScenarios;
+    if (draft == 21) {
+        static const std::vector<std::string_view> combined = [] {
+            std::vector<std::string_view> all(kDraft21ExecutableScenarios.begin(),
+                                              kDraft21ExecutableScenarios.end());
+            all.insert(all.end(), kDraft21GapAnnouncementScenarios.begin(),
+                       kDraft21GapAnnouncementScenarios.end());
+            all.insert(all.end(), kDraft21GapRawScenarios.begin(),
+                       kDraft21GapRawScenarios.end());
+            return all;
+        }();
+        return combined;
+    }
     return {};
 }
 
@@ -343,6 +357,7 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (subscriber_notify_scenario(draft,scenario) ||
         (draft == 21 && scenario == "d21-publish-state-notify-on-fetch")) return true;
     if (discovery_overlap_scenario(draft,scenario)) return true;
+    if (announcement_gap_scenario(draft, scenario) || gap_raw_scenario(draft, scenario)) return true;
     const auto original = executable_scenarios(draft).first(
         draft == 18 || draft == 21 ? 5 : 0);
     return std::find(original.begin(), original.end(), scenario) != original.end() ||
@@ -374,6 +389,7 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario) {
 }
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
+    if (announcement_gap_scenario(draft, scenario)) return false;
     const auto known = executable_scenarios(draft);
     // The first five entries use the original typed controllers. All later
     // entries execute raw probes and can contribute an independent transcript.
