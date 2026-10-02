@@ -617,7 +617,16 @@ public:
                     handle = start_context_driver(worker, run_config, current_id, driver);
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
-                const bool process_error = retire_driver();
+                bool process_error = retire_driver();
+                // A publisher that ends the session itself typically exits with a
+                // failure status. Once the probe was delivered in full and the
+                // transport recorded that close, the exit status is a consequence
+                // of the observed behavior, not a separate harness fault.
+                if (process_error && transcript.complete && !transcript.harness_failed &&
+                    std::any_of(transcript.events.begin(), transcript.events.end(), [](const auto& event) {
+                        return std::holds_alternative<transport::PeerCloseEvent>(event);
+                    }))
+                    process_error = false;
                 if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
@@ -802,6 +811,7 @@ public:
             scenarios::RawProbeClock::now() >= deadline)
             transcript.timed_out = true;
         transcript.unknown_auth_token_alias_compatibility_code = config.unknown_auth_token_alias_compatibility_code;
+        transcript.denied_authorization_token = config.denied_authorization_token;
         transcript.connection_uri = endpoint_uri(worker, run_config, transcript.scenario_id);
         storage::EvidenceEvent stimulus;
         stimulus.scenario_id = transcript.scenario_id;

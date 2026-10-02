@@ -97,6 +97,9 @@ struct RawProbeTranscript {
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
+    // Token value the operator configured the publisher's authorization policy
+    // to refuse (Section 8.9). Absent when no policy is controllable.
+    std::optional<std::string> denied_authorization_token{};
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
