@@ -243,6 +243,9 @@ struct RawProbeTranscript {
     bool timed_out{false};
     std::optional<std::size_t> delivery_event_count;
     std::vector<transport::TransportEvent> events;
+    // Arrival time of each entry of `events`, on the polling clock. A transcript that lacks
+    // times (hand-built in tests) cannot prove a reaction window and is judged by order alone.
+    std::vector<RawProbeClock::time_point> event_times;
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
@@ -282,6 +285,11 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
 // SUBSCRIBE_OK and never closed the session. Never true after a peer close.
 bool raw_probe_liveness_proven(const RawProbeTranscript& transcript,
                               const RawProbeDefinition& definition);
+// The first Application close that can be read as the publisher's reaction to the delivered
+// stimulus: after the stimulus was fully accepted and within a bounded window of it. Empty when
+// there is no close, or the close is transport-level, early, or too late to be attributed.
+std::optional<transport::PeerCloseEvent> observe_raw_probe_close(
+    const RawProbeTranscript& transcript, const RawProbeDefinition& definition);
 std::optional<bool> evaluate_raw_probe_close(
     const RawProbeTranscript& transcript, const RawProbeDefinition& definition,
     std::optional<std::uint64_t> expected_close);

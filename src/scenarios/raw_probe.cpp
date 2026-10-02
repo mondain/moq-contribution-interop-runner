@@ -475,6 +475,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
     for (auto& event : session_closed_ ? std::vector<transport::TransportEvent>{} : transport_.poll(256)) {
         if (transcript_.events.size() >= kMaximumEvents) { fail(); break; }
         transcript_.events.push_back(std::move(event));
+        transcript_.event_times.push_back(now);
         const auto& observed = transcript_.events.back();
         if (courtesy_) courtesy_->on_event(observed);
         if (const auto* established = std::get_if<transport::ConnectionEstablishedEvent>(&observed)) {
@@ -890,15 +891,62 @@ bool raw_probe_liveness_proven(const RawProbeTranscript& transcript,
     return liveness_answer(transcript, policy.draft) == LivenessAnswer::Serving;
 }
 
+namespace {
+// How long after the last stimulus write a publisher's close is still read as its reaction.
+// Closes the publisher makes on its own schedule (an idle or read timeout, a process deadline)
+// arrive later and say nothing about the input, so they are left unscored.
+constexpr std::chrono::milliseconds kReactionWindow{1500};
+
+struct CloseObservation {
+    enum class Reading { None, Reaction, Unattributable } reading{Reading::None};
+    const transport::PeerCloseEvent* close{nullptr};
+};
+
+CloseObservation observe_close(const RawProbeTranscript& transcript, const RawProbeDefinition& definition) {
+    for (std::size_t index = 0; index < transcript.events.size(); ++index) {
+        const auto* close = std::get_if<transport::PeerCloseEvent>(&transcript.events[index]);
+        if (!close) continue;
+        using Reading = CloseObservation::Reading;
+        if (close->error_space != transport::CloseErrorSpace::Application) return {Reading::Unattributable, close};
+        // A close that precedes the point where the stimulus was fully accepted cannot be a
+        // reaction to it.
+        if (!transcript.delivery_event_count || index < *transcript.delivery_event_count)
+            return {Reading::Unattributable, close};
+        if (transcript.event_times.size() == transcript.events.size()) {
+            auto last_stimulus = transcript.setup.accepted_at;
+            for (const auto& write : transcript.writes)
+                if (write.accepted_at && (!last_stimulus || *write.accepted_at > *last_stimulus))
+                    last_stimulus = write.accepted_at;
+            auto window = kReactionWindow;
+            if (definition.liveness) window += definition.liveness->delay + definition.liveness->grace;
+            if (last_stimulus && transcript.event_times[index] - *last_stimulus > window)
+                return {Reading::Unattributable, close};
+        }
+        return {Reading::Reaction, close};
+    }
+    return {};
+}
+}  // namespace
+
+std::optional<transport::PeerCloseEvent> observe_raw_probe_close(
+    const RawProbeTranscript& transcript, const RawProbeDefinition& definition) {
+    const auto observed = observe_close(transcript, definition);
+    if (observed.reading != CloseObservation::Reading::Reaction) return std::nullopt;
+    return *observed.close;
+}
+
 std::optional<bool> evaluate_raw_probe_close(const RawProbeTranscript& transcript,
                                            const RawProbeDefinition& definition,
                                            std::optional<std::uint64_t> expected_close) {
     if (!raw_probe_stimulus_valid(transcript, definition)) return std::nullopt;
-    for (const auto& event : transcript.events) {
-        if (const auto* close = std::get_if<transport::PeerCloseEvent>(&event)) {
-            if (close->error_space != transport::CloseErrorSpace::Application) return std::nullopt;
-            return !expected_close || close->error_code == *expected_close;
-        }
+    const auto observed = observe_close(transcript, definition);
+    using Reading = CloseObservation::Reading;
+    if (observed.reading == Reading::Unattributable) return std::nullopt;
+    if (observed.reading == Reading::Reaction) {
+        // When any code satisfies the rule, a NO_ERROR close is not a reaction to a violation:
+        // it is how a publisher ends a session it is finished with, or gives up waiting.
+        if (!expected_close && observed.close->error_code == 0) return std::nullopt;
+        return !expected_close || observed.close->error_code == *expected_close;
     }
     // No close. The publisher stayed silent (unscored) unless it demonstrably kept
     // serving a request made after input that required it to close.

@@ -644,6 +644,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-raw-probe-liveness-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe-liveness COMMAND moq-interop-raw-probe-liveness-tests)
 
+    add_executable(moq-interop-raw-probe-close-reaction-tests tests/protocol/raw_probe_close_reaction_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-close-reaction-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME raw-probe-close-reaction COMMAND moq-interop-raw-probe-close-reaction-tests)
+
     add_executable(moq-interop-raw-probe-courtesy-tests tests/protocol/raw_probe_courtesy_test.cpp)
     target_link_libraries(moq-interop-raw-probe-courtesy-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe-courtesy COMMAND moq-interop-raw-probe-courtesy-tests)

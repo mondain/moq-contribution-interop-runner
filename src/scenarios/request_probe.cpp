@@ -78,11 +78,10 @@ std::optional<bool> evaluate_raw_probe_request_error(
     if (!raw_probe_stimulus_valid(transcript, profile.definition)) return std::nullopt;
     const auto response = observe_response(transcript);
     if (response.state == ResponseState::Pending) {
-        for (const auto& event : transcript.events) {
-            if (const auto* close = std::get_if<transport::PeerCloseEvent>(&event)) {
-                if (close->error_space == transport::CloseErrorSpace::Application) return false;
-            }
-        }
+        // A publisher that ends the session instead of answering fails the rule only when the
+        // close is attributable to the request; a NO_ERROR close is not (see observe_close).
+        const auto observed = observe_raw_probe_close(transcript, profile.definition);
+        if (observed && observed->error_code != 0) return false;
         return std::nullopt;
     }
     if (response.state != ResponseState::Frame || response.type != 5) return false;
