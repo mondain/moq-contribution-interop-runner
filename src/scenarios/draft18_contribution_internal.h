@@ -14,6 +14,7 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -368,9 +369,42 @@ inline std::chrono::milliseconds quiet_window(std::chrono::milliseconds deadline
     return std::clamp(deadline / 4, std::chrono::milliseconds{1}, std::chrono::milliseconds{50});
 }
 
+// A complete first message of type `Message` opening a publisher-initiated
+// request stream. Section 10.1: the publisher is the client and uses even IDs.
+template <class... Opening>
+inline bool publisher_opener(std::span<const std::byte> input) {
+    wire::Cursor cursor(input);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    if (!message || cursor.remaining() != 0) return false;
+    return std::visit([](const auto& opening) {
+        if constexpr ((std::is_same_v<std::decay_t<decltype(opening)>, Opening> || ...))
+            return (opening.request_id & 1u) == 0u;
+        else
+            return false;
+    }, *message);
+}
+
+// The discovery request that follows a stimulus to show that the session
+// survived it. A typed reply is a survival proof; closing is a failure.
+inline Bytes survival_request(std::uint64_t id = 1) {
+    return encode(d18::SubscribeNamespaceMessage{id, d18::TrackNamespace{{text("a")}}, {}});
+}
+inline std::optional<bool> session_survived(const RawProbeTranscript& transcript, std::size_t write_index) {
+    if (!bounded(transcript)) return std::nullopt;
+    const auto reply = write_reply(transcript, write_index);
+    if (!reply.messages.empty())
+        return is_typed_response(reply.messages.front()) ? std::optional<bool>{true} : std::nullopt;
+    if (application_close(transcript)) return false;
+    return std::nullopt;
+}
+
+inline Bytes ok_response() { return encode(d18::RequestOkMessage{{}, {}}); }
+
 // Module entry points.
 std::vector<Draft18ContributionProbe> setup_probes(std::chrono::milliseconds deadline);
 std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseconds deadline,
                                                           const Fixture& fixture);
+std::vector<Draft18ContributionProbe> publisher_initiated_probes(std::chrono::milliseconds deadline);
 
 }  // namespace moq::interop::scenarios::contribution

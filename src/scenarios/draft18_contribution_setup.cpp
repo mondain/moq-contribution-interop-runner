@@ -174,9 +174,11 @@ std::vector<Draft18ContributionProbe> setup_probes(std::chrono::milliseconds dea
     result.push_back(make_probe("D18-10-3-MUST-003", continues,
         setup_then_request("receive-setup-with-duplicate-unknown-options", unknown_options(true, false),
                            discovery_request(), deadline), setup_continues));
-    for (const char* requirement :
-         {"D18-14-MUST-001", "D18-14-MUST-008", "D18-15-4-MUST-001"})
-        result.push_back(make_probe(requirement, continues,
+    for (const auto& [requirement, evaluator] : {
+             std::pair{"D18-14-MUST-001", continues}, std::pair{"D18-14-MUST-008", continues},
+             std::pair{"D18-15-4-MUST-001", continues},
+             std::pair{"D18-14-MUST-NOT-001", "unknown-extensible-value-alone-does-not-close-session"}})
+        result.push_back(make_probe(requirement, evaluator,
             setup_then_request("setup-unknown-grease-options-and-duplicates",
                                unknown_options(true, true), discovery_request(), deadline),
             setup_continues));

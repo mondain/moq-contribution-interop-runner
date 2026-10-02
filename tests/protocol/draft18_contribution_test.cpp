@@ -293,10 +293,59 @@ TEST(Draft18ContributionEvaluators, ScoresRowsFromRawContexts) {
                                        });
                                    })}, "D18-10-3-MUST-002"),
               OutcomeState::Fail);
-    // D18-14-MUST-NOT-001 is not bound yet and so cannot be passed by one scenario.
-    EXPECT_EQ(outcome({context_for("setup-unknown-grease-options-and-duplicates", "D18-14-MUST-001",
-                                   setup_with({}), answer)}, "D18-14-MUST-NOT-001"),
-              OutcomeState::NotRun);
+    // D18-14-MUST-NOT-001 names five scenarios; one passing context is not enough.
+    auto grease = context_for("setup-unknown-grease-options-and-duplicates", "D18-14-MUST-NOT-001",
+                              setup_with({}), answer);
+    EXPECT_EQ(outcome({grease}, "D18-14-MUST-NOT-001"), OutcomeState::NotRun);
+    std::vector<requirements::ScenarioContext> all_five{grease};
+    const auto publisher_context = [&](std::string_view scenario, const Bytes& opening,
+                                       const Bytes& reply) {
+        const auto& p = probe(probes, scenario, "D18-14-MUST-NOT-001");
+        requirements::ScenarioContext context;
+        context.scenario_id = std::string(scenario);
+        context.raw_probe = drive_probe(p.definition, [&](PeerView& v) {
+            v.when("setup", true, [&] { v.data(2, setup_with({})); });
+            v.when("open", v.step > 1 && !opening.empty(), [&] { v.data(0, opening); });
+            // The runner's follow-up request is its first bidirectional stream.
+            v.when("reply", v.sent(1), [&] { v.data(1, reply); });
+        });
+        context.complete = context.raw_probe->complete;
+        context.stimulus_delivered = context.raw_probe->stimulus_delivered;
+        return context;
+    };
+    all_five.push_back(publisher_context("publisher-recovery-track-status-unknown-optional-properties",
+        encode(d18::TrackStatusMessage{0, d18::TrackNamespace{}, d18::TrackName{text("x")}, {}}), ok()));
+    all_five.push_back(publisher_context("publisher-request-rejected-with-unknown-error",
+        encode(d18::PublishNamespaceMessage{0, d18::TrackNamespace{{text("n")}}, {}}), ok()));
+    all_five.push_back(publisher_context("publisher-request-stream-reset-with-unknown-code",
+        encode(d18::PublishNamespaceMessage{0, d18::TrackNamespace{{text("n")}}, {}}), ok()));
+    {
+        const auto& p = probe(probes, "subscribe-unknown-auth-token-type", "D18-14-MUST-NOT-001");
+        requirements::ScenarioContext context;
+        context.scenario_id = "subscribe-unknown-auth-token-type";
+        context.raw_probe = drive_probe(p.definition, [&](PeerView& v) {
+            v.when("setup", true, [&] { v.data(2, setup_with({})); });
+            v.when("reply", v.sent(1), [&] { v.data(1, subscribe_ok()); });
+        });
+        context.complete = context.raw_probe->complete;
+        context.stimulus_delivered = context.raw_probe->stimulus_delivered;
+        all_five.push_back(std::move(context));
+    }
+    EXPECT_EQ(outcome(all_five, "D18-14-MUST-NOT-001"), OutcomeState::Pass);
+    // Closing the session over any one of them fails the row.
+    all_five[2].raw_probe = drive_probe(probe(probes, "publisher-request-rejected-with-unknown-error",
+                                              "D18-14-MUST-NOT-001").definition, [&](PeerView& v) {
+        v.when("setup", true, [&] { v.data(2, setup_with({})); });
+        v.when("open", v.step > 1, [&] {
+            v.data(0, encode(d18::PublishNamespaceMessage{0, d18::TrackNamespace{{text("n")}}, {}}));
+        });
+        v.when("close", v.sent(1), [&] {
+            v.push(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 3, {}});
+        });
+    });
+    all_five[2].complete = all_five[2].raw_probe->complete;
+    all_five[2].stimulus_delivered = all_five[2].raw_probe->stimulus_delivered;
+    EXPECT_EQ(outcome(all_five, "D18-14-MUST-NOT-001"), OutcomeState::Fail);
     // The SETUP rows also named by a typed scenario accept either kind of context.
     EXPECT_EQ(outcome({context_for("observe-publisher-setup-options", "D18-10-3-MUST-NOT-001",
                                    setup_with({}), none)}, "D18-10-3-MUST-NOT-001"),

@@ -384,13 +384,16 @@ std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseco
                    namespace_done_seen, deadline),
         namespace_precedes_done);
 
-    add("D18-14-MUST-007", "unknown-auth-token-type-does-not-close-session",
-        definition("subscribe-unknown-auth-token-type",
-                   {bidi(subscribe_request(fixture, kSubscribeId,
-                        {{0x03, d18::Token{d18::TokenAliasType::UseValue, std::nullopt,
-                                           kUnknownTokenType, text("opaque")}}}))},
-                   first_response_or_close(0), deadline),
-        unknown_token_type_not_fatal);
+    for (const auto& [requirement, evaluator] : {
+             std::pair{"D18-14-MUST-007", "unknown-auth-token-type-does-not-close-session"},
+             std::pair{"D18-14-MUST-NOT-001", "unknown-extensible-value-alone-does-not-close-session"}})
+        add(requirement, evaluator,
+            definition("subscribe-unknown-auth-token-type",
+                       {bidi(subscribe_request(fixture, kSubscribeId,
+                            {{0x03, d18::Token{d18::TokenAliasType::UseValue, std::nullopt,
+                                               kUnknownTokenType, text("opaque")}}}))},
+                       first_response_or_close(0), deadline),
+            unknown_token_type_not_fatal);
     return result;
 }
 
