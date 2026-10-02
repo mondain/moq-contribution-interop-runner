@@ -285,6 +285,27 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-complete-subgroup-fin",
     "d21-subgroup-start-location-fin",
     "d21-subgroup-premature-close-reset",
+    // Slice B (src/scenarios/draft21_contribution_d21b.cpp).
+    "d21-largest-object-required-after-publication",
+    "d21-largest-object-before-publication",
+    "d21-publish-done-without-data-streams",
+    "d21-publish-done-datagram-only",
+    "d21-publisher-namespace-redirect",
+    "d21-publisher-subscribe-tracks-redirect",
+    "d21-publish-state-notify-known-largest-object",
+    "d21-publish-state-notify-before-first-object",
+    "d21-publish-state-notify-preserves-subscriber-control",
+    "d21-publish-state-notify-requested-forward-change",
+    "d21-padding-stream-emission",
+    "d21-padding-datagram-emission",
+    "d21-namespace-discovery-authorization",
+    "d21-track-discovery-authorization",
+    "d21-track-discovery-does-not-copy-authorization",
+    "d21-subgroup-early-handoff-reset",
+    "d21-filter-mutable-property",
+    "d21-filter-immutable-property",
+    "d21-grease-auth-token-type",
+    "d21-grease-stop-sending",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

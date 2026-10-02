@@ -26,6 +26,9 @@ constexpr std::size_t kMaximumTotalBytes = 1u << 20;
 struct Fixture {
     Namespace track_namespace;
     Bytes track_name;
+    // Token value the publisher's authorization policy is configured to refuse
+    // (empty selects the documented default contract value).
+    std::string denied_token;
 };
 
 bool fixture_valid(const Fixture& fixture);
@@ -57,6 +60,9 @@ Bytes fetch_frame(std::uint64_t request_id, const Fixture& fixture,
                   const std::vector<Param>& params = {});
 Bytes track_status_frame(std::uint64_t request_id, const Fixture& fixture);
 Bytes subscribe_namespace_frame(std::uint64_t request_id, const Namespace& prefix);
+// SUBSCRIBE_NAMESPACE (0x50) or SUBSCRIBE_TRACKS (0x51) with Message Parameters.
+Bytes discovery_frame(std::uint64_t type, std::uint64_t request_id, const Namespace& prefix,
+                      const std::vector<Param>& params);
 Bytes request_update_frame(std::uint64_t request_id, const std::vector<Param>& params);
 
 // A Token that registers or uses a value; token_type 0x9D is a GREASE value.
@@ -108,6 +114,9 @@ public:
     const std::vector<DatagramRecord>& datagrams() const noexcept { return datagrams_; }
     const std::optional<PeerCloseInfo>& close() const noexcept { return close_; }
     const std::optional<wire::draft21::SetupMessage>& peer_setup() const noexcept { return peer_setup_; }
+    // Operator-configured denied credential; absent when the publisher's
+    // authorization policy is not controllable.
+    const std::optional<std::string>& denied_token() const noexcept { return denied_token_; }
     std::optional<std::uint64_t> peer_option(std::uint64_t type) const;
     const StreamRecord* stream(transport::StreamId id) const;
     // Stream actually used by transcript write `index`, if it has one.
@@ -125,6 +134,7 @@ private:
     std::vector<DatagramRecord> datagrams_;
     std::optional<PeerCloseInfo> close_;
     std::optional<wire::draft21::SetupMessage> peer_setup_;
+    std::optional<std::string> denied_token_;
 };
 
 // Splits complete framed messages; sets `malformed` for an impossible frame.
@@ -169,6 +179,12 @@ struct Spec {
 
 std::vector<Spec> session_specs();
 std::vector<Spec> object_specs();
+// Rows closed by the draft-21 slice-B probes (draft21_contribution_d21b.cpp).
+std::vector<Spec> d21b_specs();
+// Adds slice-B row bindings to scenarios defined by other profile sources.
+void d21b_attach_rows(std::vector<Spec>& specs);
+// Default credential value used when no denied token is configured.
+constexpr const char* kDefaultDeniedToken = "interop-denied";
 
 // Frame type constants used across profiles.
 constexpr std::uint64_t kSubscribeOk = 0x4;
