@@ -7,7 +7,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 97> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 103> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -106,6 +106,12 @@ inline constexpr std::array<std::string_view, 97> kDraft18ExecutableScenarios{
     "publisher-recovery-track-status-unknown-before-invalid-property",
     "publisher-request-rejected-with-unknown-error",
     "publisher-request-stream-reset-with-unknown-code",
+    "observe-publisher-padding-stream",
+    "observe-publisher-padding-datagram",
+    "publish-object-with-prior-group-id-gap",
+    "publish-object-with-prior-object-id-gap",
+    "publish-end-of-group-and-end-of-track-status-objects",
+    "publish-complete-finite-subgroup-with-start-location-filter",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -276,7 +282,7 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 // Draft-18 publisher-contribution probes whose first write names the fixture.
-inline constexpr std::array<std::string_view, 13> kDraft18ContributionTrackScenarios{
+inline constexpr std::array<std::string_view, 17> kDraft18ContributionTrackScenarios{
     "accept-subscribe-for-known-publisher-track",
     "accept-forward-one-subscribe-then-publish-matching-object",
     "receive-one-request-update-on-established-publisher-request",
@@ -290,6 +296,10 @@ inline constexpr std::array<std::string_view, 13> kDraft18ContributionTrackScena
     "publisher-redirects-subscribe-namespace",
     "publish-and-withdraw-namespace-during-discovery",
     "subscribe-unknown-auth-token-type",
+    "publish-object-with-prior-group-id-gap",
+    "publish-object-with-prior-object-id-gap",
+    "publish-end-of-group-and-end-of-track-status-objects",
+    "publish-complete-finite-subgroup-with-start-location-filter",
 };
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {

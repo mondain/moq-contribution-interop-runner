@@ -33,6 +33,12 @@ inline Bytes raw_setup(const Bytes& payload) {
                              static_cast<unsigned>(payload.size() & 255)});
     return concat(std::move(result), payload);
 }
+inline d18::KeyValuePair odd_option(std::uint64_t type, Bytes value) {
+    return {type, d18::ByteValue{std::move(value)}};
+}
+inline d18::KeyValuePair even_option(std::uint64_t type, std::uint64_t value) {
+    return {type, d18::VarIntValue{value, {}}};
+}
 inline Bytes ok(d18::Parameters parameters = {}) { return encode(d18::RequestOkMessage{std::move(parameters), {}}); }
 inline Bytes error(std::uint64_t code) {
     return encode(d18::RequestErrorMessage{code, 0, {}, std::nullopt});
@@ -58,9 +64,21 @@ inline Bytes subgroup_header(std::uint64_t alias, std::uint64_t group, std::uint
     if ((type & 0x20u) == 0u) out.push_back(std::byte{128});
     return out;
 }
-// One Subgroup object without properties: Object ID delta, length, [status], payload.
-inline Bytes subgroup_object(std::uint64_t delta, const Bytes& payload, std::optional<std::uint64_t> status = std::nullopt) {
+inline Bytes kvp(const d18::KeyValuePairs& entries) {
+    wire::ByteWriter out(65535);
+    EXPECT_TRUE(d18::encode_key_value_pairs(entries, out).has_value());
+    return {out.bytes().begin(), out.bytes().end()};
+}
+// One Subgroup object: Object ID delta, [properties], length, [status], payload.
+// `properties` is the serialized Key-Value-Pair list; the header type must have
+// the PROPERTIES bit (0x01) set exactly when it is given.
+inline Bytes subgroup_object(std::uint64_t delta, const Bytes& payload, std::optional<std::uint64_t> status = std::nullopt,
+                             std::optional<Bytes> properties = std::nullopt) {
     auto out = vi(delta);
+    if (properties) {
+        out = concat(std::move(out), vi(properties->size()));
+        out = concat(std::move(out), *properties);
+    }
     out = concat(std::move(out), vi(payload.size()));
     if (payload.empty() && status) out = concat(std::move(out), vi(*status));
     return concat(std::move(out), payload);

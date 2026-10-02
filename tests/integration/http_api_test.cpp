@@ -259,7 +259,7 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     ASSERT_TRUE(page);
     EXPECT_EQ(page->status, 200);
     EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
-    EXPECT_NE(page->body.find("106/175"), std::string::npos);
+    EXPECT_NE(page->body.find("112/175"), std::string::npos);
     EXPECT_NE(page->body.find("76/175"), std::string::npos);
 }
 

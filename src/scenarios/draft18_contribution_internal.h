@@ -406,5 +406,6 @@ std::vector<Draft18ContributionProbe> setup_probes(std::chrono::milliseconds dea
 std::vector<Draft18ContributionProbe> subscription_probes(std::chrono::milliseconds deadline,
                                                           const Fixture& fixture);
 std::vector<Draft18ContributionProbe> publisher_initiated_probes(std::chrono::milliseconds deadline);
+std::vector<Draft18ContributionProbe> object_probes(std::chrono::milliseconds deadline, const Fixture& fixture);
 
 }  // namespace moq::interop::scenarios::contribution
