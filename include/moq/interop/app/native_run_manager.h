@@ -52,6 +52,9 @@ enum class RunStartStatus {
     InvalidConfig,
     PortExhausted,
     ListenerError,
+    // Every selected scenario needs a capability the publisher declared absent; nothing
+    // was started. RunStartResult::scenario and ::capability name the first such scenario.
+    ScenarioRequiresCapability,
 };
 
 struct RunStartResult {
@@ -61,6 +64,8 @@ struct RunStartResult {
     std::string url{};
     std::string path{};
     std::string protocol{};
+    std::string scenario{};
+    std::string capability{};
 };
 
 class NativeRunManager {

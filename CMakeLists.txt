@@ -498,6 +498,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
 
     add_executable(moq-interop-publisher-capability-tagging-tests
                    tests/protocol/publisher_capability_tagging_test.cpp)
+    target_compile_definitions(moq-interop-publisher-capability-tagging-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-publisher-capability-tagging-tests PRIVATE
         moq-interop-runs GTest::gtest_main)
     add_test(NAME publisher-capability-tagging

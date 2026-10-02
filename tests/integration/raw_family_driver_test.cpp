@@ -1,4 +1,5 @@
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/storage/run_store.h"
 
@@ -253,6 +254,125 @@ TEST(RawFamilyDriver, SecondSpawnFailurePreservesFirstProofWithoutFullFamilyPass
     EXPECT_EQ(process.at("status"),"error");
     EXPECT_FALSE(process.at("error").get<std::string>().empty());
     EXPECT_TRUE(manager.stop(started.id));
+}
+
+app::NativeRunManager capability_manager(const std::shared_ptr<storage::SqliteRunStore>& store,
+                                         const DriverLogs& logs) {
+    return app::NativeRunManager(catalog(18),catalog(21),store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",
+         .port_start=0,.port_end=0,.maximum_active_runs=1,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem",
+         .driver_executable=PICOQUIC_FAMILY_DRIVER_PATH,.driver_log_root=logs.path});
+}
+
+TEST(PublisherCapabilityRun, SelectionOfOnlyFetchScenariosIsRejectedBeforeAnythingStarts) {
+    DriverLogs logs;
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=capability_manager(store,logs);
+    for (const auto& ids : {std::vector<std::string>{"d21-fetch-accepted"},
+                            std::vector<std::string>{"d21-fetch-accepted","d21-fetch-rejected"}}) {
+        app::RunConfig config{app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+            app::RunMode::Driven,ids,2s,app::TrackFixture{{"n"},"t"},{.fetch=false}};
+        const auto started=manager.start(config);
+        EXPECT_EQ(started.status,app::RunStartStatus::ScenarioRequiresCapability);
+        EXPECT_EQ(started.scenario,"d21-fetch-accepted");
+        EXPECT_EQ(started.capability,"fetch");
+        EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    }
+    EXPECT_EQ(store->list({1,0}).total,0u) << "no run is created";
+    // The same selection starts when the publisher is capable (the default).
+    const auto capable=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,{"d21-fetch-accepted"},2s,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(capable.status,app::RunStartStatus::Started);
+    EXPECT_TRUE(manager.stop(capable.id));
+}
+
+TEST(PublisherCapabilityRun, MixedSelectionSkipsFetchScenariosAndScoresTheRestWithoutError) {
+    DriverLogs logs;
+    const auto full21=catalog(21);
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=capability_manager(store,logs);
+    // The test peer exits with an error for any scenario other than the two GOAWAY ones,
+    // so launching the FETCH scenario's context would surface as a harness error.
+    const std::vector<std::string> ids={"d21-duplicate-request-goaway","d21-fetch-accepted",
+                                        "d21-goaway-on-distinct-request-streams","d21-fetch-rejected"};
+    const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,ids,2s,app::TrackFixture{{"n"},"t"},{.fetch=false}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto deadline=std::chrono::steady_clock::now()+7s;
+    while (store->load(started.id).state!=storage::RunState::Finalized && std::chrono::steady_clock::now()<deadline)
+        std::this_thread::sleep_for(1ms);
+    const auto run=store->load(started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.scenario_ids,ids) << "the selection is recorded as requested";
+    EXPECT_FALSE(run.config.publisher_capabilities.fetch);
+    ASSERT_TRUE(run.score);
+    EXPECT_NE(run.score->verdict,requirements::RunVerdict::Error);
+    EXPECT_NE(run.score->verdict,requirements::RunVerdict::Fail);
+
+    ASSERT_FALSE(run.events.empty());
+    EXPECT_EQ(run.events.front().kind,"publisher_capabilities");
+    EXPECT_EQ(run.events.front().detail,"fetch=false");
+    for (const std::string skipped : {"d21-fetch-accepted","d21-fetch-rejected"}) {
+        SCOPED_TRACE(skipped);
+        std::vector<std::string> kinds;
+        for (const auto& event : run.events)
+            if (event.scenario_id==skipped) kinds.push_back(event.kind);
+        // Only the skip record: no listener context, no publisher process, no transport.
+        EXPECT_EQ(kinds,std::vector<std::string>{"context_skipped"});
+        const auto event=std::find_if(run.events.begin(),run.events.end(),[&](const auto& value) {
+            return value.kind=="context_skipped" && value.scenario_id==skipped;
+        });
+        ASSERT_NE(event,run.events.end());
+        EXPECT_EQ(event->detail,"publisher declared no FETCH support");
+    }
+    std::set<std::string> driven;
+    for (const auto& event : run.events)
+        if (event.kind=="publisher_process" && event.scenario_id) driven.insert(*event.scenario_id);
+    EXPECT_EQ(driven,(std::set<std::string>{"d21-duplicate-request-goaway","d21-goaway-on-distinct-request-streams"}));
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="harness_error";
+    }));
+
+    // Rows whose every named scenario needs FETCH are not_applicable; every other row keeps
+    // the outcome the evaluators gave it.
+    std::size_t not_applicable=0;
+    ASSERT_EQ(run.outcomes.size(),full21->requirements.size());
+    for (std::size_t index=0; index<run.outcomes.size(); ++index) {
+        // Rows the catalog itself classifies as not applicable are not scored rows.
+        if (full21->requirements[index].applicability!=requirements::Applicability::Applicable ||
+            full21->requirements[index].testability!=requirements::Testability::Testable) continue;
+        const bool excluded=app::row_not_applicable_reason(21,full21->requirements[index],run.config.publisher_capabilities).has_value();
+        EXPECT_EQ(run.outcomes[index].state==requirements::OutcomeState::NotApplicable,excluded)
+            << run.outcomes[index].requirement_id;
+        not_applicable+=excluded;
+    }
+    EXPECT_GE(not_applicable,20u);
+    const auto row=std::find_if(run.outcomes.begin(),run.outcomes.end(),[](const auto& value) {
+        return value.requirement_id=="D21-9-2-MUST-328";
+    });
+    ASSERT_NE(row,run.outcomes.end());
+    EXPECT_NE(row->state,requirements::OutcomeState::NotApplicable);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(PublisherCapabilityRun, CapableSelectionRecordsTheDeclarationAndSkipsNothing) {
+    DriverLogs logs;
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=capability_manager(store,logs);
+    const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,{"d21-duplicate-request-goaway","d21-fetch-accepted"},2s,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    ASSERT_TRUE(manager.stop(started.id));
+    const auto run=store->load(started.id);
+    EXPECT_TRUE(run.config.publisher_capabilities.fetch);
+    ASSERT_FALSE(run.events.empty());
+    EXPECT_EQ(run.events.front().kind,"publisher_capabilities");
+    EXPECT_EQ(run.events.front().detail,"fetch=true");
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="context_skipped";
+    }));
 }
 }
 }

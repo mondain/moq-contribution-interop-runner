@@ -1,4 +1,5 @@
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
 
@@ -647,6 +648,10 @@ public:
             outcomes = requirements::evaluate_draft18(*draft18, contexts);
         }
         const auto& catalog = run_config.draft == DraftVersion::Draft21 ? *draft21 : *draft18;
+        // Rows whose every scenario needs a capability the publisher declared absent are
+        // not applicable to this run (they leave the score denominators).
+        apply_publisher_capabilities(static_cast<unsigned>(run_config.draft), catalog,
+                                     run_config.publisher_capabilities, outcomes);
         auto summary = requirements::score(catalog, outcomes);
         if (operational_error || worker->stop_requested) summary.verdict = requirements::RunVerdict::Error;
         store->finalize(worker->id, summary, outcomes);
@@ -1371,6 +1376,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::InvalidConfig, {}, {}};
     std::set<std::string> selected;
     std::vector<scenarios::RawProbeDefinition> definitions;
+    // Scenarios the publisher's declaration rules out: never given a listener context or a
+    // publisher process, only a context_skipped evidence event.
+    std::vector<std::pair<std::string, std::string>> skipped;
     const auto draft = static_cast<unsigned>(config.draft);
     for (const auto& id : config.scenario_ids) {
         if (id.empty() || !selected.insert(id).second)
@@ -1378,6 +1386,10 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (!executable_scenario(draft, id) ||
             (config.scenario_ids.size() > 1 && !raw_probe_scenario(draft, id)))
             return {RunStartStatus::Unsupported, {}, {}};
+        if (auto reason = scenario_skip_reason(draft, id, config.publisher_capabilities)) {
+            skipped.emplace_back(id, std::move(*reason));
+            continue;
+        }
         if ((scenario_requires_track(draft, id) || config.mode == RunMode::Driven) &&
             !config.track_fixture)
             return {RunStartStatus::InvalidConfig, {}, {}};
@@ -1446,6 +1458,13 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             }
         }
     }
+    if (skipped.size() == config.scenario_ids.size()) {
+        RunStartResult rejected{RunStartStatus::ScenarioRequiresCapability, {}, {}};
+        rejected.scenario = skipped.front().first;
+        rejected.capability = std::string(
+            scenario_required_capability(draft, rejected.scenario).value_or("unknown"));
+        return rejected;
+    }
     const bool needs_replacement = std::any_of(definitions.begin(), definitions.end(),
         [](const auto& definition) { return definition.offer_replacement_session; });
     std::lock_guard lock(impl_->mutex);
@@ -1500,6 +1519,34 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     }
 
     const auto id = impl_->store->create_run(config);
+    {
+        // Make the run self-describing: what the publisher declared, and every scenario
+        // that was therefore never started.
+        std::vector<storage::EvidenceEvent> declaration;
+        const auto wall = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        storage::EvidenceEvent capabilities;
+        capabilities.wall_time_unix_ns = wall;
+        capabilities.kind = "publisher_capabilities";
+        capabilities.detail = std::string("fetch=") + (config.publisher_capabilities.fetch ? "true" : "false");
+        declaration.push_back(std::move(capabilities));
+        for (const auto& [skipped_id, reason] : skipped) {
+            storage::EvidenceEvent event;
+            event.wall_time_unix_ns = wall;
+            event.kind = "context_skipped";
+            event.detail = reason;
+            event.scenario_id = skipped_id;
+            declaration.push_back(std::move(event));
+        }
+        try {
+            impl_->store->append_events(id, declaration);
+        } catch (...) {
+            const requirements::ScoreSummary failure{
+                requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+            impl_->store->finalize(id, failure, {});
+            return {RunStartStatus::ListenerError, {}, {}};
+        }
+    }
     auto worker = std::make_unique<Impl::Worker>();
     worker->id = id;
     worker->endpoint = endpoint;

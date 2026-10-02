@@ -2195,6 +2195,8 @@ TEST(NativeQuicLive, HttpDraft21GreaseSetupProfilesScoreReceiverRequirements) {
         const auto stored = store->load(id);
         ASSERT_FALSE(stored.events.empty());
         for (const auto& event : stored.events) {
+            // The run-start declaration belongs to the run, not to one scenario.
+            if (event.kind == "publisher_capabilities") continue;
             EXPECT_EQ(event.scenario_id, probe.scenario);
         }
     }

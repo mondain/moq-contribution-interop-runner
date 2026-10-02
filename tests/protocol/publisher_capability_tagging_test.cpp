@@ -3,7 +3,11 @@
 // project's own wire code, plus the few scenarios whose stimulus cannot be decoded
 // statically and are pinned below with the reason.
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft18/messages.h"
@@ -12,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <string>
@@ -227,6 +232,103 @@ TEST(PublisherCapabilityTagging, RequiresFetchMatchesEveryDecodedStimulus) {
     // silently finds nothing and a tag list that then happens to agree).
     EXPECT_GE(decoded_fetch[0], 18u);
     EXPECT_GE(decoded_fetch[1], 20u);
+}
+
+requirements::Requirement row(std::string id, requirements::Strength strength, std::vector<std::string> scenarios) {
+    return {std::move(id), strength, {"1", 1, 1, 1, 1}, "publisher", "behavior",
+            requirements::Applicability::Applicable, requirements::Testability::Testable,
+            std::move(scenarios), {"evaluator"}, "reason"};
+}
+
+std::vector<requirements::Outcome> all_not_run(const requirements::RequirementCatalog& catalog) {
+    std::vector<requirements::Outcome> outcomes;
+    for (const auto& requirement : catalog.requirements)
+        outcomes.push_back({requirement.id, requirements::OutcomeState::NotRun});
+    return outcomes;
+}
+
+TEST(PublisherCapabilityScoring, OnlyRowsWhoseEveryScenarioNeedsFetchAreNotApplicable) {
+    using requirements::OutcomeState;
+    const requirements::RequirementCatalog catalog{18, "synthetic", true,
+        {row("all-fetch", requirements::Strength::Must,
+             {"fetch-publisher-track-range", "receive-fetch-with-unknown-type"}),
+         row("mixed", requirements::Strength::Must,
+             {"fetch-publisher-track-range", "subscribe-to-publisher-track"}),
+         row("no-fetch", requirements::Strength::Should, {"subscribe-to-publisher-track"}),
+         row("unnamed", requirements::Strength::May, {})}};
+    auto outcomes = all_not_run(catalog);
+    apply_publisher_capabilities(18, catalog, PublisherCapabilities{.fetch = false}, outcomes);
+    EXPECT_EQ(outcomes[0].state, OutcomeState::NotApplicable);
+    EXPECT_EQ(outcomes[1].state, OutcomeState::NotRun) << "a mixed row keeps needing every scenario";
+    EXPECT_EQ(outcomes[2].state, OutcomeState::NotRun);
+    EXPECT_EQ(outcomes[3].state, OutcomeState::NotRun);
+
+    // A capable publisher changes nothing; evidence is never overwritten.
+    auto capable = all_not_run(catalog);
+    apply_publisher_capabilities(18, catalog, PublisherCapabilities{}, capable);
+    for (const auto& outcome : capable) EXPECT_EQ(outcome.state, OutcomeState::NotRun);
+    auto observed = all_not_run(catalog);
+    observed[0].state = OutcomeState::Pass;
+    apply_publisher_capabilities(18, catalog, PublisherCapabilities{.fetch = false}, observed);
+    EXPECT_EQ(observed[0].state, OutcomeState::Pass);
+
+    EXPECT_NE(row_not_applicable_reason(18, catalog.requirements[0], {.fetch = false})
+                  .value_or("").find("publisher declared no FETCH support"), std::string::npos);
+    EXPECT_FALSE(row_not_applicable_reason(18, catalog.requirements[1], {.fetch = false}));
+    // Draft 21 ids are not draft 18 scenarios and the other way round.
+    EXPECT_FALSE(row_not_applicable_reason(21, catalog.requirements[0], {.fetch = false}));
+}
+
+TEST(PublisherCapabilityScoring, RealCatalogsLeaveTheDenominatorsByExactlyTheExcludedRows) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    for (const unsigned draft : {18u, 21u}) {
+        const auto source = requirements::load_draft_source(
+            draft, root / "docs", root / "requirements" / "draft-digests.json");
+        const auto catalog = requirements::RequirementCatalog::load(
+            source, root / "requirements" / ("draft" + std::to_string(draft) + ".json"));
+        const auto baseline = requirements::score(catalog, all_not_run(catalog));
+        // Rows with no scenario or non-scored rows are not NotRun-able the same way.
+        std::vector<requirements::Outcome> outcomes;
+        for (const auto& requirement : catalog.requirements) {
+            const bool scored = requirement.applicability == requirements::Applicability::Applicable &&
+                                requirement.testability == requirements::Testability::Testable;
+            outcomes.push_back({requirement.id,
+                scored ? requirements::OutcomeState::NotRun
+                       : requirement.applicability == requirements::Applicability::Applicable
+                           ? requirements::OutcomeState::NotTestable
+                           : requirements::OutcomeState::NotApplicable});
+        }
+        const auto before = requirements::score(catalog, outcomes);
+        auto adjusted = outcomes;
+        apply_publisher_capabilities(draft, catalog, {.fetch = false}, adjusted);
+        const auto after = requirements::score(catalog, adjusted);
+        (void)baseline;
+
+        std::uint64_t required = 0, weighted = 0;
+        std::size_t excluded = 0, mixed = 0;
+        for (const auto& requirement : catalog.requirements) {
+            if (requirement.scenarios.empty()) continue;
+            if (row_not_applicable_reason(draft, requirement, {.fetch = false})) {
+                ++excluded;
+                weighted += requirements::score_weight(requirement.strength);
+                if (requirement.strength == requirements::Strength::Must ||
+                    requirement.strength == requirements::Strength::MustNot)
+                    required += requirements::score_weight(requirement.strength);
+            } else if (std::any_of(requirement.scenarios.begin(), requirement.scenarios.end(),
+                                   [&](const auto& id) { return scenario_requires_fetch(draft, id); })) {
+                ++mixed;
+            }
+        }
+        EXPECT_GE(excluded, 20u) << "draft " << draft;
+        EXPECT_EQ(before.required.possible - after.required.possible, required);
+        EXPECT_EQ(before.weighted.possible - after.weighted.possible, weighted);
+        EXPECT_EQ(before.coverage.possible - after.coverage.possible, weighted);
+        EXPECT_EQ(after.required.earned, 0u);
+        EXPECT_NE(after.verdict, requirements::RunVerdict::Error);
+        EXPECT_NE(after.verdict, requirements::RunVerdict::Fail);
+        // Mixed rows stay in the denominators (draft 21 has one; draft 18 has none).
+        if (draft == 21) EXPECT_GE(mixed, 1u);
+    }
 }
 
 }  // namespace
