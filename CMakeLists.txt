@@ -217,6 +217,10 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18_close.cpp
     src/scenarios/draft21_announcement.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
+# Draft-18 publisher-contribution probe families (gap-closing block).
+target_sources(moq-interop-scenarios PRIVATE
+    src/scenarios/draft18_contribution.cpp
+    src/scenarios/draft18_contribution_setup.cpp)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -473,6 +477,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-draft18-response-tests tests/protocol/draft18_response_test.cpp)
     target_link_libraries(moq-interop-draft18-response-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME draft18-response COMMAND moq-interop-draft18-response-tests)
+
+    # Draft-18 publisher-contribution probe families (gap-closing block).
+    add_executable(moq-interop-draft18-contribution-tests tests/protocol/draft18_contribution_test.cpp)
+    target_link_libraries(moq-interop-draft18-contribution-tests PRIVATE moq-interop-scenarios
+        moq-interop-requirements moq-interop-draft18-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft18-contribution-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME draft18-contribution COMMAND moq-interop-draft18-contribution-tests)
 
     add_executable(moq-interop-draft18-peer-close-tests tests/protocol/draft18_peer_close_test.cpp)
     target_link_libraries(moq-interop-draft18-peer-close-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)

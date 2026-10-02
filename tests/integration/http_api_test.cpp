@@ -5,6 +5,7 @@
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/storage/run_store.h"
 
 #include <gtest/gtest.h>
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -146,7 +148,11 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 718);
+    std::set<std::string> contribution_scenarios;
+    for (const auto& probe : scenarios::draft18_contribution_probes())
+        contribution_scenarios.insert(probe.definition.id);
+    // Each contribution scenario is listed for two transports in two modes.
+    ASSERT_EQ(health.at("executable_profiles").size(), 718 + 4 * contribution_scenarios.size());
     for (const auto& profile : health.at("executable_profiles")) {
         EXPECT_TRUE(app::executable_scenario(
             profile.at("draft").get<unsigned>(),
@@ -194,8 +200,10 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
                   health.at("executable_profiles").at(index).at("draft"));
         EXPECT_FALSE(profile.at("configured"));
     }
-    for (std::size_t index = 0; index < 359; ++index) {
-        const auto& profile = health.at("executable_profiles").at(index + 359);
+    // Every observed profile has one driven twin appended after all of them.
+    const std::size_t observed_profiles = health.at("executable_profiles").size() / 2;
+    for (std::size_t index = 0; index < observed_profiles; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + observed_profiles);
         EXPECT_EQ(profile.at("mode"), "driven");
         EXPECT_EQ(profile.at("transport"),
                   health.at("executable_profiles").at(index).at("transport"));
@@ -251,7 +259,7 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     ASSERT_TRUE(page);
     EXPECT_EQ(page->status, 200);
     EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
-    EXPECT_NE(page->body.find("76/175"), std::string::npos);
+    EXPECT_NE(page->body.find("86/175"), std::string::npos);
     EXPECT_NE(page->body.find("76/175"), std::string::npos);
 }
 

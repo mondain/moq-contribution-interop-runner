@@ -20,6 +20,7 @@
 #include "moq/interop/scenarios/fetch_group_order.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
@@ -792,6 +793,21 @@ public:
 
     std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
         const RunConfig& run_config, std::string_view id) const {
+        if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id)) {
+            std::vector<std::vector<std::byte>> contribution_namespace;
+            std::vector<std::byte> contribution_name{std::byte{'x'}};
+            if (run_config.track_fixture) {
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    contribution_namespace.push_back(bytes_of(field));
+                contribution_name = bytes_of(run_config.track_fixture->track_name);
+            }
+            auto contributions = scenarios::draft18_contribution_probes(
+                run_config.timeout, contribution_namespace, contribution_name);
+            const auto found = std::find_if(contributions.begin(), contributions.end(),
+                [&](const auto& profile) { return profile.definition.id == id; });
+            if (found == contributions.end()) throw std::invalid_argument("unknown contribution probe");
+            return std::move(found->definition);
+        }
         if (request_goaway_scenario(static_cast<unsigned>(run_config.draft),id)) {
             auto profiles = run_config.draft == DraftVersion::Draft18
                 ? scenarios::draft18_request_goaway_probes(run_config.timeout)
@@ -1065,6 +1081,13 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             std::vector<std::vector<std::byte>> fields;
             for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
             if (!scenarios::fetch_first_object_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
+                return {RunStartStatus::InvalidConfig, {}, {}};
+        }
+        if (config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id) &&
+            config.track_fixture) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
+            if (!scenarios::draft18_contribution_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
                 return {RunStartStatus::InvalidConfig, {}, {}};
         }
         if (discovery_overlap_scenario(draft, id)) {

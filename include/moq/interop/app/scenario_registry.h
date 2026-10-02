@@ -7,7 +7,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 73> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 80> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -81,6 +81,14 @@ inline constexpr std::array<std::string_view, 73> kDraft18ExecutableScenarios{
     "publish-and-retrieve-same-object-and-track-immutable-properties",
     "repeat-immutable-property-with-alternative-varint-encodings-available",
     "publish-object-with-immutable-properties",
+    // Draft-18 publisher-contribution probe families (gap-closing block).
+    "observe-publisher-setup-options",
+    "observe-webtransport-publisher-setup",
+    "receive-setup-with-unknown-option",
+    "receive-setup-with-duplicate-unknown-options",
+    "setup-unknown-grease-options-and-duplicates",
+    "receive-setup-token-register-exceeding-cache-limit",
+    "receive-oversize-setup-register-then-use-its-alias",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -250,7 +258,13 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
     return discovery_overlap && std::find(executable_scenarios(draft).begin(),executable_scenarios(draft).end(),scenario) != executable_scenarios(draft).end();
 }
 
+// Draft-18 publisher-contribution probes whose first write names the fixture.
+inline constexpr std::array<std::string_view, 0> kDraft18ContributionTrackScenarios{};
+
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 18 && std::find(kDraft18ContributionTrackScenarios.begin(),
+                                 kDraft18ContributionTrackScenarios.end(),
+                                 scenario) != kDraft18ContributionTrackScenarios.end()) return true;
     if (immutable_repeat_scenario(draft,scenario) || object_repeat_scenario(draft,scenario)) return true;
     if (fetch_first_object_scenario(draft,scenario) || fetch_group_order_scenario(draft,scenario)) return true;
     if (subscriber_notify_scenario(draft,scenario) ||

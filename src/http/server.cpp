@@ -15,6 +15,7 @@
 #include "moq/interop/scenarios/fetch_group_order.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
@@ -611,6 +612,14 @@ public:
                     for (const auto& profile : repeated) if (seen.insert(profile.definition.id).second) {
                         append_profile(draft,profile.definition.id,"native-quic");
                         append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                {
+                    std::set<std::string> contribution_scenarios;
+                    for (const auto& profile : scenarios::draft18_contribution_probes()) {
+                        if (!contribution_scenarios.insert(profile.definition.id).second) continue;
+                        append_profile(18, profile.definition.id, "native-quic");
+                        append_profile(18, profile.definition.id, "webtransport");
                     }
                 }
                 const auto observed_count = profiles.size();
