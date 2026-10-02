@@ -39,13 +39,21 @@ Bytes location_pair(std::uint64_t group, std::uint64_t object) {
     return result;
 }
 
-// LOCATION_FILTER (0x21, Section 9.20.10): Start Group/Object, then End Group
-// delta and End Object. End Object 0 is open to the end of the End Group.
-Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t last) {
-    auto value = location_pair(group, first);
-    put_vi(value, 0);
-    put_vi(value, last);
+// LOCATION_FILTER (0x21, Section 9.20.10): Start Group/Object, End Group delta and
+// End Object. The range is inclusive (Section 3.3.1); an omitted End Object is the
+// separate all-objects-of-the-End-Group form, while an End Object of 0 ends at
+// Object 0 of the End Group.
+Param location_range(std::uint64_t start_group, std::uint64_t start_object,
+                     std::uint64_t end_group_delta, std::uint64_t end_object) {
+    auto value = location_pair(start_group, start_object);
+    put_vi(value, end_group_delta);
+    put_vi(value, end_object);
     return param_lp(0x21, value);
+}
+
+// A single-Group range [first, last] in one Group.
+Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t last) {
+    return location_range(group, first, 0, last);
 }
 
 RawProbeDefinition residual_definition() {
@@ -206,7 +214,7 @@ Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Jud
 }
 
 // ---- Section 3.1: one copy per matching subscription (D21-3-1-MUST-041) -----
-// Both subscriptions ask for exactly Group 7, Object 9. The publisher chooses
+// Both subscriptions ask for exactly Group 0, Object 1 (kTargetGroup, kTargetObject). The publisher chooses
 // the Track Aliases, so the same stimulus is judged under whichever alias
 // assignment it produced; a context whose assignment is not the scenario's
 // is not scored.
@@ -264,14 +272,6 @@ Spec concurrent_subscription_spec(const char* scenario, bool shared_alias) {
 // Both subscriptions may share one Track Alias, in which case a stray Object cannot
 // be attributed to a subscription; it is outside every subscription's pass set
 // either way, so it still shows a violation.
-Param location_range(std::uint64_t start_group, std::uint64_t start_object,
-                     std::uint64_t end_group_delta, std::uint64_t end_object) {
-    auto value = location_pair(start_group, start_object);
-    put_vi(value, end_group_delta);
-    put_vi(value, end_object);
-    return param_lp(0x21, value);
-}
-
 // OBJECTID_FILTER (0x26, Sections 8.6 and 9.20.12): SetID 0 and the single
 // inclusive Range [first, last], whose End is delta encoded from its Start.
 Param object_id_range(std::uint64_t first, std::uint64_t last) {
