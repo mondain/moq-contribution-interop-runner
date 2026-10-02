@@ -1,5 +1,7 @@
 #include "moq/interop/http/result_schema.h"
 
+#include "moq/interop/app/publisher_capabilities.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -49,8 +51,11 @@ ScenarioResult summarize(const storage::RunRecord& run,
             std::find(requirement.scenarios.begin(), requirement.scenarios.end(),
                       scenario) == requirement.scenarios.end())
             continue;
-        summary.applicable = true;
         const auto& states = observations[requirement.id];
+        // Declared not applicable for this run: neither passed, failed nor outstanding.
+        if (states.size() == 1 && states.front() == requirements::OutcomeState::NotApplicable)
+            continue;
+        summary.applicable = true;
         if (std::find(states.begin(), states.end(),
                       requirements::OutcomeState::Fail) != states.end()) {
             summary.failed = true;
@@ -77,24 +82,30 @@ std::string serialize_tap14(const storage::RunRecord& run,
     if (run.config.scenario_ids.empty())
         return "TAP version 14\n1..0 # SKIP no scenarios selected\n";
     out << "1.." << run.config.scenario_ids.size() << '\n';
+    if (!run.config.publisher_capabilities.fetch)
+        out << "# publisher_capabilities fetch=false (declared: the publisher does not implement FETCH)\n";
     for (std::size_t index = 0; index < run.config.scenario_ids.size(); ++index) {
         const auto& scenario = run.config.scenario_ids[index];
         const auto summary = summarize(run, catalog, scenario);
+        // A scenario the publisher's declaration ruled out was never started.
+        const auto declared_skip = app::scenario_skip_reason(
+            catalog.draft, scenario, run.config.publisher_capabilities);
         const bool error = run.state != storage::RunState::Finalized ||
                            !run.score ||
                            run.score->verdict == requirements::RunVerdict::Error;
         const bool passed = !error && !summary.failed &&
                             !summary.incomplete && summary.applicable;
-        const bool skipped = !error && !summary.applicable;
+        const bool skipped = declared_skip.has_value() || (!error && !summary.applicable);
         out << (passed || skipped ? "ok " : "not ok ") << index + 1
             << " - " << escape_name(scenario);
-        if (skipped) out << " # SKIP no scored requirements";
+        if (declared_skip) out << " # SKIP " << escape_name(*declared_skip);
+        else if (skipped) out << " # SKIP no scored requirements";
         out << '\n';
-        const char* result = error ? "error" :
+        const char* result = declared_skip ? "skip" : error ? "error" :
                              summary.failed ? "fail" :
                              summary.incomplete ? "incomplete" :
                              skipped ? "skip" : "pass";
-        const nlohmann::json diagnostic{
+        nlohmann::json diagnostic{
             {"run_id", run.id}, {"draft", catalog.draft},
             {"scenario_id", scenario}, {"result", result},
             {"scoring_profile", std::any_of(run.events.begin(), run.events.end(), [](const auto& event) {
@@ -102,6 +113,7 @@ std::string serialize_tap14(const storage::RunRecord& run,
             }) ? "compatibility" : "standards"},
             {"passed", summary.passed}, {"failed", summary.failed_count},
             {"not_run", summary.not_run}};
+        if (declared_skip) diagnostic["skip_reason"] = *declared_skip;
         out << "  ---\n  " << diagnostic.dump() << "\n  ...\n";
     }
     return out.str();

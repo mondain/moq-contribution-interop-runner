@@ -14,6 +14,9 @@ namespace moq::interop::http {
 struct ServerConfig {
     std::string bind_address = "127.0.0.1";
     std::uint16_t port = 8080;
+    // What a run declares about the publisher when its request does not say. A value in
+    // the run request ("publisher_capabilities") always wins over this default.
+    app::PublisherCapabilities default_publisher_capabilities{};
 };
 
 struct ApiError {

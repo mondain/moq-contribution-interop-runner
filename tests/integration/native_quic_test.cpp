@@ -2195,9 +2195,102 @@ TEST(NativeQuicLive, HttpDraft21GreaseSetupProfilesScoreReceiverRequirements) {
         const auto stored = store->load(id);
         ASSERT_FALSE(stored.events.empty());
         for (const auto& event : stored.events) {
+            // The run-start declaration belongs to the run, not to one scenario.
+            if (event.kind == "publisher_capabilities") continue;
             EXPECT_EQ(event.scenario_id, probe.scenario);
         }
     }
+}
+
+TEST(NativeQuicLive, HttpPublisherCapabilityDeclarationPrecedenceAndPersistence) {
+    TestPemFiles pem;
+    auto store = std::make_shared<storage::SqliteRunStore>(
+        ":memory:", app::BuildInfo{"test", "test", {}});
+    auto draft18 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{18, "test", true, {}});
+    auto draft21 = std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog{21, "test", true, {}});
+    auto runs = std::make_shared<app::NativeRunManager>(
+        draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0,
+            .maximum_active_runs = 2, .certificate_path = pem.certificate(),
+            .private_key_path = pem.key()});
+    // The runner was started with --publisher-no-fetch.
+    http::HttpServer server(draft18, draft21, store, app::BuildInfo{"test", "test", {}},
+                            {.port = 0, .default_publisher_capabilities = {.fetch = false}}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const auto post = [&](nlohmann::json request) {
+        request["draft"] = 21;
+        request["transport"] = "native-quic";
+        request["mode"] = "observed";
+        request["timeout_ms"] = 1000;
+        request["track"] = {{"namespace_hex", nlohmann::json::array({"6e"})}, {"name_hex", "74"}};
+        const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+        EXPECT_TRUE(response);
+        return std::pair{response ? response->status : 0,
+                         response ? nlohmann::json::parse(response->body) : nlohmann::json{}};
+    };
+    const auto fetch_only = nlohmann::json::array({"d21-fetch-accepted"});
+    const auto mixed = nlohmann::json::array({"d21-duplicate-request-goaway", "d21-fetch-accepted"});
+
+    // Startup default applies when the run says nothing: a FETCH-only selection is rejected
+    // with the typed error, naming the scenario and the capability, and creates no run.
+    auto [rejected, error] = post({{"scenarios", fetch_only}});
+    EXPECT_EQ(rejected, 422);
+    EXPECT_EQ(error.at("error").at("code"), "scenario_requires_publisher_capability");
+    EXPECT_NE(error.at("error").at("message").get<std::string>().find("d21-fetch-accepted"), std::string::npos);
+    EXPECT_NE(error.at("error").at("message").get<std::string>().find("fetch"), std::string::npos);
+    EXPECT_EQ(store->list({1, 0}).total, 0u);
+
+    // A mixed selection starts, with the default recorded as the effective declaration.
+    auto [created, body] = post({{"scenarios", mixed}});
+    ASSERT_EQ(created, 201) << body;
+    const auto defaulted = body.at("run").at("id").get<std::string>();
+    EXPECT_FALSE(body.at("run").at("config").at("publisher_capabilities").at("fetch").get<bool>());
+    EXPECT_FALSE(store->load(defaulted).config.publisher_capabilities.fetch);
+    ASSERT_TRUE(runs->stop(defaulted));
+    {
+        const auto events = store->load(defaulted).events;
+        ASSERT_FALSE(events.empty());
+        EXPECT_EQ(events.front().kind, "publisher_capabilities");
+        EXPECT_EQ(events.front().detail, "fetch=false");
+        EXPECT_EQ(std::count_if(events.begin(), events.end(), [](const auto& event) {
+                      return event.kind == "context_skipped" && event.scenario_id == "d21-fetch-accepted";
+                  }), 1);
+    }
+
+    // An explicit per-run value wins over the startup default, in both directions.
+    auto [capable, capable_body] = post({{"scenarios", fetch_only}, {"publisher_capabilities", {{"fetch", true}}}});
+    ASSERT_EQ(capable, 201) << capable_body;
+    const auto capable_id = capable_body.at("run").at("id").get<std::string>();
+    EXPECT_TRUE(store->load(capable_id).config.publisher_capabilities.fetch);
+    ASSERT_TRUE(runs->stop(capable_id));
+    {
+        const auto events = store->load(capable_id).events;
+        ASSERT_FALSE(events.empty());
+        EXPECT_EQ(events.front().detail, "fetch=true");
+        EXPECT_EQ(std::count_if(events.begin(), events.end(), [](const auto& event) {
+                      return event.kind == "context_skipped";
+                  }), 0);
+    }
+    auto [explicit_no, explicit_body] = post({{"scenarios", fetch_only}, {"publisher_capabilities", {{"fetch", false}}}});
+    EXPECT_EQ(explicit_no, 422);
+    EXPECT_EQ(explicit_body.at("error").at("code"), "scenario_requires_publisher_capability");
+
+    // An empty declaration leaves the startup default alone.
+    auto [empty, empty_body] = post({{"scenarios", fetch_only}, {"publisher_capabilities", nlohmann::json::object()}});
+    EXPECT_EQ(empty, 422) << empty_body;
+
+    // The effective declaration survives in the run's export.
+    const auto exported = api.Get("/results/" + defaulted + ".json");
+    ASSERT_TRUE(exported);
+    ASSERT_EQ(exported->status, 200);
+    const auto document = nlohmann::json::parse(exported->body);
+    EXPECT_FALSE(document.at("publisher_capabilities").at("fetch").get<bool>());
+    ASSERT_EQ(document.at("skipped_scenarios").size(), 1u);
 }
 
 TEST(NativeQuicLive, HttpDraft21ForbiddenServerUriOptionsScorePeerClose) {

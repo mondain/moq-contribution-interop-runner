@@ -496,6 +496,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME draft18-gap-b-native COMMAND moq-interop-draft18-gap-b-native-tests)
     set_tests_properties(draft18-gap-b-native PROPERTIES RESOURCE_LOCK "native-test-ports")
 
+    add_executable(moq-interop-publisher-capability-tagging-tests
+                   tests/protocol/publisher_capability_tagging_test.cpp)
+    target_compile_definitions(moq-interop-publisher-capability-tagging-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-publisher-capability-tagging-tests PRIVATE
+        moq-interop-runs GTest::gtest_main)
+    add_test(NAME publisher-capability-tagging
+             COMMAND moq-interop-publisher-capability-tagging-tests)
+
     add_executable(moq-interop-fetch-probe-tests tests/protocol/fetch_probe_test.cpp)
     target_link_libraries(moq-interop-fetch-probe-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-fetch-probe-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

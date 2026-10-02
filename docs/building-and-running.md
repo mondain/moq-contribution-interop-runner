@@ -104,6 +104,7 @@ Flags below match `build/moq-interop-runner --help`.
 | `--denied-authorization-token VALUE` | unset | Token-type-0 credential (1 to 1024 bytes) that the publisher's policy is configured to refuse |
 | `--invalid-auth-token TYPE:HEX` | unset | Well-formed but invalid credential for a Token Type the publisher understands |
 | `--expired-auth-token TYPE:HEX` | unset | Expired credential, same contract |
+| `--publisher-no-fetch` | off | Declare, for every run that does not say otherwise, that the publisher does not implement FETCH. A run's own `publisher_capabilities` wins over it; see below |
 | `--version` | | Print build identity and dependency revisions |
 | `--help` | | Print usage |
 
@@ -120,6 +121,17 @@ Rules enforced at startup:
   range. Each run holds one UDP port; a run that offers a replacement session
   holds a second one. When no port is free, `POST /api/v1/runs` returns 503
   `publisher_ports_exhausted`.
+
+`--publisher-no-fetch` is the startup default for the publisher capability
+declaration. The declaration of a run is, in order: the `publisher_capabilities`
+object in the `POST /api/v1/runs` body when it names `fetch`; otherwise the
+startup default (`fetch: false` with the flag, `true` without it). A run can
+therefore opt back in with `{"publisher_capabilities": {"fetch": true}}`, or out
+without the flag with `{"fetch": false}`. A live publisher with no cache, such as
+the bundled moqxr setup, starts the runner once with the flag and every run
+skips the scenarios that need FETCH; see
+[http-api.md](http-api.md#declaring-publisher-capabilities). The flag is not
+stored anywhere except in the effective declaration each run records.
 
 Operator-supplied credentials (`--invalid-auth-token`, `--expired-auth-token`,
 `--denied-authorization-token`, `--unknown-auth-token-alias-compat-code`) change

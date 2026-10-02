@@ -1,7 +1,7 @@
 CREATE TABLE schema_meta (
-    version INTEGER NOT NULL CHECK (version = 2)
+    version INTEGER NOT NULL CHECK (version = 3)
 );
-INSERT INTO schema_meta(version) VALUES (2);
+INSERT INTO schema_meta(version) VALUES (3);
 
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
@@ -47,6 +47,13 @@ CREATE TABLE run_track_namespace_fields (
     position INTEGER NOT NULL CHECK (position >= 0),
     value TEXT NOT NULL,
     PRIMARY KEY (run_id, position)
+);
+
+-- What the publisher under test declared it implements (schema version 3). One row per
+-- run; a run with no row (created before version 3) is a fully capable publisher.
+CREATE TABLE run_publisher_capabilities (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    fetch INTEGER NOT NULL CHECK (fetch IN (0, 1))
 );
 
 CREATE TABLE evidence_events (

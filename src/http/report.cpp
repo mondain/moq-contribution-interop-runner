@@ -175,6 +175,26 @@ std::string render_run_detail(const storage::RunRecord& run,
            << escape_html(run.id) << ".tap\">Download TAP 14</a></p>";
     if (document.at("run").at("scoring_profile") == "compatibility")
         output << "<p><strong>Compatibility scoring:</strong> UNKNOWN_AUTH_TOKEN_ALIAS uses an explicitly configured REQUEST_ERROR code. The checked-in draft does not assign that request code.</p>";
+    if (!run.config.publisher_capabilities.fetch) {
+        // Visible text, not colour: the declaration, the scenarios it skipped and the rows it excluded.
+        output << "<h2>Publisher capabilities</h2><p><strong>FETCH: not implemented.</strong> "
+                  "This run declares that the publisher does not implement FETCH, which the draft "
+                  "allows for an endpoint that is not a relay. Scenarios that need FETCH were not "
+                  "started, and catalog rows whose every named scenario needs FETCH are reported "
+                  "as not_applicable and left out of the required, weighted and coverage scores.</p>";
+        const auto& skipped = document.at("skipped_scenarios");
+        if (skipped.empty()) {
+            output << "<p>No selected scenario needed FETCH.</p>";
+        } else {
+            output << "<table><caption>Scenarios skipped by the declaration</caption><thead><tr>"
+                      "<th scope=\"col\">Scenario</th><th scope=\"col\">Reason</th></tr></thead><tbody>";
+            for (const auto& entry : skipped)
+                output << "<tr><th scope=\"row\"><code>"
+                       << escape_html(entry.at("scenario_id").get<std::string>()) << "</code></th><td>"
+                       << escape_html(entry.at("reason").get<std::string>()) << "</td></tr>";
+            output << "</tbody></table>";
+        }
+    }
     const auto& score = document.at("run").at("score");
     const auto verdict = document.at("run").at("verdict").is_null()
                              ? "PENDING"
@@ -214,8 +234,11 @@ std::string render_run_detail(const storage::RunRecord& run,
              << "</td><td>" << row.at("weight").get<std::uint64_t>()
              << (row.at("score_eligible").get<bool>() ? " eligible" : " excluded")
              << "</td><td><strong>" << escape_html(status) << "</strong></td><td>"
-             << escape_html(row.at("rationale").get<std::string>())
-             << "</td><td><details><summary>Evidence ("
+             << escape_html(row.at("rationale").get<std::string>());
+        if (!row.at("not_applicable_reason").is_null())
+            rows << "<p><strong>Not applicable to this run:</strong> "
+                 << escape_html(row.at("not_applicable_reason").get<std::string>()) << "</p>";
+        rows << "</td><td><details><summary>Evidence ("
              << row.at("evidence_sequences").size() << ")</summary>";
         if (row.at("evidence_sequences").empty()) {
             rows << "<p>No evidence recorded.</p>";

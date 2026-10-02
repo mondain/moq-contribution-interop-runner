@@ -1,6 +1,7 @@
 #include "moq/interop/http/result_schema.h"
 
 #include "detail.h"
+#include "moq/interop/app/publisher_capabilities.h"
 
 #include <nlohmann/json.hpp>
 
@@ -42,6 +43,9 @@ nlohmann::json aggregate(const requirements::Requirement& requirement,
     const auto has = [&](requirements::OutcomeState state) {
         return std::find(states.begin(), states.end(), state) != states.end();
     };
+    // A scored row the run declared not applicable (publisher capability) is reported alone.
+    if (states.size() == 1 && states.front() == requirements::OutcomeState::NotApplicable)
+        return "not_applicable";
     if (has(requirements::OutcomeState::NotTestable) ||
         has(requirements::OutcomeState::NotApplicable))
         return "error";
@@ -81,15 +85,29 @@ nlohmann::json serialize_result(const storage::RunRecord& run,
             requirement.testability == requirements::Testability::Testable;
         const auto& states = observations[requirement.id];
         row["outcome"] = aggregate(requirement, states);
+        // Why a scored row is not_applicable for this run, so the result explains itself.
+        const auto reason = app::row_not_applicable_reason(
+            static_cast<unsigned>(run.config.draft), requirement, run.config.publisher_capabilities);
+        row["not_applicable_reason"] =
+            (reason && row.at("outcome") == "not_applicable") ? nlohmann::json(*reason) : nlohmann::json(nullptr);
         row["observations"] = nlohmann::json::array();
         for (const auto state : states)
             row["observations"].push_back(outcome_name(state));
         row["evidence_sequences"] = evidence_sequences[requirement.id];
         rows.push_back(std::move(row));
     }
+    // Scenarios the publisher's declaration ruled out; they were never started.
+    nlohmann::json skipped = nlohmann::json::array();
+    for (const auto& scenario : run.config.scenario_ids) {
+        if (const auto reason = app::scenario_skip_reason(static_cast<unsigned>(run.config.draft), scenario,
+                                                          run.config.publisher_capabilities))
+            skipped.push_back({{"scenario_id", scenario}, {"reason", *reason}});
+    }
     return {{"schema_version", 1},
             {"draft_source_sha256", catalog.source_sha256},
             {"run", detail::run_json(run)},
+            {"publisher_capabilities", {{"fetch", run.config.publisher_capabilities.fetch}}},
+            {"skipped_scenarios", std::move(skipped)},
             {"requirements", std::move(rows)},
             {"evidence", std::move(evidence)}};
 }

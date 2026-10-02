@@ -1,4 +1,5 @@
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
 
@@ -483,9 +484,9 @@ public:
 
     // Every raw probe answers a publisher's PUBLISH_NAMESPACE by default (see
     // scenarios::apply_default_namespace_answer for the exceptions).
-    std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
-        const RunConfig& run_config, std::string_view id) const {
-        auto definition = resolve_raw_probe_definition(run_config, id);
+    static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
+        auto definition = resolve_raw_probe_definition(config, run_config, id);
         if (definition)
             scenarios::apply_default_namespace_answer(*definition, static_cast<unsigned>(run_config.draft));
         // A definition that opted into a liveness follow-up asks for the track fixture.
@@ -498,8 +499,8 @@ public:
         return definition;
     }
 
-    std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
-        const RunConfig& run_config, std::string_view id) const {
+    static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_scenario(id)) {
             std::vector<std::vector<std::byte>> name_space;
@@ -517,7 +518,7 @@ public:
             if (found == profiles.end()) return std::nullopt;
             return std::move(found->definition);
         }
-        if (auto definition = resolve_track_probe(run_config, id)) return definition;
+        if (auto definition = resolve_track_probe(config, run_config, id)) return definition;
         const auto find = [id](auto profiles) -> std::optional<scenarios::RawProbeDefinition> {
             const auto found = std::find_if(profiles.begin(), profiles.end(),
                 [id](const auto& profile) { return profile.definition.id == id; });
@@ -647,6 +648,10 @@ public:
             outcomes = requirements::evaluate_draft18(*draft18, contexts);
         }
         const auto& catalog = run_config.draft == DraftVersion::Draft21 ? *draft21 : *draft18;
+        // Rows whose every scenario needs a capability the publisher declared absent are
+        // not applicable to this run (they leave the score denominators).
+        apply_publisher_capabilities(static_cast<unsigned>(run_config.draft), catalog,
+                                     run_config.publisher_capabilities, outcomes);
         auto summary = requirements::score(catalog, outcomes);
         if (operational_error || worker->stop_requested) summary.verdict = requirements::RunVerdict::Error;
         store->finalize(worker->id, summary, outcomes);
@@ -1049,8 +1054,8 @@ public:
         return transcript;
     }
 
-    std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
-        const RunConfig& run_config, std::string_view id) const {
+    static std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
+        const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id)) {
             std::vector<std::vector<std::byte>> contribution_namespace;
             std::vector<std::byte> contribution_name{std::byte{'x'}};
@@ -1371,6 +1376,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::InvalidConfig, {}, {}};
     std::set<std::string> selected;
     std::vector<scenarios::RawProbeDefinition> definitions;
+    // Scenarios the publisher's declaration rules out: never given a listener context or a
+    // publisher process, only a context_skipped evidence event.
+    std::vector<std::pair<std::string, std::string>> skipped;
     const auto draft = static_cast<unsigned>(config.draft);
     for (const auto& id : config.scenario_ids) {
         if (id.empty() || !selected.insert(id).second)
@@ -1378,6 +1386,10 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (!executable_scenario(draft, id) ||
             (config.scenario_ids.size() > 1 && !raw_probe_scenario(draft, id)))
             return {RunStartStatus::Unsupported, {}, {}};
+        if (auto reason = scenario_skip_reason(draft, id, config.publisher_capabilities)) {
+            skipped.emplace_back(id, std::move(*reason));
+            continue;
+        }
         if ((scenario_requires_track(draft, id) || config.mode == RunMode::Driven) &&
             !config.track_fixture)
             return {RunStartStatus::InvalidConfig, {}, {}};
@@ -1437,7 +1449,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         }
         if (raw_probe_scenario(draft, id)) {
             try {
-                auto definition = impl_->resolve_raw_probe(config, id);
+                auto definition = impl_->resolve_raw_probe(impl_->config, config, id);
                 if (!definition || definition->id != id)
                     return {RunStartStatus::Unsupported, {}, {}};
                 definitions.push_back(std::move(*definition));
@@ -1445,6 +1457,13 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
                 return {RunStartStatus::InvalidConfig, {}, {}};
             }
         }
+    }
+    if (skipped.size() == config.scenario_ids.size()) {
+        RunStartResult rejected{RunStartStatus::ScenarioRequiresCapability, {}, {}};
+        rejected.scenario = skipped.front().first;
+        rejected.capability = std::string(
+            scenario_required_capability(draft, rejected.scenario).value_or("unknown"));
+        return rejected;
     }
     const bool needs_replacement = std::any_of(definitions.begin(), definitions.end(),
         [](const auto& definition) { return definition.offer_replacement_session; });
@@ -1500,6 +1519,34 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
     }
 
     const auto id = impl_->store->create_run(config);
+    {
+        // Make the run self-describing: what the publisher declared, and every scenario
+        // that was therefore never started.
+        std::vector<storage::EvidenceEvent> declaration;
+        const auto wall = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        storage::EvidenceEvent capabilities;
+        capabilities.wall_time_unix_ns = wall;
+        capabilities.kind = "publisher_capabilities";
+        capabilities.detail = std::string("fetch=") + (config.publisher_capabilities.fetch ? "true" : "false");
+        declaration.push_back(std::move(capabilities));
+        for (const auto& [skipped_id, reason] : skipped) {
+            storage::EvidenceEvent event;
+            event.wall_time_unix_ns = wall;
+            event.kind = "context_skipped";
+            event.detail = reason;
+            event.scenario_id = skipped_id;
+            declaration.push_back(std::move(event));
+        }
+        try {
+            impl_->store->append_events(id, declaration);
+        } catch (...) {
+            const requirements::ScoreSummary failure{
+                requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+            impl_->store->finalize(id, failure, {});
+            return {RunStartStatus::ListenerError, {}, {}};
+        }
+    }
     auto worker = std::make_unique<Impl::Worker>();
     worker->id = id;
     worker->endpoint = endpoint;
@@ -1523,6 +1570,11 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         return {RunStartStatus::ListenerError, {}, {}};
     }
     return {RunStartStatus::Started, id, endpoint, url, path, protocol};
+}
+
+std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
+    const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id) {
+    return Impl::resolve_raw_probe(manager_config, run_config, id);
 }
 
 bool NativeRunManager::supports(DraftVersion draft) const noexcept {

@@ -41,6 +41,7 @@ Json config_json(const app::RunConfig& config) {
             {"mode", static_cast<unsigned>(config.mode)},
             {"scenarios", config.scenario_ids},
             {"timeout_ms", config.timeout.count()},
+            {"publisher_capabilities", {{"fetch", config.publisher_capabilities.fetch}}},
             {"track", {{"namespace_hex", std::move(names)},
                        {"name_hex", track_name}}}};
 }

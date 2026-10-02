@@ -35,6 +35,10 @@ for what each one requires. For how outcomes and scores work see
 - Requests for unsupported scenarios return HTTP 422; they are never scored as
   conformant.
 
+- A publisher may declare that it does not implement FETCH (`publisher_capabilities`
+  in the run request, or `--publisher-no-fetch` at startup). Scenarios that need
+  FETCH are then skipped, not failed; see [Scenarios that need FETCH](#scenarios-that-need-fetch).
+
 List the executable scenarios (about 165 for draft 18 and 220 for draft 21 at the
 time of writing) with the `/healthz` command in [http-api.md](http-api.md). A
 scenario that needs a `track` and is submitted without one returns 400
@@ -392,6 +396,110 @@ runner answers a request the publisher opened.
 - Draft-21 FETCH response-count profiles require a valid typed reply and
   collection through peer FIN, as for subscriptions above.
 
+### Scenarios that need FETCH
+
+The drafts let an endpoint that is not a relay implement a subset of MOQT
+(draft 18 Section 4, draft 21 Section 1.5), so a live publisher with no cache may
+have no FETCH. A run can declare that (`"publisher_capabilities": {"fetch": false}`
+or the runner flag `--publisher-no-fetch`; see [http-api.md](http-api.md#declaring-publisher-capabilities)).
+Every executable scenario carries a `requires_fetch` flag, shown in the `/healthz`
+`executable_profiles`. It is set for exactly the scenarios whose stimulus sends a
+FETCH message (message type 0x16 in both drafts) or retrieves Objects through one.
+A unit test decodes the stimulus of every executable scenario with the runner's own
+wire code and fails when the flag and the decoded stimulus disagree. Two scenarios
+build their FETCH at run time from the publisher's own reply
+(`receive-fetch-start-beyond-largest-published-object` and
+`fetch-object-previously-observed-as-datagram`); every scenario with such a
+run-time write is pinned in the test with whether it is a FETCH, and the typed
+`fetch-publisher-track-range` is read from its step actions.
+
+`requires_fetch` scenarios, 23 in draft 18:
+
+- `fetch-publisher-track-range`
+- `receive-fetch-with-unknown-type`
+- `receive-joining-fetch-with-unrelated-or-wrong-state-request-id`
+- `cancel-fetch-request-with-open-data-stream`
+- `reject-request-update-for-open-fetch`
+- `fetch-known-first-object-with-nonzero-group-and-object-ids`
+- `fetch-multiple-published-groups-in-each-explicit-order`
+- `publish-and-retrieve-same-object-and-track-immutable-properties`
+- `repeat-immutable-property-with-alternative-varint-encodings-available`
+- `publish-object-with-immutable-properties`
+- `receive-joining-fetch-for-forward-zero-subscription`
+- `receive-forward-state-update-then-joining-fetch`
+- `receive-joining-fetch-for-track-with-no-published-objects`
+- `receive-standalone-fetch-for-track-with-no-published-objects`
+- `receive-fetch-start-beyond-largest-published-object`
+- `fetch-object-previously-observed-as-datagram`
+- `retrieve-same-object-at-distinct-times`
+- `subscribe-to-track-after-observed-object-publication`
+- `publish-existing-track-after-observed-object-publication`
+- `accepted-subscription-update-after-observed-object-publication`
+- `accepted-track-status-after-observed-object-publication`
+- `joining-fetch-after-forward-enabled-and-track-advanced`
+- `retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters`
+
+and 22 in draft 21:
+
+- `d21-cancel-fetch-with-open-request-and-data-streams`
+- `d21-failed-fetch-update-data-reset`
+- `d21-fetch-accepted`
+- `d21-fetch-rejected`
+- `d21-fetch-first-object-flags`
+- `d21-fetch-ascending-groups`
+- `d21-fetch-descending-groups`
+- `d21-fetch-default-group-order`
+- `d21-publish-state-notify-on-fetch`
+- `d21-immutable-property-repeat`
+- `d21-repeat-object-retrieval`
+- `d21-object-immutable-property-singleton`
+- `d21-request-stream-terminal-message-order`
+- `d21-fetch-start-beyond-largest-object`
+- `d21-fetch-track-with-no-published-objects`
+- `d21-fetch-parameters-preserve-payload`
+- `d21-prior-group-gap-repeat`
+- `d21-prior-group-gap-singleton`
+- `d21-prior-object-gap-repeat`
+- `d21-prior-object-gap-singleton`
+- `d21-subscription-forwarding-preference`
+- `d21-fetch-datagram-preference`
+
+What a declaration of no FETCH changes:
+
+- Selecting only such scenarios is refused with 422
+  `scenario_requires_publisher_capability` before any listener or publisher process
+  exists.
+- In a run that also selects other scenarios, the FETCH ones are skipped. They are
+  never given a listener context or a publisher process; the run records one
+  `context_skipped` event per skipped scenario with the detail
+  `publisher declared no FETCH support`. The selection stays as requested.
+- A catalog row is reported `not_applicable` for the run when it names at least one
+  scenario and **every** scenario it names requires FETCH. The row leaves the
+  required, weighted and coverage denominators and the export gives its reason. A
+  row that names any scenario that does not need FETCH is never dropped: it keeps
+  the rule that every named scenario must run, so it stays `not_run` when a FETCH
+  scenario it names was skipped (draft 21 `D21-9-10-MUST-369`, which names
+  `d21-publish-state-notify-on-namespace-request` and
+  `d21-publish-state-notify-on-fetch`, is the only such row today; draft 18 has
+  none). With the current catalogs 27 draft 18 rows and 25 draft 21 rows are
+  `not_applicable` under a no-FETCH declaration.
+- Skipped scenarios and `not_applicable` rows never make a run `error` or `fail`.
+  A run that is otherwise clean is `incomplete` or `pass` by the usual rules. In the
+  TAP export a skipped scenario is `ok N - id # SKIP publisher declared no FETCH
+  support`; the HTML report lists them in a "Publisher capabilities" section and
+  prints each row's reason in text.
+
+A publisher that omits FETCH is not obliged to stay silent: both drafts say a limited
+endpoint SHOULD answer an unsupported message with NOT_SUPPORTED instead of ignoring
+it (draft 18 Section 4, draft 21 Section 1.5). A scenario that sends a FETCH to a
+declared-no-FETCH publisher and requires NOT_SUPPORTED (an optional row) is possible
+future work; it does not exist today, and the runner does not send FETCH to a
+publisher that declared it away.
+
+Fill (draft 21 Section 3.4) is not FETCH: a publisher that backfills a subscription
+opens FETCH-header streams on its own, but the runner sends it no FETCH message, so
+the `d21-fill-*` scenarios are not tagged.
+
 ### Discovery (SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS)
 
 - `subscribe-namespace-at-publisher` and `subscribe-tracks-at-publisher` (draft 18)
@@ -566,7 +674,7 @@ its Track Alias with the fixture track's SUBSCRIBE_OK alias.
 | GOAWAY | The publisher never sent a GOAWAY, or did not migrate to the replacement URI |
 | Announcements, reserved namespaces | The publisher never connected, closed early, or was never induced to attempt the publication |
 | Subscriptions, response counts | A context did not complete (missing FIN, reset-only closure), or only one of the required contexts ran |
-| FETCH | The track lacks the requested Location (for example Group 7, Object 9), or the response was empty or a range marker |
+| FETCH | The track lacks the requested Location (for example Group 7, Object 9), or the response was empty or a range marker. With a no-FETCH declaration: a row that also names a scenario that does not need FETCH, whose FETCH scenario was skipped; rows that name only FETCH scenarios are `not_applicable`, not `not_run` |
 | Discovery | The prerequisite subscription was not established, or response evidence was late or incomplete |
 | Objects and cancellation | The publisher finished a stream before the trigger, so no reset could be observed; no Objects arrived |
 | Filters, fill, MAX_FILTER_RANGES | The publisher did not advertise the capability, or the advertised capacity is too large to exercise |

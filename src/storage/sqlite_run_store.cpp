@@ -249,6 +249,15 @@ std::optional<std::size_t> next_offset(const RunQuery& query, std::size_t item_c
     return query.offset + item_count;
 }
 
+app::PublisherCapabilities read_publisher_capabilities(sqlite3* database, const app::RunId& id) {
+    Statement capabilities(database,
+                           "SELECT fetch FROM run_publisher_capabilities WHERE run_id=?");
+    capabilities.bind(1, id);
+    app::PublisherCapabilities result;  // no row: the run predates the declaration
+    if (capabilities.row()) result.fetch = sqlite3_column_int(capabilities.get(), 0) != 0;
+    return result;
+}
+
 std::optional<app::TrackFixture> read_track_fixture(
     sqlite3* database, const app::RunId& id) {
     Statement fixture(database,
@@ -319,12 +328,12 @@ public:
             if (table_count != 0) {
                 throw std::runtime_error("open SQLite run store: non-empty database has no schema version");
             }
-            Transaction transaction(database.get(), "create SQLite schema version 2");
-            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 2");
+            Transaction transaction(database.get(), "create SQLite schema version 3");
+            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 3");
             transaction.commit();
         }
 
-        const auto version = schema_version_unlocked();
+        auto version = schema_version_unlocked();
         if (version == 1) {
             Transaction transaction(database.get(), "migrate SQLite schema version 1 to 2");
             execute(database.get(),
@@ -341,7 +350,25 @@ public:
                     "ALTER TABLE schema_meta_v2 RENAME TO schema_meta;",
                     "migrate SQLite schema version 1 to 2");
             transaction.commit();
-        } else if (version != 2) {
+            version = 2;
+        }
+        if (version == 2) {
+            // Publisher capabilities are a table of their own, so the runs table is untouched
+            // and existing runs (no row) read back as a fully capable publisher.
+            Transaction transaction(database.get(), "migrate SQLite schema version 2 to 3");
+            execute(database.get(),
+                    "CREATE TABLE run_publisher_capabilities ("
+                    "run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,"
+                    "fetch INTEGER NOT NULL CHECK (fetch IN (0, 1)));"
+                    "CREATE TABLE schema_meta_v3 (version INTEGER NOT NULL CHECK (version = 3));"
+                    "INSERT INTO schema_meta_v3(version) VALUES (3);"
+                    "DROP TABLE schema_meta;"
+                    "ALTER TABLE schema_meta_v3 RENAME TO schema_meta;",
+                    "migrate SQLite schema version 2 to 3");
+            transaction.commit();
+            version = 3;
+        }
+        if (version != 3) {
             throw std::runtime_error("open SQLite run store: unsupported schema version " +
                                      std::to_string(version));
         }
@@ -445,6 +472,13 @@ app::RunId SqliteRunStore::create_run(const app::RunConfig& config) {
         insert_scenario.done("create run selected scenario");
         insert_scenario.reset();
     }
+
+    Statement insert_capabilities(
+        impl_->database.get(),
+        "INSERT INTO run_publisher_capabilities(run_id,fetch) VALUES(?,?)");
+    insert_capabilities.bind(1, id);
+    insert_capabilities.bind(2, config.publisher_capabilities.fetch ? 1 : 0);
+    insert_capabilities.done("create run publisher capabilities");
 
     if (config.track_fixture) {
         Statement insert_fixture(
@@ -640,6 +674,7 @@ RunRecord SqliteRunStore::load(const app::RunId& id) const {
     scenarios.bind(1, id);
     while (scenarios.row()) record.config.scenario_ids.push_back(text(scenarios.get(), 0));
     record.config.track_fixture = read_track_fixture(impl_->database.get(), id);
+    record.config.publisher_capabilities = read_publisher_capabilities(impl_->database.get(), id);
 
     Statement score(
         impl_->database.get(),
@@ -736,6 +771,8 @@ Page<RunSummary> SqliteRunStore::list(RunQuery query) const {
         scenarios.bind(1, summary.id);
         while (scenarios.row()) summary.config.scenario_ids.push_back(text(scenarios.get(), 0));
         summary.config.track_fixture = read_track_fixture(impl_->database.get(), summary.id);
+        summary.config.publisher_capabilities =
+            read_publisher_capabilities(impl_->database.get(), summary.id);
         page.items.push_back(std::move(summary));
     }
     page.next_offset = next_offset(query, page.items.size(), total);

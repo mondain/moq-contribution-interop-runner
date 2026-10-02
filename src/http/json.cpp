@@ -100,7 +100,8 @@ Json config_json(const app::RunConfig& config) {
             {"transport", name(config.transport)},
             {"mode", name(config.mode)},
             {"scenarios", config.scenario_ids},
-            {"timeout_ms", config.timeout.count()}};
+            {"timeout_ms", config.timeout.count()},
+            {"publisher_capabilities", {{"fetch", config.publisher_capabilities.fetch}}}};
     if (config.track_fixture) {
         const auto encode_hex = [](std::string_view bytes) {
             constexpr char digits[] = "0123456789abcdef";

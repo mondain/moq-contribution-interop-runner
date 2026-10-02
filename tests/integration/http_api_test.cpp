@@ -318,6 +318,91 @@ TEST_F(HttpApiTest, ValidatesDraftAndPaginatesRequirements) {
     }
 }
 
+TEST_F(HttpApiTest, ValidatesPublisherCapabilityDeclarations) {
+    const auto post = [&](Json declared) {
+        Json request = {{"draft", 18}, {"transport", "native-quic"}, {"mode", "observed"},
+                        {"scenarios", Json::array({"receive-unknown-message-type"})}, {"timeout_ms", 1000}};
+        if (!declared.is_discarded()) request["publisher_capabilities"] = std::move(declared);
+        const auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
+        EXPECT_TRUE(response);
+        return std::pair{response ? response->status : 0,
+                         response ? Json::parse(response->body) : Json{}};
+    };
+    // Accepted: absent, empty, and a boolean fetch (no listener is configured here, so a
+    // valid request reaches the 503 that follows validation).
+    for (const auto& declared : {Json(Json::value_t::discarded), Json::object(), Json{{"fetch", false}},
+                                 Json{{"fetch", true}}}) {
+        const auto [status, body] = post(declared);
+        EXPECT_EQ(status, 503) << declared.dump() << " " << body;
+    }
+    // Rejected with the typed error: unknown names, non-boolean values, non-objects.
+    for (const auto& declared : {Json{{"relay", true}}, Json{{"fetch", "no"}}, Json{{"fetch", 0}},
+                                 Json{{"fetch", nullptr}}, Json{{"fetch", false}, {"cache", true}},
+                                 Json::array({"fetch"}), Json("fetch"), Json(false), Json(nullptr)}) {
+        const auto [status, body] = post(declared);
+        EXPECT_EQ(status, 400) << declared.dump();
+        EXPECT_EQ(body.at("error").at("code"), "invalid_publisher_capabilities") << declared.dump();
+    }
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+TEST_F(HttpApiTest, RejectsRunsThatSelectOnlyScenariosTheDeclarationRulesOut) {
+    const auto post = [&](Json scenarios, Json declared) {
+        Json request = {{"draft", 18}, {"transport", "native-quic"}, {"mode", "observed"},
+                        {"scenarios", std::move(scenarios)}, {"timeout_ms", 1000},
+                        {"track", {{"namespace_hex", Json::array({"6e"})}, {"name_hex", "74"}}},
+                        {"publisher_capabilities", std::move(declared)}};
+        const auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
+        EXPECT_TRUE(response);
+        return std::pair{response ? response->status : 0,
+                         response ? Json::parse(response->body) : Json{}};
+    };
+    const Json no_fetch = {{"fetch", false}};
+    for (const auto& scenarios : {Json::array({"fetch-publisher-track-range"}),
+                                  Json::array({"receive-fetch-with-unknown-type",
+                                               "cancel-fetch-request-with-open-data-stream"})}) {
+        const auto [status, body] = post(scenarios, no_fetch);
+        EXPECT_EQ(status, 422) << body;
+        EXPECT_EQ(body.at("error").at("code"), "scenario_requires_publisher_capability");
+        const auto message = body.at("error").at("message").get<std::string>();
+        EXPECT_NE(message.find(scenarios.at(0).get<std::string>()), std::string::npos) << message;
+        EXPECT_NE(message.find("fetch"), std::string::npos) << message;
+    }
+    // Capable publisher: the same selection passes validation (503: no listener here).
+    EXPECT_EQ(post(Json::array({"fetch-publisher-track-range"}), Json{{"fetch", true}}).first, 503);
+    // A selection with any independent scenario is accepted; the FETCH ones are skipped later.
+    EXPECT_EQ(post(Json::array({"receive-unknown-message-type", "receive-fetch-with-unknown-type"}), no_fetch).first, 503);
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+TEST_F(HttpApiTest, HealthzExposesRequiresFetchPerProfileAndTheStartupDefault) {
+    const auto health = get_json("/healthz");
+    EXPECT_TRUE(health.at("publisher_capability_defaults").at("fetch").get<bool>());
+    std::size_t tagged = 0;
+    for (const auto& profile : health.at("executable_profiles")) {
+        const auto draft = profile.at("draft").get<unsigned>();
+        const auto scenario = profile.at("scenario").get<std::string>();
+        ASSERT_TRUE(profile.contains("requires_fetch")) << scenario;
+        EXPECT_EQ(profile.at("requires_fetch").get<bool>(), app::scenario_requires_fetch(draft, scenario)) << scenario;
+        tagged += profile.at("requires_fetch").get<bool>() ? 1u : 0u;
+    }
+    EXPECT_GT(tagged, 0u);
+    bool typed_fetch_listed = false;
+    for (const auto& profile : health.at("executable_profiles"))
+        if (profile.at("scenario") == "fetch-publisher-track-range" && profile.at("mode") == "observed") {
+            typed_fetch_listed = true;
+            EXPECT_TRUE(profile.at("requires_fetch"));
+        }
+    EXPECT_TRUE(typed_fetch_listed);
+
+    server_.reset();
+    server_ = std::make_unique<HttpServer>(catalog(18), catalog(21), store_, test_build(),
+        ServerConfig{.port = 0, .default_publisher_capabilities = {.fetch = false}});
+    ASSERT_TRUE(server_->start());
+    client_ = std::make_unique<httplib::Client>("127.0.0.1", server_->port());
+    EXPECT_FALSE(get_json("/healthz").at("publisher_capability_defaults").at("fetch").get<bool>());
+}
+
 TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
     const auto malformed = client_->Post("/api/v1/runs", "{", "application/json");
     ASSERT_TRUE(malformed);
