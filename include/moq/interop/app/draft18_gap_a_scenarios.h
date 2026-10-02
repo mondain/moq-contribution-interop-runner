@@ -9,7 +9,7 @@ namespace moq::interop::app {
 // Scenario IDs executed by the draft-18 gap-A raw probes
 // (include/moq/interop/scenarios/draft18_gap_a.h). Keep in step with
 // gap_a::*_entries(); tests/protocol/draft18_gap_a_registry_test.cpp checks it.
-inline constexpr std::array<std::string_view, 35> kDraft18GapAScenarios{
+inline constexpr auto kDraft18GapAScenarios = std::to_array<std::string_view>({
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "establish-moqt-with-datagram-capable-peer",
@@ -46,10 +46,10 @@ inline constexpr std::array<std::string_view, 35> kDraft18GapAScenarios{
     "receive-control-goaway-with-new-session-uri",
     "subscribe-tracks-with-no-bidirectional-stream-credit",
     "restore-bidi-stream-credit-after-publish-blocked",
-};
+});
 
 // The subset that names a configured track fixture in its stimulus.
-inline constexpr std::array<std::string_view, 28> kDraft18GapATrackScenarios{
+inline constexpr auto kDraft18GapATrackScenarios = std::to_array<std::string_view>({
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "register-delete-then-use-token-alias",
@@ -78,7 +78,7 @@ inline constexpr std::array<std::string_view, 28> kDraft18GapATrackScenarios{
     "withhold-subgroup-acknowledgements-after-application-completion",
     "subscribe-tracks-with-no-bidirectional-stream-credit",
     "restore-bidi-stream-credit-after-publish-blocked",
-};
+});
 
 template <std::size_t A, std::size_t B>
 constexpr std::array<std::string_view, A + B> concat_scenarios(

@@ -1,9 +1,11 @@
 #include "../support/contribution_transcript.h"
 
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/requirements/draft21_evaluators.h"
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <string>
 
 // Hand-derived expectations for the remaining-rows profiles. The expected bytes
@@ -140,6 +142,53 @@ TEST(ContributionResidual, SharedAliasNeedsTwoCopies) {
     refused.reply(refused.stream_of(0), subscribe_ok(5));
     refused.reply(refused.stream_of(1), request_error(0x11), true);
     EXPECT_EQ(judge(probe, windowed(refused)), std::nullopt);
+}
+
+// D21-3-1-MUST-041 lists both alias-assignment scenarios; the publisher's own Track Alias
+// choice decides which one applies, so the other is unscored and one Pass settles the row.
+TEST(ContributionResidual, CopyPerSubscriptionRowIsSettledByTheScenarioThatApplies) {
+    using namespace requirements;
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(source, root / "requirements/draft21.json");
+    const auto state = [&](const std::vector<RawProbeTranscript>& transcripts) {
+        const auto outcomes = evaluate_draft21_raw_probes(catalog, transcripts);
+        const auto found = std::find_if(outcomes.begin(), outcomes.end(),
+                                        [](const auto& outcome) { return outcome.requirement_id == "D21-3-1-MUST-041"; });
+        return found == outcomes.end() ? OutcomeState::NotRun : found->state;
+    };
+    const auto& shared = find_probe(probes(), "d21-overlapping-subscriptions-shared-alias");
+    const auto& distinct = find_probe(probes(), "d21-overlapping-subscriptions-distinct-aliases");
+    const auto shared_run = [&](int copies) {
+        ContributionRun run(shared);
+        run.deliver(0);
+        run.deliver(1);
+        run.reply(run.stream_of(0), subscribe_ok(5));
+        run.reply(run.stream_of(1), subscribe_ok(5));
+        const transport::StreamId streams[] = {kData1, kData2};
+        for (int copy = 0; copy < copies; ++copy)
+            run.reply(streams[copy], subgroup(5, 0, objects_with_ids({1})), true);
+        return windowed(std::move(run));
+    };
+    const auto distinct_run = [&](int copies) {
+        ContributionRun run(distinct);
+        run.deliver(0);
+        run.deliver(1);
+        run.reply(run.stream_of(0), subscribe_ok(5));
+        run.reply(run.stream_of(1), subscribe_ok(6));
+        if (copies > 0) run.reply(kData1, subgroup(5, 0, objects_with_ids({1})), true);
+        if (copies > 1) run.reply(kData2, subgroup(6, 0, objects_with_ids({1})), true);
+        return windowed(std::move(run));
+    };
+    // The only scenario present passes; the other one was not run.
+    EXPECT_EQ(state({shared_run(2)}), OutcomeState::Pass);
+    EXPECT_EQ(state({distinct_run(2)}), OutcomeState::Pass);
+    // Both contexts ran, but only the one matching the publisher's alias choice is scored.
+    EXPECT_EQ(state({shared_run(2), distinct_run(0)}), OutcomeState::Pass);
+    // The only scenario present fails.
+    EXPECT_EQ(state({shared_run(1)}), OutcomeState::Fail);
+    EXPECT_EQ(state({distinct_run(1)}), OutcomeState::Fail);
+    EXPECT_EQ(state({}), OutcomeState::NotRun);
 }
 
 TEST(ContributionResidual, DistinctAliasesNeedOneCopyEach) {
@@ -300,10 +349,17 @@ TEST(ContributionResidual, ObjectsOfTwoSubgroupsNeverShareAStream) {
     // Subgroup ID given by the first Object (type 0x32) is equally fine.
     EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1})),
                                         cconcat({cvi(0x32), cvi(5), cvi(0), objects_with_ids({5, 6})})))), true);
-    // Objects from both Subgroups on one stream mix them.
-    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})), {}))), false);
-    EXPECT_TRUE(probe.definition.response_ready(run(subgroup(5, 0, objects_with_ids({3, 6})), {}).partial()));
-    EXPECT_EQ(judge(probe, run(subgroup(5, 0, objects_with_ids({3, 6})), {}).finish()), false);
+    // Objects from both cells on one stream mix Subgroups when another stream proves the split.
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
+                                        subgroup(5, 0, objects_with_ids({8}), 1)))), false);
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})),
+                                        subgroup(5, 0, objects_with_ids({2}), 1)))), false);
+    // A compliant publisher whose Group 0 is a single Subgroup puts every Object on one
+    // stream; the wire cannot show a second Subgroup there, so nothing is proven.
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2, 3, 4, 5, 6, 7, 8, 9})), {}))),
+              std::nullopt);
+    EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({3, 6})), {}))), std::nullopt);
+    EXPECT_EQ(judge(probe, run(subgroup(5, 0, objects_with_ids({3, 6})), {}).finish()), std::nullopt);
     // A single Subgroup never exercises the split.
     EXPECT_EQ(judge(probe, windowed(run(subgroup(5, 0, objects_with_ids({0, 1, 2})), {}))), std::nullopt);
     // Another Track Alias is not this subscription.
@@ -1034,6 +1090,14 @@ TEST(ContributionResidual, ExpiredTokenAliasIsRetainedUntilDeleted) {
     ExpiredRun fresh = retained;
     fresh.registration = request_ok();
     EXPECT_EQ(expired_outcome(fresh), std::nullopt);
+    // The registration failed for another reason (UNAUTHORIZED, NOT_SUPPORTED): the
+    // credential is not shown to be expired, whatever the Alias use then returns.
+    for (const std::uint8_t code : {0x1, 0x3}) {
+        ExpiredRun unrelated = retained;
+        unrelated.registration = request_error(code);
+        unrelated.use = request_error(0x1);
+        EXPECT_EQ(expired_outcome(unrelated), std::nullopt) << "registration error " << int(code);
+    }
     // The Alias use succeeded or went unanswered.
     ExpiredRun accepted = retained;
     accepted.use = request_ok();

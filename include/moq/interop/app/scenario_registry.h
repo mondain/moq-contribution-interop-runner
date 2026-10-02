@@ -12,7 +12,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 129> kDraft18ExecutableScenarios{
+inline constexpr auto kDraft18ExecutableScenarios = std::to_array<std::string_view>({
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -143,9 +143,9 @@ inline constexpr std::array<std::string_view, 129> kDraft18ExecutableScenarios{
     "publish-track-with-mandatory-property",
     "publish-distinct-content-tracks-in-same-scope",
     "connect-with-empty-host-moqt-uri",
-};
+});
 
-inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
+inline constexpr auto kDraft21ExecutableScenarios = std::to_array<std::string_view>({
     "d21-publisher-request-stream-placement",
     "d21-setup-unknown-options",
     "d21-setup-duplicate-unknown-options",
@@ -254,7 +254,7 @@ inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
     "d21-immutable-property-repeat",
     "d21-repeat-object-retrieval",
     "d21-object-immutable-property-singleton",
-};
+});
 
 // Draft-18 gap-A probes extend the core list; they are all raw probes.
 inline constexpr auto kDraft18AllExecutableScenarios =
@@ -348,9 +348,24 @@ inline bool draft21_contribution_scenario(unsigned draft, std::string_view scena
                   scenario) != std::end(kDraft21ContributionScenarios);
 }
 
+// Registry lists take their size from their content (std::to_array); these checks
+// keep an empty id from sneaking in through a hand-written element count.
+template <std::size_t N>
+constexpr bool all_scenario_ids_set(const std::array<std::string_view, N>& ids) {
+    for (const auto id : ids)
+        if (id.empty()) return false;
+    return true;
+}
+static_assert(all_scenario_ids_set(kDraft18ExecutableScenarios));
+static_assert(all_scenario_ids_set(kDraft18AllExecutableScenarios));
+static_assert(all_scenario_ids_set(kDraft21ExecutableScenarios));
+static_assert(all_scenario_ids_set(kDraft18GapAScenarios));
+static_assert(all_scenario_ids_set(kDraft18GapATrackScenarios));
+static_assert(all_scenario_ids_set(kDraft21GapAnnouncementScenarios));
+static_assert(all_scenario_ids_set(kDraft21GapRawScenarios));
+
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     if (draft == 18) return kDraft18AllExecutableScenarios;
-    if (draft == 18) return kDraft18ExecutableScenarios;
     if (draft == 21) {
         static const std::vector<std::string_view> combined = [] {
             std::vector<std::string_view> all(kDraft21ExecutableScenarios.begin(),
@@ -419,7 +434,7 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 // Draft-18 publisher-contribution probes whose first write names the fixture.
-inline constexpr std::array<std::string_view, 29> kDraft18ContributionTrackScenarios{
+inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::string_view>({
     "accept-subscribe-for-known-publisher-track",
     "accept-forward-one-subscribe-then-publish-matching-object",
     "receive-one-request-update-on-established-publisher-request",
@@ -449,7 +464,8 @@ inline constexpr std::array<std::string_view, 29> kDraft18ContributionTrackScena
     "finish-subscription-with-open-object-streams",
     "publish-track-with-mandatory-property",
     "publish-distinct-content-tracks-in-same-scope",
-};
+});
+static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (draft == 18 && std::find(kDraft18GapATrackScenarios.begin(), kDraft18GapATrackScenarios.end(),

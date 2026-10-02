@@ -14,7 +14,7 @@ namespace moq::interop::app {
 // Scenarios executed by the announcement controller (one scenario per run,
 // not raw probes). Their evidence is the publisher's SETUP and request-stream
 // openings.
-inline constexpr std::array<std::string_view, 19> kDraft21GapAnnouncementScenarios{
+inline constexpr auto kDraft21GapAnnouncementScenarios = std::to_array<std::string_view>({
     "d21-publisher-request-stream-openers",
     "d21-publisher-setup-option-multiplicity",
     "d21-webtransport-publisher-setup",
@@ -34,10 +34,10 @@ inline constexpr std::array<std::string_view, 19> kDraft21GapAnnouncementScenari
     "d21-publisher-key-value-type-deltas",
     "d21-publisher-emitted-namespace-fields",
     "d21-publisher-namespace-routing-announcement",
-};
+});
 
 // Scenarios that execute as raw probe contexts.
-inline constexpr std::array<std::string_view, 21> kDraft21GapRawScenarios{
+inline constexpr auto kDraft21GapRawScenarios = std::to_array<std::string_view>({
     "d21-publisher-request-response-before-fin",
     "d21-established-subscription-publisher-fin",
     "d21-request-stream-terminal-message-order",
@@ -59,7 +59,7 @@ inline constexpr std::array<std::string_view, 21> kDraft21GapRawScenarios{
     "d21-register-token-on-unauthorized-request",
     "d21-register-token-on-other-request-error",
     "d21-setup-register-use-value-fallback",
-};
+});
 
 inline bool gap_raw_scenario(unsigned draft, std::string_view scenario) {
     return draft == 21 &&

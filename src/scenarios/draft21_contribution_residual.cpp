@@ -39,13 +39,21 @@ Bytes location_pair(std::uint64_t group, std::uint64_t object) {
     return result;
 }
 
-// LOCATION_FILTER (0x21, Section 9.20.10): Start Group/Object, then End Group
-// delta and End Object. End Object 0 is open to the end of the End Group.
-Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t last) {
-    auto value = location_pair(group, first);
-    put_vi(value, 0);
-    put_vi(value, last);
+// LOCATION_FILTER (0x21, Section 9.20.10): Start Group/Object, End Group delta and
+// End Object. The range is inclusive (Section 3.3.1); an omitted End Object is the
+// separate all-objects-of-the-End-Group form, while an End Object of 0 ends at
+// Object 0 of the End Group.
+Param location_range(std::uint64_t start_group, std::uint64_t start_object,
+                     std::uint64_t end_group_delta, std::uint64_t end_object) {
+    auto value = location_pair(start_group, start_object);
+    put_vi(value, end_group_delta);
+    put_vi(value, end_object);
     return param_lp(0x21, value);
+}
+
+// A single-Group range [first, last] in one Group.
+Param bounded_filter(std::uint64_t group, std::uint64_t first, std::uint64_t last) {
+    return location_range(group, first, 0, last);
 }
 
 RawProbeDefinition residual_definition() {
@@ -206,7 +214,7 @@ Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Jud
 }
 
 // ---- Section 3.1: one copy per matching subscription (D21-3-1-MUST-041) -----
-// Both subscriptions ask for exactly Group 7, Object 9. The publisher chooses
+// Both subscriptions ask for exactly Group 0, Object 1 (kTargetGroup, kTargetObject). The publisher chooses
 // the Track Aliases, so the same stimulus is judged under whichever alias
 // assignment it produced; a context whose assignment is not the scenario's
 // is not scored.
@@ -264,14 +272,6 @@ Spec concurrent_subscription_spec(const char* scenario, bool shared_alias) {
 // Both subscriptions may share one Track Alias, in which case a stray Object cannot
 // be attributed to a subscription; it is outside every subscription's pass set
 // either way, so it still shows a violation.
-Param location_range(std::uint64_t start_group, std::uint64_t start_object,
-                     std::uint64_t end_group_delta, std::uint64_t end_object) {
-    auto value = location_pair(start_group, start_object);
-    put_vi(value, end_group_delta);
-    put_vi(value, end_object);
-    return param_lp(0x21, value);
-}
-
 // OBJECTID_FILTER (0x26, Sections 8.6 and 9.20.12): SetID 0 and the single
 // inclusive Range [first, last], whose End is delta encoded from its Start.
 Param object_id_range(std::uint64_t first, std::uint64_t last) {
@@ -358,18 +358,28 @@ Spec mixed_subgroup_spec() {
             if (rejected(view, 0)) return {true, std::nullopt};
             const auto alias = alias_of(view, 0);
             if (!alias) return {view.close().has_value(), std::nullopt};
+            // A Subgroup stream carries a single Subgroup ID, so two cells on one stream
+            // are only a violation when something else shows the publisher puts them in
+            // different Subgroups (the cells are the fixture's assumption, not the wire's):
+            // a stream holding just one cell, or two distinct Subgroup IDs among streams.
             std::set<int> cells_seen;
+            std::set<std::uint64_t> subgroup_ids;
+            bool stream_with_both = false;
+            bool stream_with_one = false;
             for (const auto& stream : subgroup_streams(view, *alias)) {
                 std::set<int> cells;
                 for (const auto& object : stream.objects)
                     if (const auto cell = membership(object)) cells.insert(*cell);
-                // A stream names exactly one Subgroup; Objects of two Subgroups on it mix them.
-                if (cells.size() > 1) return {true, false};
+                if (cells.empty()) continue;
+                if (stream.subgroup_id) subgroup_ids.insert(*stream.subgroup_id);
+                (cells.size() > 1 ? stream_with_both : stream_with_one) = true;
                 cells_seen.insert(cells.begin(), cells.end());
             }
+            if (stream_with_both && (stream_with_one || subgroup_ids.size() > 1)) return {true, false};
             if (!view.window_ended()) return {false, std::nullopt};
-            // Both Subgroups must have been observed for the split to be exercised.
-            return {true, cells_seen.size() == 2 ? std::optional<bool>{true} : std::nullopt};
+            // Both Subgroups must have been observed, each on streams of its own, for the
+            // split to be exercised and kept.
+            return {true, cells_seen.size() == 2 && !stream_with_both ? std::optional<bool>{true} : std::nullopt};
         },
         true);
 }
@@ -385,7 +395,10 @@ Param fill_whole_track() {
     return param_lp(0x23, encode_params({param_lp(0x21, {})}));
 }
 
-// LARGEST_OBJECT (parameter 0x9, two vi64 fields) of a SUBSCRIBE_OK.
+// LARGEST_OBJECT (parameter 0x9) of a SUBSCRIBE_OK. A Message Parameter is not a
+// Key-Value-Pair: a Location value is "two consecutive varints (Group, Object)" with
+// no Length (Section 9.20, lines 4732-4735), and SUBSCRIBE_OK carries only EXPIRES
+// (8) and LARGEST_OBJECT (9), so nothing but EXPIRES can precede it.
 std::optional<std::pair<std::uint64_t, std::uint64_t>> largest_object(const View& view, std::size_t write) {
     const auto frames = view.write_frames(write);
     if (frames.empty() || frames.front().type != kSubscribeOk) return std::nullopt;
@@ -1268,8 +1281,13 @@ Spec expired_token_alias_spec() {
         [](const View& view) -> Judgement {
             if (view.write_bytes(0).empty()) return {true, std::nullopt};  // no credential configured
             const auto registration = view.write_frames(0);
-            // The credential must really be expired: a registration that succeeds proves nothing.
-            if (!registration.empty() && registration.front().type != kRequestError) return {true, std::nullopt};
+            // The credential must really be expired: only EXPIRED_AUTH_TOKEN for the
+            // registration shows that. A success or any other error (UNAUTHORIZED,
+            // NOT_SUPPORTED, ...) leaves the precondition unmet.
+            if (!registration.empty()) {
+                const auto registration_code = request_error_code(registration);
+                if (!registration_code || *registration_code != kRequestErrorExpiredToken) return {true, std::nullopt};
+            }
             if (!answered(view, 1)) return {view.close().has_value(), std::nullopt};
             const auto use = view.write_frames(1);
             if (use.empty()) return {true, std::nullopt};

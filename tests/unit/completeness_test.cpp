@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -114,7 +115,7 @@ TEST(CompletenessTest, PartialScenarioOrEvaluatorBindingsKeepRequiredRowUncovere
     EXPECT_TRUE(report.findings.empty());
 }
 
-TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
+TEST(CompletenessTest, ReportsRequiredRowCompletionForBothDrafts) {
     const auto root = std::filesystem::path{MOQ_INTEROP_PROJECT_SOURCE_DIR};
     for (const unsigned draft : {18u, 21u}) {
         const auto source = load_draft_source(
@@ -135,15 +136,11 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
                        (row.strength == Strength::Must || row.strength == Strength::MustNot);
             }));
         EXPECT_EQ(report.required_total, expected_required);
-        EXPECT_LE(report.required_total, 175u);
-        EXPECT_GE(report.required_total, 150u);
-        // Coverage only grows from the 76-row baseline; every uncovered row
-        // must remain a blocking finding so the gate cannot be satisfied by
-        // omission.
-        EXPECT_GE(report.required_covered, 76u);
-        EXPECT_LE(report.required_covered, report.required_total);
-        // A draft may only report complete once every required row is bound.
-        if (report.complete()) EXPECT_EQ(report.required_covered, report.required_total);
+        // Both drafts reach required-row completion: every required row has a binding, so
+        // losing a binding (or a scenario registration) fails here.
+        EXPECT_EQ(report.required_total, draft == 18 ? 171u : 174u);
+        EXPECT_EQ(report.required_covered, report.required_total);
+        EXPECT_TRUE(report.complete());
         const auto blocking = static_cast<std::size_t>(std::count_if(
             report.findings.begin(), report.findings.end(),
             [](const auto& finding) {
@@ -152,6 +149,18 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             }));
         EXPECT_EQ(report.required_total - report.required_covered, blocking);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
+    }
+}
+
+TEST(CompletenessTest, ExecutableScenarioRegistryHasNoEmptyOrDuplicateIds) {
+    for (const unsigned draft : {18u, 21u}) {
+        const auto ids = app::executable_scenarios(draft);
+        EXPECT_FALSE(ids.empty());
+        std::set<std::string_view> seen;
+        for (const auto id : ids) {
+            EXPECT_FALSE(id.empty()) << "draft " << draft;
+            EXPECT_TRUE(seen.insert(id).second) << "draft " << draft << " duplicate " << id;
+        }
     }
 }
 
