@@ -9,7 +9,7 @@
 
 namespace moq::interop::app {
 
-inline constexpr std::array<std::string_view, 73> kDraft18ExecutableScenarios{
+inline constexpr std::array<std::string_view, 119> kDraft18ExecutableScenarios{
     "subscribe-to-publisher-track",
     "subscribe-again-to-established-publisher-track",
     "fetch-publisher-track-range",
@@ -83,6 +83,52 @@ inline constexpr std::array<std::string_view, 73> kDraft18ExecutableScenarios{
     "publish-and-retrieve-same-object-and-track-immutable-properties",
     "repeat-immutable-property-with-alternative-varint-encodings-available",
     "publish-object-with-immutable-properties",
+    // Draft-18 publisher-contribution probe families (gap-closing block).
+    "observe-publisher-setup-options",
+    "observe-webtransport-publisher-setup",
+    "receive-setup-with-unknown-option",
+    "receive-setup-with-duplicate-unknown-options",
+    "setup-unknown-grease-options-and-duplicates",
+    "receive-setup-token-register-exceeding-cache-limit",
+    "receive-oversize-setup-register-then-use-its-alias",
+    "accept-subscribe-for-known-publisher-track",
+    "accept-forward-one-subscribe-then-publish-matching-object",
+    "receive-one-request-update-on-established-publisher-request",
+    "receive-multiple-successful-request-updates-on-one-stream",
+    "publisher-ends-subscription-with-no-data-streams",
+    "receive-joining-fetch-for-forward-zero-subscription",
+    "receive-forward-state-update-then-joining-fetch",
+    "receive-joining-fetch-for-track-with-no-published-objects",
+    "receive-standalone-fetch-for-track-with-no-published-objects",
+    "receive-fetch-start-beyond-largest-published-object",
+    "publisher-redirects-subscribe-namespace",
+    "publish-and-withdraw-namespace-during-discovery",
+    "subscribe-unknown-auth-token-type",
+    "publisher-recovery-track-status-unknown-optional-properties",
+    "publisher-recovery-track-status-unknown-before-invalid-property",
+    "publisher-request-rejected-with-unknown-error",
+    "publisher-request-stream-reset-with-unknown-code",
+    "observe-publisher-padding-stream",
+    "observe-publisher-padding-datagram",
+    "publish-object-with-prior-group-id-gap",
+    "publish-object-with-prior-object-id-gap",
+    "publish-end-of-group-and-end-of-track-status-objects",
+    "publish-complete-finite-subgroup-with-start-location-filter",
+    "observe-publisher-client-goaway",
+    "send-new-request-after-publisher-control-goaway",
+    "publisher-control-goaway-with-pending-request-at-cutoff",
+    "connect-publisher-to-native-uri-with-authority",
+    "connect-publisher-to-native-uri-with-path",
+    "connect-publisher-to-native-uri-with-query",
+    "cancel-subscription-before-next-subgroup-object-is-produced",
+    "advance-start-location-while-subgroup-remains-incomplete",
+    "pause-forwarding-with-an-unsent-subgroup-object",
+    "publisher-terminates-subgroup-before-final-object-production",
+    "fetch-object-previously-observed-as-datagram",
+    "publish-two-simultaneous-tracks",
+    "redeliver-previously-observed-object-in-later-subscription",
+    "receive-subscribe-namespace-denied-by-configured-authorization-policy",
+    "receive-subscribe-tracks-denied-by-configured-authorization-policy",
 };
 
 inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
@@ -256,9 +302,42 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
     return discovery_overlap && std::find(executable_scenarios(draft).begin(),executable_scenarios(draft).end(),scenario) != executable_scenarios(draft).end();
 }
 
+// Draft-18 publisher-contribution probes whose first write names the fixture.
+inline constexpr std::array<std::string_view, 26> kDraft18ContributionTrackScenarios{
+    "accept-subscribe-for-known-publisher-track",
+    "accept-forward-one-subscribe-then-publish-matching-object",
+    "receive-one-request-update-on-established-publisher-request",
+    "receive-multiple-successful-request-updates-on-one-stream",
+    "publisher-ends-subscription-with-no-data-streams",
+    "receive-joining-fetch-for-forward-zero-subscription",
+    "receive-forward-state-update-then-joining-fetch",
+    "receive-joining-fetch-for-track-with-no-published-objects",
+    "receive-standalone-fetch-for-track-with-no-published-objects",
+    "receive-fetch-start-beyond-largest-published-object",
+    "publisher-redirects-subscribe-namespace",
+    "publish-and-withdraw-namespace-during-discovery",
+    "subscribe-unknown-auth-token-type",
+    "publish-object-with-prior-group-id-gap",
+    "publish-object-with-prior-object-id-gap",
+    "publish-end-of-group-and-end-of-track-status-objects",
+    "publish-complete-finite-subgroup-with-start-location-filter",
+    "cancel-subscription-before-next-subgroup-object-is-produced",
+    "advance-start-location-while-subgroup-remains-incomplete",
+    "pause-forwarding-with-an-unsent-subgroup-object",
+    "publisher-terminates-subgroup-before-final-object-production",
+    "fetch-object-previously-observed-as-datagram",
+    "publish-two-simultaneous-tracks",
+    "redeliver-previously-observed-object-in-later-subscription",
+    "receive-subscribe-namespace-denied-by-configured-authorization-policy",
+    "receive-subscribe-tracks-denied-by-configured-authorization-policy",
+};
+
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (draft == 18 && std::find(kDraft18GapATrackScenarios.begin(), kDraft18GapATrackScenarios.end(),
                                  scenario) != kDraft18GapATrackScenarios.end()) return true;
+    if (draft == 18 && std::find(kDraft18ContributionTrackScenarios.begin(),
+                                 kDraft18ContributionTrackScenarios.end(),
+                                 scenario) != kDraft18ContributionTrackScenarios.end()) return true;
     if (immutable_repeat_scenario(draft,scenario) || object_repeat_scenario(draft,scenario)) return true;
     if (fetch_first_object_scenario(draft,scenario) || fetch_group_order_scenario(draft,scenario)) return true;
     if (subscriber_notify_scenario(draft,scenario) ||

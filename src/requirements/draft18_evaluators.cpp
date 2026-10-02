@@ -12,12 +12,14 @@
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/request_goaway.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
 
 #include <algorithm>
 #include <array>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 
 namespace moq::interop::requirements {
 namespace {
@@ -301,6 +303,33 @@ OutcomeState aggregate_raw_profiles(const Requirement& requirement,
     return complete ? OutcomeState::Pass : OutcomeState::NotRun;
 }
 
+// Rows whose catalog also names a typed scenario that observes the same
+// publisher SETUP. Either kind of context can establish them; any failing
+// context fails them.
+bool contribution_alternative_row(std::string_view id) {
+    return id == "D18-10-3-MUST-NOT-001" || id == "D18-10-3-1-1-MUST-NOT-002" ||
+           id == "D18-10-3-1-2-MUST-NOT-002";
+}
+
+OutcomeState combine_contribution_alternative(
+    const Requirement& requirement, std::span<const ScenarioContext> contexts,
+    const std::vector<scenarios::Draft18ContributionProbe>& profiles, OutcomeState typed) {
+    if (typed == OutcomeState::Fail || !contribution_alternative_row(requirement.id)) return typed;
+    Requirement raw_only = requirement;
+    raw_only.scenarios.erase(
+        std::remove_if(raw_only.scenarios.begin(), raw_only.scenarios.end(),
+                       [](const std::string& id) { return id == kSubscribeScenario; }),
+        raw_only.scenarios.end());
+    const auto raw = aggregate_raw_profiles(raw_only, contexts, profiles,
+        [](const auto& profile) { return profile.definition.id; },
+        [](const auto& profile, const auto& context) {
+            return scenarios::evaluate_draft18_contribution_probe(
+                *context.raw_probe, profile, context.webtransport);
+        });
+    if (raw == OutcomeState::Fail) return OutcomeState::Fail;
+    return typed == OutcomeState::NotRun && raw == OutcomeState::Pass ? OutcomeState::Pass : typed;
+}
+
 }  // namespace
 
 std::vector<Outcome> evaluate_draft18(
@@ -324,6 +353,7 @@ std::vector<Outcome> evaluate_draft18(
     const auto object_profiles = scenarios::draft18_object_repeat_probes();
     const auto goaway_profiles = scenarios::draft18_request_goaway_probes();
     const auto gap_a_profiles = scenarios::draft18_gap_a_probes();
+    const auto contribution_profiles = scenarios::draft18_contribution_probes();
     for (const auto& requirement : catalog.requirements) {
         OutcomeState state = OutcomeState::NotRun;
         if (requirement.applicability != Applicability::Applicable) {
@@ -426,6 +456,15 @@ std::vector<Outcome> evaluate_draft18(
                 [](const auto& profile) { return profile.definition.id; },
                 [](const auto& profile, const auto& context) {
                     return scenarios::evaluate_subscription_cancel_probe(*context.raw_probe, profile);
+                });
+        } else if (!contribution_alternative_row(requirement.id) &&
+                   std::any_of(contribution_profiles.begin(), contribution_profiles.end(),
+                       [&](const auto& profile) { return profile.requirement_id == requirement.id; })) {
+            state = aggregate_raw_profiles(requirement, scenarios, contribution_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_draft18_contribution_probe(
+                        *context.raw_probe, profile, context.webtransport);
                 });
         } else if (std::any_of(close_profiles.begin(), close_profiles.end(),
                        [&](const auto& profile) { return profile.requirement_id == requirement.id; })) {
@@ -571,6 +610,7 @@ std::vector<Outcome> evaluate_draft18(
                             .value_or(OutcomeState::NotRun);
             }
         }
+        state = combine_contribution_alternative(requirement, scenarios, contribution_profiles, state);
         outcomes.push_back({requirement.id, state});
     }
     return outcomes;
@@ -648,6 +688,11 @@ std::vector<ExecutableBinding> draft18_executable_bindings() {
                           {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }
     for (const auto& profile : scenarios::draft18_gap_a_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    // Draft-18 publisher-contribution probe families (gap-closing block).
+    for (const auto& profile : scenarios::draft18_contribution_probes()) {
         result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
                           {"raw_probe_stimulus", "raw_probe_transport_event"}});
     }

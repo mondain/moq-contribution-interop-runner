@@ -542,3 +542,82 @@ for an initial aggregate exceeding the advertised positive cap, the omitted
 SETUP option default of zero, and a REQUEST_UPDATE adding SetID 1 while
 retaining the acknowledged subscription's SetID 0 filters. The last context
 exceeds the concurrent cap even though the update itself adds only one range.
+
+## Draft-18 publisher-contribution probes
+
+These raw probes (`src/scenarios/draft18_contribution*.cpp`) cover the draft-18
+publisher requirements about SETUP, GOAWAY, subscriptions, FETCH, discovery,
+data streams and unknown extensible values. Each context is a fresh session at
+the same endpoint. A probe scores `PASS` or `FAIL` only on wire evidence that
+establishes the rule; evidence that is missing, early, ambiguous or that fails a
+stated precondition leaves the row `NOT_RUN`. Several rows need the publisher
+(or its adapter, which receives the scenario ID) to perform an action the runner
+cannot force; those probes wait for it and stay `NOT_RUN` if it never happens.
+
+- SETUP: `observe-publisher-setup-options` inspects the publisher's own SETUP
+  for repeated option types (the SETUP is parsed without the duplicate check so a
+  repeat is visible). `observe-webtransport-publisher-setup` fails AUTHORITY or
+  PATH over WebTransport and is `NOT_RUN` on native QUIC. These rows also name a
+  typed scenario; either kind of context can establish them and any failing
+  context fails them. `receive-setup-with-unknown-option`,
+  `receive-setup-with-duplicate-unknown-options` and
+  `setup-unknown-grease-options-and-duplicates` send GREASE options `0x9D` and
+  `0x11C` in SETUP, then a SUBSCRIBE_NAMESPACE; a REQUEST_OK or REQUEST_ERROR
+  passes and an application close fails. The two token-cache probes send a
+  64-byte REGISTER in SETUP (cost 80 bytes) and apply only when the publisher's
+  MAX_AUTH_TOKEN_CACHE_SIZE is below that. The alias probe scores the
+  UNKNOWN_AUTH_TOKEN_ALIAS rejection only through the configured compatibility
+  code (draft 18 assigns no REQUEST_ERROR code); an accepted request fails.
+- URI: `connect-publisher-to-native-uri-with-{authority,path,query}` compare the
+  publisher's SETUP AUTHORITY and PATH with the URI the runner named for the
+  context (`context_ready` and the `raw_probe_connection_uri` evidence event).
+  The query scenario appends `?interop=1` to that URI, so the publisher must be
+  started with the URI given for that context. WebTransport contexts are `NOT_RUN`.
+- GOAWAY: `observe-publisher-client-goaway` checks every GOAWAY the publisher
+  sends for an empty New Session URI. `send-new-request-after-publisher-control-goaway`
+  and `publisher-control-goaway-with-pending-request-at-cutoff` wait for a control
+  GOAWAY from the publisher, then send a request (Request ID 1, or the first odd
+  ID at the cutoff) and require REQUEST_ERROR `GOING_AWAY` (0x6).
+  `D18-10-4-MUST-004` (reconnect to the GOAWAY URI) is not executable: the raw
+  probe controller and the native transport serve exactly one connection per
+  context, so a replacement session cannot be observed.
+- Subscriptions and FETCH (fixture track): a SUBSCRIBE must be answered with
+  SUBSCRIBE_OK (a refusal says nothing); a forwarded subscription must deliver an
+  Object on its SUBSCRIBE_OK alias; REQUEST_UPDATE gets exactly one reply (a
+  quiet window of a quarter of `timeout_ms`, at most 50 ms, follows the first
+  reply) and three coalesced updates get three REQUEST_OKs unless one
+  REQUEST_ERROR answers the batch. A Forward State 0 subscription's PUBLISH_DONE
+  must carry Stream Count 0 when no data stream was opened. Joining FETCH of a
+  Forward State 0 subscription, and FETCH on an empty track or beyond the Largest
+  Object, require INVALID_RANGE; the empty-track rows apply only when
+  SUBSCRIBE_OK has no LARGEST_OBJECT, and the beyond-largest row builds its
+  Start Location from the reported LARGEST_OBJECT. The update-then-joining-FETCH
+  row compares FETCH_OK's End Location with the LARGEST_OBJECT in
+  REQUEST_UPDATE_OK. A DOES_NOT_EXIST reply to a FETCH of a track that was just
+  subscribed fails; other error codes are inconclusive.
+- Discovery: a REDIRECT reply to SUBSCRIBE_NAMESPACE must leave the Track Name
+  empty; NAMESPACE_DONE must follow its NAMESPACE. The two authorization probes send
+  token type 0 with value `interop-denied`; the publisher must be configured to
+  refuse that token, and a REQUEST_OK then fails (any REQUEST_ERROR passes).
+- Data plane: padding streams and datagrams are observed passively; gap
+  Properties are counted in the mutable list and inside Immutable Properties;
+  non-normal status Objects must have no payload; a subgroup that delivered
+  End of Group or End of Track must close with FIN. Cancelling the subscription,
+  moving the Start Location past an open subgroup, or setting Forward State 0
+  must reset a subgroup that was open and incomplete when the trigger was sent
+  (a FIN is `NOT_RUN`, since it cannot show every Object was delivered). A
+  subgroup closed with FIN that later continues on another stream fails. The
+  datagram-fetch probe fetches an Object first seen as a datagram and requires
+  Serialization Flags bit 0x40; the redelivery probe ends the first subscription,
+  subscribes again from the observed Object, and compares Forwarding Preferences.
+- Publisher-initiated flows wait for the publisher's own request: a recovery
+  TRACK_STATUS answered with unknown optional Properties (ascending types
+  `0x00`, `0x01`, known `0x22` = 1, `0x9D`, `0x11C`) must leave the session
+  usable, and the same reply with invalid `0x22` = 0 after the unknown types must
+  close with PROTOCOL_VIOLATION (any other close code means the unknown
+  Properties were not skipped). A PUBLISH or PUBLISH_NAMESPACE rejected with
+  unknown REQUEST_ERROR `0x9D`, and a request stream stopped with unknown code
+  `0x9D` (sent as STOP_SENDING), must not close the session. A follow-up
+  SUBSCRIBE_NAMESPACE with a typed reply is the survival proof. The
+  simultaneous-tracks probe accepts one PUBLISH and compares its Track Alias
+  with the fixture track's SUBSCRIBE_OK alias.

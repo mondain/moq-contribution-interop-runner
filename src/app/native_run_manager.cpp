@@ -21,6 +21,7 @@
 #include "moq/interop/scenarios/fetch_group_order.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
+#include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft21_close.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
@@ -451,11 +452,18 @@ public:
                (result.status == DriverStatus::Exited && result.exit_code.value_or(1) != 0);
     }
 
-    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config) const {
+    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config,
+                             std::string_view scenario = {}) const {
         const auto host = worker->endpoint.address.find(':') != std::string::npos
             ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
-        return (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
+        auto uri = (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
                host + ":" + std::to_string(worker->endpoint.port) + "/moq";
+        // Some contribution scenarios check how the publisher reports a URI query.
+        if (run_config.draft == DraftVersion::Draft18 && run_config.transport == TransportKind::NativeQuic) {
+            const auto query = scenarios::draft18_contribution_connection_query(scenario);
+            if (!query.empty()) uri += "?" + std::string(query);
+        }
+        return uri;
     }
 
     void stamp_context_event(Worker* worker, storage::EvidenceEvent& event) const {
@@ -485,7 +493,7 @@ public:
         request.arguments = config.driver_arguments;
         request.run_id = worker->id;
         request.scenario_id = id;
-        request.endpoint = endpoint_uri(worker, run_config);
+        request.endpoint = endpoint_uri(worker, run_config, id);
         request.draft = run_config.draft;
         request.transport = run_config.transport;
         request.track = *run_config.track_fixture;
@@ -570,7 +578,7 @@ public:
                 }
                 if (worker->stop_requested) break;
                 append_context_event(worker, current_id, "context_ready",
-                    "endpoint=" + endpoint_uri(worker, run_config) +
+                    "endpoint=" + endpoint_uri(worker, run_config, current_id) +
                     " reconnect=fresh-session publisher_identity=unverified");
                 if (worker->stop_requested) break;
                 if (run_config.mode == RunMode::Driven)
@@ -766,6 +774,7 @@ public:
             scenarios::RawProbeClock::now() >= deadline)
             transcript.timed_out = true;
         transcript.unknown_auth_token_alias_compatibility_code = config.unknown_auth_token_alias_compatibility_code;
+        transcript.connection_uri = endpoint_uri(worker, run_config, transcript.scenario_id);
         storage::EvidenceEvent stimulus;
         stimulus.scenario_id = transcript.scenario_id;
         stimulus.connection_id = worker->connection_id;
@@ -789,6 +798,14 @@ public:
         append_write(transcript.setup);
         for (const auto& write : transcript.writes) append_write(write);
         store->append_events(worker->id,std::span(&stimulus,1));
+        if (run_config.draft == DraftVersion::Draft18 &&
+            scenarios::draft18_contribution_scenario(transcript.scenario_id)) {
+            storage::EvidenceEvent uri = stimulus;
+            uri.kind = "raw_probe_connection_uri";
+            uri.detail = "connection_uri=" + *transcript.connection_uri +
+                         " ordinal=" + std::to_string(worker->context_ordinal);
+            store->append_events(worker->id,std::span(&uri,1));
+        }
         const auto request_profiles = run_config.draft == DraftVersion::Draft18
             ? scenarios::draft18_request_profiles() : scenarios::draft21_request_profiles();
         const auto request_profile = std::find_if(request_profiles.begin(), request_profiles.end(),
@@ -809,6 +826,21 @@ public:
 
     std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
         const RunConfig& run_config, std::string_view id) const {
+        if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id)) {
+            std::vector<std::vector<std::byte>> contribution_namespace;
+            std::vector<std::byte> contribution_name{std::byte{'x'}};
+            if (run_config.track_fixture) {
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    contribution_namespace.push_back(bytes_of(field));
+                contribution_name = bytes_of(run_config.track_fixture->track_name);
+            }
+            auto contributions = scenarios::draft18_contribution_probes(
+                run_config.timeout, contribution_namespace, contribution_name);
+            const auto found = std::find_if(contributions.begin(), contributions.end(),
+                [&](const auto& profile) { return profile.definition.id == id; });
+            if (found == contributions.end()) throw std::invalid_argument("unknown contribution probe");
+            return std::move(found->definition);
+        }
         if (request_goaway_scenario(static_cast<unsigned>(run_config.draft),id)) {
             auto profiles = run_config.draft == DraftVersion::Draft18
                 ? scenarios::draft18_request_goaway_probes(run_config.timeout)
@@ -1082,6 +1114,13 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             std::vector<std::vector<std::byte>> fields;
             for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
             if (!scenarios::fetch_first_object_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
+                return {RunStartStatus::InvalidConfig, {}, {}};
+        }
+        if (config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id) &&
+            config.track_fixture) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
+            if (!scenarios::draft18_contribution_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
                 return {RunStartStatus::InvalidConfig, {}, {}};
         }
         if (discovery_overlap_scenario(draft, id)) {
