@@ -209,7 +209,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-76/175 draft-18 and 76/175 draft-21 applicable, testable MUST/MUST NOT rows
+102/175 draft-18 and 76/175 draft-21 applicable, testable MUST/MUST NOT rows
 have executable bindings for every named scenario and evaluator. Partially
 registered families remain incomplete. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
@@ -256,6 +256,50 @@ FETCH stream prove the first ordinary Object. Missing Group or Object ID flags
 fail only the corresponding requirement. Complete typed data at 7/9 passes;
 empty responses, range markers, other locations, and incomplete evidence remain
 NOT_RUN. Object bytes may arrive before FETCH_OK.
+
+Draft-18 gap-A probes close further required rows with one raw context each.
+Their verdicts rest only on observed bytes: silence, early closes by the runner,
+and missing prerequisites stay `NOT_RUN`, never a failure.
+- Setup and session: `receive-setup-with-unknown-option` sends the GREASE
+  option `0x9D` and requires a typed SUBSCRIBE_OK/REQUEST_ERROR instead of a
+  PROTOCOL_VIOLATION close (`D18-10-3-MUST-001`).
+  `complete-publisher-requests-while-session-remains-open` finishes a
+  TRACK_STATUS and fails if the publisher's control stream is FINed or reset
+  (`D18-3-3-MUST-NOT-002`). `establish-moqt-with-datagram-capable-peer` passes
+  on an established session with datagram capacity; the listener closes
+  non-negotiating peers before any MOQT evidence exists (`D18-3-1-MUST-001`).
+  `native-quic-publisher-client-setup-from-moqt-uri` requires AUTHORITY and
+  PATH options in a native-QUIC client's SETUP and is unsupported over
+  WebTransport (`D18-3-2-MUST-001`).
+- Token aliases (`D18-10-2-2-MUST-001/002/009`) send REGISTER only when the
+  publisher's SETUP advertises `MAX_AUTH_TOKEN_CACHE_SIZE` for the 20-byte
+  entry, then DELETE/USE_ALIAS on later TRACK_STATUS requests after each
+  response. The unknown-alias case needs the compatibility code described below;
+  a rejected registering request uses a track the publisher cannot have.
+- Discovery and placement: SUBSCRIBE_NAMESPACE response ordering
+  (`D18-6-1-MUST-002`), NAMESPACE for exact then proper-prefix subscriptions
+  (`D18-6-2-MUST-001`, the first stream is finished before the second prefix to
+  avoid PREFIX_OVERLAP), non-empty namespace fields and first-message placement
+  of PUBLISH (`D18-2-4-1-MUST-001`, `D18-10-MUST-002`) after SUBSCRIBE_TRACKS
+  (sent with FORWARD 0 so no Objects flow),
+  a SUBSCRIBE crossing a still-pending PUBLISH rejected with
+  DUPLICATE_SUBSCRIPTION (`D18-5-1-MUST-005`), and passively observed
+  PUBLISH_NAMESPACE placement and explicitness (`D18-10-MUST-005`,
+  `D18-9-5-MUST-003`).
+- Objects: with the Group 7/Object 9 fixture, two FETCHes compare payload bytes
+  (`D18-2-1-MUST-NOT-001`) and LARGEST_OBJECT must appear in SUBSCRIBE_OK,
+  PUBLISH, REQUEST_UPDATE_OK and TRACK_STATUS_OK once a FETCH delivered that
+  Object (`D18-10-2-11-MUST-001..004`). NextGroupStart subscriptions check the
+  FIRST_OBJECT bit and Subgroup stream uniqueness after a Group rollover
+  (`D18-2-2-MUST-001`, `D18-2-2-MUST-NOT-002`). A SUBSCRIBE for an absent track
+  must deliver no objects (`D18-5-1-1-MUST-NOT-002`); an AbsoluteRange for the
+  Group after the TRACK_STATUS Largest Object must deliver nothing outside it
+  (`D18-5-1-2-MUST-NOT-001`); a joining FETCH after a Forward 0 to 1 update must end at the
+  REQUEST_UPDATE_OK Largest Object once TRACK_STATUS shows the track advanced;
+  the subscription uses a far-future AbsoluteStart so no Object bytes accumulate
+  (`D18-5-1-MUST-003`). Parameter-block probes pass only when the publisher's
+  TRACK_STATUS_OK or PUBLISH carries several parameters and fail on a repeated
+  or overflowing Type Delta (`D18-10-2-MUST-001`, `D18-10-2-MUST-NOT-001`).
 
 Draft-21 FETCH response-count profiles cover accepted and rejected requests.
 They require a valid typed reply on the actual request stream and collect

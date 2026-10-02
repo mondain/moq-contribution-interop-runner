@@ -215,7 +215,13 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_peer_close.cpp
     src/scenarios/draft21_close.cpp
     src/scenarios/draft18_close.cpp
-    src/scenarios/draft21_announcement.cpp)
+    src/scenarios/draft21_announcement.cpp
+    # draft-18 gap-A probes
+    src/scenarios/draft18_gap_a.cpp
+    src/scenarios/draft18_gap_a_common.cpp
+    src/scenarios/draft18_gap_a_setup.cpp
+    src/scenarios/draft18_gap_a_discovery.cpp
+    src/scenarios/draft18_gap_a_object.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -389,6 +395,28 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME session-transport-header
              COMMAND moq-interop-session-transport-header-tests)
 
+
+    # draft-18 gap-A probe tests
+    foreach(gap_a_test IN ITEMS setup discovery object registry)
+        add_executable(moq-interop-draft18-gap-a-${gap_a_test}-tests
+            tests/protocol/draft18_gap_a_${gap_a_test}_test.cpp)
+        target_include_directories(moq-interop-draft18-gap-a-${gap_a_test}-tests PRIVATE
+            "${PROJECT_SOURCE_DIR}/tests")
+        target_link_libraries(moq-interop-draft18-gap-a-${gap_a_test}-tests PRIVATE
+            moq-interop-scenarios GTest::gtest_main)
+        add_test(NAME draft18-gap-a-${gap_a_test}
+                 COMMAND moq-interop-draft18-gap-a-${gap_a_test}-tests)
+    endforeach()
+
+    add_executable(moq-interop-draft18-gap-a-native-tests
+        tests/integration/draft18_gap_a_native_test.cpp)
+    target_link_libraries(moq-interop-draft18-gap-a-native-tests PRIVATE
+        moq-interop-test-client moq-interop-runs GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft18-gap-a-native-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft18-gap-a-native COMMAND moq-interop-draft18-gap-a-native-tests)
+    set_tests_properties(draft18-gap-a-native PROPERTIES RESOURCE_LOCK "native-test-ports")
 
     add_executable(moq-interop-fetch-probe-tests tests/protocol/fetch_probe_test.cpp)
     target_link_libraries(moq-interop-fetch-probe-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)

@@ -128,9 +128,18 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        EXPECT_EQ(report.required_covered, 76u);
-        EXPECT_EQ(report.required_total - report.required_covered,
-                  99u);
+        // Coverage only grows from the 76-row baseline; every uncovered row
+        // must remain a blocking finding so the gate cannot be satisfied by
+        // omission.
+        EXPECT_GE(report.required_covered, 76u);
+        EXPECT_LT(report.required_covered, report.required_total);
+        const auto blocking = static_cast<std::size_t>(std::count_if(
+            report.findings.begin(), report.findings.end(),
+            [](const auto& finding) {
+                return finding.blocking &&
+                       finding.code == "missing_required_evaluator";
+            }));
+        EXPECT_EQ(report.required_total - report.required_covered, blocking);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
     }
 }

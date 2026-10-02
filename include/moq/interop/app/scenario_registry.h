@@ -1,5 +1,7 @@
 #pragma once
 
+#include "moq/interop/app/draft18_gap_a_scenarios.h"
+
 #include <algorithm>
 #include <array>
 #include <span>
@@ -194,8 +196,12 @@ inline constexpr std::array<std::string_view, 108> kDraft21ExecutableScenarios{
     "d21-object-immutable-property-singleton",
 };
 
+// Draft-18 gap-A probes extend the core list; they are all raw probes.
+inline constexpr auto kDraft18AllExecutableScenarios =
+    concat_scenarios(kDraft18ExecutableScenarios, kDraft18GapAScenarios);
+
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
-    if (draft == 18) return kDraft18ExecutableScenarios;
+    if (draft == 18) return kDraft18AllExecutableScenarios;
     if (draft == 21) return kDraft21ExecutableScenarios;
     return {};
 }
@@ -251,6 +257,8 @@ inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario
 }
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 18 && std::find(kDraft18GapATrackScenarios.begin(), kDraft18GapATrackScenarios.end(),
+                                 scenario) != kDraft18GapATrackScenarios.end()) return true;
     if (immutable_repeat_scenario(draft,scenario) || object_repeat_scenario(draft,scenario)) return true;
     if (fetch_first_object_scenario(draft,scenario) || fetch_group_order_scenario(draft,scenario)) return true;
     if (subscriber_notify_scenario(draft,scenario) ||

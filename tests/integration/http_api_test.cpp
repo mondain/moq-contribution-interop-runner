@@ -5,6 +5,7 @@
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/storage/run_store.h"
 
 #include <gtest/gtest.h>
@@ -146,7 +147,12 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 718);
+    // Each gap-A scenario is advertised for observed and driven mode; the
+    // native-only ones omit WebTransport.
+    std::size_t gap_a_profiles = 0;
+    for (const auto& probe : scenarios::draft18_gap_a_probes())
+        gap_a_profiles += probe.native_only ? 2 : 4;
+    ASSERT_EQ(health.at("executable_profiles").size(), 718 + gap_a_profiles);
     for (const auto& profile : health.at("executable_profiles")) {
         EXPECT_TRUE(app::executable_scenario(
             profile.at("draft").get<unsigned>(),
@@ -194,8 +200,9 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
                   health.at("executable_profiles").at(index).at("draft"));
         EXPECT_FALSE(profile.at("configured"));
     }
-    for (std::size_t index = 0; index < 359; ++index) {
-        const auto& profile = health.at("executable_profiles").at(index + 359);
+    const auto observed_profiles = (359 + gap_a_profiles / 2);
+    for (std::size_t index = 0; index < observed_profiles; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + observed_profiles);
         EXPECT_EQ(profile.at("mode"), "driven");
         EXPECT_EQ(profile.at("transport"),
                   health.at("executable_profiles").at(index).at("transport"));
@@ -218,6 +225,7 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     EXPECT_EQ(document.at("schema_version"), 1);
     EXPECT_EQ(document.at("source_revision"), test_build().source_revision);
     ASSERT_EQ(document.at("drafts").size(), 2);
+    std::vector<std::string> coverage_labels;
     for (const unsigned draft : {18u, 21u}) {
         const auto current = catalog(draft);
         const auto bindings = draft == 18
@@ -229,6 +237,8 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
         EXPECT_EQ(item.at("draft"), draft);
         EXPECT_EQ(item.at("source_sha256"), current->source_sha256);
         EXPECT_EQ(item.at("catalog_rows"), current->requirements.size());
+        coverage_labels.push_back(std::to_string(audit.required_covered) + "/" +
+                                  std::to_string(audit.required_total));
         EXPECT_EQ(item.at("required_covered"), audit.required_covered);
         EXPECT_EQ(item.at("required_total"), audit.required_total);
         EXPECT_EQ(item.at("optional_covered"), audit.optional_covered);
@@ -251,8 +261,8 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     ASSERT_TRUE(page);
     EXPECT_EQ(page->status, 200);
     EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
-    EXPECT_NE(page->body.find("76/175"), std::string::npos);
-    EXPECT_NE(page->body.find("76/175"), std::string::npos);
+    for (const auto& label : coverage_labels)
+        EXPECT_NE(page->body.find(label), std::string::npos) << label;
 }
 
 TEST_F(HttpApiTest, ScoredRowWithoutEvaluatorEvidenceRemainsNotRun) {
