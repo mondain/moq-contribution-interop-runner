@@ -64,7 +64,8 @@ elif [[ "$draft" == 21 && "$transport" == webtransport ]]; then
         d21-overlapping-subscriptions-*|d21-forward-location-and-range-filter-conjunction|\
         d21-subscribe-multiple-subgroups|d21-fill-fails-before-first-object|\
         d21-cancel-subscription-with-concurrent-fill-streams|\
-        d21-subscribe-tracks-publish-skipped-then-capacity-recovers) forward=0 ;;
+        d21-subscribe-tracks-publish-skipped-then-capacity-recovers|\
+        d21-subgroup-completion-withheld-acknowledgments) forward=0 ;;
     esac
     args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
           --namespace media --draft "$draft" --forward "$forward"

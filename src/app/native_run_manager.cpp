@@ -411,6 +411,8 @@ public:
         if (limits.max_streams_bidi)
             quic.initial_max_streams_bidi = *limits.max_streams_bidi +
                 (run_config.transport == TransportKind::WebTransport ? 1 : 0);
+        if (limits.max_stream_data_uni) quic.initial_max_stream_data_uni = *limits.max_stream_data_uni;
+        quic.hold_uni_stream_credit = limits.hold_uni_stream_credit;
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
         quic.certificate_path = config.certificate_path;
@@ -612,7 +614,7 @@ public:
                 current_id = definitions[index].id;
                 worker->context_ordinal = index + 1;
                 worker->connection_id.clear();
-                if (index != 0 || definitions[index].listener_limits.max_streams_bidi) {
+                if (index != 0 || definitions[index].listener_limits.any()) {
                     // Cleanup events belong outside the frozen proof of the preceding context.
                     listener->close(0, {});
                     const auto cleanup_deadline = scenarios::RawProbeClock::now() + 20ms;

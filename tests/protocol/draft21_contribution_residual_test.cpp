@@ -76,7 +76,8 @@ TEST(ContributionResidual, RegistryAndBindingsCoverTheNewScenarios) {
           "d21-reject-publish-before-object-production", "d21-rejected-subscribe-no-delivery",
           "d21-publisher-update-credit-limit", "d21-publisher-update-credit-per-stream",
           "d21-publisher-update-zero-unlimited", "d21-publisher-client-goaway-control",
-          "d21-publisher-client-goaway-request", "d21-publisher-delete-with-pending-alias-uses"}) {
+          "d21-publisher-client-goaway-request", "d21-publisher-delete-with-pending-alias-uses",
+          "d21-subgroup-completion-withheld-acknowledgments"}) {
         EXPECT_TRUE(app::draft21_contribution_scenario(21, scenario)) << scenario;
         EXPECT_TRUE(app::raw_probe_scenario(21, scenario)) << scenario;
         EXPECT_NO_THROW(find_probe(probes(), scenario)) << scenario;
@@ -388,6 +389,13 @@ TEST(ContributionResidual, FillWaitsForTheWarmUpSubscriptionToDeliver) {
     silent.reply(kData1, subgroup(5, 0, objects_with_ids({0})));
     transcript = silent.partial();
     EXPECT_TRUE(gate({std::span<const RawProbeAcceptedWrite>(transcript.writes).first(1), transcript.events}));
+    // Only the stream header has to have arrived: held credit can stop an Object short.
+    ContributionRun header_only(probe);
+    header_only.deliver(0);
+    header_only.reply(header_only.stream_of(0), subscribe_ok(5));
+    header_only.reply(kData1, cbytes({0x30, 5, 0}));
+    transcript = header_only.partial();
+    EXPECT_TRUE(gate({std::span<const RawProbeAcceptedWrite>(transcript.writes).first(1), transcript.events}));
     // An Object on another Track Alias is not this subscription's delivery.
     ContributionRun other(probe);
     other.deliver(0);
@@ -401,6 +409,9 @@ TEST(ContributionResidual, FillWaitsForTheWarmUpSubscriptionToDeliver) {
 TEST(ContributionResidual, CancellationScenarioOpensTwoFillsThenStopsTheRequest) {
     const auto& probe = find_probe(probes(), "d21-cancel-subscription-with-concurrent-fill-streams");
     EXPECT_EQ(probe.requirement_id, "D21-3-4-1-MUST-067");
+    // Stream credit is held at 64 bytes so a fill longer than that stays open.
+    EXPECT_EQ(probe.definition.listener_limits.max_stream_data_uni, std::optional<std::uint64_t>{64});
+    EXPECT_TRUE(probe.definition.listener_limits.hold_uni_stream_credit);
     ASSERT_EQ(probe.definition.writes.size(), 4u);
     EXPECT_EQ(probe.definition.writes[1].bytes,
               cbytes({3, 0, 11, 3, 0, 1, 'x', 2, 0x10, 1, 0x13, 2, 0x21, 0}));
@@ -843,6 +854,57 @@ TEST(ContributionResidual, DeleteWaitsForEveryAnswerToAnAliasUse) {
     other.reply(0, update_with(3, token_parameter(use_alias_token(2))));
     other.reply(0, update_with(5, token_parameter(delete_token(1))));
     EXPECT_EQ(judge(probe, windowed(other)), std::nullopt);
+}
+
+// ---- Section 5.2 lines 1880-1890 -----------------------------------------------------------------------
+TEST(ContributionResidual, SubgroupTimeoutScenarioHoldsStreamCreditAndAsksForATimeout) {
+    const auto& probe = find_probe(probes(), "d21-subgroup-completion-withheld-acknowledgments");
+    EXPECT_EQ(probe.requirement_id, "D21-5-2-MUST-130");
+    EXPECT_EQ(probe.definition.listener_limits.max_stream_data_uni, std::optional<std::uint64_t>{64});
+    EXPECT_TRUE(probe.definition.listener_limits.hold_uni_stream_credit);
+    ASSERT_EQ(probe.definition.writes.size(), 1u);
+    // SUBGROUP_DELIVERY_TIMEOUT (0x06) of 200 ms (vi64 0x80c8), FORWARD=1 (delta 0x0a)
+    // and a Location filter for all of Group 0 (delta 0x11, three fields).
+    EXPECT_EQ(probe.definition.writes[0].bytes,
+              cbytes({3, 0, 15, 1, 0, 1, 'x', 3, 6, 0x80, 0xc8, 0x0a, 1, 0x11, 3, 0, 0, 0}));
+}
+
+TEST(ContributionResidual, AnUncommittedSubgroupMustBeResetWhenItsTimerExpires) {
+    const auto& probe = find_probe(probes(), "d21-subgroup-completion-withheld-acknowledgments");
+    const auto stalled = [&](bool reset, bool fin) {
+        ContributionRun run(probe);
+        run.deliver(0);
+        run.reply(run.stream_of(0), subscribe_ok(5));
+        // Group 0's first Object arrives truncated at the held credit.
+        run.reply(kData1, subgroup(5, 0, object_data(0, Bytes(100, std::byte{'o'}))), fin);
+        if (reset) run.event(transport::PeerResetEvent{kData1, 0x0});
+        return run;
+    };
+    // Reset while unfinished: the timer was honoured, whatever the code.
+    EXPECT_EQ(judge(probe, stalled(true, false).finish()), true);
+    EXPECT_TRUE(probe.definition.response_ready(stalled(true, false).partial()));
+    // Still open when the window ends, long after the 200 ms timer: never reset.
+    EXPECT_FALSE(probe.definition.response_ready(stalled(false, false).partial()));
+    EXPECT_EQ(judge(probe, windowed(stalled(false, false))), false);
+    EXPECT_EQ(judge(probe, stalled(false, false).finish()), std::nullopt);
+    // A stream that finished was fully committed; there is nothing to time out.
+    EXPECT_EQ(judge(probe, windowed(stalled(false, true))), std::nullopt);
+    // Another Track Alias is not this subscription.
+    ContributionRun other(probe);
+    other.deliver(0);
+    other.reply(other.stream_of(0), subscribe_ok(5));
+    other.reply(kData1, subgroup(9, 0, object_data(0, Bytes(100, std::byte{'o'}))));
+    EXPECT_EQ(judge(probe, windowed(other)), std::nullopt);
+    // No data stream at all: the fixture produced nothing to time out.
+    ContributionRun silent(probe);
+    silent.deliver(0);
+    silent.reply(silent.stream_of(0), subscribe_ok(5));
+    EXPECT_EQ(judge(probe, windowed(silent)), std::nullopt);
+    ContributionRun refused(probe);
+    refused.deliver(0);
+    refused.reply(refused.stream_of(0), request_error(0x10), true);
+    EXPECT_TRUE(probe.definition.response_ready(refused.partial()));
+    EXPECT_EQ(judge(probe, refused.finish()), std::nullopt);
 }
 
 }  // namespace

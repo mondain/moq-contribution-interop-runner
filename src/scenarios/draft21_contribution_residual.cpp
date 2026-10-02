@@ -439,10 +439,12 @@ bool fill_open(const View& view, std::uint64_t request_id) {
     return fill && !fill->record->fin && !fill->record->reset;
 }
 
-// The plain subscription (Request ID 1) has delivered an Object.
+// The plain subscription (Request ID 1) has begun delivering: a Subgroup stream for
+// its Track Alias has started or an Object Datagram has arrived.
 bool warmed_up(const View& view) {
     const auto alias = alias_of(view, 0);
-    return view.valid() && alias && !delivered_objects(view, *alias).empty();
+    if (!view.valid() || !alias) return false;
+    return !subgroup_streams(view, *alias).empty() || !delivered_objects(view, *alias).empty();
 }
 
 RawProbeWrite after_warm_up(Bytes bytes, bool fin = false) {
@@ -489,6 +491,10 @@ Spec cancelled_fill_spec() {
         {{"D21-3-4-1-MUST-067", "d21-cancel-subscription-resets-all-fill-streams"}},
         [](const Fixture& fixture) {
             auto definition = residual_definition();
+            // Fill streams stay open while the runner holds back stream credit, so there is
+            // something to reset when the subscription is cancelled.
+            definition.listener_limits.max_stream_data_uni = 64;
+            definition.listener_limits.hold_uni_stream_credit = true;
             definition.writes.push_back(request_write(subscribe_frame(1, fixture, {param_u8(0x10, 1)})));
             // The initial fill (Request ID 3) and one opened by a REQUEST_UPDATE
             // (Request ID 5) are both open before the subscription is cancelled.
@@ -1107,6 +1113,58 @@ Spec pending_alias_delete_spec() {
         true);
 }
 
+// ---- Section 5.2 lines 1880-1890: an uncommitted Subgroup is reset (D21-5-2-MUST-130) ------
+// "If the Object Forwarding Preference is Subgroup and the value of
+// SUBGROUP_DELIVERY_TIMEOUT is not zero, the MOQT implementation MUST start a timer ...
+// once it becomes aware that all of the objects on the subgroup have been published
+// ... If the timer expires before the underlying transport stream reaches 'all data
+// committed' state, the implementation MUST reset the stream."
+//
+// The subscription asks for SUBGROUP_DELIVERY_TIMEOUT (Parameter 0x06) of 200 ms for
+// Group 0 and the runner holds back flow control credit on the publisher's data
+// streams: each may carry only 64 bytes, a stream credit that is never raised (RFC 9000
+// Section 4.1), so a Subgroup whose first Object is larger than that can never be
+// committed. A completed Subgroup then has to be reset when the timer expires, and
+// that reset reaches the runner because the stream is still unfinished there. (Merely
+// withholding acknowledgements would leave a fully received stream, where a later
+// RESET_STREAM is not delivered to the application.) The fixture's Group 0 is complete
+// and its first Object is larger than 64 bytes.
+constexpr std::uint64_t kSubgroupDeliveryTimeout = 0x06;
+constexpr std::uint64_t kSubgroupTimeoutMs = 200;
+constexpr std::uint64_t kHeldStreamCredit = 64;
+
+Spec uncommitted_subgroup_spec() {
+    return spec("d21-subgroup-completion-withheld-acknowledgments",
+        {{"D21-5-2-MUST-130", "d21-uncommitted-subgroup-timeout-reset"}},
+        [](const Fixture& fixture) {
+            auto definition = residual_definition();
+            definition.listener_limits.max_stream_data_uni = kHeldStreamCredit;
+            definition.listener_limits.hold_uni_stream_credit = true;
+            auto whole_group = location_pair(0, 0);
+            put_vi(whole_group, 0);
+            definition.writes.push_back(request_write(subscribe_frame(1, fixture,
+                {param_vi(kSubgroupDeliveryTimeout, kSubgroupTimeoutMs), param_u8(0x10, 1),
+                 param_lp(0x21, whole_group)})));
+            return definition;
+        },
+        [](const View& view) -> Judgement {
+            if (rejected(view, 0)) return {true, std::nullopt};
+            const auto alias = alias_of(view, 0);
+            if (!alias) return {view.close().has_value(), std::nullopt};
+            bool unfinished = false;
+            for (const auto& stream : subgroup_streams(view, *alias)) {
+                const auto* record = view.stream(stream.stream);
+                if (!record || record->fin) continue;
+                if (record->reset) return {true, true};
+                unfinished = true;
+            }
+            if (!view.window_ended()) return {false, std::nullopt};
+            // A stream still open at the end of the window, long after the timer, was never reset.
+            return {true, unfinished ? std::optional<bool>{false} : std::nullopt};
+        },
+        true);
+}
+
 }  // namespace
 
 std::vector<Spec> residual_specs() {
@@ -1128,6 +1186,7 @@ std::vector<Spec> residual_specs() {
     result.push_back(client_goaway_spec("d21-publisher-client-goaway-control", true));
     result.push_back(client_goaway_spec("d21-publisher-client-goaway-request", false));
     result.push_back(pending_alias_delete_spec());
+    result.push_back(uncommitted_subgroup_spec());
     return result;
 }
 

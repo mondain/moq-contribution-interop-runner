@@ -75,6 +75,12 @@ struct RawProbeCourtesyWrite {
 struct RawProbeListenerLimits {
     // Publisher-opened bidirectional streams available to MOQT request streams.
     std::optional<std::uint64_t> max_streams_bidi{};
+    // Bytes the publisher may write on a unidirectional data stream. With
+    // `hold_uni_stream_credit` the runner never raises it, so a stream longer
+    // than this stays open and unfinished.
+    std::optional<std::uint64_t> max_stream_data_uni{};
+    bool hold_uni_stream_credit{false};
+    bool any() const noexcept { return max_streams_bidi || max_stream_data_uni || hold_uni_stream_credit; }
 };
 struct RawProbeDefinition {
     std::string id;
