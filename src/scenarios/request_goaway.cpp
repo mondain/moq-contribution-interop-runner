@@ -1,5 +1,6 @@
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft18_response.h"
+#include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/wire/draft21/request_error.h"
 #include "moq/interop/wire/draft21/request_frame.h"
 #include "moq/interop/wire/draft21/setup.h"
@@ -204,6 +205,8 @@ std::vector<RequestGoawayProbe> profiles(unsigned draft, std::chrono::millisecon
     std::vector<RequestGoawayProbe> result{{requirement,evaluator,draft,definition(draft,duplicate,true,deadline),true}};
     if (draft == 21) result.push_back({requirement,evaluator,draft,
         definition(draft,"d21-goaway-on-distinct-request-streams",false,deadline),false});
+    // Only the duplicate GOAWAY on one request stream requires a close.
+    apply_liveness_policy(result.front().definition,draft);
     return result;
 }
 }  // namespace

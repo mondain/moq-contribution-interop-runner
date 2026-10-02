@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/wire/draft18/messages.h"
 #include <algorithm>
 #include <array>
@@ -94,9 +95,10 @@ bool peer_cache_setup(std::span<const std::byte> input, bool duplicate) {
 }
 }
 std::span<const Draft18CloseProfile> draft18_close_profiles() { return kProfiles; }
-RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::milliseconds deadline,
-                                      std::vector<std::vector<std::byte>> track_namespace,
-                                      std::vector<std::byte> track_name) {
+namespace {
+RawProbeDefinition draft18_close_probe_base(std::string_view id, std::chrono::milliseconds deadline,
+                                           std::vector<std::vector<std::byte>> track_namespace,
+                                           std::vector<std::byte> track_name) {
     if (std::none_of(kProfiles.begin(), kProfiles.end(), [id](const auto& profile) { return profile.scenario_id == id; }))
         throw std::invalid_argument("unknown draft-18 close probe");
     RawProbeDefinition definition;
@@ -243,6 +245,14 @@ RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::millise
         else throw std::logic_error("close profile has no stimulus");
     }
     if (definition.start_after_peer_setup) definition.writes.push_back({channel,frame(type,payload),false});
+    return definition;
+}
+}  // namespace
+RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::milliseconds deadline,
+                                      std::vector<std::vector<std::byte>> track_namespace,
+                                      std::vector<std::byte> track_name) {
+    auto definition = draft18_close_probe_base(id, deadline, std::move(track_namespace), std::move(track_name));
+    apply_liveness_policy(definition, 18);
     return definition;
 }
 RawProbeDefinition draft18_close_probe_for(std::string_view id, const RawProbeTranscript& transcript,

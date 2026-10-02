@@ -27,6 +27,21 @@ message the row is about, or an operator-supplied fixture was absent. Rows that
 are `not_testable` or `not_applicable` stay visible in the report and are
 excluded from every score.
 
+### Failing on continued service
+
+A close probe is scored from what the publisher did after input that required it
+to close the session: a close with the required code passes, a close with another
+code fails, and silence is `not_run`. For the scenarios that opt in (see
+[scenario-reference.md](scenario-reference.md#close-probes-and-the-liveness-follow-up)),
+silence can also fail: the runner sends a valid SUBSCRIBE for the track fixture
+afterwards, and a SUBSCRIBE_OK on it with no close of any kind, within the delay
+and a grace period after the answer, is wire evidence that the publisher did not
+close. The rule only ever turns an unscored row into `fail`. It never produces a
+`pass`, never overrides a close, and a refusal or an unanswered follow-up leaves
+the row `not_run`. The residual risk is timing: the transport gives no
+acknowledgement signal, so "the publisher had the input" is bounded by a 500 ms
+delay, not proven.
+
 ## Weights and verdicts
 
 | Strength | Weight | Effect |
