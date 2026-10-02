@@ -83,8 +83,10 @@ TEST_F(Draft21CatalogPart01Test, SubscriptionSubgroupMappingPreservesExceptionsA
     const auto separate = at(719);
     ASSERT_EQ(separate.size(), 1u);
     EXPECT_EQ(separate.front()->strength, Strength::MustNot);
-    EXPECT_EQ(separate.front()->evaluators,
-              std::vector<std::string>{"d21-no-mixed-subgroups-on-subscription-stream"});
+    // A SUBGROUP_HEADER names one Subgroup per stream, so mixing has no wire form (lines 5873-5875).
+    EXPECT_EQ(separate.front()->testability, Testability::NotTestable);
+    EXPECT_TRUE(separate.front()->scenarios.empty());
+    EXPECT_TRUE(separate.front()->evaluators.empty());
     const auto same = at(720);
     ASSERT_EQ(same.size(), 1u);
     EXPECT_NE(same.front()->summary.find("reset"), std::string::npos);
