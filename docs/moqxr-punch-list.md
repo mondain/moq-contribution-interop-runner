@@ -380,8 +380,9 @@ here so an agent does not re-investigate them, and so they act as regression che
 ### M-17 Unsupported request types: answer NOT_SUPPORTED, and keep the session
 
 Because moqxr is a live publisher with no cache, FETCH and joining FETCH are not
-expected to work, and that alone is not a defect. The drafts still say what a
-limited endpoint does with a request it does not implement:
+expected to work, and that alone is not a defect. The drafts say what a limited
+endpoint is encouraged to do with a request it does not implement. This is a
+recommendation (a SHOULD), not a MUST:
 
 - **Draft:** draft 18 lines 1863-1870 and draft 21 lines 595-601: "Limited endpoints
   SHOULD respond to any unsupported messages with the appropriate NOT_SUPPORTED
@@ -392,9 +393,13 @@ limited endpoint does with a request it does not implement:
   (UNAUTHORIZED) with the text "unsupported request stream", and then moqxr closes the
   session with PROTOCOL_VIOLATION and logs "received unsupported request stream".
 - **Where:** `moqt_session.cpp` lines 4331-4333, 7522, 8999-9001, 10107.
-- **Required:** reply NOT_SUPPORTED (0x3) instead of 0x1, and do not close the
-  session for a request that is well-formed but unsupported. Keep the PROTOCOL_VIOLATION
-  close for requests that are actually malformed. Do not implement FETCH.
+- **Recommended (SHOULD):** reply NOT_SUPPORTED (0x3) instead of 0x1, and let the
+  session continue after a request that is well-formed but unsupported. The draft
+  states no MUST for either part, so treat this as should-fix. Surviving is the
+  intended behavior: the draft's answer to an unsupported request is a response, and
+  PROTOCOL_VIOLATION is defined for a peer that did something not allowed, which a
+  valid FETCH is not. Keep the PROTOCOL_VIOLATION close for requests that are
+  actually malformed. Do not implement FETCH.
 - **Effect on runner results:** the rows that need FETCH to be served
   (for example D18-10-12-2-MUST-004, the Joining Fetch rule) cannot be scored
   against moqxr and stay `not_run`/ambiguous; that is expected. The runner side of
@@ -415,6 +420,51 @@ limited endpoint does with a request it does not implement:
   the subgroup header type of peer-opened streams so that an invalid type closes the
   session as it should.
 
+### M-20 A rejected announcement or publication ends the session (draft 18 section 14)
+
+- **Rows:** D18-14-MUST-004, D18-14-MUST-NOT-002, D18-14-MUST-NOT-001 (the
+  unknown-error context). Draft 21 has the same wording (lines 6755-6759);
+  find the corresponding draft 21 scenario before
+  changing draft 21.
+- **Scenario:** `publisher-request-rejected-with-unknown-error`: the runner answers
+  moqxr's PUBLISH_NAMESPACE (or PUBLISH) with a REQUEST_ERROR carrying an error code
+  the publisher cannot know, with FIN, then sends a valid follow-up request on a new
+  stream and checks that the session still works.
+- **Draft:** draft 18 lines 6412-6416: "Receipt of an unknown error code in any error
+  context (Session Termination, REQUEST_ERROR, PUBLISH_DONE, or Data Stream Reset)
+  MUST be treated as equivalent to INTERNAL_ERROR for that context. An endpoint MUST
+  NOT close the session because it received an unknown error code in a REQUEST_ERROR
+  or PUBLISH_DONE."
+- **Observed:** about 10 ms after the rejection moqxr closes the session with
+  application code 0, logs `transport publish failed: request failed:`, and exits with
+  status 1. It closes before the runner's follow-up request can be sent. An earlier
+  control run (REQUEST_ERROR codes 0x0 INTERNAL_ERROR, 0x10 DOES_NOT_EXIST and an
+  unknown code) ended identically, so the close does not depend on the code.
+- **Where:** `moqt_session.cpp` around line 1406: any decoded REQUEST_ERROR on a
+  request becomes `TransportStatus::failure(... kEndpointPermanent)` for the whole
+  endpoint, whatever the code.
+- **Two readings, so this is should-fix rather than an established violation.**
+  The literal one: the close is not shown to be *because the code is unknown*,
+  since moqxr closes for every rejection. The stricter one: an unknown code must be
+  treated exactly as INTERNAL_ERROR, and an endpoint must not close the session
+  because of an unknown code; an endpoint that closes on every REQUEST_ERROR,
+  INTERNAL_ERROR included, cannot satisfy both statements for an unknown code. The
+  second reading is the safer one to implement, because it is consistent with both
+  sentences of the draft.
+- **Recommended:** a REQUEST_ERROR answering one of moqxr's own announcements or
+  publications ends that request, not the session or the process. Treat an unknown
+  code like INTERNAL_ERROR, and keep serving requests on the session. If moqxr has
+  genuinely nothing left to do it may finish later through its normal end of
+  session, but not as an immediate reaction to the rejection.
+- **Verify:** run `publisher-request-rejected-with-unknown-error`. Today the rows are
+  `not_run`, because a NO_ERROR close right after the rejection cannot be attributed
+  to the unknown code (the runner deliberately does not fail on it). After the fix
+  the session stays open, the follow-up request is answered or at least not closed,
+  and the rows should score `pass`. Add this scenario to the regression set.
+- **Runner note:** a control context (the same rejection with a known code, in the
+  same run) would let the runner tell "closes only for unknown codes" from "closes
+  for every rejection" and score this row directly. It is not implemented.
+
 ## Priority 3: observed, lower value
 
 ### M-19 Control-stream GOAWAY URI is ignored
@@ -426,16 +476,6 @@ limited endpoint does with a request it does not implement:
   current one).
 - **Required:** reconnect to the URI given in a control-stream GOAWAY. Lowest priority
   of the list; it needs reconnect logic.
-
-### M-20 A rejected announcement ends the process
-
-When the runner rejects moqxr's PUBLISH_NAMESPACE (or answers with an unknown error
-code), moqxr ends the session and exits non-zero. This is a design choice for a
-publisher with nothing else to publish, not a draft violation. Nothing to change
-unless the project wants a publisher to survive the rejection of one request
-(draft 18 section 14 and the rows D18-14-MUST-NOT-002 and D18-14-MUST-004 say an unknown value
-alone must not be fatal, but the runner cannot separate that from "gave up", so they
-are unscored).
 
 ## Out of scope (do not implement for this list)
 
@@ -461,7 +501,7 @@ are unscored).
 2. M-02 and M-03 together (shared validation), then M-05, M-06, M-07.
 3. M-08, M-09 (close paths on the control and unidirectional streams), M-10.
 4. M-12, M-13, M-14 (draft 21 only).
-5. M-15, M-17, M-18, then M-19 if time allows.
+5. M-15, M-20, M-17, M-18, then M-19 if time allows.
 
 After each group, rebuild moqxr and re-run the scenarios named in the items; compare
 with the "Done criteria" below.
@@ -475,6 +515,9 @@ with the "Done criteria" below.
 - No row that passes today starts failing. The regression set is the rows named in
   M-16, plus any row you can see passing in a fresh run before you start (run the
   whole catalog once first and keep the list).
+- M-20: `publisher-request-rejected-with-unknown-error` scores `pass` for
+  D18-14-MUST-004, D18-14-MUST-NOT-002 and D18-14-MUST-NOT-001 (the last row also
+  names other scenarios; run them together to see it complete).
 - moqxr's own test suite passes, with new tests for each behavior added.
 - The runner's audit is unchanged (`build/moq-interop-audit --draft 18` and
   `--draft 21`: 173/173 required rows); nothing in this list asks for a runner change.
