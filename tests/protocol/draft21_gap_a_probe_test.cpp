@@ -722,6 +722,27 @@ TEST(Draft21GapARows, SingleTransportRowsPassOnOneTransportScenario) {
     EXPECT_EQ(state(outcomes, "D21-6-4-2-2-MUST-157"), OutcomeState::NotRun);
 }
 
+// D21-6-2-MUST-140 lists a native and a WebTransport scenario; a run executes only the
+// one for its transport, so one passing scenario settles the row and a failing one fails it.
+TEST(Draft21GapARows, DatagramNegotiationRowIsSettledByTheOnlyScenarioRun) {
+    std::vector<Draft21GapProbe> storage;
+    const auto& native = scenarios::probe("d21-native-quic-without-datagram-negotiation", storage);
+    auto negotiated = scenarios::start(native);
+    scenarios::accept(negotiated, native, 0, 1);
+    scenarios::data(negotiated, 1, scenarios::subscribe_ok());
+    scenarios::finish(negotiated);
+    // The WebTransport scenario was not run: it is unscored.
+    EXPECT_EQ(state(evaluate_draft21_raw_probes(catalog21(), std::vector{negotiated}),
+                    "D21-6-2-MUST-140"), OutcomeState::Pass);
+    auto zero = negotiated;
+    std::get<transport::ConnectionEstablishedEvent>(zero.events.front()).max_datagram_payload = 0;
+    EXPECT_EQ(state(evaluate_draft21_raw_probes(catalog21(), std::vector{zero}),
+                    "D21-6-2-MUST-140"), OutcomeState::Fail);
+    // Neither scenario run leaves the row unrun.
+    EXPECT_EQ(state(evaluate_draft21_raw_probes(catalog21(), std::vector<scenarios::RawProbeTranscript>{}),
+                    "D21-6-2-MUST-140"), OutcomeState::NotRun);
+}
+
 TEST(Draft21GapARows, RowsWithTwoContextsNeedBothInOneRun) {
     std::vector<Draft21GapProbe> storage;
     const auto& bounded = scenarios::probe("d21-subscribe-bounded-location-range", storage);

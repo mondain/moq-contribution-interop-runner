@@ -80,7 +80,9 @@ std::vector<Draft21ContributionProbe> draft21_contribution_probes(
 }
 
 bool draft21_contribution_scenarios_are_alternatives(const std::string& requirement_id) {
-    return requirement_id == "D21-9-9-MUST-365";
+    // D21-9-9-MUST-365 and D21-3-1-MUST-041 (the publisher's own Track Alias
+    // assignment, Section 3.1, decides which of the two scenarios applies).
+    return requirement_id == "D21-9-9-MUST-365" || requirement_id == "D21-3-1-MUST-041";
 }
 
 namespace {
