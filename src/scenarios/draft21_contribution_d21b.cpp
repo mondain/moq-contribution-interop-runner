@@ -983,21 +983,24 @@ Spec property_filter_spec(const char* scenario, const char* requirement, const c
                 }
             }
             if (matching != 0) return {true, true};
-            // Objects with that value keep arriving on the unfiltered
-            // subscription after the filter was accepted, yet none passes it.
-            const auto accepted = view.write_event(1);
+            // Objects with that value keep arriving on the unfiltered subscription
+            // after the publisher accepted the filtered one, yet none passes it. The
+            // boundary is the filtered SUBSCRIBE_OK: streams opened while the request
+            // was still in flight carry no evidence about the filter.
+            const auto accepted = view.write_frames(1).front().event;
             const auto unfiltered = subscribe_alias(view, 0);
-            std::size_t later = 0;
+            std::set<std::uint64_t> groups;
             for (const auto& [id, stream] : view.streams()) {
-                if ((id & 3u) != 2u || !accepted || stream.first_event < *accepted) continue;
+                if ((id & 3u) != 2u || stream.first_event <= accepted) continue;
                 const auto parsed = parse_subgroup(stream.bytes);
                 if (!parsed.header || !unfiltered || parsed.alias != *unfiltered) continue;
                 for (const auto& object : parsed.objects) {
                     const auto found = mutable_only_candidate(object, in_immutable);
-                    if (found && found->type == candidate->type && found->value == candidate->value) ++later;
+                    if (found && found->type == candidate->type && found->value == candidate->value)
+                        groups.insert(parsed.group);
                 }
             }
-            if (later >= 2 && view.close()) return {true, false};
+            if (groups.size() >= 2 && view.close()) return {true, false};
             return unresolved(view);
         });
 }
