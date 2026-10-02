@@ -32,6 +32,9 @@ enum class Draft21GapAspect {
     ControlStreamLifetime,
     // Section 6.2: the QUIC DATAGRAM extension is supported and negotiated.
     DatagramSupport,
+    // Section 6.2: the same extension must also be negotiated, so a connection
+    // without it is not a valid MOQT session (row D21-6-2-MUST-140).
+    DatagramNegotiation,
     // Section 3.3.1: a subscription with a bounded Location filter.
     BoundedRange,
     // Section 3.3.1 and 9.5.1: a REQUEST_UPDATE that sets the Location filter.

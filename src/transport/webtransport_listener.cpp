@@ -150,6 +150,8 @@ struct WebTransportListener::Impl {
             if (stream_ctx->stream_id == self->session->connect_stream_id())
                 return self->on_control(cnx, bytes, length,
                                         event == picohttp_callback_post_fin);
+            if (self->config.quic.hold_uni_stream_credit && (stream_ctx->stream_id & 3u) == 2u)
+                (void)picoquic_set_app_flow_control(cnx, stream_ctx->stream_id, 1);
             const auto* payload = reinterpret_cast<const std::byte*>(bytes);
             if (!self->session->ingest_stream(
                     stream_ctx->stream_id,

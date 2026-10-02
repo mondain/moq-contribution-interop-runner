@@ -55,8 +55,21 @@ args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transpor
 if [[ "$draft" == 21 && "$transport" == native_quic ]]; then
     args+=(--preannounce-tracks)
 elif [[ "$draft" == 21 && "$transport" == webtransport ]]; then
+    # Scenarios in which the runner subscribes to the track (rather than observing
+    # the publisher's own PUBLISH) need moqxr to wait for that SUBSCRIBE: --forward 0
+    # selects its await-subscribe mode, whereas --forward 1 pushes PUBLISH requests
+    # the runner does not answer in those contexts.
+    forward=1
+    case "$(jq -r '.scenario_id' "$request_file")" in
+        d21-overlapping-subscriptions-*|d21-forward-location-and-range-filter-conjunction|\
+        d21-subscribe-multiple-subgroups|d21-fill-fails-before-first-object|\
+        d21-cancel-subscription-with-concurrent-fill-streams|\
+        d21-subscribe-tracks-publish-skipped-then-capacity-recovers|\
+        d21-subgroup-completion-withheld-acknowledgments|d21-request-well-formed-invalid-token|\
+        d21-expired-token-alias-lifetime) forward=0 ;;
+    esac
     args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
-          --namespace media --draft "$draft" --forward 1
+          --namespace media --draft "$draft" --forward "$forward"
           --timeout "$timeout_seconds" --ca "$ca_cert")
 fi
 # Scenario-specific CLI options. These only make moqxr emit the publisher-

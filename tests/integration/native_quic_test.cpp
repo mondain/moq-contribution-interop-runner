@@ -378,6 +378,45 @@ TEST(NativeQuicLive, RetryHandshakeOwnsEvidenceAndDeliversStreamAndDatagram) {
     }));
 }
 
+// A peer that writes more than the advertised unidirectional stream credit is stopped
+// there when the listener holds credit, and is not when it does not (RFC 9000 Section 4.1).
+std::size_t received_on_peer_uni_stream(bool hold_credit) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.initial_max_stream_data_uni = 100;
+    config.hold_uni_stream_credit = hold_credit;
+    auto created = NativeQuicListener::create(config);
+    if (created.listener == nullptr) return SIZE_MAX;
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port, .alpn = expected_alpn()});
+    if (client == nullptr) return SIZE_MAX;
+    bool established = false;
+    if (!pump_until(*client, [&] {
+            for (const auto& event : created.listener->poll(64))
+                established |= std::holds_alternative<ConnectionEstablishedEvent>(event);
+            return established;
+        })) return SIZE_MAX;
+    // Client-initiated unidirectional stream 2: 1000 bytes and a FIN.
+    if (!client->send_stream(2, std::vector<std::byte>(1000, std::byte{'x'}), true)) return SIZE_MAX;
+    std::size_t received = 0;
+    bool finished = false;
+    (void)pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            if (const auto* stream = std::get_if<StreamDataEvent>(&event)) {
+                received += stream->data.size();
+                finished = finished || stream->fin;
+            }
+        }
+        return finished;
+    }, std::chrono::milliseconds{600});
+    return received;
+}
+
+TEST(NativeQuicLive, HeldUniStreamCreditStopsAPeerStreamAtTheInitialWindow) {
+    EXPECT_EQ(received_on_peer_uni_stream(true), 100u);
+    EXPECT_EQ(received_on_peer_uni_stream(false), 1000u);
+}
+
 TEST(NativeQuicLive, Draft18ControllerCompletesSubscribeResponseOverQuic) {
     TestPemFiles pem;
     auto created = NativeQuicListener::create(live_config(pem));

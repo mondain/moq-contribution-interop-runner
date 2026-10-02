@@ -106,6 +106,8 @@ TEST(Draft21GapA, RawScenariosRouteToRawProbesAndTransportRules) {
     }
     EXPECT_TRUE(app::gap_native_only_scenario("d21-native-quic-datagram-support"));
     EXPECT_TRUE(app::gap_webtransport_only_scenario("d21-webtransport-h3-datagram-support"));
+    EXPECT_TRUE(app::gap_native_only_scenario("d21-native-quic-without-datagram-negotiation"));
+    EXPECT_TRUE(app::gap_webtransport_only_scenario("d21-webtransport-h3-without-datagram-negotiation"));
     EXPECT_FALSE(app::gap_native_only_scenario("d21-control-stream-lifetime"));
     EXPECT_FALSE(app::gap_webtransport_only_scenario("d21-control-stream-lifetime"));
 }

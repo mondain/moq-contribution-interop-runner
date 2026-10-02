@@ -3,9 +3,11 @@
 // Internal helpers shared by the draft-21 contribution profile sources. This
 // header is private to src/scenarios and is not part of the runner API.
 
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft21/setup.h"
+#include "moq/interop/wire/draft21/token.h"
 
 #include <cstdint>
 #include <functional>
@@ -29,6 +31,8 @@ struct Fixture {
     // Token value the publisher's authorization policy is configured to refuse
     // (empty selects the documented default contract value).
     std::string denied_token;
+    // Operator-supplied credentials for the token rows; absent means those scenarios send nothing.
+    Draft21TokenCredentials credentials{};
 };
 
 bool fixture_valid(const Fixture& fixture);
@@ -71,6 +75,9 @@ Bytes token_value(std::uint64_t alias_type, std::optional<std::uint64_t> alias,
 
 // ---- decoding -------------------------------------------------------------
 std::optional<Fixture> recover_fixture(std::span<const std::byte> request);
+// The first AUTHORIZATION TOKEN (0x03) parameter of a SUBSCRIBE, FETCH or TRACK_STATUS
+// the runner wrote, decoded; absent when the request carries none.
+std::optional<wire::draft21::Token> recover_token(std::span<const std::byte> request);
 
 struct Frame {
     std::uint64_t type{0};
@@ -113,6 +120,17 @@ public:
     const std::map<transport::StreamId, StreamRecord>& streams() const noexcept { return streams_; }
     const std::vector<DatagramRecord>& datagrams() const noexcept { return datagrams_; }
     const std::optional<PeerCloseInfo>& close() const noexcept { return close_; }
+    // Courtesy responses the runner volunteered (empty for gate views).
+    const std::vector<RawProbeCourtesyWrite>& courtesy_writes() const noexcept { return courtesy_; }
+    // Transport events observed when the runner acknowledged the PUBLISH_NAMESPACE that
+    // opened `stream` (RawProbeDefinition::auto_accept_*), if it did.
+    std::optional<std::size_t> auto_reply_event(transport::StreamId stream) const {
+        for (const auto& reply : auto_replies_)
+            if (reply.stream_id == stream) return reply.delivery_event_count;
+        return std::nullopt;
+    }
+    // REQUEST_ERROR code a compatibility profile maps to UNKNOWN_AUTH_TOKEN_ALIAS, if configured.
+    std::optional<std::uint64_t> unknown_alias_code() const noexcept { return unknown_alias_code_; }
     const std::optional<wire::draft21::SetupMessage>& peer_setup() const noexcept { return peer_setup_; }
     // Operator-configured denied credential; absent when the publisher's
     // authorization policy is not controllable.
@@ -127,12 +145,26 @@ public:
     std::optional<transport::StreamId> write_stream_id(std::size_t index) const;
     // Transport event count at which write `index` was fully accepted.
     std::optional<std::size_t> write_event(std::size_t index) const;
+    // The bytes the runner wrote for transcript write `index` (empty if absent).
+    std::span<const std::byte> write_bytes(std::size_t index) const {
+        return index < writes_.size() ? std::span<const std::byte>(writes_[index].write.bytes)
+                                      : std::span<const std::byte>{};
+    }
+    // True when the observation window of a `Spec::window` scenario is over: the
+    // context timed out or the peer ended the session, so no further evidence
+    // can arrive. Always false for scenarios that must finish on evidence.
+    bool window_ended() const noexcept { return window_ended_; }
+    void set_window_ended(bool value) noexcept { window_ended_ = value; }
     std::vector<Frame> frames(const StreamRecord& record) const;
     std::vector<Frame> write_frames(std::size_t index) const;
 
 private:
     std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
+    bool window_ended_{false};
+    std::optional<std::uint64_t> unknown_alias_code_;
+    std::vector<RawProbeCourtesyWrite> courtesy_;
+    std::vector<RawProbeAutoReply> auto_replies_;
     std::map<transport::StreamId, StreamRecord> streams_;
     std::vector<DatagramRecord> datagrams_;
     std::optional<PeerCloseInfo> close_;
@@ -180,6 +212,10 @@ struct Spec {
     std::vector<RowBinding> rows;
     Builder build;
     Judge judge;
+    // Absence rules (nothing outside a filter, exactly N copies) need the whole
+    // observation window: a timed-out or peer-closed transcript is judged on its
+    // prefix with View::window_ended() set, instead of being unscorable.
+    bool window{false};
 };
 
 std::vector<Spec> session_specs();
@@ -190,6 +226,8 @@ std::vector<Spec> d21b_specs();
 void d21b_attach_rows(std::vector<Spec>& specs);
 // Default credential value used when no denied token is configured.
 constexpr const char* kDefaultDeniedToken = "interop-denied";
+// Rows closed by the remaining-rows slice (draft21_contribution_residual.cpp).
+std::vector<Spec> residual_specs();
 
 // Frame type constants used across profiles.
 constexpr std::uint64_t kSubscribeOk = 0x4;

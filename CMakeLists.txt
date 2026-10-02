@@ -195,6 +195,7 @@ add_library(moq-interop-scenarios
     src/scenarios/action_dispatcher.cpp
     src/scenarios/run_controller.cpp
     src/scenarios/raw_probe.cpp
+    src/scenarios/raw_probe_courtesy.cpp
     src/scenarios/request_probe.cpp
     src/scenarios/draft18_request.cpp
     src/scenarios/draft18_response.cpp
@@ -229,7 +230,8 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_contribution_support.cpp
     src/scenarios/draft21_contribution_session.cpp
     src/scenarios/draft21_contribution_objects.cpp
-    src/scenarios/draft21_contribution_d21b.cpp)
+    src/scenarios/draft21_contribution_d21b.cpp
+    src/scenarios/draft21_contribution_residual.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -627,6 +629,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-probe-tests tests/protocol/raw_probe_test.cpp)
     target_link_libraries(moq-interop-raw-probe-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe COMMAND moq-interop-raw-probe-tests)
+
+    add_executable(moq-interop-raw-probe-courtesy-tests tests/protocol/raw_probe_courtesy_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-courtesy-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME raw-probe-courtesy COMMAND moq-interop-raw-probe-courtesy-tests)
 
     add_executable(moq-interop-draft18-scenarios-tests
                    tests/protocol/draft18_scenarios_test.cpp)
@@ -1052,7 +1058,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-draft21-contribution-tests
         tests/protocol/draft21_contribution_test.cpp
         tests/protocol/draft21_contribution_objects_test.cpp
-        tests/protocol/draft21_contribution_d21b_test.cpp)
+        tests/protocol/draft21_contribution_d21b_test.cpp
+        tests/protocol/draft21_contribution_residual_test.cpp)
     target_link_libraries(moq-interop-draft21-contribution-tests PRIVATE
         moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-draft21-contribution-tests PRIVATE

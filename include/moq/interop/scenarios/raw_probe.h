@@ -5,11 +5,13 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -50,6 +52,37 @@ struct RawProbeWrite {
     std::function<std::optional<transport::StreamId>(const RawProbeGateInput&)> select_peer_stream{};
 };
 struct RawProbeTranscript;
+// How the runner answers requests a publisher opens (draft 21, Sections 9.3, 9.4
+// and 9.5). A REQUEST_OK without parameters accepts; REQUEST_ERROR UNINTERESTED
+// followed by a FIN rejects (Section 6.4.2.3).
+enum class RawProbePublishResponse {
+    Ignore,
+    Accept,
+    Reject,
+    // Reject only once an Object for the PUBLISH's Track Alias has been received,
+    // so the publisher is known to have been producing.
+    RejectAfterObject,
+};
+enum class RawProbeUpdateResponse {
+    Ignore,
+    Accept,
+    // Accept at once, except that a message carrying an AUTHORIZATION TOKEN with
+    // Alias Type USE_ALIAS is answered only after `hold`.
+    HoldAliasUses,
+};
+struct RawProbeCourtesy {
+    RawProbePublishResponse publish{RawProbePublishResponse::Ignore};
+    // Responses to REQUEST_UPDATE messages the publisher sends on its requests.
+    RawProbeUpdateResponse update{RawProbeUpdateResponse::Ignore};
+    std::chrono::milliseconds hold{300};
+};
+enum class RawProbeCourtesyKind { PublishOk, PublishError, UpdateOk };
+struct RawProbeCourtesyWrite {
+    transport::StreamId stream_id{0};
+    // Transport events observed when the response was fully accepted.
+    std::size_t event_count{0};
+    RawProbeCourtesyKind kind{RawProbeCourtesyKind::PublishOk};
+};
 struct RawProbeDefinition {
     std::string id;
     std::vector<std::byte> setup_bytes;
@@ -81,6 +114,11 @@ struct RawProbeDefinition {
     // session itself needs (MOQT control stream; WebTransport adds its three
     // HTTP/3 streams).
     std::optional<std::uint64_t> initial_peer_uni_streams{};
+    // Bytes the publisher may write on a unidirectional data stream. With
+    // `hold_uni_stream_credit` the runner never raises it, so a longer stream
+    // stays open and unfinished.
+    std::optional<std::uint64_t> initial_peer_uni_stream_data{};
+    bool hold_uni_stream_credit{false};
     // The harness runs a second listener whose URI a write can name (through
     // RawProbeGateInput::replacement_uri) and records what connects to it in
     // RawProbeTranscript::replacement_events. Used for GOAWAY migration.
@@ -88,6 +126,16 @@ struct RawProbeDefinition {
     // Called by the run with the replacement listener's URI so a definition
     // can embed it in its writes (used with offer_replacement_session).
     std::function<void(RawProbeDefinition&, const std::string&)> bind_alternate_uri{};
+    // Opt-in courtesy responses to requests the publisher opens on its own request
+    // streams. They are not part of the scored stimulus and are never transcript
+    // writes; each one is listed in RawProbeTranscript::courtesy_writes with the
+    // transport event count at which it was fully accepted, so evaluators can
+    // order it against what the publisher sent. Draft 21 only. PUBLISH_NAMESPACE
+    // is acknowledged by `auto_accept_*`, not here.
+    RawProbeCourtesy courtesy{};
+    // The scenario withholds or rejects what the publisher asked for, so a publisher
+    // that then exits with an error is part of what was observed, not a broken run.
+    bool publisher_exit_is_evidence{false};
 };
 struct RawProbeAutoReply {
     transport::StreamId stream_id{0};
@@ -145,6 +193,8 @@ struct RawProbeTranscript {
     // Token value the operator configured the publisher's authorization policy
     // to refuse (Section 8.9). Absent when no policy is controllable.
     std::optional<std::string> denied_authorization_token{};
+    // Responses sent by RawProbeDefinition::courtesy, in the order accepted.
+    std::vector<RawProbeCourtesyWrite> courtesy_writes;
 };
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition);
@@ -152,6 +202,7 @@ std::optional<bool> evaluate_raw_probe_close(
     const RawProbeTranscript& transcript, const RawProbeDefinition& definition,
     std::optional<std::uint64_t> expected_close);
 
+class PublisherCourtesy;
 class RawProbeController {
 public:
     // `replacement` is the second listener of a replacement-session definition.
@@ -159,6 +210,7 @@ public:
                        RawProbeDefinition definition,
                        transport::SessionTransport* replacement = nullptr,
                        std::string replacement_uri = {});
+    ~RawProbeController();
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
 private:
@@ -173,6 +225,7 @@ private:
     RawProbeTranscript transcript_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_setup_candidates_;
     std::size_t peer_setup_bytes_count_{0};
+    std::unique_ptr<PublisherCourtesy> courtesy_;
     std::map<transport::StreamId, std::vector<std::byte>> peer_request_candidates_;
     std::set<transport::StreamId> cancelled_peer_requests_;
     std::map<transport::StreamId, std::vector<std::byte>> auto_accept_candidates_;

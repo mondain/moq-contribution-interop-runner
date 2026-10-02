@@ -112,6 +112,30 @@ Options parse_options(int argc, char* argv[]) {
                 throw std::invalid_argument("denied authorization token must be 1 to 1024 bytes");
             options.native.denied_authorization_token = std::string(input);
         }
+        else if (argument == "--invalid-auth-token" || argument == "--expired-auth-token") {
+            // TYPE:VALUE_HEX, the Token Type number and the credential bytes in hexadecimal.
+            const auto input = value(argument);
+            const auto colon = input.find(':');
+            if (colon == std::string_view::npos || colon == 0 || (input.size() - colon - 1) % 2 != 0)
+                throw std::invalid_argument(std::string(argument) + " requires TYPE:VALUE_HEX");
+            moq::interop::scenarios::Draft21TokenCredential credential;
+            const auto type = input.substr(0, colon);
+            const auto [type_end, type_error] =
+                std::from_chars(type.data(), type.data() + type.size(), credential.token_type);
+            if (type_error != std::errc{} || type_end != type.data() + type.size())
+                throw std::invalid_argument(std::string(argument) + " Token Type must be an unsigned integer");
+            const auto digits = input.substr(colon + 1);
+            for (std::size_t offset = 0; offset < digits.size(); offset += 2) {
+                unsigned byte = 0;
+                const auto [end, error] =
+                    std::from_chars(digits.data() + offset, digits.data() + offset + 2, byte, 16);
+                if (error != std::errc{} || end != digits.data() + offset + 2)
+                    throw std::invalid_argument(std::string(argument) + " value must be hexadecimal");
+                credential.value.push_back(static_cast<std::byte>(byte));
+            }
+            (argument == "--invalid-auth-token" ? options.native.invalid_auth_token
+                                                : options.native.expired_auth_token) = std::move(credential);
+        }
         else throw std::invalid_argument("unknown option: " + std::string(argument));
     }
     if (options.native.driver_executable.empty()) {

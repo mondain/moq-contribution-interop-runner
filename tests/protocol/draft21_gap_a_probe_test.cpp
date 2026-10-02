@@ -136,9 +136,9 @@ TEST(Draft21GapAProbe, RowsMapToTheCatalogScenariosAndEvaluators) {
     for (const auto& candidate : probes) rows.insert(candidate.requirement_id);
     EXPECT_EQ(rows, (std::set<std::string>{
         "D21-2-2-MUST-020", "D21-2-2-MUST-NOT-018", "D21-3-3-1-MUST-NOT-057", "D21-3-6-MUST-070", "D21-4-2-MUST-089",
-        "D21-6-2-MUST-139", "D21-6-3-MUST-NOT-146", "D21-6-4-2-2-MUST-157",
+        "D21-6-2-MUST-139", "D21-6-2-MUST-140", "D21-6-3-MUST-NOT-146", "D21-6-4-2-2-MUST-157",
         "D21-6-4-2-2-MUST-158", "D21-6-4-2-2-MUST-NOT-156"}));
-    EXPECT_EQ(probes.size(), 13u);
+    EXPECT_EQ(probes.size(), 15u);
 }
 
 // ----------------------------------------------------- response before FIN
@@ -457,6 +457,42 @@ TEST(Draft21GapAProbe, QuicDatagramMustBeNegotiated) {
         auto harness = passing;
         harness.harness_failed = true;
         EXPECT_EQ(evaluate_draft21_gap_a_probe(harness, p), std::nullopt);
+    }
+}
+
+// Section 6.2 (lines 2048-2049): "MUST be supported and negotiated". The
+// negotiation row shares the transport evidence with the support row but is a
+// separate requirement with its own scenarios and evaluator.
+TEST(Draft21GapAProbe, QuicDatagramNegotiationRowScoresTheNegotiationOutcome) {
+    for (const char* scenario : {"d21-native-quic-without-datagram-negotiation",
+                                 "d21-webtransport-h3-without-datagram-negotiation"}) {
+        SCOPED_TRACE(scenario);
+        std::vector<Draft21GapProbe> storage;
+        const auto& p = probe(scenario, storage);
+        EXPECT_EQ(p.requirement_id, "D21-6-2-MUST-140");
+        EXPECT_EQ(p.evaluator_id, "d21-no-moqt-session-without-quic-datagram-negotiation");
+        auto negotiated = start(p);
+        accept(negotiated, p, 0, 1);
+        data(negotiated, 1, subscribe_ok());
+        finish(negotiated);
+        EXPECT_EQ(evaluate_draft21_gap_a_probe(negotiated, p), std::optional<bool>{true});
+
+        // A connection reported without a usable DATAGRAM payload is a failure.
+        auto zero = negotiated;
+        std::get<transport::ConnectionEstablishedEvent>(zero.events.front()).max_datagram_payload = 0;
+        EXPECT_EQ(evaluate_draft21_gap_a_probe(zero, p), std::optional<bool>{false});
+
+        RawProbeTranscript refused;
+        refused.scenario_id = p.definition.id;
+        refused.timed_out = true;
+        const std::string reason = "QUIC DATAGRAM not negotiated";
+        Bytes reason_bytes;
+        for (const char c : reason) reason_bytes.push_back(static_cast<std::byte>(c));
+        refused.events = {transport::LocalCloseEvent{transport::CloseErrorSpace::Application, 3,
+                                                     reason_bytes}};
+        EXPECT_EQ(evaluate_draft21_gap_a_probe(refused, p), std::optional<bool>{false});
+        refused.events.clear();
+        EXPECT_EQ(evaluate_draft21_gap_a_probe(refused, p), std::nullopt);
     }
 }
 

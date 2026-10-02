@@ -37,7 +37,7 @@ inline constexpr std::array<std::string_view, 19> kDraft21GapAnnouncementScenari
 };
 
 // Scenarios that execute as raw probe contexts.
-inline constexpr std::array<std::string_view, 19> kDraft21GapRawScenarios{
+inline constexpr std::array<std::string_view, 21> kDraft21GapRawScenarios{
     "d21-publisher-request-response-before-fin",
     "d21-established-subscription-publisher-fin",
     "d21-request-stream-terminal-message-order",
@@ -47,6 +47,8 @@ inline constexpr std::array<std::string_view, 19> kDraft21GapRawScenarios{
     "d21-control-stream-lifetime",
     "d21-native-quic-datagram-support",
     "d21-webtransport-h3-datagram-support",
+    "d21-native-quic-without-datagram-negotiation",
+    "d21-webtransport-h3-without-datagram-negotiation",
     "d21-subscribe-bounded-location-range",
     "d21-update-subscription-location-range",
     "d21-subscribe-single-subgroup",
@@ -78,7 +80,8 @@ inline bool gap_webtransport_only_scenario(std::string_view scenario) {
            scenario == "d21-webtransport-server-sends-authority" ||
            scenario == "d21-webtransport-server-sends-path" ||
            scenario == "d21-webtransport-required-setup-options" ||
-           scenario == "d21-webtransport-h3-datagram-support";
+           scenario == "d21-webtransport-h3-datagram-support" ||
+           scenario == "d21-webtransport-h3-without-datagram-negotiation";
 }
 
 inline bool gap_native_only_scenario(std::string_view scenario) {
@@ -86,7 +89,8 @@ inline bool gap_native_only_scenario(std::string_view scenario) {
            scenario == "d21-native-publisher-uri-query" ||
            scenario == "d21-native-publisher-empty-query" ||
            scenario == "d21-native-quic-required-setup-options" ||
-           scenario == "d21-native-quic-datagram-support";
+           scenario == "d21-native-quic-datagram-support" ||
+           scenario == "d21-native-quic-without-datagram-negotiation";
 }
 
 // Path and query of the moqt URI a driven native publisher is given

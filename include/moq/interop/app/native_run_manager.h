@@ -2,6 +2,7 @@
 
 #include "moq/interop/app/types.h"
 #include "moq/interop/requirements/catalog.h"
+#include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/storage/run_store.h"
 #include "moq/interop/transport/native_quic_listener.h"
 
@@ -35,6 +36,11 @@ struct NativeRunManagerConfig {
     // policy is configured to refuse. Discovery authorization probes score a
     // pass or failure only when it is set; the operator controls the policy.
     std::optional<std::string> denied_authorization_token{};
+    // Credentials, for a Token Type the publisher under test is configured to
+    // understand, used by the draft-21 token rows D21-8-9-MUST-270 (invalid) and
+    // D21-8-9-MUST-273 (expired). The runner cannot create these itself.
+    std::optional<scenarios::Draft21TokenCredential> invalid_auth_token{};
+    std::optional<scenarios::Draft21TokenCredential> expired_auth_token{};
 };
 
 enum class RunStartStatus {

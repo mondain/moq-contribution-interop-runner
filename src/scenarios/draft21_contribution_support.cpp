@@ -189,6 +189,50 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> request) {
     return fixture;
 }
 
+std::optional<wire::draft21::Token> recover_token(std::span<const std::byte> request) {
+    if (request.size() > 65546) return std::nullopt;
+    wire::Cursor cursor(request);
+    const auto type = read_vi(cursor);
+    if (!type || (*type != 0x3 && *type != 0x16 && *type != 0xd)) return std::nullopt;
+    const auto length = read_n(cursor, 2);
+    if (!length) return std::nullopt;
+    const auto size = (static_cast<std::size_t>(std::to_integer<unsigned>((*length)[0])) << 8u) |
+                      std::to_integer<unsigned>((*length)[1]);
+    const auto body_bytes = read_n(cursor, size);
+    if (!body_bytes) return std::nullopt;
+    wire::Cursor body(*body_bytes);
+    const auto id = read_vi(body);
+    const auto fields = read_vi(body);
+    if (!id || !fields || *fields > 32) return std::nullopt;
+    for (std::uint64_t index = 0; index < *fields; ++index) {
+        const auto field_length = read_vi(body);
+        if (!field_length || !read_n(body, static_cast<std::size_t>(*field_length))) return std::nullopt;
+    }
+    const auto name_length = read_vi(body);
+    if (!name_length || !read_n(body, static_cast<std::size_t>(*name_length))) return std::nullopt;
+    const auto count = read_vi(body);
+    if (!count) return std::nullopt;
+    std::uint64_t parameter = 0;
+    for (std::uint64_t index = 0; index < *count; ++index) {
+        const auto delta = read_vi(body);
+        if (!delta) return std::nullopt;
+        parameter += *delta;
+        // Even types carry a varint; odd types a length-prefixed value (Section 9.20).
+        if ((parameter & 1u) == 0u) {
+            if (!read_vi(body)) return std::nullopt;
+            continue;
+        }
+        const auto value_length = read_vi(body);
+        const auto value = value_length ? read_n(body, static_cast<std::size_t>(*value_length)) : std::nullopt;
+        if (!value) return std::nullopt;
+        if (parameter != 0x03) continue;
+        const auto token = wire::draft21::decode_token(*value);
+        if (const auto* decoded = std::get_if<wire::draft21::Token>(&token)) return *decoded;
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 std::vector<Frame> parse_frames(const StreamRecord& record, bool& malformed) {
     std::vector<Frame> result;
     malformed = false;
@@ -221,6 +265,9 @@ View::View(const RawProbeTranscript& transcript) : View(transcript.writes, trans
     denied_token_ = transcript.denied_authorization_token;
     alternate_uri_ = transcript.replacement_uri;
     alternate_events_ = transcript.replacement_events;
+    courtesy_ = transcript.courtesy_writes;
+    auto_replies_ = transcript.auto_replies;
+    unknown_alias_code_ = transcript.unknown_auth_token_alias_compatibility_code;
 }
 
 View::View(std::span<const RawProbeAcceptedWrite> writes,

@@ -111,6 +111,9 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
     } else if (event == picoquic_callback_stream_data ||
                event == picoquic_callback_stream_fin) {
         if (connection_ != connection) return -1;
+        // Holding credit must start with the first bytes of the stream.
+        if (config_.hold_uni_stream_credit && (stream_id & 3u) == 2u)
+            (void)picoquic_set_app_flow_control(connection, stream_id, 1);
         if (!reserve_event(length)) return 0;
         StreamDataEvent received;
         received.stream_id = stream_id;

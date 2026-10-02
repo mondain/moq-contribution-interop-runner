@@ -1,5 +1,6 @@
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/draft18/messages.h"
+#include "raw_probe_courtesy.h"
 #include <algorithm>
 #include <stdexcept>
 #include <set>
@@ -184,10 +185,15 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
          })))
         throw std::invalid_argument("invalid raw probe definition");
     transcript_.scenario_id = definition_.id;
+    const auto& courtesy = definition_.courtesy;
+    if (courtesy.publish != RawProbePublishResponse::Ignore ||
+        courtesy.update != RawProbeUpdateResponse::Ignore)
+        courtesy_ = std::make_unique<PublisherCourtesy>(courtesy);
     transcript_.setup.write = {RawProbeChannel::NewUni, definition_.setup_bytes, false};
     for (const auto& write : definition_.writes)
         transcript_.writes.push_back({write, {}, 0, false});
 }
+RawProbeController::~RawProbeController() = default;
 void RawProbeController::fail() {
     transcript_.harness_failed = true;
     transcript_.complete = false;
@@ -388,10 +394,12 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
             delivered_at_ = now;
         }
     };
+    if (courtesy_) courtesy_->set_now(now);
     for (auto& event : session_closed_ ? std::vector<transport::TransportEvent>{} : transport_.poll(256)) {
         if (transcript_.events.size() >= kMaximumEvents) { fail(); break; }
         transcript_.events.push_back(std::move(event));
         const auto& observed = transcript_.events.back();
+        if (courtesy_) courtesy_->on_event(observed);
         if (const auto* established = std::get_if<transport::ConnectionEstablishedEvent>(&observed)) {
             if (transcript_.transport_established) { fail(); break; }
             transcript_.transport_established = true;
@@ -486,6 +494,9 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
     // All events in this batch were already observed before any new writes.
     if (!transcript_.harness_failed && !session_closed_ && transcript_.transport_established)
         acknowledge_publisher_namespaces();
+    if (courtesy_ && !transcript_.harness_failed && !session_closed_ && transcript_.transport_established)
+        for (const auto& write : courtesy_->step(transport_, now, transcript_.events.size()))
+            transcript_.courtesy_writes.push_back(write);
     if (!transcript_.harness_failed && !session_closed_) send();
     if (transcript_.stimulus_delivered && !transcript_.harness_failed &&
         definition_.response_ready && definition_.response_ready(transcript_)) {

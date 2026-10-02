@@ -319,6 +319,27 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
     "d21-grease-auth-token-type",
     "d21-grease-stop-sending",
     "d21-publisher-goaway-alternate-uri",
+    // Remaining-rows slice (draft21_contribution_residual.cpp).
+    "d21-overlapping-subscriptions-shared-alias",
+    "d21-overlapping-subscriptions-distinct-aliases",
+    "d21-forward-location-and-range-filter-conjunction",
+    "d21-subscribe-multiple-subgroups",
+    "d21-fill-fails-before-first-object",
+    "d21-cancel-subscription-with-concurrent-fill-streams",
+    "d21-subscribe-tracks-publish-skipped-then-capacity-recovers",
+    "d21-concurrent-distinct-track-subscriptions",
+    "d21-publish-distinct-tracks-in-one-scope",
+    "d21-reject-publish-before-object-production",
+    "d21-rejected-subscribe-no-delivery",
+    "d21-publisher-update-credit-limit",
+    "d21-publisher-update-credit-per-stream",
+    "d21-publisher-update-zero-unlimited",
+    "d21-publisher-client-goaway-control",
+    "d21-publisher-client-goaway-request",
+    "d21-publisher-delete-with-pending-alias-uses",
+    "d21-subgroup-completion-withheld-acknowledgments",
+    "d21-request-well-formed-invalid-token",
+    "d21-expired-token-alias-lifetime",
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {

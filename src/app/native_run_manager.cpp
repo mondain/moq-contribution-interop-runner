@@ -409,10 +409,13 @@ public:
     struct Tuning {
         std::optional<std::uint64_t> peer_bidi_streams;
         std::optional<std::uint64_t> peer_uni_streams;
+        std::optional<std::uint64_t> peer_uni_stream_data;
+        bool hold_uni_stream_credit;
         std::string_view path;
     };
     static Tuning tuning_of(const scenarios::RawProbeDefinition& definition) {
-        return {definition.initial_peer_bidi_streams, definition.initial_peer_uni_streams, {}};
+        return {definition.initial_peer_bidi_streams, definition.initial_peer_uni_streams,
+                definition.initial_peer_uni_stream_data, definition.hold_uni_stream_credit, {}};
     }
 
     ListenerResult create_listener(const RunConfig& run_config, std::uint16_t port,
@@ -420,6 +423,10 @@ public:
         const auto& peer_bidi_streams = tuning.peer_bidi_streams;
         const auto path = tuning.path;
         transport::NativeQuicListenerConfig quic;
+        // Bytes the publisher may write on a unidirectional data stream; with held
+        // credit the runner never raises it.
+        if (tuning.peer_uni_stream_data) quic.initial_max_stream_data_uni = *tuning.peer_uni_stream_data;
+        quic.hold_uni_stream_credit = tuning.hold_uni_stream_credit;
         quic.bind_address = config.bind_address;
         quic.bind_port = port;
         // A stream-credit scenario starts the peer with only this many
@@ -599,6 +606,28 @@ public:
         store->finalize(worker->id, summary, outcomes);
     }
 
+    static bool publisher_exit_expected(const scenarios::RawProbeTranscript& transcript,
+                                        bool exit_is_evidence) {
+        // A publisher that ends the session itself typically exits with a failure status.
+        // Once the probe was delivered in full and the transport recorded that close, the
+        // exit status is a consequence of the observed behavior, not a separate harness fault.
+        const bool closed_by_peer = transcript.complete && !transcript.harness_failed &&
+            std::any_of(transcript.events.begin(), transcript.events.end(), [](const auto& event) {
+                return std::holds_alternative<transport::PeerCloseEvent>(event);
+            });
+        return refused_for_missing_datagram(transcript) || closed_by_peer ||
+               (exit_is_evidence && !transcript.harness_failed);
+    }
+
+    static bool refused_for_missing_datagram(const scenarios::RawProbeTranscript& transcript) {
+        constexpr std::string_view reason = "QUIC DATAGRAM not negotiated";
+        if (transcript.transport_established || transcript.harness_failed || transcript.events.size() != 1)
+            return false;
+        const auto* close = std::get_if<transport::LocalCloseEvent>(&transcript.events.front());
+        return close != nullptr &&
+               std::string_view(reinterpret_cast<const char*>(close->reason.data()), close->reason.size()) == reason;
+    }
+
     void run_raw_family(Worker* worker, std::unique_ptr<transport::SessionTransport>& listener,
                         const RunConfig& run_config,
                         std::vector<scenarios::RawProbeDefinition> definitions) {
@@ -646,20 +675,20 @@ public:
                 if (worker->stop_requested) break;
                 if (run_config.mode == RunMode::Driven)
                     handle = start_context_driver(worker, run_config, current_id, driver);
+                const bool exit_is_evidence = definitions[index].publisher_exit_is_evidence;
                 auto transcript = collect_raw_probe(worker, *listener, run_config,
                     std::move(definitions[index]), &driver, handle);
                 bool process_error = retire_driver() &&
                     !scenarios::draft18_contribution_empty_host_scenario(current_id);
-                // A publisher that ends the session itself typically exits with a
-                // failure status. Once the probe was delivered in full and the
-                // transport recorded that close, the exit status is a consequence
-                // of the observed behavior, not a separate harness fault.
-                if (process_error && transcript.complete && !transcript.harness_failed &&
-                    std::any_of(transcript.events.begin(), transcript.events.end(), [](const auto& event) {
-                        return std::holds_alternative<transport::PeerCloseEvent>(event);
-                    }))
-                    process_error = false;
-                if (process_error) {
+                if (process_error && publisher_exit_expected(transcript, exit_is_evidence)) {
+                    // The runner itself caused this exit: it refused a client that never offered
+                    // QUIC DATAGRAM (draft 21 Section 6.2), or the scenario withholds or rejects
+                    // what the publisher asked for. A publisher that gives up afterwards is the
+                    // consequence of what was observed, not a harness failure, so the transport
+                    // evidence stays scoreable.
+                    append_context_event(worker, current_id, "publisher_exit_after_refusal",
+                                         "publisher process exited after the runner refused or rejected it");
+                } else if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
                     append_context_event(worker, current_id, "harness_error", "publisher process failed");
@@ -786,7 +815,7 @@ public:
                 reserved_ports.insert(port);
                 replacement_port = port;
             }
-            auto created = create_listener(run_config, port, Tuning{std::nullopt, std::nullopt, kReplacementPath});
+            auto created = create_listener(run_config, port, Tuning{std::nullopt, std::nullopt, std::nullopt, false, kReplacementPath});
             if (!created.listener) {
                 if (replacement_port) { std::lock_guard lock(mutex); reserved_ports.erase(*replacement_port); }
                 throw std::runtime_error("replacement session listener could not be created");
@@ -930,6 +959,20 @@ public:
         append_write(transcript.setup);
         for (const auto& write : transcript.writes) append_write(write);
         store->append_events(worker->id,std::span(&stimulus,1));
+        for (const auto& courtesy : transcript.courtesy_writes) {
+            // Responses the runner volunteered to requests the publisher opened;
+            // they are context for the transcript, not part of the stimulus proof.
+            storage::EvidenceEvent event = stimulus;
+            event.kind = "raw_probe_courtesy_write";
+            event.stream_id = std::to_string(courtesy.stream_id);
+            const char* kind = "namespace_ok";
+            if (courtesy.kind == scenarios::RawProbeCourtesyKind::PublishOk) kind = "publish_ok";
+            else if (courtesy.kind == scenarios::RawProbeCourtesyKind::PublishError) kind = "publish_error";
+            else if (courtesy.kind == scenarios::RawProbeCourtesyKind::UpdateOk) kind = "update_ok";
+            event.detail = std::string("courtesy=") + kind + " accepted_event_count=" +
+                std::to_string(courtesy.event_count) + " ordinal=" + std::to_string(worker->context_ordinal);
+            store->append_events(worker->id, std::span(&event, 1));
+        }
         if (run_config.draft == DraftVersion::Draft18 &&
             scenarios::draft18_contribution_scenario(transcript.scenario_id)) {
             storage::EvidenceEvent uri = stimulus;
@@ -989,7 +1032,8 @@ public:
                 contribution_namespace.push_back(bytes_of(field));
             auto profiles = scenarios::draft21_contribution_probes(run_config.timeout,
                 std::move(contribution_namespace), bytes_of(run_config.track_fixture->track_name),
-                config.denied_authorization_token.value_or(std::string{}));
+                config.denied_authorization_token.value_or(std::string{}),
+                scenarios::Draft21TokenCredentials{config.invalid_auth_token, config.expired_auth_token});
             const auto found = std::find_if(profiles.begin(), profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown contribution probe");

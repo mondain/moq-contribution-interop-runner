@@ -88,6 +88,13 @@ public:
             transcript_.writes.push_back({write, {}, 0, false});
         transcript_.events.push_back(transport::ConnectionEstablishedEvent{{}, {}, {}, 1200});
         transcript_.events.push_back(transport::StreamDataEvent{2, std::move(peer_setup), false});
+        // A probe that sends nothing starts observing once the peer SETUP has arrived.
+        if (definition_.writes.empty()) delivered_ = transcript_.events.size();
+    }
+
+    // A response the runner volunteered (RawProbeDefinition::courtesy), stamped now.
+    void courtesy(transport::StreamId stream, scenarios::RawProbeCourtesyKind kind) {
+        transcript_.courtesy_writes.push_back({stream, transcript_.events.size(), kind});
     }
 
     void event(transport::TransportEvent event) { transcript_.events.push_back(std::move(event)); }
@@ -130,6 +137,7 @@ public:
         }
         accepted.accepted = accepted.write.bytes.size();
         accepted.fin_accepted = accepted.write.fin;
+        accepted.operation_accepted = write.operation == scenarios::RawProbeOperation::StopSending;
         accepted.delivery_event_count = transcript_.events.size();
         delivered_ = transcript_.events.size();
     }
