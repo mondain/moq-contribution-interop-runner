@@ -363,7 +363,6 @@ Configured runs record the chosen code in evidence and expose
 HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
 establish a standards assignment. A different response code fails the probe.
 
-<<<<<<< ours
 ### Draft-21 completeness-gap scenarios (slice A)
 
 These scenarios close required MUST/MUST NOT rows whose scenario and evaluator
@@ -450,20 +449,80 @@ Raw probe scenarios (the runner subscribes or fetches as a server):
   `d21-register-token-on-*` scenarios (`-271`) and
   `d21-setup-register-use-value-fallback` (`D21-9-1-4-MUST-308`).
 
-Not executable at the protocol boundary, so left unbound: `D21-2-2-MUST-NOT-017`
-(a stream header names exactly one Subgroup, so mixing is invisible without
-fixture-defined Subgroup membership), `D21-2-5-MUST-032`,
-`D21-3-1-2-MUST-NOT-048` (need two different published tracks),
-`D21-3-1-MUST-041` (alias sharing is the publisher's choice, so both named
-contexts cannot be forced), `D21-3-1-1-MUST-NOT-047` (cross-stream arrival order
-cannot attribute an Object to post-rejection production),
-`D21-3-3-3-MUST-066` (needs known Object properties), `D21-3-4-1-MUST-067/068/069`
-(fill streams cannot be held open or forced to fail), `D21-4-1-MUST-NOT-084`,
-`D21-5-2-MUST-130`, `D21-6-2-MUST-140` (absence of a session is
-indistinguishable from a failed connection), `D21-8-9-MUST-270/273` (need a
-configured credential type) and `D21-8-9-MUST-NOT-281` (the publisher must be
-driven to retire tokens).
-=======
+### Draft-21 remaining-rows profiles
+
+These raw-probe scenarios close the last required rows of slice A that the
+slice-A probes above could not induce. They live in
+`src/scenarios/draft21_contribution_residual.cpp` and are listed in
+`kDraft21ContributionScenarios`. Fixture contract: unlike the Group 7 contract
+above, the configured track holds Groups 0 and 1, each with Objects 0 and 1
+(the shape of one GOP per Group); the Subgroup row alone needs a Group 0 whose
+Objects 0-4 and 5-9 form two Subgroups. Contexts that sit behind a publisher's
+own requests ask the runner to acknowledge those requests (a volunteered
+`REQUEST_OK`, never a stimulus write; see `RawProbeCourtesy`) and record every
+such answer, with the transport event count at which it completed, in the
+transcript and in `raw_probe_courtesy_write` evidence.
+
+Runner-subscribes scenarios:
+
+- `d21-overlapping-subscriptions-shared-alias` / `-distinct-aliases`
+  (`D21-3-1-MUST-041`): two subscriptions ask for exactly Object {0,1}; the
+  publisher chooses the Track Aliases, so the context whose alias assignment
+  occurred is the one scored and the row passes on either.
+- `d21-forward-location-and-range-filter-conjunction` (`D21-3-3-3-MUST-066`): a
+  `FORWARD=0` subscription must stay silent, and a `FORWARD=1` subscription with
+  a Location filter {0,0}-{1,0} (and an `OBJECTID_FILTER` for Object 1 when the
+  publisher advertises `MAX_FILTER_RANGES`) may only receive Objects passing all.
+- `d21-subscribe-multiple-subgroups` (`D21-2-2-MUST-NOT-017`): one stream never
+  carries Objects of both fixture Subgroups.
+- `d21-fill-fails-before-first-object` (`D21-3-4-1-MUST-068/069`) and
+  `d21-cancel-subscription-with-concurrent-fill-streams` (`-067`): a plain
+  subscription first makes the track live, then a second subscription (and for
+  067 a `REQUEST_UPDATE`) carries `FILL_PARAMETERS`. A fill failure scores only
+  when the fill stream's `FETCH_HEADER` reached the runner and was followed by a
+  reset with no Object: a stack that resets before the header is sent exposes
+  nothing but the reset, which proves neither row. The 067 context holds stream
+  credit so fills stay open until the subscription is cancelled with
+  `STOP_SENDING`.
+- `d21-subscribe-tracks-publish-skipped-then-capacity-recovers`
+  (`D21-4-1-MUST-NOT-084`): the runner allows one publisher-opened request
+  stream, waits for `PUBLISH_SKIPPED`, rejects the one `PUBLISH` and closes its
+  stream, and fails the row if a skipped track is published afterwards.
+- `d21-subgroup-completion-withheld-acknowledgments` (`D21-5-2-MUST-130`): the
+  subscription asks for a 200 ms `SUBGROUP_DELIVERY_TIMEOUT` and the runner holds
+  each data stream at 64 bytes of credit. Withholding acknowledgements alone would
+  leave a fully received stream, where a later `RESET_STREAM` is not delivered to
+  the application, so the stream is kept unfinished instead; the publisher must
+  reset it when the timer expires.
+- `d21-request-well-formed-invalid-token` (`D21-8-9-MUST-270`) and
+  `d21-expired-token-alias-lifetime` (`-273`) use credentials the operator supplies
+  for a Token Type the publisher understands: `--invalid-auth-token TYPE:HEX`
+  and `--expired-auth-token TYPE:HEX` (one `TRACK_STATUS` each, then a repeat
+  registration for 273). Without them the context sends nothing and stays
+  `NOT_RUN`.
+
+Publisher-initiated scenarios (the runner sends nothing and answers what the
+publisher opens): `d21-concurrent-distinct-track-subscriptions`
+(`D21-3-1-2-MUST-NOT-048`), `d21-publish-distinct-tracks-in-one-scope`
+(`D21-2-5-MUST-032`, which compares Object payloads at a shared Location),
+`d21-reject-publish-before-object-production` and
+`d21-rejected-subscribe-no-delivery` (`D21-3-1-1-MUST-NOT-047`; only streams the
+publisher starts after it visibly reacted to the rejection count),
+`d21-publisher-update-credit-limit`, `-per-stream` and `d21-publisher-update-zero-unlimited`
+(`D21-9-1-7-MUST-NOT-316`; the runner announces `MAX_REQUEST_UPDATES` of 2 and
+leaves every update unanswered), `d21-publisher-client-goaway-control` and
+`-request` (`D21-9-2-MUST-318`) and `d21-publisher-delete-with-pending-alias-uses`
+(`D21-8-9-MUST-NOT-281`; the runner holds back the answer to each message that
+uses a Token Alias). A publisher that gives up after the runner rejects its
+request or withholds answers does not void the context (`publisher_exit_is_evidence`).
+
+Two harness primitives support these scenarios: per-context listener limits
+(`RawProbeListenerLimits`: publisher-opened request streams, per-stream credit,
+and `hold_uni_stream_credit`, which stops flow-control extension through
+`picoquic_set_app_flow_control`) and window-judged contribution scenarios
+(`Spec::window`), which judge a timed-out or peer-closed context on the
+evidence it collected.
+
 Draft-21 contribution profiles (`src/scenarios/draft21_contribution_*.cpp`)
 each need a configured track fixture. Every context proves the publisher kept
 serving requests with a fresh request for that track, and only a complete,
@@ -503,7 +562,6 @@ data leaves it `NOT_RUN`.
   subscription delivery with a FETCH of the same Object. Datagram and Subgroup
   header bits, Subgroup FIN after End of Group, and reset after Forward 0 are
   scored from the Objects the publisher actually produces.
->>>>>>> theirs
 
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
 stored execution evidence. The JSON output gains `execution_audit` with
