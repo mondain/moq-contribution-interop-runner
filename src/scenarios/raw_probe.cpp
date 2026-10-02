@@ -11,7 +11,8 @@ constexpr std::size_t kMaximumSetupBytes = 65546;
 bool staged(const RawProbeDefinition& definition) {
     return std::any_of(definition.writes.begin(),definition.writes.end(),[](const auto& write) {
         return write.reuse_write_stream.has_value() || static_cast<bool>(write.peer_response_ready) ||
-               static_cast<bool>(write.evidence_ready) || static_cast<bool>(write.prepare_bytes);
+               static_cast<bool>(write.evidence_ready) || static_cast<bool>(write.prepare_bytes) ||
+               static_cast<bool>(write.select_peer_stream);
     });
 }
 bool valid_stages(const RawProbeDefinition& definition) {
@@ -23,8 +24,12 @@ bool valid_stages(const RawProbeDefinition& definition) {
             return false;
         if (write.operation != RawProbeOperation::Write && write.operation != RawProbeOperation::StopSending)
             return false;
+        if (write.select_peer_stream &&
+            (write.operation != RawProbeOperation::StopSending || write.reuse_write_stream ||
+             write.peer_response_ready || write.prepare_bytes || !definition.start_after_peer_setup))
+            return false;
         if (write.operation == RawProbeOperation::StopSending &&
-            (!write.reuse_write_stream || !write.bytes.empty() || write.fin ||
+            ((!write.reuse_write_stream && !write.select_peer_stream) || !write.bytes.empty() || write.fin ||
              write.application_error >= (std::uint64_t{1} << 62))) return false;
         if (write.peer_response_ready && !write.reuse_write_stream) return false;
         roots.push_back(i);
@@ -131,6 +136,7 @@ bool accepted(const RawProbeAcceptedWrite& observed, const RawProbeWrite& expect
            observed.write.application_error == expected.application_error &&
            static_cast<bool>(observed.write.evidence_ready) == static_cast<bool>(expected.evidence_ready) &&
            static_cast<bool>(observed.write.prepare_bytes) == static_cast<bool>(expected.prepare_bytes) &&
+           static_cast<bool>(observed.write.select_peer_stream) == static_cast<bool>(expected.select_peer_stream) &&
            observed.operation_accepted == (expected.operation == RawProbeOperation::StopSending) &&
            observed.accepted == expected.bytes.size() &&
            observed.fin_accepted == expected.fin;
@@ -276,6 +282,17 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                     transcript_.events,pending.write.evidence_ready);
                 if (gate == GateState::LimitExceeded) fail();
                 if (gate != GateState::Ready) return;
+            }
+            if (pending.write.select_peer_stream && !pending.prepared_event_count) {
+                const auto prior = std::span<const RawProbeAcceptedWrite>(transcript_.writes).first(next_write_);
+                if (evidence_gate(prior,transcript_.events,[](const auto&){return true;}) != GateState::Ready) {
+                    fail(); return;
+                }
+                const auto selected = pending.write.select_peer_stream({prior,transcript_.events});
+                if (!selected) return;
+                if ((*selected & 3u) != 2u) { fail(); return; }
+                pending.stream_id = *selected;
+                pending.prepared_event_count = transcript_.events.size();
             }
             if (pending.write.prepare_bytes && pending.write.channel == RawProbeChannel::PeerBidi &&
                 !pending.write.reuse_write_stream && !peer_request_stream_) return;
@@ -453,6 +470,17 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
             auto metadata = expected;
             metadata.bytes = write.write.bytes;
             if (!accepted(write,metadata)) return false;
+        } else if (expected.select_peer_stream) {
+            if (!write.prepared_event_count || !transcript.setup.delivery_event_count ||
+                *transcript.setup.delivery_event_count > gate_marker ||
+                gate_marker < previous_marker || gate_marker > marker ||
+                marker > *transcript.delivery_event_count) return false;
+            const auto prior = std::span<const RawProbeAcceptedWrite>(transcript.writes).first(i);
+            const auto events = std::span<const transport::TransportEvent>(transcript.events).first(gate_marker);
+            if (evidence_gate(prior,events,[](const auto&){return true;}) != GateState::Ready ||
+                !setup_before(transcript,definition,gate_marker)) return false;
+            const auto selected = expected.select_peer_stream({prior,events});
+            if (!selected || write.stream_id != selected || (*selected & 3u) != 2u) return false;
         } else if (write.prepared_event_count) return false;
         if (!expected.prepare_bytes && !accepted(write, expected)) return false;
         if (marked && !write.delivery_event_count) return false;
@@ -466,6 +494,8 @@ bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
             if (definition.writes[i].peer_response_ready &&
                 response_gate(transcript,*write.stream_id,*previous.delivery_event_count,gate_marker,
                     definition.writes[i].peer_response_ready) != GateState::Ready) return false;
+        } else if (expected.select_peer_stream) {
+            // The stream was selected and validated from the events above.
         } else if (write.write.channel == RawProbeChannel::Datagram) {
             if (write.write.fin || write.write.bytes.empty() ||
                 write.write.bytes.size() > datagram_capacity ||

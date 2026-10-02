@@ -33,6 +33,11 @@ struct RawProbeWrite {
     // Returns no value while awaiting evidence. The first nonempty result is
     // frozen before opening a stream, and regenerated from its prefix in proof.
     std::function<std::optional<std::vector<std::byte>>(const RawProbeGateInput&)> prepare_bytes{};
+    // STOP_SENDING aimed at a peer-initiated unidirectional stream. Only valid
+    // with operation StopSending and no reuse_write_stream. The callback
+    // returns no value until a stream qualifies; the first stream it names is
+    // frozen, and the proof calls it again on the events seen at that point.
+    std::function<std::optional<transport::StreamId>(const RawProbeGateInput&)> select_peer_stream{};
 };
 struct RawProbeTranscript;
 struct RawProbeDefinition {
