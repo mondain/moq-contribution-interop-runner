@@ -6,6 +6,7 @@
 #include "moq/interop/scenarios/draft21_contribution.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/cursor.h"
+#include "moq/interop/wire/draft21/key_values.h"
 #include "moq/interop/wire/draft21/setup.h"
 #include "moq/interop/wire/draft21/token.h"
 
@@ -228,6 +229,54 @@ void d21b_attach_rows(std::vector<Spec>& specs);
 constexpr const char* kDefaultDeniedToken = "interop-denied";
 // Rows closed by the remaining-rows slice (draft21_contribution_residual.cpp).
 std::vector<Spec> residual_specs();
+
+// ---- helpers shared by the object and slice-B probe sources -----------------------
+// A nested namespace keeps these out of sources (residual) that still carry
+// their own copies of the same names.
+namespace shared {
+
+constexpr std::uint64_t kImmutablePropertiesType = 0x0b;
+constexpr std::uint64_t kGreaseValue = 0x9d;
+
+// Object Properties: the top-level list and each Immutable Properties list.
+struct Properties {
+    wire::draft21::KeyValues top;
+    std::vector<wire::draft21::KeyValues> immutable;
+};
+std::optional<Properties> parse_properties(std::span<const std::byte> block);
+
+struct ObjectRecord {
+    std::uint64_t group{0};
+    std::uint64_t object{0};
+    std::optional<std::uint64_t> subgroup;
+    std::optional<std::uint64_t> status;
+    Bytes payload;
+    Properties properties;
+    bool has_properties{false};
+};
+
+// One Subgroup stream: header, then every whole Object received so far.
+struct SubgroupParse {
+    bool header{false};
+    bool invalid{false};
+    std::uint64_t type{0};
+    std::uint64_t alias{0};
+    std::uint64_t group{0};
+    std::optional<std::uint64_t> subgroup;
+    std::size_t header_length{0};
+    std::vector<ObjectRecord> objects;
+    bool terminal_status{false};  // an End of Group or End of Track Object
+    bool partial_body{false};     // bytes follow the last whole Object
+};
+SubgroupParse parse_subgroup(std::span<const std::byte> data);
+
+// A request on a fresh bidirectional stream.
+RawProbeWrite request_write(Bytes bytes, bool fin = false);
+Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Judge judge = {},
+          bool window = false);
+Bytes text_bytes(const std::string& value);
+
+}  // namespace shared
 
 // Frame type constants used across profiles.
 constexpr std::uint64_t kSubscribeOk = 0x4;

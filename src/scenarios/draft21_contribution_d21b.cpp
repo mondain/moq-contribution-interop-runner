@@ -29,6 +29,7 @@
 namespace moq::interop::scenarios::d21c {
 namespace {
 namespace d21 = wire::draft21;
+using namespace shared;
 
 constexpr std::uint64_t kTokenParameter = 0x03;
 constexpr std::uint64_t kLargestObjectParameter = 0x09;
@@ -36,10 +37,8 @@ constexpr std::uint64_t kForwardParameter = 0x10;
 constexpr std::uint64_t kPriorityParameter = 0x20;
 constexpr std::uint64_t kGroupOrderParameter = 0x22;
 constexpr std::uint64_t kObjectPropertyFilter = 0x28;
-constexpr std::uint64_t kImmutablePropertiesType = 0x0b;
 constexpr std::uint64_t kPublish = 0x1d;
 constexpr std::uint64_t kRedirect = 0x34;
-constexpr std::uint64_t kGreaseValue = 0x9d;
 constexpr std::uint64_t kPaddingStreamType = 0x132b3e28;
 constexpr std::uint64_t kPaddingDatagramType = 0x132b3e29;
 constexpr std::uint64_t kMaxFilterRanges = 0x06;  // Section 9.1.6
@@ -125,115 +124,6 @@ std::optional<Block> block_of(const Frame& message) {
 }
 
 // ---- Object parsing -------------------------------------------------------------
-struct Properties {
-    d21::KeyValues top;
-    std::vector<d21::KeyValues> immutable;
-};
-
-std::optional<Properties> parse_properties(std::span<const std::byte> block) {
-    wire::Cursor cursor(block);
-    auto decoded = d21::decode_key_values_to_end(cursor);
-    auto* entries = std::get_if<d21::KeyValues>(&decoded);
-    if (!entries) return std::nullopt;
-    Properties result;
-    result.top = *entries;
-    for (const auto& entry : result.top) {
-        if (entry.type != kImmutablePropertiesType) continue;
-        const auto* raw = std::get_if<Bytes>(&entry.value);
-        if (!raw) return std::nullopt;
-        wire::Cursor nested(*raw);
-        auto inner = d21::decode_key_values_to_end(nested);
-        auto* values = std::get_if<d21::KeyValues>(&inner);
-        if (!values) return std::nullopt;
-        result.immutable.push_back(*values);
-    }
-    return result;
-}
-
-struct Obj {
-    std::uint64_t id{0};
-    std::optional<std::uint64_t> status;
-    Properties properties;
-    bool has_properties{false};
-};
-
-struct Subgroup {
-    bool header{false};
-    bool invalid{false};
-    std::uint64_t type{0};
-    std::uint64_t alias{0};
-    std::uint64_t group{0};
-    std::optional<std::uint64_t> subgroup;
-    std::size_t header_length{0};
-    std::vector<Obj> objects;
-    bool terminal{false};  // an End of Group or End of Track Object
-    bool partial_body{false};  // bytes follow the header that are not yet a whole Object
-};
-
-Subgroup parse_subgroup(std::span<const std::byte> data) {
-    Subgroup result;
-    wire::Cursor cursor(data);
-    const auto type = read_vi(cursor);
-    if (!type) return result;
-    result.type = *type;
-    if (*type >= 128 || (*type & 0x10u) == 0 || (*type & 0x06u) == 0x06u) {
-        result.invalid = true;
-        return result;
-    }
-    const auto alias = read_vi(cursor);
-    const auto group = alias ? read_vi(cursor) : std::nullopt;
-    if (!alias || !group) return result;
-    const unsigned mode = static_cast<unsigned>((*type & 0x06u) >> 1u);
-    std::optional<std::uint64_t> subgroup;
-    if (mode == 2) {
-        subgroup = read_vi(cursor);
-        if (!subgroup) return result;
-    } else if (mode == 0) {
-        subgroup = 0;
-    }
-    if ((*type & 0x20u) == 0 && !read_n(cursor, 1)) return result;
-    result.header = true;
-    result.alias = *alias;
-    result.group = *group;
-    result.header_length = cursor.offset();
-    std::optional<std::uint64_t> previous;
-    while (cursor.remaining() != 0) {
-        auto local = cursor;
-        const auto delta = read_vi(local);
-        if (!delta) { result.partial_body = true; break; }
-        Obj record;
-        if ((*type & 0x01u) != 0) {
-            const auto length = read_vi(local);
-            if (!length) { result.partial_body = true; break; }
-            if (*length > 65535) { result.invalid = true; break; }
-            const auto block = read_n(local, static_cast<std::size_t>(*length));
-            if (!block) { result.partial_body = true; break; }
-            auto properties = parse_properties(*block);
-            if (!properties) { result.invalid = true; break; }
-            record.properties = std::move(*properties);
-            record.has_properties = true;
-        }
-        const auto payload_length = read_vi(local);
-        if (!payload_length) { result.partial_body = true; break; }
-        if (*payload_length == 0) {
-            const auto status = read_vi(local);
-            if (!status) { result.partial_body = true; break; }
-            record.status = *status;
-        } else {
-            if (*payload_length > kMaximumTotalBytes) { result.invalid = true; break; }
-            if (!read_n(local, static_cast<std::size_t>(*payload_length))) { result.partial_body = true; break; }
-        }
-        record.id = previous ? *previous + *delta + 1 : *delta;
-        if (mode == 1 && !previous) subgroup = record.id;
-        previous = record.id;
-        if (record.status && (*record.status == 3 || *record.status == 4)) result.terminal = true;
-        result.objects.push_back(std::move(record));
-        cursor = local;
-    }
-    result.subgroup = subgroup;
-    return result;
-}
-
 struct DatagramObject {
     bool valid{false};
     std::uint64_t alias{0};
@@ -295,10 +185,6 @@ bool object_gate(const RawProbeGateInput& input) {
 
 bool application_close(const View& view) { return view.close().has_value(); }
 
-RawProbeWrite request_write(Bytes bytes, bool fin = false) {
-    return {RawProbeChannel::NewBidi, std::move(bytes), fin};
-}
-
 // Follow-up on the stream opened by write `base`, once its SUBSCRIBE_OK is complete.
 RawProbeWrite update_write(Bytes bytes, std::size_t base) {
     RawProbeWrite write{RawProbeChannel::NewBidi, std::move(bytes), false, base};
@@ -306,19 +192,10 @@ RawProbeWrite update_write(Bytes bytes, std::size_t base) {
     return write;
 }
 
-Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Judge judge) {
-    Spec result;
-    result.scenario = scenario;
-    result.rows = std::move(rows);
-    result.build = std::move(build);
-    result.judge = std::move(judge);
-    return result;
-}
-
 Judgement unresolved(const View& view) { return {application_close(view), std::nullopt}; }
 
 // A complete SUBSCRIBE_OK, REQUEST_OK or REQUEST_ERROR on write `index`'s stream.
-bool answered(const View& view, std::size_t index) {
+bool response_complete(const View& view, std::size_t index) {
     const auto frames = view.write_frames(index);
     return !frames.empty() && (frames.front().type == kSubscribeOk || frames.front().type == kRequestOk ||
                                frames.front().type == kRequestError);
@@ -476,7 +353,7 @@ Judgement done_judgement(const View& view, bool need_datagram_objects) {
     const auto done = publish_done(view.write_frames(0));
     if (!done) return unresolved(view);
     const auto* stream = view.write_stream(0);
-    const bool settled = (stream && stream->fin) || application_close(view) || answered(view, 2);
+    const bool settled = (stream && stream->fin) || application_close(view) || response_complete(view, 2);
     if (!settled) return {false, std::nullopt};
     const bool datagrams = datagram_objects(view) != 0;
     // The precondition is the absence of any data stream for the subscription.
@@ -707,12 +584,6 @@ Spec padding_datagram_spec() {
 }
 
 // ---- Sections 9.15, 9.18, 9.20.3: discovery authorization -----------------------------
-Bytes text_bytes(const std::string& value) {
-    Bytes result;
-    for (const char c : value) result.push_back(static_cast<std::byte>(static_cast<unsigned char>(c)));
-    return result;
-}
-
 std::string denied_value(const Fixture& fixture) {
     return fixture.denied_token.empty() ? std::string(kDefaultDeniedToken) : fixture.denied_token;
 }
@@ -797,6 +668,9 @@ Spec token_not_copied() {
             const auto frames = view.write_frames(0);
             const Bytes credential = text_bytes(kSubscriberCredential);
             std::map<std::uint64_t, ResolvedToken> aliases;
+            // A PUBLISH may be sent without a SUBSCRIBE_TRACKS, so only one on a stream
+            // opened after the REQUEST_OK can be the discovery request's result.
+            const bool accepted = !frames.empty() && frames.front().type == kRequestOk;
             bool observed = false;
             for (const auto& [id, stream] : view.streams()) {
                 if ((id & 3u) != 0u) continue;  // publisher-opened request streams
@@ -804,12 +678,11 @@ Spec token_not_copied() {
                 auto decoded = d21::decode_publish(cursor);
                 const auto* publish = std::get_if<d21::PublishMessage>(&decoded);
                 if (!publish) continue;
-                observed = true;
+                if (accepted && stream.first_event > frames.front().event) observed = true;
                 for (const auto& token : resolved_tokens(*publish, aliases))
                     if (token.type == 0 && token.value == credential) return {true, false};
             }
-            // Only a PUBLISH that follows an accepted SUBSCRIBE_TRACKS is its result.
-            if (observed && !frames.empty() && frames.front().type == kRequestOk) return {true, true};
+            if (observed) return {true, true};
             if (!frames.empty() && frames.front().type == kRequestError) return {true, std::nullopt};
             return unresolved(view);
         });
@@ -832,7 +705,7 @@ Spec early_reset() {
                 for (const auto& [id, stream] : view.streams()) {
                     if ((id & 3u) != 2u || stream.fin || stream.reset) continue;
                     const auto parsed = parse_subgroup(stream.bytes);
-                    if (parsed.header && parsed.alias == *alias && !parsed.terminal) return true;
+                    if (parsed.header && parsed.alias == *alias && !parsed.terminal_status) return true;
                 }
                 return false;
             };
@@ -856,7 +729,7 @@ Spec early_reset() {
             if (!alias || !pause) return unresolved(view);
             struct Stream {
                 transport::StreamId id;
-                Subgroup parsed;
+                SubgroupParse parsed;
                 const StreamRecord* record;
             };
             std::vector<Stream> streams;
@@ -868,19 +741,19 @@ Spec early_reset() {
             std::optional<bool> verdict;
             for (const auto& open : streams) {
                 // Streams that were open, and not complete, when Forward State 0 was sent.
-                if (open.record->first_event >= *pause || open.parsed.terminal) continue;
+                if (open.record->first_event >= *pause || open.parsed.terminal_status) continue;
                 if ((open.record->fin_event && *open.record->fin_event < *pause) ||
                     (open.record->reset_event && *open.record->reset_event < *pause)) continue;
                 if (open.record->reset) { verdict = true; continue; }
                 if (!open.record->fin || open.parsed.objects.empty()) continue;
                 // A FIN is a promise of completeness. Objects of the same Group and
                 // Subgroup past the last one on this stream disprove it.
-                const auto last = open.parsed.objects.back().id;
+                const auto last = open.parsed.objects.back().object;
                 for (const auto& other : streams) {
                     if (other.id == open.id || other.parsed.group != open.parsed.group ||
                         other.parsed.subgroup != open.parsed.subgroup) continue;
                     for (const auto& object : other.parsed.objects)
-                        if (object.id > last) return {true, false};
+                        if (object.object > last) return {true, false};
                 }
             }
             if (verdict) return {true, verdict};
@@ -895,7 +768,7 @@ struct Candidate {
     std::uint64_t value{0};
 };
 
-std::optional<Candidate> mutable_only_candidate(const Obj& object, bool in_immutable) {
+std::optional<Candidate> mutable_only_candidate(const ObjectRecord& object, bool in_immutable) {
     if (!object.has_properties) return std::nullopt;
     std::map<std::uint64_t, std::vector<std::uint64_t>> top;
     std::map<std::uint64_t, std::vector<std::uint64_t>> inner;
@@ -981,21 +854,24 @@ Spec property_filter_spec(const char* scenario, const char* requirement, const c
                 }
             }
             if (matching != 0) return {true, true};
-            // Objects with that value keep arriving on the unfiltered
-            // subscription after the filter was accepted, yet none passes it.
-            const auto accepted = view.write_event(1);
+            // Objects with that value keep arriving on the unfiltered subscription
+            // after the publisher accepted the filtered one, yet none passes it. The
+            // boundary is the filtered SUBSCRIBE_OK: streams opened while the request
+            // was still in flight carry no evidence about the filter.
+            const auto accepted = view.write_frames(1).front().event;
             const auto unfiltered = subscribe_alias(view, 0);
-            std::size_t later = 0;
+            std::set<std::uint64_t> groups;
             for (const auto& [id, stream] : view.streams()) {
-                if ((id & 3u) != 2u || !accepted || stream.first_event < *accepted) continue;
+                if ((id & 3u) != 2u || stream.first_event <= accepted) continue;
                 const auto parsed = parse_subgroup(stream.bytes);
                 if (!parsed.header || !unfiltered || parsed.alias != *unfiltered) continue;
                 for (const auto& object : parsed.objects) {
                     const auto found = mutable_only_candidate(object, in_immutable);
-                    if (found && found->type == candidate->type && found->value == candidate->value) ++later;
+                    if (found && found->type == candidate->type && found->value == candidate->value)
+                        groups.insert(parsed.group);
                 }
             }
-            if (later >= 2 && view.close()) return {true, false};
+            if (groups.size() >= 2 && view.close()) return {true, false};
             return unresolved(view);
         });
 }
@@ -1009,7 +885,7 @@ Spec property_filter_spec(const char* scenario, const char* requirement, const c
 // unknown value), which is neither graceful handling nor an allowed close. A
 // close with no code, or a transport close, proves nothing.
 Judgement grease_handled(const View& view, std::size_t follow_up, std::optional<std::size_t> after) {
-    if (answered(view, follow_up)) return {true, true};
+    if (response_complete(view, follow_up)) return {true, true};
     const auto& close = view.close();
     if (!close) return {false, std::nullopt};
     if (close->application && close->code != 0 && (!after || close->event >= *after)) return {true, false};

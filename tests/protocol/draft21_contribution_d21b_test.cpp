@@ -510,6 +510,13 @@ TEST(ContributionD21b, PublishFromSubscribeTracksDoesNotCarryTheSubscribersToken
     silent.deliver(0);
     silent.reply(silent.stream_of(0), request_ok());
     EXPECT_EQ(evaluate(silent, probe), std::nullopt);
+    // An unsolicited PUBLISH that precedes the REQUEST_OK is not the discovery
+    // request's result (a PUBLISH may be sent without SUBSCRIBE_TRACKS).
+    ContributionRun early(probe);
+    early.deliver(0);
+    early.reply(0, peer_publish_with(cbytes({0})));
+    early.reply(early.stream_of(0), request_ok());
+    EXPECT_EQ(evaluate(early, probe), std::nullopt);
 }
 
 // ---- Section 11.3.2: early Subgroup termination -------------------------------------
@@ -615,6 +622,30 @@ TEST(ContributionD21b, PropertyFilterNeedsAdvertisedRangesAndSearchesBothLists) 
         starved.reply(18, subgroup(5, 3, object, 0x31));
         close_with(starved, 0);
         EXPECT_EQ(evaluate(starved, probe), false);
+        // Unfiltered Objects that were opened while the filtered SUBSCRIBE was still in
+        // flight say nothing about the filter: the receive side cannot prove the
+        // publisher had accepted it yet.
+        auto in_flight = filter_run(probe);
+        in_flight.deliver(0);
+        in_flight.reply(in_flight.stream_of(0), subscribe_ok(5));
+        in_flight.reply(kData1, subgroup(5, 1, object, 0x31));
+        in_flight.deliver(1);
+        in_flight.reply(14, subgroup(5, 2, object, 0x31));
+        in_flight.reply(18, subgroup(5, 3, object, 0x31));
+        in_flight.reply(in_flight.stream_of(1), subscribe_ok(6));
+        close_with(in_flight, 0);
+        EXPECT_EQ(evaluate(in_flight, probe), std::nullopt);
+        // Matching Objects from a single Group after acceptance are not enough either.
+        auto one_group = filter_run(probe);
+        one_group.deliver(0);
+        one_group.reply(one_group.stream_of(0), subscribe_ok(5));
+        one_group.reply(kData1, subgroup(5, 1, object, 0x31));
+        one_group.deliver(1);
+        one_group.reply(one_group.stream_of(1), subscribe_ok(6));
+        one_group.reply(14, subgroup(5, 2, object, 0x31));
+        one_group.reply(18, subgroup(5, 2, object, 0x31));
+        close_with(one_group, 0);
+        EXPECT_EQ(evaluate(one_group, probe), std::nullopt);
         // Without that evidence a quiet filtered subscription is unscored.
         auto quiet = filter_run(probe);
         quiet.deliver(0);

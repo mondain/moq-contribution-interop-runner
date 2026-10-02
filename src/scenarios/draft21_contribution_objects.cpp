@@ -14,49 +14,14 @@
 namespace moq::interop::scenarios::d21c {
 namespace {
 namespace d21 = wire::draft21;
+using namespace shared;
 
 constexpr std::uint64_t kTargetGroup = 7;
 constexpr std::uint64_t kTargetObject = 9;
 constexpr std::uint64_t kPriorGroupGap = 0x3c;
 constexpr std::uint64_t kPriorObjectGap = 0x3e;
-constexpr std::uint64_t kImmutableProperties = 0x0b;
 
 // ---- object parsing ----------------------------------------------------------
-struct Properties {
-    d21::KeyValues top;
-    std::vector<d21::KeyValues> immutable;
-};
-
-struct ObjectRecord {
-    std::uint64_t group{0};
-    std::uint64_t object{0};
-    std::optional<std::uint64_t> subgroup;
-    std::optional<std::uint64_t> status;
-    Bytes payload;
-    Properties properties;
-    bool has_properties{false};
-};
-
-std::optional<Properties> parse_properties(std::span<const std::byte> block) {
-    wire::Cursor cursor(block);
-    auto decoded = d21::decode_key_values_to_end(cursor);
-    auto* entries = std::get_if<d21::KeyValues>(&decoded);
-    if (!entries) return std::nullopt;
-    Properties result;
-    result.top = *entries;
-    for (const auto& entry : result.top) {
-        if (entry.type != kImmutableProperties) continue;
-        const auto* raw = std::get_if<Bytes>(&entry.value);
-        if (!raw) return std::nullopt;
-        wire::Cursor nested(*raw);
-        auto inner = d21::decode_key_values_to_end(nested);
-        auto* values = std::get_if<d21::KeyValues>(&inner);
-        if (!values) return std::nullopt;
-        result.immutable.push_back(*values);
-    }
-    return result;
-}
-
 // Every occurrence of `type`, in the mutable list and inside Immutable Properties.
 std::vector<std::uint64_t> property_values(const Properties& properties, std::uint64_t type) {
     std::vector<std::uint64_t> values;
@@ -69,82 +34,6 @@ std::vector<std::uint64_t> property_values(const Properties& properties, std::ui
     collect(properties.top);
     for (const auto& list : properties.immutable) collect(list);
     return values;
-}
-
-struct SubgroupParse {
-    bool header{false};
-    bool invalid{false};
-    std::uint64_t type{0};
-    std::uint64_t alias{0};
-    std::uint64_t group{0};
-    std::vector<ObjectRecord> objects;
-    bool terminal_status{false};  // an End of Group or End of Track object
-};
-
-SubgroupParse parse_subgroup(std::span<const std::byte> data) {
-    SubgroupParse result;
-    wire::Cursor cursor(data);
-    const auto type = read_vi(cursor);
-    if (!type) return result;
-    result.type = *type;
-    if (*type >= 128 || (*type & 0x10u) == 0 || (*type & 0x06u) == 0x06u) {
-        result.invalid = true;
-        return result;
-    }
-    const auto alias = read_vi(cursor);
-    const auto group = alias ? read_vi(cursor) : std::nullopt;
-    if (!alias || !group) return result;
-    std::optional<std::uint64_t> subgroup;
-    const unsigned mode = static_cast<unsigned>((*type & 0x06u) >> 1u);
-    if (mode == 2) {
-        subgroup = read_vi(cursor);
-        if (!subgroup) return result;
-    } else if (mode == 0) {
-        subgroup = 0;
-    }
-    if ((*type & 0x20u) == 0 && !read_n(cursor, 1)) return result;
-    result.header = true;
-    result.alias = *alias;
-    result.group = *group;
-    std::optional<std::uint64_t> previous;
-    while (cursor.remaining() != 0) {
-        auto local = cursor;
-        const auto delta = read_vi(local);
-        if (!delta) break;
-        ObjectRecord record;
-        record.group = *group;
-        if ((*type & 0x01u) != 0) {
-            const auto length = read_vi(local);
-            if (!length) break;
-            if (*length > 65535) { result.invalid = true; break; }
-            const auto block = read_n(local, static_cast<std::size_t>(*length));
-            if (!block) break;
-            auto properties = parse_properties(*block);
-            if (!properties) { result.invalid = true; break; }
-            record.properties = std::move(*properties);
-            record.has_properties = true;
-        }
-        const auto payload_length = read_vi(local);
-        if (!payload_length) break;
-        if (*payload_length == 0) {
-            const auto status = read_vi(local);
-            if (!status) break;
-            record.status = *status;
-        } else {
-            if (*payload_length > kMaximumTotalBytes) { result.invalid = true; break; }
-            const auto payload = read_n(local, static_cast<std::size_t>(*payload_length));
-            if (!payload) break;
-            record.payload.assign(payload->begin(), payload->end());
-        }
-        record.object = previous ? *previous + *delta + 1 : *delta;
-        record.subgroup = mode == 1 ? std::optional<std::uint64_t>{previous ? *subgroup : record.object} : subgroup;
-        if (mode == 1 && !previous) subgroup = record.object;
-        previous = record.object;
-        if (record.status && (*record.status == 3 || *record.status == 4)) result.terminal_status = true;
-        result.objects.push_back(std::move(record));
-        cursor = local;
-    }
-    return result;
 }
 
 struct FetchParse {
@@ -342,23 +231,10 @@ Param target_range_filter() {
     return param_lp(0x21, value);
 }
 
-RawProbeWrite request_write(Bytes bytes, bool fin = false) {
-    return {RawProbeChannel::NewBidi, std::move(bytes), fin};
-}
-
 RawProbeWrite update_write(Bytes bytes, std::size_t base) {
     RawProbeWrite write{RawProbeChannel::NewBidi, std::move(bytes), false, base};
     write.peer_response_ready = subscribe_ok_ready;
     return write;
-}
-
-Spec spec(const char* scenario, std::vector<RowBinding> rows, Builder build, Judge judge = {}) {
-    Spec result;
-    result.scenario = scenario;
-    result.rows = std::move(rows);
-    result.build = std::move(build);
-    result.judge = std::move(judge);
-    return result;
 }
 
 // ---- Section 9.6 / 3.1: eligible Objects are delivered --------------------------
