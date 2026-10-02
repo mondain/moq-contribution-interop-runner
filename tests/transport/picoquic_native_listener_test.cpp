@@ -46,7 +46,7 @@ public:
         : port_(std::to_string(port)), protocol_(protocol), action_(action) {
         pid_ = ::fork();
         if (pid_ == 0) {
-            ::execl(QUICHE_TEST_PEER_PATH, QUICHE_TEST_PEER_PATH,
+            ::execl(PICOQUIC_TEST_PEER_PATH, PICOQUIC_TEST_PEER_PATH,
                     port_.c_str(), protocol_.c_str(), action_.c_str(),
                     nullptr);
             ::_exit(127);
@@ -237,8 +237,9 @@ TEST(PicoquicNativeListener, BoundsQueuedPeerEvents) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     const auto events = result.listener->poll(8);
-    ASSERT_EQ(events.size(), 1U);
-    EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[0]));
+    ASSERT_EQ(events.size(), 2U);
+    EXPECT_TRUE(std::holds_alternative<ConnectionEstablishedEvent>(events[0]));
+    EXPECT_TRUE(std::holds_alternative<EventQueueOverflowEvent>(events[1]));
 }
 
 TEST(PicoquicNativeListener, RepeatedPollOnePreservesAllStreamEvents) {
@@ -603,7 +604,7 @@ TEST(PicoquicNativeListener, ReportsIdleTimeout) {
                           std::chrono::seconds{3};
     while (std::chrono::steady_clock::now() < deadline && !closed) {
         for (const auto& event : result.listener->poll(1)) {
-            closed = std::holds_alternative<PeerCloseEvent>(event);
+            closed = std::holds_alternative<IdleTimeoutEvent>(event);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }

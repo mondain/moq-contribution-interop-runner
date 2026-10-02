@@ -66,6 +66,8 @@ struct NativeQuicListener::Impl {
     sockaddr_storage local_address{};
     std::vector<std::uint8_t> receive;
     std::vector<std::uint8_t> send;
+    sockaddr_storage pending_destination{};
+    std::size_t pending_send_length = 0;
     StreamId next_bidi = 1;
     StreamId next_uni = 3;
     std::unordered_set<StreamId> reserved_streams;
@@ -99,17 +101,17 @@ struct NativeQuicListener::Impl {
     }
 
     OpenResult open_stream(bool unidirectional) {
+        const auto status = connection.application_status();
+        if (status != TransportStatus::Success) return {status, 0};
         auto* active = connection.connection();
-        if (active == nullptr) return {TransportStatus::InvalidState, 0};
         const auto* peer_limits = picoquic_get_transport_parameters(active, 0);
         if (peer_limits == nullptr) {
             return {TransportStatus::InternalError, 0};
         }
         auto& next = unidirectional ? next_uni : next_bidi;
-        const auto maximum = unidirectional
-                                 ? peer_limits->initial_max_stream_id_unidir
-                                 : peer_limits->initial_max_stream_id_bidir;
-        if (next > maximum) return {TransportStatus::StreamLimit, 0};
+        const auto maximum = unidirectional ? active->max_streams_unidir_remote
+                                            : active->max_streams_bidir_remote;
+        if ((next >> 2u) >= maximum) return {TransportStatus::StreamLimit, 0};
         const auto result = next;
         if (next > std::numeric_limits<StreamId>::max() - 4) {
             next = std::numeric_limits<StreamId>::max();
@@ -141,32 +143,38 @@ struct NativeQuicListener::Impl {
                 reinterpret_cast<sockaddr*>(&peer),
                 reinterpret_cast<sockaddr*>(&local), 0, 0,
                 picoquic_current_time());
+            connection.observe_transport_state();
         }
     }
 
     void pump_send() {
         for (std::size_t index = 0;
              index < config.max_egress_datagrams_per_call; ++index) {
-            sockaddr_storage destination{};
-            sockaddr_storage source{};
-            picoquic_connection_id_t log_id{};
-            picoquic_cnx_t* last_connection = nullptr;
-            std::size_t length = 0;
-            int interface_index = 0;
-            const int result = picoquic_prepare_next_packet(
-                quic, picoquic_current_time(), send.data(), send.size(),
-                &length, &destination, &source, &interface_index, &log_id,
-                &last_connection);
-            if (result != 0) {
-                connection.fail();
-                break;
+            if (pending_send_length == 0) {
+                sockaddr_storage source{};
+                picoquic_connection_id_t log_id{};
+                picoquic_cnx_t* last_connection = nullptr;
+                int interface_index = 0;
+                const int result = picoquic_prepare_next_packet(
+                    quic, picoquic_current_time(), send.data(), send.size(),
+                    &pending_send_length, &pending_destination, &source,
+                    &interface_index, &log_id, &last_connection);
+                if (result != 0) {
+                    connection.fail();
+                    break;
+                }
+                if (pending_send_length == 0) break;
             }
-            if (length == 0) break;
+            const auto length = pending_send_length;
             const auto sent = ::sendto(
                 socket_fd, send.data(), length, 0,
-                reinterpret_cast<const sockaddr*>(&destination),
-                address_size(destination));
+                reinterpret_cast<const sockaddr*>(&pending_destination),
+                address_size(pending_destination));
+            // The QUIC engine has already consumed this packet. Keep it until
+            // the socket accepts it instead of preparing a replacement.
             if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+            if (sent < 0 && errno == EINTR) continue;
+            pending_send_length = 0;
             if (sent < 0 || static_cast<std::size_t>(sent) != length) {
                 connection.fail();
                 break;
@@ -191,7 +199,14 @@ NativeQuicListenerCreateResult NativeQuicListener::create(
         config.max_event_payload_bytes == 0 ||
         config.max_queued_send_bytes == 0 ||
         config.idle_timeout <= std::chrono::milliseconds{0} ||
-        config.retry_token_lifetime != std::chrono::seconds{120}) {
+        config.retry_token_lifetime != std::chrono::seconds{120} ||
+        config.initial_max_data >= (std::uint64_t{1} << 62u) ||
+        config.initial_max_stream_data_bidi_local >= (std::uint64_t{1} << 62u) ||
+        config.initial_max_stream_data_bidi_remote >= (std::uint64_t{1} << 62u) ||
+        config.initial_max_stream_data_uni >= (std::uint64_t{1} << 62u) ||
+        config.initial_max_streams_bidi > (std::uint64_t{1} << 60u) ||
+        config.initial_max_streams_uni > (std::uint64_t{1} << 60u) ||
+        config.missing_datagram_application_error >= (std::uint64_t{1} << 62u)) {
         return {nullptr, NativeQuicListenerError::InvalidConfiguration};
     }
     if (!regular_file(config.certificate_path)) {
@@ -293,57 +308,65 @@ NativeQuicListenerCreateResult NativeQuicListener::create(
 }
 
 const BoundEndpoint& NativeQuicListener::bound_endpoint() const noexcept {
-    return impl_->endpoint;
+    static const BoundEndpoint empty{};
+    return impl_ ? impl_->endpoint : empty;
 }
 
 OpenResult NativeQuicListener::open_bidi() {
-    return impl_->open_stream(false);
+    return impl_ ? impl_->open_stream(false) : OpenResult{TransportStatus::InvalidState, 0};
 }
 OpenResult NativeQuicListener::open_uni() {
-    return impl_->open_stream(true);
+    return impl_ ? impl_->open_stream(true) : OpenResult{TransportStatus::InvalidState, 0};
 }
 OperationResult NativeQuicListener::write(StreamId stream_id,
                                           std::span<const std::byte> data,
                                           bool fin) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
     auto* active = impl_->connection.connection();
-    if (active == nullptr) {
-        return {TransportStatus::InvalidState, 0, std::nullopt};
-    }
     if ((!impl_->reserved_streams.contains(stream_id) &&
          !impl_->peer_bidi_streams.contains(stream_id)) ||
         impl_->finished_streams.contains(stream_id)) {
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
-    if (data.size() > impl_->config.initial_max_data) {
-        return {TransportStatus::WouldBlock, 0, std::nullopt};
+    if (const auto* stream = picoquic_find_stream(active, stream_id);
+        stream != nullptr && stream->stop_sending_received) {
+        return {TransportStatus::PeerStopped, 0, stream->remote_stop_error};
     }
     const auto queued = impl_->queued_stream_bytes();
-    if (data.size() > impl_->config.max_queued_send_bytes - queued) {
+    const auto accepted = std::min(data.size(), impl_->config.max_queued_send_bytes - queued);
+    if (!data.empty() && accepted == 0) {
         return {TransportStatus::WouldBlock, 0, std::nullopt};
     }
+    const bool accepted_fin = fin && accepted == data.size();
     static constexpr std::uint8_t kEmpty = 0;
     const auto* pointer = data.empty()
                               ? &kEmpty
                               : reinterpret_cast<const std::uint8_t*>(
                                     data.data());
     const int result = picoquic_add_to_stream(active, stream_id, pointer,
-                                              data.size(), fin ? 1 : 0);
+                                              accepted, accepted_fin ? 1 : 0);
     if (result == PICOQUIC_ERROR_INVALID_STREAM_ID) {
         return {TransportStatus::StreamLimit, 0, std::nullopt};
     }
     if (result != 0) {
         return {TransportStatus::InternalError, 0, std::nullopt};
     }
-    if (fin) impl_->finished_streams.insert(stream_id);
+    if (accepted_fin) impl_->finished_streams.insert(stream_id);
     impl_->pump_send();
-    return {TransportStatus::Success, data.size(), std::nullopt};
+    return {accepted == data.size() ? TransportStatus::Success : TransportStatus::Partial,
+            accepted, std::nullopt};
 }
 OperationResult NativeQuicListener::reset(StreamId stream_id,
                                           std::uint64_t application_error) {
-    auto* active = impl_->connection.connection();
-    if (active == nullptr) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
+    if (application_error >= (std::uint64_t{1} << 62u)) {
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
+    auto* active = impl_->connection.connection();
     if ((!impl_->reserved_streams.contains(stream_id) &&
          !impl_->peer_bidi_streams.contains(stream_id)) ||
         impl_->finished_streams.contains(stream_id)) {
@@ -363,8 +386,14 @@ OperationResult NativeQuicListener::reset(StreamId stream_id,
 }
 OperationResult NativeQuicListener::stop_sending(
     StreamId stream_id, std::uint64_t application_error) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
+    if (application_error >= (std::uint64_t{1} << 62u)) {
+        return {TransportStatus::InvalidState, 0, std::nullopt};
+    }
     auto* active = impl_->connection.connection();
-    if (active == nullptr) {
+    if ((stream_id & 3u) == 3u) {
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
     const int result = picoquic_stop_sending(active, stream_id,
@@ -380,10 +409,10 @@ OperationResult NativeQuicListener::stop_sending(
 }
 OperationResult NativeQuicListener::send_datagram(
     std::span<const std::byte> data) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
     auto* active = impl_->connection.connection();
-    if (active == nullptr) {
-        return {TransportStatus::InvalidState, 0, std::nullopt};
-    }
     if (data.size() > impl_->connection.max_datagram_payload()) {
         return {TransportStatus::DatagramTooLarge, 0, std::nullopt};
     }
@@ -404,13 +433,17 @@ OperationResult NativeQuicListener::send_datagram(
 }
 OperationResult NativeQuicListener::close(
     std::uint64_t application_error, std::span<const std::byte> reason) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
     if (impl_->closing) {
         return {TransportStatus::ConnectionClosed, 0, std::nullopt};
     }
-    auto* active = impl_->connection.connection();
-    if (active == nullptr) {
+    if (!impl_) return {TransportStatus::InvalidState, 0, std::nullopt};
+    const auto status = impl_->connection.application_status();
+    if (status != TransportStatus::Success) return {status, 0, std::nullopt};
+    if (application_error >= (std::uint64_t{1} << 62u)) {
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
+    auto* active = impl_->connection.connection();
     if (reason.size() > impl_->config.max_udp_payload - 50 ||
         std::find(reason.begin(), reason.end(), std::byte{0}) !=
             reason.end()) {
@@ -427,9 +460,11 @@ OperationResult NativeQuicListener::close(
     }
     impl_->closing = true;
     impl_->connection.note_local_close(application_error, reason);
+    impl_->pump_send();
     return {TransportStatus::Success, 0, std::nullopt};
 }
 std::vector<TransportEvent> NativeQuicListener::poll(std::size_t max_events) {
+    if (!impl_) return {};
     impl_->pump_receive();
     impl_->pump_send();
     auto events = impl_->connection.drain(max_events);

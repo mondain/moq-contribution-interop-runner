@@ -17,6 +17,18 @@ std::vector<std::byte> cid_bytes(picoquic_connection_id_t id) {
     return result;
 }
 
+std::size_t payload_size(const TransportEvent& event) {
+    if (const auto* ready = std::get_if<ConnectionEstablishedEvent>(&event)) {
+        return ready->alpn.size() + ready->local_connection_id.size() +
+               ready->peer_connection_id.size();
+    }
+    if (const auto* stream = std::get_if<StreamDataEvent>(&event)) return stream->data.size();
+    if (const auto* datagram = std::get_if<DatagramEvent>(&event)) return datagram->data.size();
+    if (const auto* close = std::get_if<PeerCloseEvent>(&event)) return close->reason.size();
+    if (const auto* close = std::get_if<LocalCloseEvent>(&event)) return close->reason.size();
+    return 0;
+}
+
 }  // namespace
 
 int PicoquicConnectionState::callback(picoquic_cnx_t* connection,
@@ -34,7 +46,7 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
                                       std::uint8_t* bytes, std::size_t length,
                                       picoquic_call_back_event_t event) {
     if (event == picoquic_callback_ready) {
-        if (connection_ != nullptr && connection_ != connection) {
+        if (terminal_ || (connection_ != nullptr && connection_ != connection)) {
             return picoquic_close(connection, 0x10);
         }
         connection_ = connection;
@@ -72,13 +84,12 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
              config_.max_udp_payload - 50, 1150});
         max_datagram_payload_ = ready.max_datagram_payload;
         enqueue(std::move(ready));
+    } else if (terminal_ || connection_ != connection) {
+        return 0;
     } else if (event == picoquic_callback_stream_data ||
                event == picoquic_callback_stream_fin) {
         if (connection_ != connection) return -1;
-        if (length > config_.max_event_payload_bytes) {
-            enqueue(TransportErrorEvent{TransportError::ProtocolFailure});
-            return -1;
-        }
+        if (!reserve_event(length)) return 0;
         StreamDataEvent received;
         received.stream_id = stream_id;
         received.data.resize(length);
@@ -91,10 +102,7 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
             stream_id, picoquic_get_remote_stream_error(connection, stream_id)});
     } else if (event == picoquic_callback_datagram) {
         if (connection_ != connection) return -1;
-        if (length > config_.max_event_payload_bytes) {
-            enqueue(TransportErrorEvent{TransportError::ProtocolFailure});
-            return -1;
-        }
+        if (!reserve_event(length)) return 0;
         DatagramEvent received;
         received.data.resize(length);
         if (length > 0) std::memcpy(received.data.data(), bytes, length);
@@ -108,17 +116,27 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
                event == picoquic_callback_stateless_reset) {
         if (connection_ == connection) {
             if (!local_close_) {
+                if (event == picoquic_callback_close &&
+                    connection->local_error == PICOQUIC_ERROR_IDLE_TIMEOUT) {
+                    enqueue(IdleTimeoutEvent{});
+                    terminal_ = true;
+                    connection_ = nullptr;
+                    established_ = false;
+                    return 0;
+                }
+                if (event == picoquic_callback_close && !peer_transport_close_) {
+                    enqueue(TransportErrorEvent{TransportError::ProtocolFailure});
+                    terminal_ = true;
+                    connection_ = nullptr;
+                    established_ = false;
+                    max_datagram_payload_ = 0;
+                    return 0;
+                }
                 std::vector<std::byte> reason;
                 if (connection->remote_error_reason != nullptr) {
                     const auto length =
                         std::strlen(connection->remote_error_reason);
-                    if (length > config_.max_event_payload_bytes) {
-                        enqueue(EventQueueOverflowEvent{});
-                        connection_ = nullptr;
-                        established_ = false;
-                        max_datagram_payload_ = 0;
-                        return 0;
-                    }
+                    if (!reserve_event(length)) return 0;
                     reason.resize(length);
                     if (length != 0) {
                         std::memcpy(reason.data(),
@@ -134,6 +152,7 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
                         : picoquic_get_remote_error(connection),
                     std::move(reason)});
             }
+            terminal_ = true;
             connection_ = nullptr;
             established_ = false;
             max_datagram_payload_ = 0;
@@ -142,14 +161,43 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
     return 0;
 }
 
-void PicoquicConnectionState::enqueue(TransportEvent event) {
-    if (overflowed_) return;
-    if (events_.size() >= config_.max_events) {
-        events_.clear();
-        events_.emplace_back(EventQueueOverflowEvent{});
-        overflowed_ = true;
-        return;
+void PicoquicConnectionState::observe_transport_state() {
+    if (terminal_ || connection_ == nullptr || !established_) return;
+    // A received transport CLOSE has no dedicated callback until disconnect.
+    // Record the actual receive transition, including code zero/empty reason.
+    if (connection_->cnx_state == picoquic_state_closing_received) {
+        peer_transport_close_ = true;
+        on_event(connection_, 0, nullptr, 0, picoquic_callback_close);
+    } else if (connection_->local_error != 0 &&
+               connection_->local_error != PICOQUIC_ERROR_IDLE_TIMEOUT) {
+        enqueue(TransportErrorEvent{TransportError::ProtocolFailure});
+        terminal_ = true;
     }
+}
+
+void PicoquicConnectionState::overflow() {
+    if (terminal_) return;
+    terminal_ = true;
+    events_.emplace_back(EventQueueOverflowEvent{});
+    if (connection_ != nullptr) {
+        picoquic_connection_error_ex(connection_, 1, 0, "event queue overflow");
+    }
+}
+
+bool PicoquicConnectionState::reserve_event(std::size_t payload) {
+    if (terminal_) return false;
+    if (events_.size() >= config_.max_events ||
+        payload > config_.max_event_payload_bytes - event_payload_bytes_) {
+        overflow();
+        return false;
+    }
+    return true;
+}
+
+void PicoquicConnectionState::enqueue(TransportEvent event) {
+    const auto payload = payload_size(event);
+    if (!reserve_event(payload)) return;
+    event_payload_bytes_ += payload;
     events_.push_back(std::move(event));
 }
 
@@ -157,6 +205,7 @@ std::vector<TransportEvent> PicoquicConnectionState::drain(
     std::size_t max_events) {
     std::vector<TransportEvent> result;
     while (!events_.empty() && result.size() < max_events) {
+        event_payload_bytes_ -= payload_size(events_.front());
         result.push_back(std::move(events_.front()));
         events_.pop_front();
     }
@@ -164,14 +213,19 @@ std::vector<TransportEvent> PicoquicConnectionState::drain(
 }
 
 void PicoquicConnectionState::fail() {
+    if (terminal_) return;
     enqueue(TransportErrorEvent{TransportError::InternalFailure});
+    terminal_ = true;
+    if (connection_ != nullptr) picoquic_connection_error(connection_, 1, 0);
 }
 
 void PicoquicConnectionState::note_local_close(
     std::uint64_t application_error, std::span<const std::byte> reason) {
+    if (terminal_) return;
     local_close_ = true;
     enqueue(LocalCloseEvent{CloseErrorSpace::Application, application_error,
                             {reason.begin(), reason.end()}});
+    terminal_ = true;
 }
 
 }  // namespace moq::interop::transport::detail

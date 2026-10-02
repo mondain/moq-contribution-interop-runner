@@ -1,4 +1,4 @@
-#include "quiche_client.h"
+#include "picoquic_client.h"
 
 #include <chrono>
 #include <array>
@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
     const auto port = std::strtoul(argv[1], nullptr, 10);
     if (port == 0 || port > 65535) return 2;
 
-    moq::interop::transport::test::QuicheTestClient::Config config;
+    moq::interop::transport::test::PicoquicTestClient::Config config;
     config.port = static_cast<std::uint16_t>(port);
     const std::string_view action{argv[3]};
     if (action == "expect-missing-datagram-close") {
@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     for (const char character : std::string_view{argv[2]}) {
         config.alpn.push_back(static_cast<std::byte>(character));
     }
-    auto client = moq::interop::transport::test::QuicheTestClient::create(config);
+    auto client = moq::interop::transport::test::PicoquicTestClient::create(config);
     if (!client) return 3;
 
     const auto deadline = std::chrono::steady_clock::now() +

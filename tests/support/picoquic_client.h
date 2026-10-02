@@ -39,7 +39,7 @@ struct ClientCloseObservation {
     std::vector<std::byte> reason;
 };
 
-class QuicheTestClient {
+class PicoquicTestClient {
 public:
     struct Config {
         std::string host = "127.0.0.1";
@@ -47,10 +47,12 @@ public:
         std::vector<std::byte> alpn;
         bool enable_datagrams = true;
         std::size_t datagram_queue = 16;
+        std::uint64_t initial_max_streams_bidi = 64;
+        std::uint64_t initial_max_streams_uni = 64;
     };
 
-    static std::unique_ptr<QuicheTestClient> create(const Config& config);
-    ~QuicheTestClient();
+    static std::unique_ptr<PicoquicTestClient> create(const Config& config);
+    ~PicoquicTestClient();
 
     bool pump();
     bool established() const;
@@ -60,6 +62,8 @@ public:
                                            std::span<const std::byte> data,
                                            bool fin);
     bool send_datagram(std::span<const std::byte> data);
+    bool send_invalid_transport_frame();
+    bool send_transport_close_frame();
     bool reset_stream(std::uint64_t stream_id, std::uint64_t application_error);
     bool stop_stream(std::uint64_t stream_id, std::uint64_t application_error);
     std::size_t available_destination_ids() const;
@@ -74,7 +78,7 @@ public:
 
 private:
     struct Impl;
-    explicit QuicheTestClient(std::unique_ptr<Impl> impl);
+    explicit PicoquicTestClient(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 

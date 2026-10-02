@@ -33,9 +33,6 @@ struct NativeQuicListenerConfig {
     std::uint64_t initial_max_stream_data_uni = 1u << 18;
     std::uint64_t initial_max_streams_bidi = 64;
     std::uint64_t initial_max_streams_uni = 64;
-    std::size_t datagram_receive_queue = 64;
-    std::size_t datagram_send_queue = 64;
-    std::size_t max_additional_connection_ids = 1;
     std::uint64_t missing_datagram_application_error = 3;
 };
 

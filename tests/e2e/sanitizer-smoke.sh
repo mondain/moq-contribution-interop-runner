@@ -7,8 +7,7 @@ cmake -S "$root_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_C_FLAGS=-fsanitize=address,undefined \
     -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined \
-    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined \
-    -DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=OFF
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined
 cmake --build "$build_dir" --parallel 2 --target \
     moq-interop-publisher-driver-tests moq-interop-run-store-tests \
     moq-interop-execution-audit-tests \

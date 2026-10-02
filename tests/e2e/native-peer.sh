@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 3 || ( "$3" != 18 && "$3" != 21 ) ]]; then
-    printf 'Usage: %s RUNNER_BIN QUICHE_PEER_BIN 18|21\n' "$0" >&2
+    printf 'Usage: %s RUNNER_BIN PICOQUIC_PEER_BIN 18|21\n' "$0" >&2
     exit 2
 fi
 
@@ -110,9 +110,3 @@ fi
 
 printf 'draft-%s native publisher: %s passing requirements for %s\n' \
     "$draft" "$passed" "$run_id"
-if [[ -n ${MOQ_INTEROP_NATIVE_PARITY_OUTPUT:-} ]]; then
-    jq -cS '{verdict:.run.verdict,score:.run.score,outcomes:[.run.outcomes[]|{requirement_id,state}]}' \
-        <<<"$result_json" >"$MOQ_INTEROP_NATIVE_PARITY_OUTPUT"
-    jq -cS '[.items[]|{kind,requirement_id}]' \
-        <<<"$events_json" >>"$MOQ_INTEROP_NATIVE_PARITY_OUTPUT"
-fi

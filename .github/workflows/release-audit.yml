@@ -41,7 +41,7 @@ jobs:
           bash tests/e2e/release-audit.sh run "$RUNNER_TEMP/release-audit" \
             "$PWD/build/moq-interop-audit" \
             "moq-interop-runner:$GITHUB_SHA" \
-            "$PWD/build/moq-interop-quiche-peer" \
+            "$PWD/build/moq-interop-picoquic-peer" \
             "$PWD/external/moqxr/build/openmoq-publisher" \
             "$PWD/external/moqxr/tests/fixtures/locmaf-publisher.mp4"
           result=$?

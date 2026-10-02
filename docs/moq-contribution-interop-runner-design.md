@@ -61,8 +61,8 @@ The application is a fresh C++20 implementation. Picoquic supplies QUIC and
 its H3zero component supplies HTTP/3 primitives. This repository owns strict
 WebTransport admission, session-to-stream mapping, and all MOQT behavior.
 Neither picoquic's examples nor any publisher implementation define expected
-MOQT behavior. Quiche may remain a test-only independent peer, but is not linked
-into the validator or its production Docker image.
+MOQT behavior. Native test peers also use picoquic; quiche build options and
+legacy backend targets have been retired.
 
 The protocol implementation has explicit draft-18 and draft-21 modules. They
 share bounded byte-buffer and integer primitives only when the draft texts
@@ -115,7 +115,6 @@ requirements used for scoring.
 - C++20 application code.
 - CMake for configuration, build, test registration, and install rules.
 - Pinned picoquic, H3zero, and picotls sources for QUIC, HTTP/3, and TLS.
-- Quiche as an optional, test-only independent QUIC peer.
 - SQLite3 for durable run, outcome, and evidence indexes.
 - nlohmann/json for manifests and JSON API serialization.
 - cpp-httplib for the plain HTTP control and results service.
@@ -193,8 +192,7 @@ tests.
 ### Picoquic migration and strict WebTransport profile
 
 Both native QUIC and WebTransport use picoquic in the production runner. The
-native listener replaces the current quiche-backed implementation behind the
-existing `SessionTransport` interface. Draft selection remains explicit: a run
+native listener implements the existing `SessionTransport` interface. Draft selection remains explicit: a run
 accepts its exact `moqt-18` or `moqt-21` ALPN and never falls back to another
 draft. QUIC DATAGRAM support is required for both drafts. A native MOQT stream
 may use RESET_STREAM or RESET_STREAM_AT according to the negotiated extension;
@@ -224,11 +222,11 @@ resource-limit violation cannot enter the MOQT decoder. H3zero changes needed
 to prevent legacy settings, token, or header acceptance are carried as small,
 pinned build-time patches with tests; the sibling picoquic checkout is never
 modified by this project. The final Docker runtime contains picoquic and its
-TLS dependencies but no quiche runtime dependency.
+TLS dependencies.
 
 Migration is complete only when existing native draft-18 and draft-21
 scenarios produce equivalent evidence and scores through picoquic, strict
-WebTransport transport tests pass, and the old quiche runtime can be removed.
+WebTransport transport tests pass.
 Until then, an unimplemented transport profile is reported as unsupported;
 there is no transparent backend fallback. Transport negotiation and internal
 adapter failures remain distinct from publisher-MOQT requirement failures.
@@ -312,6 +310,21 @@ Each run owns its session state, deadlines, scenario selection, evidence stream,
 and result aggregation. Port-range exhaustion returns an HTTP conflict rather
 than sharing state between runs. Stopping a run closes its listeners and active
 sessions without deleting evidence.
+
+Raw probe runs accept up to 100 distinct scenario IDs in the supplied order.
+Each context uses a fresh native QUIC or WebTransport session on the same
+reserved endpoint, with its own timeout and transport evidence indexes. The
+worker retains actual transcripts and evaluates the unchanged catalog once;
+separate run results never supply missing contexts. The original typed
+controllers continue to accept one scenario per run.
+
+Observed publishers reconnect when the events API reports `context_ready` for
+the next scenario. This contract coordinates sessions without authenticating
+publisher identity. Driven runs restart the configured process for each context
+and retain separate request and process logs. Cancellation, listener errors,
+process errors, and forced termination after the stop grace mark the run
+`ERROR`; incomplete contexts cannot supply a pass. Bound ports remain reserved
+through listener recreation and draining cancellation.
 
 ## Requirement Catalog
 
@@ -599,8 +612,7 @@ runs can reuse the same targets outside CI.
 An independent byte-scripted publisher fixture uses literal golden frames and
 does not call production encoders. It covers transport/session integration,
 run isolation, persistence, API responses, report rendering, and timeout paths.
-Quiche may be used to supply an independent test peer for picoquic native QUIC
-and the HTTP/3 WebTransport profile, but test expectations come from the
+Picoquic supplies the native test peer. Test expectations come from the
 checked-in drafts and the exact WebTransport draft they reference. Negative
 tests cover legacy WebTransport settings and tokens, missing required settings
 or transport parameters, malformed Structured Fields, wrong MOQT protocol,

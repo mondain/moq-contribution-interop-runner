@@ -45,7 +45,6 @@ RUN cmake -S . -B /build \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=none \
         -DCMAKE_INSTALL_PREFIX=/opt/moq-interop \
         -DMOQ_INTEROP_BUILD_TESTS=OFF \
-        -DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=OFF \
         -DMOQ_INTEROP_SOURCE_REVISION=${SOURCE_REVISION} \
     && cmake --build /build --parallel 2 \
     && cmake --install /build --strip

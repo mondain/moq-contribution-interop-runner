@@ -1,5 +1,9 @@
 # Picoquic Transport Migration Implementation Plan
 
+Backend update (2026-10-01): picoquic is the sole supported backend and local
+test peer. Quiche options, dependencies, legacy sources, and parity targets
+have been retired; quiche references below describe the earlier migration.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace production quiche with pinned picoquic for native draft-18/21 sessions, then add strict draft-specific WebTransport over H3zero without changing publisher-MOQT scoring.

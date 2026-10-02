@@ -55,7 +55,6 @@ jobs:
           -DCMAKE_C_FLAGS=-fsanitize=address,undefined
           -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined
           -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined
-          -DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=OFF
       - name: Build focused tests
         run: >-
           cmake --build build-asan --parallel 2 --target
