@@ -153,8 +153,13 @@ TEST(ScoringTest, RejectsOutcomesInconsistentWithCatalogClassification) {
     const auto testable = catalog({requirement("row", Strength::Must)});
     expect_error(score(testable,
                        std::vector<Outcome>{{"row", OutcomeState::NotTestable}}));
-    expect_error(score(testable,
-                       std::vector<Outcome>{{"row", OutcomeState::NotApplicable}}));
+    // A scored row may be reported NotApplicable, but only as its single observation.
+    expect_error(score(testable, std::vector<Outcome>{{"row", OutcomeState::NotApplicable},
+                                                      {"row", OutcomeState::Pass}}));
+    expect_error(score(testable, std::vector<Outcome>{{"row", OutcomeState::NotApplicable},
+                                                      {"row", OutcomeState::NotApplicable}}));
+    expect_error(score(testable, std::vector<Outcome>{{"row", OutcomeState::NotApplicable},
+                                                      {"row", OutcomeState::NotRun}}));
 
     const auto not_testable = catalog({requirement("row", Strength::Must,
                                                     Applicability::Applicable,
@@ -166,6 +171,47 @@ TEST(ScoringTest, RejectsOutcomesInconsistentWithCatalogClassification) {
                                                       Testability::NotApplicable)});
     expect_error(score(not_applicable,
                        std::vector<Outcome>{{"row", OutcomeState::NotTestable}}));
+}
+
+TEST(ScoringTest, ScoredRowReportedNotApplicableLeavesEveryDenominator) {
+    const auto input = catalog({requirement("must-passed", Strength::Must),
+                                requirement("must-excluded", Strength::Must),
+                                requirement("should-excluded", Strength::Should),
+                                requirement("may-excluded", Strength::May),
+                                requirement("should-passed", Strength::Should)});
+    const auto summary = score(input, std::vector<Outcome>{{"must-passed", OutcomeState::Pass},
+                                                           {"must-excluded", OutcomeState::NotApplicable},
+                                                           {"should-excluded", OutcomeState::NotApplicable},
+                                                           {"may-excluded", OutcomeState::NotApplicable},
+                                                           {"should-passed", OutcomeState::Pass}});
+    EXPECT_EQ(summary.verdict, RunVerdict::Pass);
+    expect_ratio(summary.required, 10, 10);
+    expect_ratio(summary.weighted, 13, 13);
+    expect_ratio(summary.coverage, 13, 13);
+}
+
+TEST(ScoringTest, NotApplicableRowsNeitherFailNorMakeTheRunIncomplete) {
+    const auto input = catalog({requirement("kept", Strength::Must),
+                                requirement("excluded", Strength::Must)});
+    // The excluded row would otherwise be NotRun and make the run incomplete.
+    EXPECT_EQ(score(input, std::vector<Outcome>{{"kept", OutcomeState::Pass},
+                                                {"excluded", OutcomeState::NotRun}}).verdict,
+              RunVerdict::Incomplete);
+    EXPECT_EQ(score(input, std::vector<Outcome>{{"kept", OutcomeState::Pass},
+                                                {"excluded", OutcomeState::NotApplicable}}).verdict,
+              RunVerdict::Pass);
+    // Rows that still ran keep deciding the verdict.
+    EXPECT_EQ(score(input, std::vector<Outcome>{{"kept", OutcomeState::Fail},
+                                                {"excluded", OutcomeState::NotApplicable}}).verdict,
+              RunVerdict::Fail);
+    EXPECT_EQ(score(input, std::vector<Outcome>{{"kept", OutcomeState::NotRun},
+                                                {"excluded", OutcomeState::NotApplicable}}).verdict,
+              RunVerdict::Incomplete);
+    // A run in which every scored row is excluded has nothing to score and is not an error.
+    const auto all = score(input, std::vector<Outcome>{{"kept", OutcomeState::NotApplicable},
+                                                       {"excluded", OutcomeState::NotApplicable}});
+    EXPECT_EQ(all.verdict, RunVerdict::Pass);
+    expect_ratio(all.required, 0, 0);
 }
 
 TEST(ScoringTest, RejectsInvalidCatalogIntegrity) {

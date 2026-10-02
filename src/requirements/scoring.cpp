@@ -133,6 +133,10 @@ ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> o
             if (!exactly_not_applicable(observations)) return error_summary();
             continue;
         }
+        // A scored row the run declared not applicable (for example, every scenario it
+        // names needs a feature the publisher declared it does not implement) leaves the
+        // required, weighted and coverage denominators and cannot make the run incomplete.
+        if (exactly_not_applicable(observations)) continue;
         if (!valid_scored_observations(observations)) return error_summary();
 
         const auto requirement_weight = weight(requirement.strength);
