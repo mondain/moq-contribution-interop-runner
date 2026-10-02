@@ -183,6 +183,72 @@ TEST(Draft18GapB, SameObjectPayloadMustNotDependOnRequestParameters) {
     EXPECT_EQ(score(probe, silent), std::nullopt);
 }
 
+// Section 10.2.2: no DELETE while a USE_ALIAS message awaits its response.
+d18::Parameters token(d18::TokenAliasType type, std::uint64_t alias) {
+    d18::Token value{type, alias, std::nullopt, {}};
+    if (type == d18::TokenAliasType::Register) { value.token_type = 1; value.token_value = bytes_of("tok"); }
+    return {{0x03, value}};
+}
+Bytes announce(std::uint64_t request_id, d18::Parameters parameters) {
+    return encode_draft18(d18::PublishNamespaceMessage{request_id, d18::TrackNamespace{{bytes_of("n")}},
+        std::move(parameters)});
+}
+Bytes update(std::uint64_t request_id, d18::Parameters parameters) {
+    return encode_draft18(d18::RequestUpdateMessage{request_id, std::move(parameters)});
+}
+
+TEST(Draft18GapB, DeleteMustWaitForEveryUseAliasResponse) {
+    const auto probe = profile("D18-10-2-2-MUST-NOT-002");
+    EXPECT_EQ(probe.definition.id, "withhold-use-alias-response-while-publisher-retires-token");
+    EXPECT_EQ(probe.evaluator_id, "token-delete-not-sent-before-all-use-alias-responses");
+    const auto reaction = [](std::function<void(ScriptedPublisher&)> later) {
+        return [later](ScriptedPublisher& peer) {
+            once(peer, "register", [&] { peer.data(0, announce(2, token(d18::TokenAliasType::Register, 1))); });
+            // The runner's REQUEST_OK reaches stream 0 once the registration was seen.
+            if (peer.sent(0)) later(peer);
+        };
+    };
+    // DELETE while a USE_ALIAS on another stream is unanswered: violation.
+    ScriptedPublisher early(setup(), reaction([](ScriptedPublisher& peer) {
+        once(peer, "use", [&] { peer.data(4, announce(4, token(d18::TokenAliasType::UseAlias, 1))); });
+        if (peer.answered("use"))
+            once(peer, "delete", [&] { peer.data(8, announce(6, token(d18::TokenAliasType::Delete, 1))); });
+    }));
+    EXPECT_EQ(score(probe, early), std::optional<bool>{false});
+    ASSERT_NE(early.sent(0), nullptr);
+    EXPECT_EQ(early.sent(0)->bytes, ok());
+    EXPECT_EQ(early.sent(4), nullptr);
+    // A DELETE with no USE_ALIAS outstanding is allowed.
+    ScriptedPublisher clean(setup(), reaction([](ScriptedPublisher& peer) {
+        once(peer, "delete", [&] { peer.data(0, update(4, token(d18::TokenAliasType::Delete, 1))); });
+    }));
+    EXPECT_EQ(score(probe, clean), std::optional<bool>{true});
+    // USE_ALIAS on the acknowledged stream itself after the response is answered.
+    ScriptedPublisher answered_use(setup(), reaction([](ScriptedPublisher& peer) {
+        once(peer, "use", [&] { peer.data(0, update(4, token(d18::TokenAliasType::UseAlias, 1))); });
+        if (peer.answered("use"))
+            once(peer, "delete", [&] { peer.data(0, update(6, token(d18::TokenAliasType::Delete, 1))); });
+    }));
+    EXPECT_EQ(score(probe, answered_use), std::optional<bool>{true});
+    // No retirement observed: nothing established.
+    ScriptedPublisher kept(setup(), reaction([](ScriptedPublisher& peer) {
+        once(peer, "use", [&] { peer.data(4, announce(4, token(d18::TokenAliasType::UseAlias, 1))); });
+    }));
+    EXPECT_EQ(score(probe, kept), std::nullopt);
+    // DELETE of an alias the publisher never registered is outside this rule.
+    ScriptedPublisher unregistered(setup(), [](ScriptedPublisher& peer) {
+        once(peer, "register", [&] { peer.data(0, announce(2, token(d18::TokenAliasType::Register, 1))); });
+        if (peer.sent(0)) once(peer, "delete", [&] { peer.data(4, announce(4, token(d18::TokenAliasType::Delete, 7))); });
+    });
+    EXPECT_EQ(score(probe, unregistered), std::nullopt);
+    // Without any token-bearing request the runner never sends the response.
+    ScriptedPublisher plain(setup(), [](ScriptedPublisher& peer) {
+        once(peer, "announce", [&] { peer.data(0, announce(2, {})); });
+    });
+    EXPECT_EQ(score(probe, plain), std::nullopt);
+    EXPECT_EQ(plain.sent(0), nullptr);
+}
+
 // The controller answers the publisher's PUBLISH_NAMESPACE so that it proceeds.
 TEST(Draft18GapB, PublisherNamespaceIsAcknowledgedWithoutBecomingStimulus) {
     const auto probe = profile("D18-10-MUST-004");

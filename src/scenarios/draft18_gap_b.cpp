@@ -1,6 +1,9 @@
 #include "draft18_gap_a_common.h"
 
 #include <algorithm>
+#include <concepts>
+#include <map>
+#include <set>
 #include <string_view>
 
 // Draft-18 gap slice B: publisher-observed obligations that need either a
@@ -194,6 +197,113 @@ Observation payload_identity_observe(const RawProbeTranscript& transcript, const
     return observation;
 }
 
+// ---- withhold-use-alias-response-while-publisher-retires-token ------------------
+// Section 10.2.2: a sender MUST NOT send DELETE for an alias while any message
+// using USE_ALIAS with it has not received a response. The runner acknowledges
+// the publisher's registering request and then answers nothing else, so any
+// later request that used the alias is still unanswered when a DELETE arrives.
+const d18::Parameters* parameters_of(const d18::Message& message) {
+    return std::visit([](const auto& value) -> const d18::Parameters* {
+        if constexpr (requires { value.parameters; }) return &value.parameters;
+        else return nullptr;
+    }, message);
+}
+
+std::vector<d18::Token> tokens_of(const d18::Message& message) {
+    std::vector<d18::Token> result;
+    const auto* parameters = parameters_of(message);
+    if (!parameters) return result;
+    for (const auto& parameter : *parameters)
+        if (const auto* token = std::get_if<d18::Token>(&parameter.value)) result.push_back(*token);
+    return result;
+}
+
+bool opens_with_registered_token(std::span<const std::byte> bytes) {
+    wire::Cursor cursor(bytes);
+    const auto decoded = d18::decode_message(d18::StreamRole::Request, cursor, {});
+    const auto* message = std::get_if<d18::Message>(&decoded);
+    if (!message) return false;
+    const auto* request_id = std::visit([](const auto& value) -> const std::uint64_t* {
+        if constexpr (requires { requires std::same_as<std::remove_cvref_t<decltype(value.request_id)>, std::uint64_t>; })
+            return &value.request_id;
+        else return nullptr;
+    }, *message);
+    // The publisher is the client, so its Request IDs are even (Section 10.1).
+    if (!request_id || (*request_id & 1u) != 0) return false;
+    const auto tokens = tokens_of(*message);
+    return std::any_of(tokens.begin(), tokens.end(), [](const auto& token) {
+        return token.alias_type == d18::TokenAliasType::Register;
+    });
+}
+
+RawProbeDefinition retire_token_definition(const Fixture&, std::chrono::milliseconds deadline) {
+    auto definition = make_definition("withhold-use-alias-response-while-publisher-retires-token",
+        setup_frame(), deadline);
+    definition.peer_request_ready = opens_with_registered_token;
+    definition.writes.push_back(make_write(RawProbeChannel::PeerBidi,
+        encode(d18::RequestOkMessage{{}, {}})));
+    return definition;
+}
+
+struct TokenUse {
+    transport::StreamId stream;
+    std::size_t event;
+};
+
+Observation retire_token_observe(const RawProbeTranscript& transcript, const Fixture&) {
+    Observation observation;
+    if (transcript.writes.size() != 1 || !transcript.writes[0].stream_id ||
+        !transcript.writes[0].delivery_event_count) return observation;
+    const auto answered_stream = *transcript.writes[0].stream_id;
+    const auto answered_at = *transcript.writes[0].delivery_event_count;
+    // Replay arrival order so a DELETE is compared with the USE_ALIAS messages
+    // that reached the runner before it, on any request stream.
+    std::map<transport::StreamId, Bytes> buffers;
+    std::map<transport::StreamId, std::size_t> consumed;
+    std::map<std::uint64_t, std::vector<TokenUse>> uses;
+    std::set<std::uint64_t> registered;
+    bool retired_cleanly = false;
+    for (std::size_t index = 0; index < transcript.events.size(); ++index) {
+        const auto* data = std::get_if<transport::StreamDataEvent>(&transcript.events[index]);
+        if (!data || !(is_peer_bidi(data->stream_id))) continue;
+        auto& bytes = buffers[data->stream_id];
+        bytes.insert(bytes.end(), data->data.begin(), data->data.end());
+        const auto split = split_frames(bytes);
+        auto& done = consumed[data->stream_id];
+        const auto first_new = done;
+        done = split.frames.size();
+        for (std::size_t frame = first_new; frame < split.frames.size(); ++frame) {
+            const auto message = decode_frame(bytes, split.frames[frame]);
+            if (!message) continue;
+            for (const auto& token : tokens_of(*message)) {
+                if (!token.alias) continue;
+                if (token.alias_type == d18::TokenAliasType::Register) {
+                    registered.insert(*token.alias);
+                } else if (token.alias_type == d18::TokenAliasType::UseAlias) {
+                    uses[*token.alias].push_back({data->stream_id, index});
+                } else if (token.alias_type == d18::TokenAliasType::Delete &&
+                           registered.contains(*token.alias)) {
+                    for (const auto& use : uses[*token.alias]) {
+                        // Only the registering request received a response.
+                        const bool responded = use.stream == answered_stream && answered_at <= index;
+                        if (!responded) {
+                            observation.ready = true;
+                            observation.result = false;
+                            return observation;
+                        }
+                    }
+                    retired_cleanly = true;
+                }
+            }
+        }
+    }
+    if (retired_cleanly) {
+        observation.ready = true;
+        observation.result = true;
+    }
+    return observation;
+}
+
 }  // namespace
 
 std::vector<Entry> entries() {
@@ -208,6 +318,9 @@ std::vector<Entry> entries() {
         "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters",
         "same-object-payload-independent-of-message-parameters", true, false, FirstWrite::Fetch,
         payload_identity_definition, payload_identity_observe});
+    result.push_back({"D18-10-2-2-MUST-NOT-002", "withhold-use-alias-response-while-publisher-retires-token",
+        "token-delete-not-sent-before-all-use-alias-responses", false, false, std::nullopt,
+        retire_token_definition, retire_token_observe});
     return result;
 }
 

@@ -9,7 +9,7 @@ namespace moq::interop::app {
 // Scenario IDs executed by the draft-18 gap-A raw probes
 // (include/moq/interop/scenarios/draft18_gap_a.h). Keep in step with
 // gap_a::*_entries(); tests/protocol/draft18_gap_a_registry_test.cpp checks it.
-inline constexpr std::array<std::string_view, 29> kDraft18GapAScenarios{
+inline constexpr std::array<std::string_view, 30> kDraft18GapAScenarios{
     "receive-setup-with-unknown-option",
     "complete-publisher-requests-while-session-remains-open",
     "establish-moqt-with-datagram-capable-peer",
@@ -40,6 +40,7 @@ inline constexpr std::array<std::string_view, 29> kDraft18GapAScenarios{
     "publisher-queries-track-status-before-resuming-publication",
     "publish-with-and-without-parameter-extension-negotiation",
     "retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters",
+    "withhold-use-alias-response-while-publisher-retires-token",
 };
 
 // The subset that names a configured track fixture in its stimulus.
