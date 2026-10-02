@@ -94,7 +94,9 @@ bool peer_cache_setup(std::span<const std::byte> input, bool duplicate) {
 }
 }
 std::span<const Draft18CloseProfile> draft18_close_profiles() { return kProfiles; }
-RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::milliseconds deadline) {
+RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::milliseconds deadline,
+                                      std::vector<std::vector<std::byte>> track_namespace,
+                                      std::vector<std::byte> track_name) {
     if (std::none_of(kProfiles.begin(), kProfiles.end(), [id](const auto& profile) { return profile.scenario_id == id; }))
         throw std::invalid_argument("unknown draft-18 close probe");
     RawProbeDefinition definition;
@@ -185,6 +187,20 @@ RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::millise
     } else if (id == "receive-request-id-wrong-peer-parity") {
         payload.front() = std::byte{0};
     } else if (id == "receive-duplicate-request-id-across-request-streams") {
+        // Section 10.1 needs the first SUBSCRIBE to be otherwise acceptable; a
+        // publisher may reject or abort over an unknown track before it ever
+        // sees the repeated Request ID.
+        if (!track_namespace.empty() && !track_name.empty()) {
+            payload = bytes({1});
+            vi(payload,track_namespace.size());
+            for (const auto& field : track_namespace) {
+                vi(payload,field.size());
+                payload.insert(payload.end(),field.begin(),field.end());
+            }
+            vi(payload,track_name.size());
+            payload.insert(payload.end(),track_name.begin(),track_name.end());
+            payload.push_back(std::byte{0});
+        }
         definition.writes.push_back({channel,frame(type,payload),false});
     } else if (id == "receive-fetch-with-unknown-type") {
         type=0x16; payload=bytes({1,0,0});
@@ -227,5 +243,17 @@ RawProbeDefinition draft18_close_probe(std::string_view id, std::chrono::millise
     }
     if (definition.start_after_peer_setup) definition.writes.push_back({channel,frame(type,payload),false});
     return definition;
+}
+RawProbeDefinition draft18_close_probe_for(std::string_view id, const RawProbeTranscript& transcript,
+                                          std::chrono::milliseconds deadline) {
+    if (id == "receive-duplicate-request-id-across-request-streams" && !transcript.writes.empty()) {
+        wire::Cursor cursor(transcript.writes.front().write.bytes);
+        const auto decoded = wire::draft18::decode_message(wire::draft18::StreamRole::Request,cursor,{});
+        const auto* message = std::get_if<wire::draft18::Message>(&decoded);
+        const auto* subscribe = message ? std::get_if<wire::draft18::SubscribeMessage>(message) : nullptr;
+        if (subscribe)
+            return draft18_close_probe(id,deadline,subscribe->track_namespace.fields,subscribe->track_name.bytes);
+    }
+    return draft18_close_probe(id,deadline);
 }
 }  // namespace moq::interop::scenarios

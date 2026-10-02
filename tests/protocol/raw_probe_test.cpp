@@ -870,6 +870,20 @@ TEST(Draft18CloseProfiles, BoundaryAndMultiStreamFixturesUseIndependentBytes) {
     EXPECT_EQ(duplicate.writes[0].bytes,b({3,0,7,1,1,1,'n',1,'x',0}));
     EXPECT_EQ(duplicate.writes[1].bytes,duplicate.writes[0].bytes);
 }
+TEST(Draft18CloseProfiles, DuplicateRequestIdProbeNamesTheConfiguredTrack) {
+    // The first SUBSCRIBE must be acceptable for the repeated Request ID to be the
+    // only reason to close; an unknown track lets a publisher abort first.
+    const auto probe = draft18_close_probe("receive-duplicate-request-id-across-request-streams",
+        std::chrono::milliseconds(10),{b({'m','e','d','i','a'})},b({'v','i','d','e','_','1'}));
+    ASSERT_EQ(probe.writes.size(),2u);
+    EXPECT_EQ(probe.writes[0].bytes,b({3,0,16,1,1,5,'m','e','d','i','a',6,'v','i','d','e','_','1',0}));
+    EXPECT_EQ(probe.writes[1].bytes,probe.writes[0].bytes);
+    EXPECT_NE(probe.writes[0].channel,RawProbeChannel::Control);
+    // Other scenarios keep their fixed bytes whatever track is supplied.
+    const auto parity = draft18_close_probe("receive-request-id-wrong-peer-parity",
+        std::chrono::milliseconds(10),{b({'m','e','d','i','a'})},b({'v','i','d','e','_','1'}));
+    EXPECT_EQ(parity.writes.at(0).bytes,b({3,0,7,0,1,1,'n',1,'x',0}));
+}
 TEST(Draft18CloseProfiles, IndependentLiteralStimulusTranscripts) {
     const std::map<std::string, std::vector<std::byte>> fixtures{
         {"receive-unknown-unidirectional-stream-type",b({0})},
