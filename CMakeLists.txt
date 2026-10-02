@@ -233,7 +233,8 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_contribution_d21b.cpp
     src/scenarios/draft21_contribution_residual.cpp
     src/scenarios/draft21_contribution_residual_wire.cpp
-    src/scenarios/draft21_contribution_residual_subscription.cpp)
+    src/scenarios/draft21_contribution_residual_subscription.cpp
+    src/scenarios/draft21_contribution_residual_publisher.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE

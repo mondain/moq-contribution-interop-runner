@@ -232,6 +232,7 @@ std::vector<Spec> residual_specs();
 // The residual slice is split by what drives each row; residual_specs() concatenates
 // these in the order the rows were first defined.
 std::vector<Spec> residual_subscription_specs();
+std::vector<Spec> residual_publisher_specs();
 
 // ---- helpers shared by the object and slice-B probe sources -----------------------
 // A nested namespace keeps these out of sources (residual) that still carry
