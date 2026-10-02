@@ -633,7 +633,7 @@ contract without changes to protocol or evaluator code.
 
 ## Implementation Status
 
-As of 2026-10-01, executable bindings exist for 151 of 175 draft-18 and 141 of
+As of 2026-10-01, executable bindings exist for 160 of 172 draft-18 and 141 of
 175 draft-21 applicable, testable MUST/MUST NOT rows. The static completeness
 gate therefore still fails for both drafts, and optional-row coverage is 1/90
 and 1/97. Remaining required rows need stimuli the runner cannot induce

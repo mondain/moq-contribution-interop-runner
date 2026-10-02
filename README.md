@@ -209,7 +209,7 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-151/175 draft-18 and 141/175 draft-21 applicable, testable MUST/MUST NOT rows
+160/172 draft-18 and 141/175 draft-21 applicable, testable MUST/MUST NOT rows
 have executable bindings for every named scenario and evaluator. Partially
 registered families remain incomplete. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
@@ -362,6 +362,59 @@ Configured runs record the chosen code in evidence and expose
 `scoring_profile: "compatibility"` in JSON and a compatibility label in the
 HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
 establish a standards assignment. A different response code fails the probe.
+
+### Draft-18 completeness-gap scenarios (slice B)
+
+These raw probes (`src/scenarios/draft18_gap_b.cpp`) close nine more required
+rows. As elsewhere, only observed bytes decide a verdict; silence, a missing
+precondition or an undecodable reset code leave the row `NOT_RUN`.
+
+- `publisher-queries-track-status-before-resuming-publication` passively requires
+  every publisher TRACK_STATUS to be the first message of a new bidirectional
+  stream (`D18-10-MUST-004`); a publisher that never queries stays `NOT_RUN`.
+- `publish-with-and-without-parameter-extension-negotiation` sends SUBSCRIBE and
+  TRACK_STATUS with a SETUP that negotiates no extension and fails on a message
+  parameter the draft does not define (`D18-10-2-MUST-003`); at least one
+  parameter must actually be sent for a pass.
+  `retrieve-same-object-with-different-subscribe-publish-ok-and-fetch-parameters`
+  fetches Group 7/Object 9 twice and subscribes to it with different priority
+  and group order, and compares payload bytes (`D18-10-2-MUST-NOT-002`).
+- `withhold-use-alias-response-while-publisher-retires-token` answers only the
+  publisher's registering request and fails if a DELETE arrives while a
+  USE_ALIAS message of that alias is unanswered (`D18-10-2-2-MUST-NOT-002`).
+- Stream credit: `subscribe-tracks-with-no-bidirectional-stream-credit` grants the
+  publisher a single bidirectional stream (spent on its PUBLISH_NAMESPACE, which
+  the runner answers) and requires REQUEST_OK or REQUEST_ERROR to be first on
+  the SUBSCRIBE_TRACKS stream (`D18-6-1-MUST-004`).
+  `restore-bidi-stream-credit-after-publish-blocked` then sends a real
+  MAX_STREAMS frame and fails if the publisher opens PUBLISH for the blocked
+  Track (`D18-6-1-MUST-NOT-001`). The probe steps are `RawProbeChannel::Credit`
+  and `UniCredit` on top of `SessionTransport::grant_peer_streams`.
+- Delivery timeouts: `subgroup-object-expires-before-transport-handoff` leaves the
+  publisher without a unidirectional stream for 400 ms against an
+  OBJECT_DELIVERY_TIMEOUT of 100 ms and passes only on a stream reset with
+  DELIVERY_TIMEOUT (`D18-8-MUST-003`).
+  `withhold-subgroup-acknowledgements-after-application-completion` discards
+  every inbound packet for 400 ms (`SessionTransport::set_inbound_drop`, so
+  nothing is acknowledged) against a SUBGROUP_DELIVERY_TIMEOUT of 100 ms and
+  passes on a subgroup stream reset once the path resumes (`D18-8-MUST-006`).
+  Neither can score a failure: the age of an Object at hand-off is internal to
+  the publisher, and a publisher that kept the data cannot be told from one that
+  handed it over late. Over WebTransport a reset whose wire code is not a
+  WebTransport application error code is reported as unavailable, so only a
+  mapped DELIVERY_TIMEOUT counts for `D18-8-MUST-003`.
+- `receive-control-goaway-with-new-session-uri` sends a control GOAWAY naming a
+  second listener (`<scheme>://<host>:<second port>/moq-next`, a free port from
+  the publisher port range or an ephemeral one) and records what connects there.
+  A native-QUIC SETUP must state that PATH and AUTHORITY; a WebTransport
+  connection to the URI is sufficient. A publisher that does not migrate is
+  not failed (`D18-10-4-MUST-004`). A runner started with a single publisher port
+  rejects this scenario with `PortExhausted`; give it two.
+
+Three rows are reclassified `not_testable` with their draft citations:
+`D18-8-MUST-004` (datagram age runs from an internal application event),
+`D18-10-2-2-MUST-008` and `D18-10-2-2-MUST-010` (draft 18 defines no token type,
+so token invalidity and expiry are not wire facts).
 
 <<<<<<< ours
 ### Draft-21 completeness-gap scenarios (slice A)
@@ -633,6 +686,10 @@ In a 2026-09-29 test with `moqxr` build `g478d6c0.dirty`, its picoquic client
 did not negotiate QUIC DATAGRAM for either draft, so both attempts ended at the
 transport gate before publisher behavior could be scored. This is an interop
 observation, not a validator pass or a reason to bypass that draft requirement.
+It still held on 2026-10-01 with the same build for both drafts over native
+QUIC (the runner closes with `PROTOCOL_VIOLATION`, "QUIC DATAGRAM not
+negotiated"); draft 18 over WebTransport runs, so publisher-driven slice-B
+checks use that transport.
 
 The optional test peer exercises the actual HTTP-created run and production
 native listener for both drafts without depending on a particular publisher:
