@@ -87,6 +87,9 @@ esac
 # Objects so cancellation and update probes have an open stream to act on. Its
 # own timeout outlasts the context so an idle publisher is stopped by the runner
 # rather than exiting with a failure status first.
+# The d21-* ids listed after the first group are probes in which the runner is the
+# subscriber: with --forward 1 moqxr also pushes a PUBLISH of its own that those
+# probes do not answer, so it waits and exits with a failure status.
 # This chooses moqxr CLI options; it never changes what a scenario expects.
 if [[ "$draft" == 21 ]]; then
     case $(jq -r '.scenario_id' "$request_file") in
@@ -94,7 +97,35 @@ if [[ "$draft" == 21 ]]; then
         d21-publisher-subscribe-tracks-redirect | d21-publish-state-notify-* | d21-padding-*-emission | \
         d21-namespace-discovery-authorization | d21-track-discovery-* | d21-subgroup-early-handoff-reset | \
         d21-filter-* | d21-grease-auth-token-type | d21-grease-stop-sending | d21-grease-setup-options | \
-        d21-publisher-goaway-alternate-uri)
+        d21-publisher-goaway-alternate-uri | \
+        d21-cancel-fetch-with-open-request-and-data-streams | \
+        d21-cancel-subscribe-with-open-streams | d21-coalesced-failed-update-response | \
+        d21-coalesced-successful-update-responses | \
+        d21-discovery-independent-overlap-spaces | \
+        d21-discovery-update-independent-overlap-spaces | \
+        d21-discovery-update-invalid-forward | d21-duplicate-range-filter-key-in-request | \
+        d21-duplicate-range-filter-key-in-update | d21-duplicate-request-goaway | \
+        d21-duplicate-request-update-id | d21-established-subscription-publisher-fin | \
+        d21-failed-fetch-update-data-reset | d21-failed-subscribe-namespace-update-close | \
+        d21-failed-subscribe-tracks-update-close | d21-failed-subscription-update-cleanup | \
+        d21-fetch-datagram-preference | d21-goaway-on-distinct-request-streams | \
+        d21-group-order-in-subscription-update | d21-immutable-property-repeat | \
+        d21-namespace-prefix-update-overlap | d21-object-property-filter-odd-property-type | \
+        d21-prior-group-gap-repeat | d21-priority-filter-end-above-255 | \
+        d21-priority-filter-start-above-255 | d21-prior-object-gap-repeat | \
+        d21-range-filter-end-delta-overflow | d21-range-filter-start-delta-overflow | \
+        d21-range-filter-total-exceeds-negotiated-limit | d21-range-filter-total-limit | \
+        d21-range-filter-update-total-limit | d21-register-token-on-other-request-error | \
+        d21-register-token-on-unauthorized-request | d21-repeat-object-retrieval | \
+        d21-request-deleted-token-alias | d21-request-stream-terminal-message-order | \
+        d21-request-update-unlimited | d21-setup-register-use-value-fallback | \
+        d21-single-request-update-response | d21-subgroup-premature-close-reset | \
+        d21-subgroup-restart-after-reset | d21-subscribe-namespace-overlap | \
+        d21-subscribe-tracks-overlap | d21-subscription-forwarding-preference | \
+        d21-successful-subscribe-forward-zero | d21-token-delete-and-reuse | \
+        d21-token-duplicate-registration | d21-token-register-alias-lifetime | \
+        d21-track-prefix-update-overlap | d21-track-property-filter-odd-property-type | \
+        d21-update-subscription-location-range)
             args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
                   --namespace media --draft "$draft" --forward 0 --paced
                   --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")

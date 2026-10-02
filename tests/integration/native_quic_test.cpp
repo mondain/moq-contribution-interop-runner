@@ -1097,8 +1097,14 @@ TEST(NativeQuicLive, PeerResponseProbesWaitForMatchingPublisherRequestOnActualSt
         auto expected = draft == 18 ? bytes({5, 4, 5, 0x20, 0, 0x84, 1}) : bytes({5, 4, 5, 0, 0, 0x84, 1});
         expected.insert(expected.end(), 1025, draft == 18 ? std::byte{'a'} : std::byte{'x'});
         EXPECT_EQ(client->stream(4)->data, expected);
+        // Stream 0 carries a parameter-free PUBLISH_NAMESPACE, which every raw probe now
+        // answers by default (a bare REQUEST_OK). The probe's own response (the oversized
+        // reason) must never appear there: it targets the matching request on stream 4.
         const auto unrelated = client->stream(0);
-        EXPECT_TRUE(!unrelated || unrelated->data.empty());
+        ASSERT_TRUE(unrelated.has_value());
+        EXPECT_FALSE(unrelated->data.empty());
+        EXPECT_EQ(unrelated->data.front(), std::byte{7});
+        EXPECT_LE(unrelated->data.size(), 6u);
         ASSERT_TRUE(client->close(3, {}));
         ASSERT_TRUE(pump_until(*client, [&] { return store->load(started.id).state == storage::RunState::Finalized; }));
         const auto run = store->load(started.id);

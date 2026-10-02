@@ -464,7 +464,17 @@ public:
         return {std::move(created.listener), endpoint, created.error};
     }
 
+    // Every raw probe answers a publisher's PUBLISH_NAMESPACE by default (see
+    // scenarios::apply_default_namespace_answer for the exceptions).
     std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
+        const RunConfig& run_config, std::string_view id) const {
+        auto definition = resolve_raw_probe_definition(run_config, id);
+        if (definition)
+            scenarios::apply_default_namespace_answer(*definition, static_cast<unsigned>(run_config.draft));
+        return definition;
+    }
+
+    std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
         const RunConfig& run_config, std::string_view id) const {
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_scenario(id)) {

@@ -1,5 +1,6 @@
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/draft18/messages.h"
+#include "moq/interop/wire/draft21/request_ok.h"
 #include "raw_probe_courtesy.h"
 #include <algorithm>
 #include <stdexcept>
@@ -10,6 +11,51 @@ namespace moq::interop::scenarios {
 namespace {
 constexpr std::size_t kMaximumEvents = 4096;
 constexpr std::size_t kMaximumSetupBytes = 65546;
+// A complete draft 21 PUBLISH_NAMESPACE (Section 9.14: Request ID, Track Namespace,
+// Parameters) that is answerable by a bare REQUEST_OK: no Parameters and not the
+// reserved "." namespace. Anything malformed or incomplete is left unanswered.
+bool answerable_draft21_announcement(std::span<const std::byte> input) {
+    wire::Cursor cursor(input);
+    const auto vi = [&cursor]() -> std::optional<std::uint64_t> {
+        auto value = wire::read_vi64(cursor);
+        if (const auto* v = std::get_if<std::uint64_t>(&value)) return *v;
+        return std::nullopt;
+    };
+    const auto take = [&cursor](std::uint64_t length) -> std::optional<std::span<const std::byte>> {
+        if (length > 65535) return std::nullopt;
+        auto value = wire::read_bytes(cursor, static_cast<std::size_t>(length));
+        if (const auto* v = std::get_if<std::span<const std::byte>>(&value)) return *v;
+        return std::nullopt;
+    };
+    const auto type = vi();
+    if (!type || *type != 0x6) return false;
+    const auto frame = take(2);
+    if (!frame) return false;
+    const std::size_t size = (std::to_integer<std::size_t>((*frame)[0]) << 8u) | std::to_integer<std::size_t>((*frame)[1]);
+    const auto body = take(size);
+    if (!body) return false;
+    wire::Cursor inner(*body);
+    const auto inner_vi = [&inner]() -> std::optional<std::uint64_t> {
+        auto value = wire::read_vi64(inner);
+        if (const auto* v = std::get_if<std::uint64_t>(&value)) return *v;
+        return std::nullopt;
+    };
+    if (!inner_vi()) return false;  // Request ID
+    const auto fields = inner_vi();
+    if (!fields || *fields == 0 || *fields > 32) return false;
+    std::optional<std::span<const std::byte>> first;
+    for (std::uint64_t i = 0; i < *fields; ++i) {
+        const auto length = inner_vi();
+        if (!length || *length > inner.remaining()) return false;
+        auto field = wire::read_bytes(inner, static_cast<std::size_t>(*length));
+        const auto* value = std::get_if<std::span<const std::byte>>(&field);
+        if (!value) return false;
+        if (i == 0) first = *value;
+    }
+    const auto parameters = inner_vi();
+    if (!parameters || *parameters != 0 || inner.remaining() != 0) return false;
+    return !(first->size() == 1 && (*first)[0] == std::byte{'.'});
+}
 bool stream_less(RawProbeChannel channel) {
     return channel == RawProbeChannel::Datagram || channel == RawProbeChannel::Credit ||
            channel == RawProbeChannel::UniCredit || channel == RawProbeChannel::DropInbound ||
@@ -179,7 +225,9 @@ RawProbeController::RawProbeController(transport::SessionTransport& transport,
         (std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
             return write.channel == RawProbeChannel::PeerBidi;
         }) && !definition_.peer_request_ready) ||
-        (definition_.acknowledge_publisher_namespace &&
+        (definition_.acknowledge_publisher_namespace && definition_.acknowledge_publisher_namespace_draft21) ||
+        ((definition_.acknowledge_publisher_namespace || definition_.acknowledge_publisher_namespace_draft21) &&
+         !definition_.acknowledge_skips_peer_target &&
          std::any_of(definition_.writes.begin(), definition_.writes.end(), [](const auto& write) {
              return write.channel == RawProbeChannel::PeerBidi;
          })) ||
@@ -299,12 +347,24 @@ void RawProbeController::send_auto_replies() {
         transcript_.auto_replies.push_back({id, transcript_.events.size()});
     }
 }
+bool RawProbeController::acknowledgement_excluded(transport::StreamId id, std::span<const std::byte> request) const {
+    if (!definition_.acknowledge_skips_peer_target) return false;
+    return peer_request_stream_ == id ||
+           (definition_.peer_request_ready && definition_.peer_request_ready(request));
+}
 void RawProbeController::acknowledge_publisher_namespaces() {
-    static const std::vector<std::byte> request_ok = [] {
+    static const std::vector<std::byte> request_ok_18 = [] {
         wire::ByteWriter output(16);
         wire::draft18::encode_message(wire::draft18::RequestOkMessage{{}, {}}, output);
         return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
     }();
+    // Draft 21 Section 9.3: REQUEST_OK with no Parameters and no Track Properties.
+    static const std::vector<std::byte> request_ok_21 = [] {
+        wire::ByteWriter output(16);
+        wire::draft21::encode_empty_publish_ok(output);
+        return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+    }();
+    const auto& request_ok = definition_.acknowledge_publisher_namespace_draft21 ? request_ok_21 : request_ok_18;
     for (auto it = acknowledgement_pending_.begin(); it != acknowledgement_pending_.end();) {
         const auto id = *it;
         if (cancelled_peer_requests_.contains(id)) { it = acknowledgement_pending_.erase(it); continue; }
@@ -431,21 +491,28 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
                 if (data->data.size() > kMaximumSetupBytes - candidate.size()) { fail(); break; }
                 candidate.insert(candidate.end(), data->data.begin(), data->data.end());
             }
-            if (definition_.acknowledge_publisher_namespace && (data->stream_id & 3u) == 0u &&
+            if ((definition_.acknowledge_publisher_namespace || definition_.acknowledge_publisher_namespace_draft21) &&
+                (data->stream_id & 3u) == 0u &&
                 !acknowledged_.contains(data->stream_id) &&
                 !acknowledgement_pending_.contains(data->stream_id) &&
                 (acknowledgement_candidates_.contains(data->stream_id) || acknowledgement_candidates_.size() < 64)) {
                 auto& candidate = acknowledgement_candidates_[data->stream_id];
                 if (candidate.size() + data->data.size() <= kMaximumSetupBytes) {
                     candidate.insert(candidate.end(), data->data.begin(), data->data.end());
+                    if (definition_.acknowledge_publisher_namespace_draft21) {
+                        if (answerable_draft21_announcement(candidate) && !acknowledgement_excluded(data->stream_id, candidate))
+                            acknowledgement_pending_.insert(data->stream_id);
+                    } else {
                     wire::Cursor cursor(candidate);
                     const auto decoded = wire::draft18::decode_message(wire::draft18::StreamRole::Request, cursor, {});
                     const auto* message = std::get_if<wire::draft18::Message>(&decoded);
                     const auto* announce = message ? std::get_if<wire::draft18::PublishNamespaceMessage>(message) : nullptr;
                     if (announce && announce->parameters.empty() && !announce->track_namespace.fields.empty() &&
                         !(announce->track_namespace.fields.front().size() == 1 &&
-                          announce->track_namespace.fields.front().front() == std::byte{'.'}))
+                          announce->track_namespace.fields.front().front() == std::byte{'.'}) &&
+                        !acknowledgement_excluded(data->stream_id, candidate))
                         acknowledgement_pending_.insert(data->stream_id);
+                    }
                 }
             }
             const bool opener_accepted = std::any_of(transcript_.writes.begin(),transcript_.writes.end(),[](const auto& write) {
@@ -547,6 +614,58 @@ bool auto_replies_valid(const RawProbeTranscript& transcript, const RawProbeDefi
     return true;
 }
 }  // namespace
+
+namespace {
+// A parameter-free PUBLISH_NAMESPACE for "media", the shape the default answer acts on.
+std::vector<std::byte> sample_announcement(unsigned draft) {
+    if (draft == 21) {
+        static const unsigned char frame[] = {0x06, 0x00, 0x09, 0x00, 0x01, 0x05, 'm', 'e', 'd', 'i', 'a', 0x00};
+        std::vector<std::byte> result;
+        for (const auto byte : frame) result.push_back(static_cast<std::byte>(byte));
+        return result;
+    }
+    wire::ByteWriter output(64);
+    wire::draft18::encode_message(wire::draft18::PublishNamespaceMessage{
+        0, wire::draft18::TrackNamespace{{{std::byte{'m'}, std::byte{'e'}, std::byte{'d'}, std::byte{'i'}, std::byte{'a'}}}}, {}}, output);
+    return std::vector<std::byte>(output.bytes().begin(), output.bytes().end());
+}
+}  // namespace
+
+std::span<const NamespaceAnswerOptOut> namespace_answer_opt_outs() {
+    static const std::vector<NamespaceAnswerOptOut> table = {
+        // Empty on purpose. Every scenario whose subject is the publisher's reaction
+        // to a response the runner writes on the publisher's request stream (rejection,
+        // redirect, malformed or unknown response; PeerBidi writes or peer_request_ready)
+        // is skipped by apply_default_namespace_answer itself, and the credit-exhaustion
+        // probes that spend the only bidirectional stream on the announcement already
+        // carry their own acknowledgement. An entry here is for a probe that sets
+        // neither but whose announcement must stay unanswered.
+    };
+    return table;
+}
+
+DefaultNamespaceAnswer apply_default_namespace_answer(RawProbeDefinition& definition, unsigned draft) {
+    if (draft != 18 && draft != 21) return DefaultNamespaceAnswer::UnsupportedDraft;
+    if (definition.no_default_namespace_answer ||
+        std::any_of(namespace_answer_opt_outs().begin(), namespace_answer_opt_outs().end(),
+                    [&](const auto& entry) { return entry.draft == draft && entry.scenario == definition.id; }))
+        return DefaultNamespaceAnswer::OptedOut;
+    if (definition.acknowledge_publisher_namespace || definition.acknowledge_publisher_namespace_draft21 ||
+        definition.auto_accept_ready)
+        return DefaultNamespaceAnswer::OwnMechanism;
+    const bool peer_writes = std::any_of(definition.writes.begin(), definition.writes.end(),
+        [](const auto& write) { return write.channel == RawProbeChannel::PeerBidi; });
+    if (peer_writes || definition.peer_request_ready) {
+        // Safe only when the stimulus targets some other publisher request (a PUBLISH, a
+        // TRACK_STATUS): then an announcement is answered beside it, never on its stream.
+        if (!definition.peer_request_ready || definition.peer_request_ready(sample_announcement(draft)))
+            return DefaultNamespaceAnswer::TargetsRequest;
+        definition.acknowledge_skips_peer_target = true;
+    }
+    (draft == 18 ? definition.acknowledge_publisher_namespace
+                 : definition.acknowledge_publisher_namespace_draft21) = true;
+    return DefaultNamespaceAnswer::Applied;
+}
 
 bool raw_probe_stimulus_valid(const RawProbeTranscript& transcript,
                              const RawProbeDefinition& definition) {
