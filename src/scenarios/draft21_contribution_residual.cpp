@@ -395,7 +395,10 @@ Param fill_whole_track() {
     return param_lp(0x23, encode_params({param_lp(0x21, {})}));
 }
 
-// LARGEST_OBJECT (parameter 0x9, two vi64 fields) of a SUBSCRIBE_OK.
+// LARGEST_OBJECT (parameter 0x9) of a SUBSCRIBE_OK. A Message Parameter is not a
+// Key-Value-Pair: a Location value is "two consecutive varints (Group, Object)" with
+// no Length (Section 9.20, lines 4732-4735), and SUBSCRIBE_OK carries only EXPIRES
+// (8) and LARGEST_OBJECT (9), so nothing but EXPIRES can precede it.
 std::optional<std::pair<std::uint64_t, std::uint64_t>> largest_object(const View& view, std::size_t write) {
     const auto frames = view.write_frames(write);
     if (frames.empty() || frames.front().type != kSubscribeOk) return std::nullopt;
