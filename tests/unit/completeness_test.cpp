@@ -83,6 +83,36 @@ TEST(CompletenessTest, CompleteSyntheticCatalogPasses) {
     EXPECT_TRUE(report.complete());
     EXPECT_TRUE(report.findings.empty());
 }
+TEST(CompletenessTest, PartialScenarioOrEvaluatorBindingsKeepRequiredRowUncovered) {
+    auto required = row("required",Strength::Must);
+    required.scenarios.push_back("second-scenario");
+    required.evaluators.push_back("second-evaluator");
+    const RequirementCatalog catalog{18,"source",true,{required}};
+    const std::array<std::string_view,2> scenarios{"scenario","second-scenario"};
+    std::vector bindings{binding("required")};
+    auto report = audit_completeness(catalog,bindings,scenarios);
+    EXPECT_EQ(report.required_covered,0u);
+    EXPECT_FALSE(report.complete());
+    EXPECT_TRUE(std::any_of(report.findings.begin(),report.findings.end(),[](const auto& finding) {
+        return finding.code == "missing_required_evaluator" && finding.requirement_id == "required" &&
+            finding.detail.find("missing_scenario=second-scenario") != std::string::npos &&
+            finding.detail.find("missing_evaluator=second-evaluator") != std::string::npos;
+    }));
+    auto second_scenario = binding("required");
+    second_scenario.scenario_id = "second-scenario";
+    bindings.push_back(second_scenario);
+    report = audit_completeness(catalog,bindings,scenarios);
+    EXPECT_EQ(report.required_covered,0u);
+    EXPECT_FALSE(report.complete());
+    ASSERT_EQ(report.findings.size(),1u);
+    EXPECT_NE(report.findings.front().detail.find("missing_evaluator=second-evaluator"),std::string::npos);
+    EXPECT_EQ(report.findings.front().detail.find("missing_scenario="),std::string::npos);
+    bindings.back().evaluator_id = "second-evaluator";
+    report = audit_completeness(catalog,bindings,scenarios);
+    EXPECT_EQ(report.required_covered,1u);
+    EXPECT_TRUE(report.complete());
+    EXPECT_TRUE(report.findings.empty());
+}
 
 TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
     const auto root = std::filesystem::path{MOQ_INTEROP_PROJECT_SOURCE_DIR};
@@ -98,9 +128,9 @@ TEST(CompletenessTest, ReportsCurrentDraftResidualsWithoutClaimingCompletion) {
             catalog, bindings, app::executable_scenarios(draft));
         EXPECT_FALSE(report.complete());
         EXPECT_EQ(report.required_total, 175u);
-        EXPECT_EQ(report.required_covered, draft == 18 ? 9u : 12u);
+        EXPECT_EQ(report.required_covered, 76u);
         EXPECT_EQ(report.required_total - report.required_covered,
-                  draft == 18 ? 166u : 163u);
+                  99u);
         EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
     }
 }

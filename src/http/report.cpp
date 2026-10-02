@@ -173,6 +173,8 @@ std::string render_run_detail(const storage::RunRecord& run,
            << ".</p><p><a href=\"/results/" << escape_html(run.id)
            << ".json\">Download JSON</a> · <a href=\"/results/"
            << escape_html(run.id) << ".tap\">Download TAP 14</a></p>";
+    if (document.at("run").at("scoring_profile") == "compatibility")
+        output << "<p><strong>Compatibility scoring:</strong> UNKNOWN_AUTH_TOKEN_ALIAS uses an explicitly configured REQUEST_ERROR code. The checked-in draft does not assign that request code.</p>";
     const auto& score = document.at("run").at("score");
     const auto verdict = document.at("run").at("verdict").is_null()
                              ? "PENDING"

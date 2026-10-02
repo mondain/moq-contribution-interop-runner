@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,7 @@ struct NativeRunManagerConfig {
     std::filesystem::path driver_fixture{};
     std::filesystem::path driver_tls_ca{};
     std::filesystem::path driver_log_root{};
+    std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
 };
 
 enum class RunStartStatus {

@@ -18,13 +18,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -48,6 +51,20 @@ struct PublisherState {
     bool accepted = false;
     std::vector<std::uint8_t> request_bytes;
     h3zero_stream_ctx_t* request_stream = nullptr;
+    std::map<std::uint64_t, std::vector<std::uint8_t>> stream_bytes;
+};
+
+struct RawFamilyContext {
+    std::string scenario_id;
+    std::string next_scenario_id;
+    bool publish_origin = false;
+    unsigned close_code = 3;
+    std::optional<std::uint64_t> request_stream_id;
+    std::vector<std::uint8_t> received;
+    bool connect_accepted = false;
+    bool gate_held_for_fragment = false;
+    bool peer_close_sent = false;
+    std::map<std::uint64_t, std::vector<std::uint8_t>> observed_streams;
 };
 
 int publisher_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
@@ -55,6 +72,10 @@ int publisher_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
                        void* context) {
     auto* state = static_cast<PublisherState*>(context);
     if (event == picohttp_callback_connect_accepted) state->accepted = true;
+    if (event == picohttp_callback_post_data && stream != nullptr && bytes != nullptr) {
+        auto& received = state->stream_bytes[stream->stream_id];
+        received.insert(received.end(), bytes, bytes + length);
+    }
     if (event == picohttp_callback_post_data && stream != nullptr &&
         (stream->stream_id & 3u) == 1u && bytes != nullptr) {
         state->request_stream = stream;
@@ -70,7 +91,8 @@ bool publish_setup(unsigned port, unsigned draft,
                    std::string expected_requirement_id = {},
                    std::vector<std::uint8_t> peer_setup = {0xaf, 0, 0, 0},
                    requirements::OutcomeState expected_state =
-                       requirements::OutcomeState::Pass) {
+                       requirements::OutcomeState::Pass,
+                   RawFamilyContext* family = nullptr) {
     const int socket_fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (socket_fd < 0) return false;
     const int flags = ::fcntl(socket_fd, F_GETFL, 0);
@@ -111,6 +133,12 @@ bool publish_setup(unsigned port, unsigned draft,
         bool setup_sent = false;
         bool response_sent = false;
         bool close_sent = false;
+        bool fragment_sent = false;
+        bool remaining_sent = false;
+        h3zero_stream_ctx_t* publish_stream = nullptr;
+        std::optional<std::chrono::steady_clock::time_point> fragment_time;
+        std::set<std::uint64_t> acknowledged_streams;
+        bool barrier_response_sent = false;
         std::array<std::uint8_t, 2048> outgoing{};
         std::array<std::uint8_t, 2048> incoming{};
         for (int step = 0; step < 3000 && !success; ++step) {
@@ -185,6 +213,171 @@ bool publish_setup(unsigned port, unsigned draft,
             }
             if (setup_sent) {
                 const auto run = store->load(id);
+                if (family != nullptr) {
+                    const bool goaway_duplicate = family->scenario_id == "d21-duplicate-request-goaway";
+                    const bool goaway_control = family->scenario_id == "d21-goaway-on-distinct-request-streams";
+                    if (goaway_duplicate || goaway_control) {
+                        const auto opening = [](unsigned request_id, unsigned field) {
+                            return std::vector<std::uint8_t>{0x50, 0, 5,
+                                static_cast<std::uint8_t>(request_id), 1, 1,
+                                static_cast<std::uint8_t>(field), 0};
+                        };
+                        const auto a = opening(1, 'a');
+                        const auto b = opening(3, 'b');
+                        const auto c = opening(5, 'c');
+                        const auto stream_for = [&](const std::vector<std::uint8_t>& prefix)
+                            -> std::optional<std::uint64_t> {
+                            for (const auto& [stream_id, data] : state.stream_bytes) {
+                                if (data.size() >= prefix.size() &&
+                                    std::equal(prefix.begin(), prefix.end(), data.begin()))
+                                    return stream_id;
+                            }
+                            return std::nullopt;
+                        };
+                        const auto first = stream_for(a);
+                        const auto second = stream_for(b);
+                        if (first && !fragment_sent) {
+                            auto* stream = h3zero_find_stream(h3, *first);
+                            const std::array<std::uint8_t, 2> partial{7, 0};
+                            if (stream == nullptr || picoquic_add_to_stream_with_ctx(cnx,
+                                    *first, partial.data(), partial.size(), 0, stream) != 0) break;
+                            family->request_stream_id = first;
+                            fragment_sent = true;
+                            fragment_time = std::chrono::steady_clock::now();
+                        }
+                        if (goaway_control && second && !acknowledged_streams.contains(*second)) {
+                            auto* stream = h3zero_find_stream(h3, *second);
+                            const std::array<std::uint8_t, 4> response{7, 0, 1, 0};
+                            if (stream == nullptr || picoquic_add_to_stream_with_ctx(cnx,
+                                    *second, response.data(), response.size(), 0, stream) != 0) break;
+                            acknowledged_streams.insert(*second);
+                        }
+                        if (fragment_time && !remaining_sent &&
+                            std::chrono::steady_clock::now() - *fragment_time >=
+                                std::chrono::milliseconds{20}) {
+                            family->gate_held_for_fragment = state.stream_bytes[*first] == a;
+                            auto* stream = h3zero_find_stream(h3, *first);
+                            const std::array<std::uint8_t, 2> remainder{1, 0};
+                            if (stream == nullptr || picoquic_add_to_stream_with_ctx(cnx,
+                                    *first, remainder.data(), remainder.size(), 0, stream) != 0) break;
+                            remaining_sent = true;
+                        }
+                        const std::vector<std::uint8_t> goaway{0x10, 0, 3, 0, 0xa7, 0x10};
+                        auto expected = a;
+                        expected.insert(expected.end(), goaway.begin(), goaway.end());
+                        if (goaway_duplicate) expected.insert(expected.end(), goaway.begin(), goaway.end());
+                        if (remaining_sent && first && state.stream_bytes[*first] == expected) {
+                            family->received = expected;
+                            if (goaway_duplicate && !close_sent) {
+                                if (picoquic_close(cnx, family->close_code) != 0) break;
+                                close_sent = true;
+                                family->peer_close_sent = true;
+                            } else if (goaway_control && second && !barrier_response_sent) {
+                                auto expected_b = b;
+                                expected_b.insert(expected_b.end(), goaway.begin(), goaway.end());
+                                const auto barrier = stream_for(c);
+                                if (state.stream_bytes[*second] == expected_b && barrier &&
+                                    state.stream_bytes[*barrier] == c) {
+                                    auto* stream = h3zero_find_stream(h3, *barrier);
+                                    const std::array<std::uint8_t, 4> response{7, 0, 1, 0};
+                                    if (stream == nullptr || picoquic_add_to_stream_with_ctx(cnx,
+                                            *barrier, response.data(), response.size(), 0, stream) != 0) break;
+                                    barrier_response_sent = true;
+                                }
+                            }
+                        }
+                        family->connect_accepted = state.accepted;
+                        if (close_sent || barrier_response_sent) {
+                            if (!family->next_scenario_id.empty()) {
+                                success = run.state == storage::RunState::Active &&
+                                    std::any_of(run.events.begin(), run.events.end(), [&](const auto& event) {
+                                        return event.kind == "context_ready" &&
+                                               event.scenario_id == family->next_scenario_id;
+                                    });
+                            } else {
+                                success = run.state == storage::RunState::Finalized &&
+                                    std::any_of(run.outcomes.begin(), run.outcomes.end(), [&](const auto& outcome) {
+                                        return outcome.requirement_id == expected_requirement_id &&
+                                               outcome.state == expected_state;
+                                    });
+                            }
+                        }
+                        if (success) {
+                            family->observed_streams = state.stream_bytes;
+                            continue;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                        continue;
+                    }
+                    static const std::vector<std::uint8_t> subscribe{
+                        3, 0, 7, 1, 1, 1, 'n', 1, 't', 0};
+                    static const std::vector<std::uint8_t> publish{
+                        0x1d, 0, 10, 0, 1, 1, 'n', 1, 't', 0, 0, 4, 1};
+                    static const std::vector<std::uint8_t> subscribe_ok{
+                        4, 0, 4, 0, 0, 4, 1};
+                    static const std::vector<std::uint8_t> publish_ok{7, 0, 1, 0};
+                    static const std::vector<std::uint8_t> notify{0x22, 0, 1, 0};
+                    if (family->publish_origin && publish_stream == nullptr) {
+                        publish_stream = picowt_create_local_stream(cnx, 1, h3,
+                                                                   control->stream_id);
+                        if (publish_stream == nullptr) break;
+                        publish_stream->path_callback = publisher_callback;
+                        publish_stream->path_callback_ctx = &state;
+                        family->request_stream_id = publish_stream->stream_id;
+                        if (picoquic_add_to_stream_with_ctx(cnx, publish_stream->stream_id,
+                                publish.data(), 5, 0, publish_stream) != 0) break;
+                        fragment_sent = true;
+                        fragment_time = std::chrono::steady_clock::now();
+                    } else if (!family->publish_origin && !fragment_sent &&
+                               state.request_bytes == subscribe && state.request_stream != nullptr) {
+                        family->request_stream_id = state.request_stream->stream_id;
+                        if (picoquic_add_to_stream_with_ctx(cnx, state.request_stream->stream_id,
+                                subscribe_ok.data(), 2, 0, state.request_stream) != 0) break;
+                        fragment_sent = true;
+                        fragment_time = std::chrono::steady_clock::now();
+                    }
+                    if (fragment_time && !remaining_sent &&
+                        std::chrono::steady_clock::now() - *fragment_time >=
+                            std::chrono::milliseconds{20}) {
+                        const auto& received = state.stream_bytes[*family->request_stream_id];
+                        family->gate_held_for_fragment = family->publish_origin
+                            ? received.empty() : received == subscribe;
+                        const auto& response = family->publish_origin ? publish : subscribe_ok;
+                        const std::size_t split = family->publish_origin ? 5 : 2;
+                        auto* stream = family->publish_origin ? publish_stream : state.request_stream;
+                        if (picoquic_add_to_stream_with_ctx(cnx, stream->stream_id,
+                                response.data() + split, response.size() - split, 0, stream) != 0)
+                            break;
+                        remaining_sent = true;
+                    }
+                    auto expected = family->publish_origin ? publish_ok : subscribe;
+                    expected.insert(expected.end(), notify.begin(), notify.end());
+                    if (remaining_sent && !close_sent &&
+                        state.stream_bytes[*family->request_stream_id] == expected) {
+                        family->received = expected;
+                        if (picoquic_close(cnx, family->close_code) != 0) break;
+                        close_sent = true;
+                    }
+                    family->connect_accepted = state.accepted;
+                    if (close_sent) {
+                        if (!family->next_scenario_id.empty()) {
+                            success = run.state == storage::RunState::Active &&
+                                std::any_of(run.events.begin(), run.events.end(), [&](const auto& event) {
+                                    return event.kind == "context_ready" &&
+                                           event.scenario_id == family->next_scenario_id;
+                                });
+                        } else {
+                            success = run.state == storage::RunState::Finalized &&
+                                std::any_of(run.outcomes.begin(), run.outcomes.end(), [&](const auto& outcome) {
+                                    return outcome.requirement_id == expected_requirement_id &&
+                                           outcome.state == expected_state;
+                                });
+                        }
+                    }
+                    if (success) continue;
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                    continue;
+                }
                 if (reject_code && !close_sent &&
                     std::any_of(run.events.begin(), run.events.end(),
                         [](const auto& event) {
@@ -236,6 +429,319 @@ bool publish_setup(unsigned port, unsigned draft,
             std::cerr << "event=" << event.kind << " " << event.detail << '\n';
     }
     return success;
+}
+
+TEST(WebTransportRunApi, RawFamilyGoawayRecreatesStillOpenSessionOnExactEndpoint) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    const auto draft18 = catalog(18);
+    const auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const std::vector<std::string> scenarios{
+        "d21-goaway-on-distinct-request-streams", "d21-duplicate-request-goaway"};
+    const Json request{{"draft", 21}, {"transport", "webtransport"}, {"mode", "observed"},
+                       {"scenarios", scenarios}, {"timeout_ms", 2500}};
+    const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201) << response->body;
+    const auto body = Json::parse(response->body);
+    const auto id = body.at("run").at("id").get<std::string>();
+    const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+    const auto endpoint = "https://127.0.0.1:" + std::to_string(port) + "/moq";
+    EXPECT_EQ(body.at("publisher_endpoint").at("url"), endpoint);
+
+    RawFamilyContext first{.scenario_id = scenarios[0], .next_scenario_id = scenarios[1]};
+    ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+        "D21-9-2-MUST-328", {0xaf, 0, 0, 0}, requirements::OutcomeState::Pass, &first));
+    EXPECT_TRUE(first.connect_accepted);
+    EXPECT_TRUE(first.gate_held_for_fragment);
+    EXPECT_FALSE(first.peer_close_sent);
+    ASSERT_TRUE(first.request_stream_id);
+    EXPECT_EQ(*first.request_stream_id & 3u, 1u);
+    std::set<std::uint64_t> actual_request_streams;
+    for (const auto& [stream_id, data] : first.observed_streams) {
+        if (data.size() >= 3 && data[0] == 0x50 && data[1] == 0 && data[2] == 5) {
+            actual_request_streams.insert(stream_id);
+            EXPECT_EQ(stream_id & 3u, 1u);
+        }
+    }
+    EXPECT_EQ(actual_request_streams.size(), 3u);
+    const auto between = store->load(id);
+    ASSERT_EQ(between.state, storage::RunState::Active);
+    EXPECT_TRUE(between.outcomes.empty());
+    EXPECT_FALSE(between.finalized_at_unix_ns);
+    EXPECT_EQ(std::count_if(between.events.begin(), between.events.end(), [&](const auto& event) {
+        return event.kind == "peer_close" && event.scenario_id == scenarios[0];
+    }), 0);
+    EXPECT_EQ(std::count_if(between.events.begin(), between.events.end(), [&](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == scenarios[0];
+    }), 1);
+
+    RawFamilyContext second{.scenario_id = scenarios[1]};
+    ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+        "D21-9-2-MUST-328", {0xaf, 0, 0, 0}, requirements::OutcomeState::Pass, &second));
+    EXPECT_TRUE(second.connect_accepted);
+    EXPECT_TRUE(second.gate_held_for_fragment);
+    EXPECT_TRUE(second.peer_close_sent);
+    const auto run = store->load(id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(run.config.scenario_ids, scenarios);
+    EXPECT_EQ(run.outcomes.size(), draft21->requirements.size());
+    EXPECT_EQ(store->list({10, 0}).total, 1u);
+    std::set<std::string> actual_connection_ids;
+    for (const auto& scenario : scenarios) {
+        const auto established = std::find_if(run.events.begin(), run.events.end(), [&](const auto& event) {
+            return event.kind == "transport_established" && event.scenario_id == scenario;
+        });
+        ASSERT_NE(established, run.events.end());
+        ASSERT_TRUE(established->connection_id);
+        ASSERT_FALSE(established->connection_id->empty());
+        actual_connection_ids.insert(*established->connection_id);
+        EXPECT_NE(established->detail.find("transport_event_index=0"), std::string::npos);
+        EXPECT_EQ(std::count_if(run.events.begin(), run.events.end(), [&](const auto& event) {
+            return event.kind == "context_ready" && event.scenario_id == scenario &&
+                   event.detail.find("endpoint=" + endpoint) != std::string::npos;
+        }), 1);
+        EXPECT_EQ(std::count_if(run.events.begin(), run.events.end(), [&](const auto& event) {
+            return event.kind == "context_complete" && event.scenario_id == scenario;
+        }), 1);
+    }
+    EXPECT_EQ(actual_connection_ids.size(), 2u);
+    const auto result = std::find_if(run.outcomes.begin(), run.outcomes.end(), [](const auto& outcome) {
+        return outcome.requirement_id == "D21-9-2-MUST-328";
+    });
+    ASSERT_NE(result, run.outcomes.end());
+    EXPECT_EQ(result->state, requirements::OutcomeState::Pass);
+    EXPECT_TRUE(runs->stop(id));
+}
+
+TEST(WebTransportRunApi, RawFamilySubscriberNotifyUsesIndependentSessionsAndFullCatalog) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const std::vector<std::string> scenarios{
+        "d21-subscriber-sends-publish-state-notify",
+        "d21-publish-established-subscriber-sends-publish-state-notify"};
+    const Json request{{"draft", 21}, {"transport", "webtransport"},
+                       {"mode", "observed"}, {"scenarios", scenarios},
+                       {"timeout_ms", 2500},
+                       {"track", {{"namespace_hex", Json::array({"6e"})},
+                                  {"name_hex", "74"}}}};
+    const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201) << response->body;
+    const auto body = Json::parse(response->body);
+    const auto id = body.at("run").at("id").get<std::string>();
+    const auto endpoint = body.at("publisher_endpoint");
+    const auto port = endpoint.at("port").get<unsigned>();
+    ASSERT_GT(port, 0u);
+    EXPECT_EQ(endpoint.at("url"), "https://127.0.0.1:" + std::to_string(port) + "/moq");
+    EXPECT_EQ(endpoint.at("path"), "/moq");
+    EXPECT_EQ(endpoint.at("protocol"), "moqt-21");
+    EXPECT_EQ(endpoint.at("alpn"), "h3");
+    EXPECT_EQ(body.at("run").at("config").at("scenarios"), Json(scenarios));
+    EXPECT_EQ(store->load(id).config.scenario_ids, scenarios);
+
+    RawFamilyContext first{.scenario_id = scenarios[0], .next_scenario_id = scenarios[1]};
+    ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+        "D21-9-10-MUST-370", {0xaf, 0, 0, 0}, requirements::OutcomeState::Pass, &first));
+    EXPECT_TRUE(first.connect_accepted);
+    EXPECT_TRUE(first.gate_held_for_fragment);
+    ASSERT_TRUE(first.request_stream_id);
+    EXPECT_EQ(*first.request_stream_id & 3u, 1u);
+    EXPECT_EQ(first.received, (std::vector<std::uint8_t>{
+        3, 0, 7, 1, 1, 1, 'n', 1, 't', 0, 0x22, 0, 1, 0}));
+    const auto between = store->load(id);
+    ASSERT_EQ(between.state, storage::RunState::Active);
+    EXPECT_FALSE(between.finalized_at_unix_ns);
+    EXPECT_TRUE(between.outcomes.empty());
+    EXPECT_FALSE(between.score);
+
+    RawFamilyContext second{.scenario_id = scenarios[1], .publish_origin = true};
+    ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+        "D21-9-10-MUST-370", {0xaf, 0, 0, 0}, requirements::OutcomeState::Pass, &second));
+    EXPECT_TRUE(second.connect_accepted);
+    EXPECT_TRUE(second.gate_held_for_fragment);
+    ASSERT_TRUE(second.request_stream_id);
+    EXPECT_EQ(*second.request_stream_id & 3u, 0u);
+    EXPECT_NE(*second.request_stream_id, 0u);  // HTTP CONNECT occupies stream 0.
+    EXPECT_EQ(second.received, (std::vector<std::uint8_t>{7, 0, 1, 0, 0x22, 0, 1, 0}));
+    const auto record = store->load(id);
+    ASSERT_EQ(record.state, storage::RunState::Finalized);
+    EXPECT_TRUE(record.finalized_at_unix_ns);
+    ASSERT_TRUE(record.score);
+    EXPECT_EQ(record.outcomes.size(), draft21->requirements.size());
+    EXPECT_EQ(record.config.scenario_ids, scenarios);
+    EXPECT_EQ(store->list({10, 0}).total, 1u);
+    const auto row = std::find_if(record.outcomes.begin(), record.outcomes.end(), [](const auto& outcome) {
+        return outcome.requirement_id == "D21-9-10-MUST-370";
+    });
+    ASSERT_NE(row, record.outcomes.end());
+    EXPECT_EQ(row->state, requirements::OutcomeState::Pass);
+    std::vector<std::string> connection_ids;
+    for (std::size_t i = 0; i < scenarios.size(); ++i) {
+        const auto ready = std::find_if(record.events.begin(), record.events.end(), [&](const auto& event) {
+            return event.kind == "context_ready" && event.scenario_id == scenarios[i];
+        });
+        ASSERT_NE(ready, record.events.end());
+        EXPECT_NE(ready->detail.find("ordinal=" + std::to_string(i + 1)), std::string::npos);
+        const auto established = std::find_if(record.events.begin(), record.events.end(), [&](const auto& event) {
+            return event.kind == "transport_established" && event.scenario_id == scenarios[i];
+        });
+        ASSERT_NE(established, record.events.end());
+        ASSERT_TRUE(established->connection_id);
+        EXPECT_FALSE(established->connection_id->empty());
+        connection_ids.push_back(*established->connection_id);
+        const auto stimulus = std::find_if(record.events.begin(), record.events.end(), [&](const auto& event) {
+            return event.kind == "raw_probe_stimulus" && event.scenario_id == scenarios[i];
+        });
+        ASSERT_NE(stimulus, record.events.end());
+        EXPECT_NE(stimulus->detail.find("accepted=4 fin=false bytes=22000100 accepted_event_count="),
+                  std::string::npos);
+        EXPECT_TRUE(std::any_of(record.events.begin(), record.events.end(), [&](const auto& event) {
+            return event.kind == "peer_close" && event.scenario_id == scenarios[i] &&
+                   event.detail.find("application close code=3 transport_event_index=") == 0;
+        }));
+    }
+    ASSERT_EQ(connection_ids.size(), 2u);
+    EXPECT_NE(connection_ids[0], connection_ids[1]);
+    const auto stopped = api.Post("/api/v1/runs/" + id + "/stop", "", "application/json");
+    ASSERT_TRUE(stopped);
+    EXPECT_EQ(stopped->status, 409) << stopped->body;
+    const auto after_stop = store->load(id);
+    EXPECT_EQ(after_stop.finalized_at_unix_ns, record.finalized_at_unix_ns);
+    EXPECT_EQ(after_stop.events.size(), record.events.size());
+    const std::array records{record};
+    EXPECT_TRUE(requirements::audit_execution(
+        *draft21, requirements::draft21_executable_bindings(), records).consistent());
+}
+
+TEST(WebTransportRunApi, RawFamilySubscriberNotifyFailsForEitherWrongCloseContext) {
+    for (const auto close_codes : {std::array{3u, 9u}, std::array{9u, 3u}}) {
+        SCOPED_TRACE(close_codes[0]);
+        SCOPED_TRACE(close_codes[1]);
+        const app::BuildInfo build{"test", "test", {}};
+        auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+        auto draft18 = catalog(18);
+        auto draft21 = catalog(21);
+        auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+            app::NativeRunManagerConfig{
+                .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+                .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+                .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+                .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+        http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+        ASSERT_TRUE(server.start());
+        httplib::Client api("127.0.0.1", server.port());
+        const std::vector<std::string> scenarios{
+            "d21-subscriber-sends-publish-state-notify",
+            "d21-publish-established-subscriber-sends-publish-state-notify"};
+        const Json request{{"draft", 21}, {"transport", "webtransport"},
+                           {"mode", "observed"}, {"scenarios", scenarios},
+                           {"timeout_ms", 2500},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                      {"name_hex", "74"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 201) << response->body;
+        const auto body = Json::parse(response->body);
+        const auto id = body.at("run").at("id").get<std::string>();
+        const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+        RawFamilyContext first{.scenario_id = scenarios[0], .next_scenario_id = scenarios[1],
+                               .close_code = close_codes[0]};
+        ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+            "D21-9-10-MUST-370", {0xaf, 0, 0, 0}, requirements::OutcomeState::Fail, &first));
+        ASSERT_EQ(store->load(id).state, storage::RunState::Active);
+        RawFamilyContext second{.scenario_id = scenarios[1], .publish_origin = true,
+                                .close_code = close_codes[1]};
+        ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+            "D21-9-10-MUST-370", {0xaf, 0, 0, 0}, requirements::OutcomeState::Fail, &second));
+        EXPECT_TRUE(first.connect_accepted);
+        EXPECT_TRUE(second.connect_accepted);
+        EXPECT_TRUE(first.gate_held_for_fragment);
+        EXPECT_TRUE(second.gate_held_for_fragment);
+        const auto run = store->load(id);
+        EXPECT_EQ(run.state, storage::RunState::Finalized);
+        EXPECT_EQ(run.outcomes.size(), draft21->requirements.size());
+        EXPECT_EQ(store->list({10, 0}).total, 1u);
+    }
+}
+
+TEST(WebTransportRunApi, RawFamilyCancellationAfterFirstSessionCannotPassFullRow) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"});
+    http::HttpServer server(draft18, draft21, store, build, {.port = 0}, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    api.set_read_timeout(2, 0);
+    const std::vector<std::string> scenarios{
+        "d21-subscriber-sends-publish-state-notify",
+        "d21-publish-established-subscriber-sends-publish-state-notify"};
+    const Json request{{"draft", 21}, {"transport", "webtransport"},
+                       {"mode", "observed"}, {"scenarios", scenarios},
+                       {"timeout_ms", 2500},
+                       {"track", {{"namespace_hex", Json::array({"6e"})},
+                                  {"name_hex", "74"}}}};
+    const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201) << response->body;
+    const auto body = Json::parse(response->body);
+    const auto id = body.at("run").at("id").get<std::string>();
+    const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+    RawFamilyContext first{.scenario_id = scenarios[0], .next_scenario_id = scenarios[1]};
+    ASSERT_TRUE(publish_setup(port, 21, store, id, std::nullopt,
+        "D21-9-10-MUST-370", {0xaf, 0, 0, 0}, requirements::OutcomeState::Pass, &first));
+    ASSERT_EQ(store->load(id).state, storage::RunState::Active);
+    const auto stop_started = std::chrono::steady_clock::now();
+    const auto stopped = api.Post("/api/v1/runs/" + id + "/stop", "", "application/json");
+    ASSERT_TRUE(stopped);
+    EXPECT_EQ(stopped->status, 200) << stopped->body;
+    EXPECT_LT(std::chrono::steady_clock::now() - stop_started, std::chrono::seconds{2});
+    const auto run = store->load(id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(run.outcomes.size(), draft21->requirements.size());
+    const auto row = std::find_if(run.outcomes.begin(), run.outcomes.end(), [](const auto& outcome) {
+        return outcome.requirement_id == "D21-9-10-MUST-370";
+    });
+    ASSERT_NE(row, run.outcomes.end());
+    EXPECT_EQ(row->state, requirements::OutcomeState::NotRun);
+    EXPECT_EQ(std::count_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "transport_established";
+    }), 1);
+    const int rebound = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(rebound, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(static_cast<std::uint16_t>(port));
+    EXPECT_EQ(::bind(rebound, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ::close(rebound);
 }
 
 TEST(WebTransportRunApi, AllocatesExactPublisherUrlForBothDrafts) {

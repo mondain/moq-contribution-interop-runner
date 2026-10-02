@@ -1,8 +1,21 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
+#include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_peer_close.h"
+#include "moq/interop/scenarios/draft18_request.h"
+#include "moq/interop/scenarios/draft18_response.h"
+#include "moq/interop/scenarios/fetch_probe.h"
+#include "moq/interop/scenarios/subscription_cancel.h"
+#include "moq/interop/scenarios/discovery_overlap.h"
+#include "moq/interop/scenarios/fetch_first_object.h"
+#include "moq/interop/scenarios/fetch_group_order.h"
+#include "moq/interop/scenarios/immutable_repeat.h"
+#include "moq/interop/scenarios/object_repeat.h"
+#include "moq/interop/scenarios/request_goaway.h"
 
 #include <algorithm>
 #include <array>
 #include <optional>
+#include <set>
 #include <stdexcept>
 
 namespace moq::interop::requirements {
@@ -254,6 +267,39 @@ const ScenarioContext* unique_context(
     return result;
 }
 
+template<class Profiles,class ScenarioId,class Evaluate>
+OutcomeState aggregate_raw_profiles(const Requirement& requirement,
+    std::span<const ScenarioContext> contexts,const Profiles& profiles,
+    ScenarioId scenario_id,Evaluate evaluate) {
+    std::set<std::string> passed_scenarios;
+    std::set<std::string> passed_evaluators;
+    for (const auto& profile : profiles) {
+        const std::string id(scenario_id(profile));
+        if (profile.requirement_id != requirement.id ||
+            std::find(requirement.scenarios.begin(),requirement.scenarios.end(),id) == requirement.scenarios.end() ||
+            std::find(requirement.evaluators.begin(),requirement.evaluators.end(),profile.evaluator_id) == requirement.evaluators.end()) continue;
+        const auto* sole_context = unique_context(contexts,id);
+        for (const auto& context : contexts) {
+            if (context.scenario_id != id || !context.complete ||
+                !context.stimulus_delivered || !context.raw_probe) continue;
+            const auto result = evaluate(profile,context);
+            if (result && !*result) return OutcomeState::Fail;
+            if (result && &context == sole_context) {
+                passed_scenarios.insert(id);
+                passed_evaluators.insert(std::string(profile.evaluator_id));
+            }
+        }
+    }
+    const bool complete = !requirement.scenarios.empty() && !requirement.evaluators.empty() &&
+        std::all_of(requirement.scenarios.begin(),requirement.scenarios.end(),[&](const auto& id) {
+            return passed_scenarios.contains(id);
+        }) &&
+        std::all_of(requirement.evaluators.begin(),requirement.evaluators.end(),[&](const auto& id) {
+            return passed_evaluators.contains(id);
+        });
+    return complete ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
 }  // namespace
 
 std::vector<Outcome> evaluate_draft18(
@@ -264,12 +310,122 @@ std::vector<Outcome> evaluate_draft18(
     }
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
+    const auto peer_profiles = scenarios::draft18_peer_close_probes();
+    const auto request_profiles = scenarios::draft18_request_profiles();
+    const auto close_profiles = scenarios::draft18_close_profiles();
+    const auto response_profiles = scenarios::draft18_response_probes();
+    const auto fetch_profiles = scenarios::draft18_fetch_probes();
+    const auto cancel_profiles = scenarios::draft18_subscription_cancel_probes();
+    const auto overlap_profiles = scenarios::draft18_discovery_overlap_probes();
+    const auto first_fetch_profiles = scenarios::draft18_fetch_first_object_probes();
+    const auto group_order_profiles = scenarios::draft18_fetch_group_order_probes();
+    const auto immutable_profiles = scenarios::draft18_immutable_repeat_probes();
+    const auto object_profiles = scenarios::draft18_object_repeat_probes();
+    const auto goaway_profiles = scenarios::draft18_request_goaway_probes();
     for (const auto& requirement : catalog.requirements) {
         OutcomeState state = OutcomeState::NotRun;
         if (requirement.applicability != Applicability::Applicable) {
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (std::any_of(peer_profiles.begin(), peer_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, peer_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_raw_probe_close(*context.raw_probe, profile.definition, profile.expected_close);
+                });
+        } else if (std::any_of(request_profiles.begin(), request_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement,scenarios,request_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile,const auto& context) {
+                    return scenarios::evaluate_raw_probe_request_error(*context.raw_probe,profile);
+                });
+        } else if (std::any_of(response_profiles.begin(), response_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, response_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_draft18_response_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(fetch_profiles.begin(), fetch_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, fetch_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_fetch_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(immutable_profiles.begin(), immutable_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, immutable_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_immutable_repeat_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(object_profiles.begin(), object_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, object_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_object_repeat_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(goaway_profiles.begin(), goaway_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, goaway_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_request_goaway_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(group_order_profiles.begin(), group_order_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, group_order_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_fetch_group_order_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(first_fetch_profiles.begin(), first_fetch_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, first_fetch_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_fetch_first_object_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(overlap_profiles.begin(), overlap_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, overlap_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_discovery_overlap_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(cancel_profiles.begin(), cancel_profiles.end(), [&](const auto& profile) {
+                       return profile.requirement_id == requirement.id;
+                   })) {
+            state = aggregate_raw_profiles(requirement, scenarios, cancel_profiles,
+                [](const auto& profile) { return profile.definition.id; },
+                [](const auto& profile, const auto& context) {
+                    return scenarios::evaluate_subscription_cancel_probe(*context.raw_probe, profile);
+                });
+        } else if (std::any_of(close_profiles.begin(), close_profiles.end(),
+                       [&](const auto& profile) { return profile.requirement_id == requirement.id; })) {
+            state = aggregate_raw_profiles(requirement,scenarios,close_profiles,
+                [](const auto& profile) { return profile.scenario_id; },
+                [](const auto& profile,const auto& context) -> std::optional<bool> {
+                    if ((profile.webtransport_only && !context.webtransport) ||
+                        (profile.native_only && context.webtransport)) return std::nullopt;
+                    return scenarios::evaluate_raw_probe_close(*context.raw_probe,
+                        scenarios::draft18_close_probe(profile.scenario_id,std::chrono::milliseconds(1)),profile.expected_close);
+                });
         } else if (requirement.id == "D18-3-3-MUST-NOT-001" &&
                    std::find(requirement.scenarios.begin(),
                              requirement.scenarios.end(), kSubscribeScenario) !=
@@ -410,7 +566,7 @@ std::vector<Outcome> evaluate_draft18(
 }
 
 std::vector<ExecutableBinding> draft18_executable_bindings() {
-    return {
+    std::vector<ExecutableBinding> result{
         {18, "D18-3-3-MUST-NOT-001", kSubscribeScenario,
          kRequestOpenerEvaluator,
          {"peer_stream_classified", "request_observed"}},
@@ -432,6 +588,55 @@ std::vector<ExecutableBinding> draft18_executable_bindings() {
         {18, "D18-6-1-MUST-003", kTracksScenario, kTracksResponseEvaluator,
          {"request_observed", "initial_response_observed"}},
     };
+    for (const auto& profile : scenarios::draft18_close_profiles()) {
+        result.push_back({18,std::string(profile.requirement_id),std::string(profile.scenario_id),
+                          std::string(profile.evaluator_id),{"raw_probe_stimulus","peer_close"}});
+    }
+    for (const auto& profile : scenarios::draft18_request_profiles()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id,
+                          profile.evaluator_id, {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_peer_close_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id,
+                          profile.evaluator_id, {"raw_probe_stimulus", "raw_probe_transport_event", "peer_close"}});
+    }
+    for (const auto& profile : scenarios::draft18_response_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_fetch_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_immutable_repeat_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_object_repeat_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_request_goaway_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event", "peer_close"}});
+    }
+    for (const auto& profile : scenarios::draft18_fetch_group_order_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_fetch_first_object_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_discovery_overlap_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    for (const auto& profile : scenarios::draft18_subscription_cancel_probes()) {
+        result.push_back({18, profile.requirement_id, profile.definition.id, profile.evaluator_id,
+                          {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    }
+    return result;
 }
 
 }  // namespace moq::interop::requirements

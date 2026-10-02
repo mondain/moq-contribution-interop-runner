@@ -13,17 +13,11 @@ Requests for unsupported scenarios return HTTP 422; they are never silently
 scored as conformant.
 
 Build on Linux with `cmake -S . -B build`, then
-`cmake --build build -j4`. The production runner uses pinned picoquic and
-picotls; it does not link quiche, BoringSSL, or Rust. To include the independent
-quiche test peer and both native process-level publisher tests, configure with
-`-DMOQ_INTEROP_BUILD_QUICHE_TEST_PEER=ON`, then run
-`ctest --test-dir build --output-on-failure`. The option is off by default and
-off in the production Docker image. The pinned picoquic revision accepts Retry
-tokens for 120 seconds; the native listener rejects other configured lifetimes
-rather than silently using a different value.
-The optional suite also retains the legacy quiche integration tests in a
-separate executable and compares draft-18/21 native evidence classes,
-requirement outcomes, and scores across both backends (`native-parity`).
+`cmake --build build -j4` and `ctest --test-dir build --output-on-failure`.
+The runner and local native test peers use pinned picoquic and picotls.
+Native draft-18/21 process tests and evaluator integration tests are included
+in the default test build. The pinned picoquic revision accepts Retry tokens
+for 120 seconds; the native listener rejects other configured lifetimes.
 Runtime options are listed by `build/moq-interop-runner --help`.
 
 To run the executable scenario, provide a PEM certificate and private key:
@@ -58,6 +52,42 @@ The HTTP run configuration accepts an optional opaque-byte track fixture:
   "track": {"namespace_hex": ["6e"], "name_hex": "78"}
 }
 ```
+
+Receiver-error probes are listed by `/healthz` alongside the publication
+scenarios. In observed mode these probes accept a run request without `track`;
+for example, use `receive-forward-outside-zero-one` for draft 18 or
+`d21-forward-value-two` for draft 21. Each context sends one isolated malformed
+stimulus and scores the publisher's application close. Exact close codes are
+checked where the draft prescribes them. Transport closes, local closes,
+partial writes, missing SETUP, unsupported datagrams, and timeouts remain
+`NOT_RUN`. Datagram probes require observed negotiated payload capacity and
+complete atomic transport acceptance. The stored evidence includes received
+stream bytes, submitted bytes and accepted lengths, delivery ordering, and the
+peer close code and error space. Driven mode still requires the publisher's
+track fixture. Request-error probes such as `request-track-in-single-period-namespace`
+(draft 18) and `d21-request-single-period-namespace` (draft 21) instead wait for
+an actual response on the matching request stream and verify its error code.
+Optional filter and token-cache probes require an observed peer SETUP advertising
+sufficient support for their stimulus; unmet prerequisites remain `NOT_RUN`.
+
+Raw probes can select up to 100 distinct scenario IDs in one run. The runner
+executes them in the supplied order, using a fresh session for each context and
+keeping the same publisher endpoint. `timeout_ms` applies to each context.
+For example, a draft-21 GOAWAY run selects
+`["d21-duplicate-request-goaway", "d21-goaway-on-distinct-request-streams"]`.
+Requirements needing multiple contexts are scored after collection finishes;
+an absent or incomplete context cannot supply a pass.
+
+In observed mode, read `/api/v1/runs/{id}/events` and reconnect to the same
+endpoint when `context_ready` names the next scenario. Open a fresh QUIC or
+WebTransport session each time. Coordinate the publisher connections for that
+run; observed mode does not authenticate the publisher's identity. Driven mode
+starts the configured publisher process for each context and retains separate
+request and process logs. Cancellation and process or listener failures preserve
+collected evidence and prevent a complete successful run.
+
+The original typed publication scenarios still accept one scenario per run;
+combining them with raw probes returns HTTP 422.
 
 For the draft-18 duplicate-subscription check, set `scenarios` to
 `["subscribe-again-to-established-publisher-track"]`. The runner waits for
@@ -179,16 +209,123 @@ draft digest and source revision, executable coverage counts, and residual
 status 0 means the source and required evaluator/scenario/evidence registry
 checks pass; status 1 means the draft is not yet executable-complete, which
 is expected for the current narrow profiles. As of this checkpoint, only
-9/175 draft-18 and 12/175 draft-21 applicable, testable MUST/MUST NOT rows
-have registered executable bindings. A registered binding is a static gate,
+76/175 draft-18 and 76/175 draft-21 applicable, testable MUST/MUST NOT rows
+have executable bindings for every named scenario and evaluator. Partially
+registered families remain incomplete. A registered binding is a static gate,
 not proof that a publisher passed it; run results still require live evidence.
+Raw runs collect independent sessions before evaluating the full catalog once.
+Every named context remains required; outcomes from separate runs are not merged.
+
+FETCH group-order profiles decode complete Objects on each associated FETCH stream.
+Draft-18 executes both explicit orders in one scenario; draft-21 uses ascending,
+descending, and default ascending scenarios. A pass needs a typed FETCH_OK,
+at least two distinct groups, and a complete stream. Missing named contexts
+remain unscored. Draft-18 uses its exclusive end bound and whole-end-group
+special case; draft-21 uses its inclusive end bound.
+
+Draft-21 notification probes establish a namespace or FETCH request with a
+valid typed response, then send PUBLISH_STATE_NOTIFY on that request stream.
+They check for an application PROTOCOL_VIOLATION close. FETCH probes require a
+configured track fixture; saved evidence retains the opening, notification,
+response bytes, acceptance markers, and peer close code.
+Subscriber-direction notification probes cover both SUBSCRIBE and PUBLISH
+established subscriptions with configured track fixtures. Both contexts are
+required for the complete requirement result.
+
+Request GOAWAY probes wait for typed establishment before sending two GOAWAY
+messages on one request stream. The draft-21 control sends one on each of two
+independent request streams and requires a typed response on a fresh request;
+silence alone does not prove success.
+
+Discovery overlap profiles for both drafts establish active typed discovery
+subscriptions before testing exact, ancestor, and descendant common prefixes.
+Prefix updates establish A and a disjoint B whose first namespace field differs,
+then update B to A on B's actual request stream using a fresh Request ID.
+Draft-21 also executes both request types together to prove their independent
+overlap spaces; each requirement scores its own type. These profiles require a
+track fixture, use only its namespace, and allow at most 31 nonempty fields and
+4,094 namespace bytes so the descendant and disjoint controls remain valid.
+An empty configured namespace selects the canonical `(a)` fixture. A complete
+REQUEST_ERROR with PREFIX_OVERLAP (`0x30`) passes; a typed wrong error or OK fails,
+and missing establishment or incomplete/late response evidence stays NOT_RUN.
+
+FETCH first-object profiles for both drafts require a configured track containing
+Group 7, Object 9. They request exactly that point (draft-18 uses exclusive end
+7/10; draft-21 uses inclusive end 7/9). A typed FETCH_OK and one associated
+FETCH stream prove the first ordinary Object. Missing Group or Object ID flags
+fail only the corresponding requirement. Complete typed data at 7/9 passes;
+empty responses, range markers, other locations, and incomplete evidence remain
+NOT_RUN. Object bytes may arrive before FETCH_OK.
+
+Draft-21 FETCH response-count profiles cover accepted and rejected requests.
+They require a valid typed reply on the actual request stream and collect
+through peer FIN before passing a singleton. Two replies fail immediately;
+missing FIN or reset-only closure remains NOT_RUN. Each named context is
+required for the full catalogue row to pass, so a run exercising only one
+context remains incomplete.
+
+Draft-21 SUBSCRIBE, SUBSCRIBE_NAMESPACE, and SUBSCRIBE_TRACKS response-count
+profiles likewise require accepted and rejected contexts. Discovery additionally
+requires REQUEST_OK or REQUEST_ERROR to be the first message on the response
+stream. Later namespace notifications do not count as additional replies.
+Redirect errors for discovery require an empty Track Name. These profiles use
+the configured track namespace as the discovery prefix; discovery permits a
+valid prefix even when the Track Name is unsuitable for SUBSCRIBE.
+
+Draft-21 Range Filter limit probes prepare their request from the publisher's
+actual MAX_FILTER_RANGES advertisement. They send exactly one Range over the
+limit across distinct filter keys, or one Range when the limit defaults to
+zero. Capacities too large for a bounded request remain NOT_RUN. Duplicate-key
+update probes wait for a valid SUBSCRIBE_OK before updating the same stream.
+Saved evidence records the prefix used to prepare each payload, its actual
+bytes, and its acceptance marker.
+
+Established update probes record when each write was accepted and wait for
+the complete peer update on that request's actual stream. Missing, early,
+truncated, or unrelated updates cannot establish a passing result.
+
+FETCH cleanup probes require a configured track fixture and an actual open
+FETCH data stream. Cancellation sends FIN on the request's sending direction
+before STOP_SENDING on its receiving direction. Request and data resets are
+scored independently. A failed update requires a valid REQUEST_ERROR and a
+reset of its associated data stream. FIN-only results remain NOT_RUN because
+transport timing cannot establish a missing reset.
+Saved evidence includes actual stream IDs, reset/stop error codes, and accepted
+operation markers.
+
+SUBSCRIBE cancellation probes wait for a valid SUBSCRIBE_OK and at least two
+open associated subgroup streams before sending STOP_SENDING. Passing requires
+actual resets of the request stream and all observed associated open streams,
+including reordered late subgroup headers. Ambiguous FIN or alias ownership
+results remain NOT_RUN.
+
+Draft-21 server update probes likewise wait for a fully decoded successful
+response before reusing the request stream. The duplicate update ID probe
+waits for the first update's acknowledgment before repeating its ID, so
+outstanding update credits cannot explain the required close.
+Draft-21 failed-update probes require an actual complete `REQUEST_ERROR`
+before checking subscription `PUBLISH_DONE` with `UPDATE_FAILED`, or discovery
+request closure. They verify accepted local FIN and peer FIN or RESET on the
+same request stream; `STOP_SENDING` and a RESET after session closure do not
+prove the peer's sending direction closed. Cleanup is conditional on rejection
+and does not assume an authorization-alias error code.
+
+Unknown authorization alias probes preserve the draft's missing REQUEST_ERROR
+assignment. Without a mapping, a structurally valid rejection remains `NOT_RUN`.
+To test a deployed mapping explicitly, start the runner with
+`--unknown-auth-token-alias-compat-code 0x17` (decimal values also work).
+Configured runs record the chosen code in evidence and expose
+`scoring_profile: "compatibility"` in JSON and a compatibility label in the
+HTML report and TAP diagnostics. These outcomes validate the configured mapping; they do not
+establish a standards assignment. A different response code fails the probe.
+
 After a test series finishes, add `--database /path/to/runs.sqlite3` to audit
 stored execution evidence. The JSON output gains `execution_audit` with
 per-run canonical SHA-256 hashes, scored-row counts, and explicit findings for
 passed rows missing declared evidence, score mismatches, active/error runs,
 and inconsistent repeats. Run ID, timestamps, and incidental evidence arrival
 order are excluded from the hash, while evidence kind counts remain significant;
-draft, transport, track, timeout, and validator revision remain part of the
+draft, transport, track, timeout, configured compatibility mapping, and validator revision remain part of the
 comparison group. A zero-run audit can be consistent but proves no behavior.
 Compare repetitions only when the publisher binary and fixture are the same;
 publisher identity is not yet stored as a grouping key. Run this audit after
@@ -200,7 +337,7 @@ Docker image, synthetic native peer, moqxr executable, and MP4 fixture:
 ```sh
 bash tests/e2e/release-audit.sh run /tmp/moq-interop-release-audit \
   "$PWD/build/moq-interop-audit" "moq-interop-runner:$(git rev-parse --short HEAD)" \
-  "$PWD/build/moq-interop-quiche-peer" \
+  "$PWD/build/moq-interop-picoquic-peer" \
   /path/to/openmoq-publisher /path/to/locmaf-publisher.mp4
 ```
 
@@ -355,3 +492,9 @@ the script.
 If the publisher omits QUIC DATAGRAM negotiation, the runner rejects the
 session as required by draft 18 section 3.1, records the close, and leaves
 publisher behavior unscored rather than marking a pass.
+
+Draft-21 MAX_FILTER_RANGES rejection coverage includes distinct named contexts
+for an initial aggregate exceeding the advertised positive cap, the omitted
+SETUP option default of zero, and a REQUEST_UPDATE adding SetID 1 while
+retaining the acknowledged subscription's SetID 0 filters. The last context
+exceeds the concurrent cap even though the update itself adds only one range.

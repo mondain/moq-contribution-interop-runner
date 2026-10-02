@@ -49,6 +49,10 @@ TEST(ReportAccessibility, EscapesCatalogAndEvidenceTextWithoutScript) {
     EXPECT_NE(html.find("Rows shown: 1 of 1"), std::string::npos);
     EXPECT_NE(html.find("<th scope=\"row\">"), std::string::npos);
 
+    event.kind = "compatibility_error_mapping";
+    run.events = {event};
+    EXPECT_NE(render_run_detail(run, catalog, {}).find("Compatibility scoring:"), std::string::npos);
+
     ReportFilters filtered;
     filtered.outcome = "fail";
     const auto empty = render_run_detail(run, catalog, filtered);

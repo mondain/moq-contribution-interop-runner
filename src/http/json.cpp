@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
 #include <string_view>
 
@@ -208,6 +209,9 @@ Json run_json(const storage::RunRecord& run) {
             {"finalized_at_unix_ns", run.finalized_at_unix_ns},
             {"verdict", run.score ? Json(name(run.score->verdict)) : Json(nullptr)},
             {"score", run.score ? score_json(*run.score) : Json(nullptr)},
+            {"scoring_profile", std::any_of(run.events.begin(), run.events.end(), [](const auto& event) {
+                return event.kind == "compatibility_error_mapping";
+            }) ? "compatibility" : "standards"},
             {"outcomes", std::move(outcomes)},
             {"events", {{"total", run.events.size()},
                          {"href", "/api/v1/runs/" + run.id + "/events"}}}};

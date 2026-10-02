@@ -58,6 +58,19 @@ Json score_json(const ScoreSummary& score) {
             {"coverage", {score.coverage.earned, score.coverage.possible}}};
 }
 
+Json compatibility_mappings(const storage::RunRecord& run) {
+    std::vector<std::tuple<std::optional<std::string>, std::optional<std::string>, std::string>> mappings;
+    for (const auto& event : run.events) {
+        if (event.kind == "compatibility_error_mapping")
+            mappings.emplace_back(event.scenario_id, event.requirement_id, event.detail);
+    }
+    std::sort(mappings.begin(), mappings.end());
+    Json result = Json::array();
+    for (const auto& [scenario, requirement, detail] : mappings)
+        result.push_back({{"scenario_id", scenario}, {"requirement_id", requirement}, {"mapping", detail}});
+    return result;
+}
+
 bool same_score(const ScoreSummary& left, const ScoreSummary& right) {
     return left.verdict == right.verdict &&
            left.required.earned == right.required.earned &&
@@ -103,6 +116,7 @@ std::string canonical_result_sha256(const storage::RunRecord& run) {
         evidence.push_back({{"kind", kind}, {"scenario_id", scenario_id},
                             {"requirement_id", requirement_id}});
     const Json document{{"config", config_json(run.config)},
+                        {"compatibility_mappings", compatibility_mappings(run)},
                         {"validator", build_json(run.build)},
                         {"state", static_cast<unsigned>(run.state)},
                         {"score", run.score ? score_json(*run.score) : Json(nullptr)},
@@ -185,6 +199,7 @@ ExecutionAudit audit_execution(
             }
         }
         const Json group_json{{"config", config_json(run.config)},
+                              {"compatibility_mappings", compatibility_mappings(run)},
                               {"validator", build_json(run.build)}};
         const auto group = group_json.dump();
         const auto digest = canonical_result_sha256(run);

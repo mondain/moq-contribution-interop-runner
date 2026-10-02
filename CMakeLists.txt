@@ -7,16 +7,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MOQ_INTEROP_BUILD_TESTS "Build unit tests" ON)
 option(MOQ_INTEROP_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
-option(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER "Build independent quiche peer and legacy parity tests" OFF)
 
 include(cmake/Dependencies.cmake)
 
 find_package(SQLite3 REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Git REQUIRED)
-if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
-    include(cmake/Quiche.cmake)
-endif()
 include(cmake/Picoquic.cmake)
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -111,12 +107,15 @@ add_library(moq-interop-wire
     src/wire/draft21/control.cpp
     src/wire/draft21/goaway.cpp
     src/wire/draft21/key_values.cpp
+    src/wire/draft21/objects.cpp
     src/wire/draft21/location_filter.cpp
     src/wire/draft21/publish.cpp
+    src/wire/draft21/publish_done.cpp
     src/wire/draft21/publisher_request.cpp
     src/wire/draft21/request_frame.cpp
     src/wire/draft21/request_error.cpp
     src/wire/draft21/request_ok.cpp
+    src/wire/draft21/successful_response.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
 )
@@ -195,6 +194,27 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18.cpp
     src/scenarios/action_dispatcher.cpp
     src/scenarios/run_controller.cpp
+    src/scenarios/raw_probe.cpp
+    src/scenarios/request_probe.cpp
+    src/scenarios/draft18_request.cpp
+    src/scenarios/draft18_response.cpp
+    src/scenarios/fetch_probe.cpp
+    src/scenarios/fetch_first_object.cpp
+    src/scenarios/fetch_group_order.cpp
+    src/scenarios/request_goaway.cpp
+    src/scenarios/immutable_repeat.cpp
+    src/scenarios/object_repeat.cpp
+    src/scenarios/fetch_response.cpp
+    src/scenarios/request_response.cpp
+    src/scenarios/range_filter.cpp
+    src/scenarios/subscription_cancel.cpp
+    src/scenarios/discovery_overlap.cpp
+    src/scenarios/draft18_peer_close.cpp
+    src/scenarios/draft21_request.cpp
+    src/scenarios/draft21_response.cpp
+    src/scenarios/draft21_peer_close.cpp
+    src/scenarios/draft21_close.cpp
+    src/scenarios/draft18_close.cpp
     src/scenarios/draft21_announcement.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
 target_compile_options(moq-interop-scenarios PRIVATE
@@ -204,7 +224,7 @@ target_compile_options(moq-interop-scenarios PRIVATE
 add_library(moq-interop-draft18-evaluators
     src/requirements/draft18_evaluators.cpp)
 target_link_libraries(moq-interop-draft18-evaluators PUBLIC
-    moq-interop-requirements moq-interop-session)
+    moq-interop-requirements moq-interop-session moq-interop-scenarios)
 target_compile_options(moq-interop-draft18-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -287,45 +307,53 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-picoquic-link-tests PRIVATE
                           moq-interop-picoquic)
     add_test(NAME picoquic-link COMMAND moq-interop-picoquic-link-tests)
-    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
-    add_library(moq-interop-quiche-legacy-tests
-                src/transport/quiche_connection.cpp
-                src/transport/quiche_native_listener.cpp)
-    target_include_directories(moq-interop-quiche-legacy-tests PRIVATE
-        "${PROJECT_SOURCE_DIR}/src")
-    target_include_directories(moq-interop-quiche-legacy-tests SYSTEM PRIVATE
-        "${MOQ_INTEROP_BORINGSSL_INCLUDE_DIR}")
-    target_link_libraries(moq-interop-quiche-legacy-tests PUBLIC
-        moq-interop-app moq-interop-quiche)
+    add_library(moq-interop-test-client tests/support/picoquic_client.cpp)
+    target_include_directories(moq-interop-test-client PUBLIC "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-test-client PUBLIC moq-interop-picoquic)
+    target_compile_options(moq-interop-test-client PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_executable(moq-interop-picoquic-peer tests/support/picoquic_peer_main.cpp)
+    target_link_libraries(moq-interop-picoquic-peer PRIVATE moq-interop-test-client)
     add_executable(moq-interop-picoquic-native-tests
                    tests/transport/picoquic_native_listener_test.cpp)
-    add_executable(moq-interop-quiche-peer
-                   tests/support/quiche_peer_main.cpp
-                   tests/support/quiche_client.cpp)
-    target_include_directories(moq-interop-picoquic-native-tests PRIVATE
-                               "${PROJECT_SOURCE_DIR}/tests")
-    target_include_directories(moq-interop-quiche-peer PRIVATE
-                               "${PROJECT_SOURCE_DIR}/tests")
     target_compile_definitions(moq-interop-picoquic-native-tests PRIVATE
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
-        QUICHE_TEST_PEER_PATH="$<TARGET_FILE:moq-interop-quiche-peer>")
+        PICOQUIC_TEST_PEER_PATH="$<TARGET_FILE:moq-interop-picoquic-peer>")
     target_link_libraries(moq-interop-picoquic-native-tests PRIVATE
-        moq-interop-app moq-interop-transport
-        GTest::gtest_main)
-    target_link_libraries(moq-interop-quiche-peer PRIVATE
-                          moq-interop-quiche)
-    add_dependencies(moq-interop-picoquic-native-tests moq-interop-quiche-peer)
-    add_test(NAME picoquic-native-listener
-             COMMAND moq-interop-picoquic-native-tests)
-    add_test(NAME draft18-native
-             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-peer.sh"
-                     "$<TARGET_FILE:moq-interop-runner>"
-                     "$<TARGET_FILE:moq-interop-quiche-peer>" 18)
-    add_test(NAME draft21-native
-             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-peer.sh"
-                     "$<TARGET_FILE:moq-interop-runner>"
-                     "$<TARGET_FILE:moq-interop-quiche-peer>" 21)
-    endif()
+        moq-interop-app moq-interop-transport GTest::gtest_main)
+    add_dependencies(moq-interop-picoquic-native-tests moq-interop-picoquic-peer)
+    add_test(NAME picoquic-native-listener COMMAND moq-interop-picoquic-native-tests)
+    foreach(draft IN ITEMS 18 21)
+        add_test(NAME draft${draft}-native
+                 COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-peer.sh"
+                         "$<TARGET_FILE:moq-interop-runner>"
+                         "$<TARGET_FILE:moq-interop-picoquic-peer>" ${draft})
+    endforeach()
+    set_tests_properties(draft18-native draft21-native
+                         PROPERTIES RESOURCE_LOCK "native-test-ports")
+    add_executable(moq-interop-native-quic-tests tests/integration/native_quic_test.cpp)
+    target_link_libraries(moq-interop-native-quic-tests PRIVATE
+        moq-interop-test-client moq-interop-runs moq-interop-http
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-native-quic-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_compile_options(moq-interop-native-quic-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME native-quic COMMAND moq-interop-native-quic-tests)
+    add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
+    target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
+        moq-interop-test-client nlohmann_json::nlohmann_json)
+    add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
+    target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
+        moq-interop-runs nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
+        PICOQUIC_FAMILY_DRIVER_PATH="$<TARGET_FILE:moq-interop-raw-family-driver-peer>")
+    add_dependencies(moq-interop-raw-family-driver-tests moq-interop-raw-family-driver-peer)
+    target_compile_options(moq-interop-raw-family-driver-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME raw-family-driver COMMAND moq-interop-raw-family-driver-tests)
     add_test(NAME production-link
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/integration/production-link.sh"
                      "$<TARGET_FILE:moq-interop-runner>")
@@ -350,32 +378,6 @@ if(MOQ_INTEROP_BUILD_TESTS)
     set_tests_properties(picoquic-dependency-rejects-mismatch PROPERTIES
                          WILL_FAIL TRUE)
 
-    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
-    add_executable(moq-interop-quiche-link-tests
-                   tests/integration/quiche_link_test.cpp)
-    target_link_libraries(moq-interop-quiche-link-tests PRIVATE
-                          moq-interop-quiche)
-    target_compile_options(moq-interop-quiche-link-tests PRIVATE
-        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
-    )
-    add_test(NAME quiche-link COMMAND moq-interop-quiche-link-tests)
-    add_test(NAME quiche-dependency-contract
-        COMMAND "${CMAKE_COMMAND}"
-            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-            "-DQUICHE_SOURCE_DIR=${quiche_SOURCE_DIR}"
-            "-DPROJECT_LOCK_FILE=${MOQ_INTEROP_QUICHE_LOCK_FILE}"
-            "-DFETCHED_LOCK_FILE=${MOQ_INTEROP_FETCHED_QUICHE_LOCK_FILE}"
-            "-DVERIFY_SCRIPT=${PROJECT_SOURCE_DIR}/cmake/VerifyQuiche.cmake"
-            "-DQUICHE_REVISION=${MOQ_INTEROP_QUICHE_REVISION}"
-            "-DBORINGSSL_REVISION=${MOQ_INTEROP_BORINGSSL_REVISION}"
-            "-DCARGO_EXECUTABLE=${MOQ_INTEROP_CARGO_EXECUTABLE}"
-            "-DCARGO_HOME=${MOQ_INTEROP_QUICHE_CARGO_HOME}"
-            "-DCARGO_TARGET_DIR=${MOQ_INTEROP_QUICHE_CARGO_TARGET_DIR}"
-            "-DREAL_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
-            "-DFIXTURE_ROOT=${PROJECT_BINARY_DIR}/quiche-contract-fixtures"
-            -P "${PROJECT_SOURCE_DIR}/tests/integration/quiche_dependency_contract.cmake"
-    )
-    endif()
 
     add_executable(moq-interop-session-transport-header-tests
                    tests/transport/session_transport_header_test.cpp)
@@ -387,62 +389,69 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME session-transport-header
              COMMAND moq-interop-session-transport-header-tests)
 
-    if(MOQ_INTEROP_BUILD_QUICHE_TEST_PEER)
-    add_executable(moq-interop-quiche-connection-tests
-                   tests/transport/quiche_connection_test.cpp)
-    target_include_directories(moq-interop-quiche-connection-tests PRIVATE
-                               "${PROJECT_SOURCE_DIR}/src")
-    target_link_libraries(moq-interop-quiche-connection-tests PRIVATE
-                          moq-interop-quiche-legacy-tests moq-interop-quiche
-                          GTest::gtest_main)
-    target_compile_options(moq-interop-quiche-connection-tests PRIVATE
-        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
-    )
-    add_test(NAME quiche-connection COMMAND moq-interop-quiche-connection-tests)
 
-    add_library(moq-interop-quiche-legacy-runs-tests
-                src/app/native_run_manager.cpp)
-    target_link_libraries(moq-interop-quiche-legacy-runs-tests PUBLIC
-        moq-interop-quiche-legacy-tests moq-interop-scenarios
-        moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-        moq-interop-storage moq-interop-transport
-        moq-interop-publisher-driver)
-    add_library(moq-interop-quiche-legacy-http-tests ${MOQ_INTEROP_HTTP_SOURCES})
-    target_link_libraries(moq-interop-quiche-legacy-http-tests PUBLIC
-        moq-interop-app moq-interop-requirements
-        moq-interop-quiche-legacy-runs-tests moq-interop-storage
-        moq-interop-execution-audit)
-    target_link_libraries(moq-interop-quiche-legacy-http-tests PRIVATE
-        httplib::httplib nlohmann_json::nlohmann_json)
-    add_executable(moq-interop-runner-legacy-tests src/app/main.cpp)
-    target_compile_definitions(moq-interop-runner-legacy-tests PRIVATE
-        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    target_link_libraries(moq-interop-runner-legacy-tests PRIVATE
-        moq-interop-quiche-legacy-http-tests
-        moq-interop-quiche-legacy-tests)
-    add_test(NAME native-parity
-             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/native-parity.sh"
-                     "$<TARGET_FILE:moq-interop-runner>"
-                     "$<TARGET_FILE:moq-interop-runner-legacy-tests>"
-                     "$<TARGET_FILE:moq-interop-quiche-peer>")
-    set_tests_properties(draft18-native draft21-native native-parity
-                         PROPERTIES RESOURCE_LOCK "native-test-ports")
-    add_executable(moq-interop-native-quic-legacy-tests
-                   tests/integration/native_quic_test.cpp
-                   tests/support/quiche_client.cpp)
-    target_include_directories(moq-interop-native-quic-legacy-tests PRIVATE
-                               "${PROJECT_SOURCE_DIR}/src"
-                               "${PROJECT_SOURCE_DIR}/tests")
-    target_link_libraries(moq-interop-native-quic-legacy-tests PRIVATE
-        moq-interop-quiche-legacy-tests
-        moq-interop-quiche-legacy-runs-tests
-        moq-interop-quiche-legacy-http-tests
-        httplib::httplib nlohmann_json::nlohmann_json
-        GTest::gtest_main)
-    target_compile_options(moq-interop-native-quic-legacy-tests PRIVATE
+    add_executable(moq-interop-fetch-probe-tests tests/protocol/fetch_probe_test.cpp)
+    target_link_libraries(moq-interop-fetch-probe-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-fetch-probe-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME fetch-probe COMMAND moq-interop-fetch-probe-tests)
+
+    add_executable(moq-interop-request-goaway-tests tests/protocol/request_goaway_test.cpp)
+    target_link_libraries(moq-interop-request-goaway-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-request-goaway-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME request-goaway COMMAND moq-interop-request-goaway-tests)
+
+    foreach(profile IN ITEMS immutable-repeat object-repeat)
+        string(REPLACE "-" "_" profile_source "${profile}")
+        add_executable(moq-interop-${profile}-tests tests/protocol/${profile_source}_test.cpp)
+        target_link_libraries(moq-interop-${profile}-tests PRIVATE
+            moq-interop-scenarios moq-interop-requirements
+            moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+        target_compile_definitions(moq-interop-${profile}-tests PRIVATE
+            MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+        add_test(NAME ${profile} COMMAND moq-interop-${profile}-tests)
+    endforeach()
+
+    add_executable(moq-interop-fetch-group-order-tests tests/protocol/fetch_group_order_test.cpp)
+    target_link_libraries(moq-interop-fetch-group-order-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-fetch-group-order-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME fetch-group-order COMMAND moq-interop-fetch-group-order-tests)
+
+    add_executable(moq-interop-fetch-first-object-tests tests/protocol/fetch_first_object_test.cpp)
+    target_link_libraries(moq-interop-fetch-first-object-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-fetch-first-object-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME fetch-first-object COMMAND moq-interop-fetch-first-object-tests)
+
+    add_executable(moq-interop-draft21-objects-tests tests/protocol/draft21_objects_test.cpp)
+    target_link_libraries(moq-interop-draft21-objects-tests PRIVATE moq-interop-wire GTest::gtest_main)
+    target_compile_options(moq-interop-draft21-objects-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
-    add_test(NAME native-quic-legacy COMMAND moq-interop-native-quic-legacy-tests)
-    endif()
+    add_test(NAME draft21-objects COMMAND moq-interop-draft21-objects-tests)
+
+    add_executable(moq-interop-range-filter-tests tests/protocol/range_filter_test.cpp)
+    target_link_libraries(moq-interop-range-filter-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-range-filter-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME range-filter COMMAND moq-interop-range-filter-tests)
+
+    add_executable(moq-interop-request-response-tests tests/protocol/request_response_test.cpp)
+    target_link_libraries(moq-interop-request-response-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-request-response-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME request-response COMMAND moq-interop-request-response-tests)
+
+    add_executable(moq-interop-fetch-response-tests tests/protocol/fetch_response_test.cpp)
+    target_link_libraries(moq-interop-fetch-response-tests PRIVATE moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-fetch-response-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME fetch-response COMMAND moq-interop-fetch-response-tests)
+
+    add_executable(moq-interop-subscription-cancel-tests tests/protocol/subscription_cancel_test.cpp)
+    target_link_libraries(moq-interop-subscription-cancel-tests PRIVATE moq-interop-scenarios
+        moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-subscription-cancel-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME subscription-cancel COMMAND moq-interop-subscription-cancel-tests)
+    add_executable(moq-interop-discovery-overlap-tests tests/protocol/discovery_overlap_test.cpp)
+    target_link_libraries(moq-interop-discovery-overlap-tests PRIVATE moq-interop-scenarios
+        moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
+    target_compile_definitions(moq-interop-discovery-overlap-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME discovery-overlap COMMAND moq-interop-discovery-overlap-tests)
 
     add_executable(moq-interop-draft18-session-tests
                    tests/protocol/draft18_session_test.cpp)
@@ -452,6 +461,44 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     )
     add_test(NAME draft18-session COMMAND moq-interop-draft18-session-tests)
+
+    add_executable(moq-interop-request-probe-tests tests/protocol/request_probe_test.cpp)
+    target_link_libraries(moq-interop-request-probe-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME request-probe COMMAND moq-interop-request-probe-tests)
+
+    add_executable(moq-interop-draft18-request-tests tests/protocol/draft18_request_test.cpp)
+    target_link_libraries(moq-interop-draft18-request-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft18-request COMMAND moq-interop-draft18-request-tests)
+
+    add_executable(moq-interop-draft18-response-tests tests/protocol/draft18_response_test.cpp)
+    target_link_libraries(moq-interop-draft18-response-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft18-response COMMAND moq-interop-draft18-response-tests)
+
+    add_executable(moq-interop-draft18-peer-close-tests tests/protocol/draft18_peer_close_test.cpp)
+    target_link_libraries(moq-interop-draft18-peer-close-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft18-peer-close-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME draft18-peer-close COMMAND moq-interop-draft18-peer-close-tests)
+
+    add_executable(moq-interop-draft21-request-tests tests/protocol/draft21_request_test.cpp)
+    target_link_libraries(moq-interop-draft21-request-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-request COMMAND moq-interop-draft21-request-tests)
+
+    add_executable(moq-interop-draft21-response-tests tests/protocol/draft21_response_test.cpp)
+    target_link_libraries(moq-interop-draft21-response-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-response COMMAND moq-interop-draft21-response-tests)
+
+    add_executable(moq-interop-draft21-peer-close-tests tests/protocol/draft21_peer_close_test.cpp)
+    target_link_libraries(moq-interop-draft21-peer-close-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft21-peer-close-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME draft21-peer-close COMMAND moq-interop-draft21-peer-close-tests)
+
+    add_executable(moq-interop-draft21-close-tests tests/protocol/draft21_close_test.cpp)
+    target_link_libraries(moq-interop-draft21-close-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME draft21-close COMMAND moq-interop-draft21-close-tests)
+
+    add_executable(moq-interop-raw-probe-tests tests/protocol/raw_probe_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME raw-probe COMMAND moq-interop-raw-probe-tests)
 
     add_executable(moq-interop-draft18-scenarios-tests
                    tests/protocol/draft18_scenarios_test.cpp)

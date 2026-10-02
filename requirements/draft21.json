@@ -7344,7 +7344,8 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d21-subscriber-sends-publish-state-notify"
+        "d21-subscriber-sends-publish-state-notify",
+        "d21-publish-established-subscriber-sends-publish-state-notify"
       ],
       "evaluators": [
         "d21-publish-state-notify-direction-error"

@@ -1,9 +1,15 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 
 #include <gtest/gtest.h>
+#include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_peer_close.h"
+#include "moq/interop/scenarios/draft18_request.h"
+#include "moq/interop/scenarios/draft18_response.h"
+#include "../support/raw_probe_transcript.h"
 
 #include <algorithm>
 #include <filesystem>
+#include <utility>
 
 namespace moq::interop::requirements {
 namespace {
@@ -459,5 +465,261 @@ TEST(Draft18Evaluators, PublisherRequestStreamOpenerRequiresObservedValidMessage
               OutcomeState::NotRun);
 }
 
+TEST(Draft18PeerCloseEvaluators, ActualOpeningRequestAndAcceptedResponseAreRequired) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(source, root / "requirements/draft18.json");
+    for (const auto& profile : scenarios::draft18_peer_close_probes()) {
+        SCOPED_TRACE(profile.requirement_id);
+        const bool publish = profile.definition.id == "receive-reason-phrase-length-over-1024" ||
+                             profile.definition.id == "receive-publish-request-ok-with-track-properties" ||
+                             profile.definition.id == "receive-request-update-ok-with-track-properties";
+        const bool namespace_request = profile.definition.id == "receive-publish-namespace-ok-with-track-properties" ||
+                                       profile.definition.id == "receive-publish-namespace-redirect-with-nonempty-track-name";
+        const auto opener = publish ? test::probe_bytes({0x1d, 0, 8, 0, 1, 1, 'n', 1, 'x', 0, 0}) :
+            namespace_request ? test::probe_bytes({6, 0, 5, 0, 1, 1, 'n', 0}) :
+                test::probe_bytes({0xd, 0, 7, 0, 1, 1, 'n', 1, 'x', 0});
+        auto transcript = test::raw_probe_transcript(profile.definition, opener);
+        if (profile.definition.writes.size() == 2) {
+            transcript.writes[0].delivery_event_count = 3;
+            transcript.events.push_back(transport::StreamDataEvent{0, test::probe_bytes({2, 0, 2, 2, 0}), false});
+            transcript.writes[1].delivery_event_count = 4;
+            transcript.delivery_event_count = 4;
+        }
+        transcript.events.push_back(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 3, {}});
+        ScenarioContext context;
+        context.scenario_id = profile.definition.id;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = transcript;
+        const auto state = [&](const auto& candidate) {
+            const auto outcomes = evaluate_draft18(catalog, std::span(&candidate, 1));
+            return std::find_if(outcomes.begin(), outcomes.end(), [&](const auto& row) {
+                return row.requirement_id == profile.requirement_id;
+            })->state;
+        };
+        EXPECT_EQ(state(context), OutcomeState::Pass);
+        context.raw_probe->writes.front().accepted--;
+        EXPECT_EQ(state(context), OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        std::get<transport::PeerCloseEvent>(context.raw_probe->events.back()).error_code = 4;
+        EXPECT_EQ(state(context), OutcomeState::Fail);
+        context.raw_probe = transcript;
+        context.raw_probe->delivery_event_count = 2;
+        EXPECT_EQ(state(context), OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        std::get<transport::StreamDataEvent>(context.raw_probe->events[2]).stream_id = 4;
+        EXPECT_EQ(state(context), OutcomeState::NotRun);
+    }
+}
+
 }  // namespace
+TEST(Draft18CloseEvaluators, RequireExactDeliveredTranscriptAndApplicationCloseCode) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18,root / "docs",root / "requirements/draft-digests.json");
+    const auto checked_catalog = RequirementCatalog::load(source,root / "requirements/draft18.json");
+    for (const auto& profile : scenarios::draft18_close_profiles()) {
+        SCOPED_TRACE(std::string(profile.scenario_id));
+        const auto definition = scenarios::draft18_close_probe(profile.scenario_id, std::chrono::milliseconds(10));
+        auto transcript = test::raw_probe_transcript(definition);
+        transcript.events.push_back(transport::PeerCloseEvent{transport::CloseErrorSpace::Application,profile.expected_close.value_or(3),{}});
+        transcript.complete = transcript.stimulus_delivered = true;
+        ScenarioContext context;
+        context.scenario_id = profile.scenario_id;
+        context.webtransport = profile.webtransport_only;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = transcript;
+        auto evaluate = [&] { return outcome_for(evaluate_draft18(checked_catalog,std::span(&context,1)),std::string(profile.requirement_id)).state; };
+        EXPECT_EQ(evaluate(),OutcomeState::Pass);
+        if (profile.expected_close) {
+            std::get<transport::PeerCloseEvent>(context.raw_probe->events.back()).error_code = 0;
+            EXPECT_EQ(evaluate(),OutcomeState::Fail);
+        }
+        context.raw_probe = transcript;
+        context.raw_probe->setup.accepted--;
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        std::get<transport::PeerCloseEvent>(context.raw_probe->events.back()).error_space = transport::CloseErrorSpace::Transport;
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        context.raw_probe->events.insert(context.raw_probe->events.begin(),transport::PeerCloseEvent{transport::CloseErrorSpace::Application,3,{}});
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        context.raw_probe->setup.stream_id = 9;
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        if (!transcript.writes.empty()) {
+            context.raw_probe = transcript;
+            context.raw_probe->writes.front().stream_id =
+                transcript.writes.front().write.channel == scenarios::RawProbeChannel::Control ? 7 : 3;
+            EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        }
+        context.raw_probe = transcript;
+        context.raw_probe->harness_failed = true;
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        context.raw_probe->timed_out = true;
+        EXPECT_EQ(evaluate(),OutcomeState::NotRun);
+    }
+}
+
+TEST(Draft18RequestEvaluators, CatalogRowsRequireMatchingResponseAfterDelivery) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(source, root / "requirements/draft18.json");
+    for (const auto& profile : scenarios::draft18_request_profiles()) {
+        SCOPED_TRACE(profile.definition.id);
+        auto transcript = test::raw_probe_transcript(profile.definition);
+        if (profile.compatibility_error)
+            transcript.unknown_auth_token_alias_compatibility_code = profile.expected_error;
+        transcript.events.push_back(transport::StreamDataEvent{
+            1, test::probe_bytes({5, 0, 3, static_cast<unsigned>(profile.expected_error), 0, 0}), true});
+        ScenarioContext context;
+        context.scenario_id = profile.definition.id;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = transcript;
+        const auto evaluate = [&] {
+            return outcome_for(evaluate_draft18(checked, std::span(&context, 1)), profile.requirement_id).state;
+        };
+        EXPECT_EQ(evaluate(),profile.requirement_id == "D18-10-2-2-MUST-007"
+            ? OutcomeState::NotRun : OutcomeState::Pass);
+        std::get<transport::StreamDataEvent>(context.raw_probe->events.back()).data[3] =
+            static_cast<std::byte>(profile.expected_error + 1);
+        EXPECT_EQ(evaluate(), OutcomeState::Fail);
+        context.raw_probe = transcript;
+        --context.raw_probe->writes.front().accepted;
+        EXPECT_EQ(evaluate(), OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        std::get<transport::StreamDataEvent>(context.raw_probe->events.back()).stream_id = 5;
+        EXPECT_EQ(evaluate(), OutcomeState::NotRun);
+        context.raw_probe = transcript;
+        context.raw_probe->delivery_event_count = transcript.events.size();
+        EXPECT_EQ(evaluate(), OutcomeState::NotRun);
+    }
+}
+
+TEST(Draft18RequestEvaluators, EveryNamedContextIsRequiredAndFailureDominatesSuccess) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18,root / "docs",root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(source,root / "requirements/draft18.json");
+    constexpr const char* id = "D18-10-2-2-MUST-007";
+    std::vector<ScenarioContext> contexts;
+    for (const auto& profile : scenarios::draft18_request_profiles()) {
+        if (profile.requirement_id != id) continue;
+        auto transcript = test::raw_probe_transcript(profile.definition);
+        transcript.unknown_auth_token_alias_compatibility_code = 0x17;
+        transcript.events.push_back(transport::StreamDataEvent{1,test::probe_bytes({5,0,3,0x17,0,0}),true});
+        ScenarioContext context;
+        context.scenario_id = profile.definition.id;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = std::move(transcript);
+        contexts.push_back(std::move(context));
+    }
+    ASSERT_EQ(contexts.size(),2u);
+    const auto evaluate = [&](const std::vector<ScenarioContext>& observed) {
+        return outcome_for(evaluate_draft18(checked,observed),id).state;
+    };
+    EXPECT_EQ(evaluate(contexts),OutcomeState::Pass);
+    EXPECT_EQ(evaluate({contexts.front()}),OutcomeState::NotRun);
+    auto incomplete = contexts;
+    --incomplete.front().raw_probe->writes.front().accepted;
+    EXPECT_EQ(evaluate(incomplete),OutcomeState::NotRun);
+    auto repeated = contexts;
+    repeated.push_back(contexts.front());
+    EXPECT_EQ(evaluate(repeated),OutcomeState::NotRun);
+    auto failed = contexts;
+    std::get<transport::StreamDataEvent>(failed.front().raw_probe->events.back()).data[3] = std::byte{1};
+    EXPECT_EQ(evaluate(failed),OutcomeState::Fail);
+    EXPECT_EQ(evaluate({failed.back(),failed.front()}),OutcomeState::Fail);
+    EXPECT_EQ(evaluate({failed.front()}),OutcomeState::Fail);
+    failed.push_back(contexts.front());
+    EXPECT_EQ(evaluate(failed),OutcomeState::Fail);
+}
+
+TEST(Draft18CloseEvaluators, MissingAndRepeatedContextsCannotPassButObservedFailureStillFails) {
+    const auto definition = scenarios::draft18_close_probe("absolute-range-end-group-overflow",std::chrono::milliseconds(10));
+    auto transcript = test::raw_probe_transcript(definition);
+    transcript.events.push_back(transport::PeerCloseEvent{transport::CloseErrorSpace::Application,3,{}});
+    ScenarioContext context;
+    context.scenario_id = definition.id;
+    context.complete = context.stimulus_delivered = true;
+    context.raw_probe = transcript;
+    Requirement required{"D18-5-1-2-MUST-001",Strength::Must,{"5.1.2",2094,2095,1,1},
+        "endpoint","Range overflow",Applicability::Applicable,Testability::Testable,
+        {definition.id,"additional-required-context"},{"session-closed-protocol-violation"},""};
+    const auto evaluate = [&](const Requirement& row,const std::vector<ScenarioContext>& observed) {
+        const RequirementCatalog checked{18,"fixture",true,{row}};
+        return outcome_for(evaluate_draft18(checked,observed),row.id).state;
+    };
+    EXPECT_EQ(evaluate(required,{context}),OutcomeState::NotRun);
+    required.scenarios.pop_back();
+    EXPECT_EQ(evaluate(required,{context}),OutcomeState::Pass);
+    EXPECT_EQ(evaluate(required,{context,context}),OutcomeState::NotRun);
+    auto failed = context;
+    std::get<transport::PeerCloseEvent>(failed.raw_probe->events.back()).error_code = 0;
+    EXPECT_EQ(evaluate(required,{failed,context}),OutcomeState::Fail);
+    required.scenarios.push_back("additional-required-context");
+    EXPECT_EQ(evaluate(required,{failed}),OutcomeState::Fail);
+}
+
+TEST(Draft18ResponseEvaluators, ActualCatalogRequiresCompleteUniqueCleanupEvidence) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(source, root / "requirements/draft18.json");
+    const auto profiles = scenarios::draft18_response_probes();
+    ASSERT_EQ(profiles.size(), 2u);
+    for (const auto& profile : profiles) {
+        SCOPED_TRACE(profile.requirement_id);
+        const bool subscription = profile.expectation == scenarios::Draft18ResponseExpectation::FailedSubscriptionCleanup;
+        auto transcript = test::raw_probe_transcript(profile.definition);
+        transcript.writes.front().delivery_event_count = transcript.events.size();
+        transcript.events.push_back(transport::StreamDataEvent{1, subscription
+            ? test::probe_bytes({4, 0, 4, 0, 0, 4, 1}) : test::probe_bytes({7, 0, 1, 0}), false});
+        transcript.writes.back().stream_id = 1;
+        transcript.writes.back().delivery_event_count = transcript.events.size();
+        transcript.delivery_event_count = transcript.events.size();
+        auto reply = test::probe_bytes({5, 0, 3, 1, 0, 0});
+        if (subscription) {
+            const auto done = test::probe_bytes({0x0b, 0, 3, 8, 0, 0});
+            reply.insert(reply.end(), done.begin(), done.end());
+        }
+        transcript.events.push_back(transport::StreamDataEvent{1, reply, true});
+        ScenarioContext context;
+        context.scenario_id = profile.definition.id;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = transcript;
+        const auto evaluate = [&](const std::vector<ScenarioContext>& contexts) {
+            return outcome_for(evaluate_draft18(checked, contexts), profile.requirement_id).state;
+        };
+        EXPECT_EQ(evaluate({context}), OutcomeState::Pass);
+        EXPECT_EQ(evaluate({}), OutcomeState::NotRun);
+        EXPECT_EQ(evaluate({context, context}), OutcomeState::NotRun);
+        auto broken = context;
+        --broken.raw_probe->writes.back().accepted;
+        EXPECT_EQ(evaluate({broken}), OutcomeState::NotRun);
+        broken = context;
+        std::get<transport::StreamDataEvent>(broken.raw_probe->events.back()).stream_id = 5;
+        EXPECT_EQ(evaluate({broken}), OutcomeState::NotRun);
+        broken = context;
+        broken.raw_probe->writes.back().fin_accepted = false;
+        EXPECT_EQ(evaluate({broken}), OutcomeState::NotRun);
+        broken = context;
+        std::get<transport::StreamDataEvent>(broken.raw_probe->events.back()).fin = false;
+        EXPECT_EQ(evaluate({broken}), OutcomeState::NotRun);
+        if (subscription) {
+            broken = context;
+            std::get<transport::StreamDataEvent>(broken.raw_probe->events.back()).data =
+                test::probe_bytes({5, 0, 3, 1, 0, 0});
+            EXPECT_EQ(evaluate({broken}), OutcomeState::Fail);
+            EXPECT_EQ(evaluate({context, broken}), OutcomeState::Fail);
+            EXPECT_EQ(evaluate({broken, context}), OutcomeState::Fail);
+        }
+        auto altered = checked;
+        const auto row = std::find_if(altered.requirements.begin(), altered.requirements.end(),
+            [&](const auto& item) { return item.id == profile.requirement_id; });
+        ASSERT_NE(row, altered.requirements.end());
+        row->evaluators.push_back("missing-evaluator");
+        EXPECT_EQ(outcome_for(evaluate_draft18(altered, std::span(&context, 1)), profile.requirement_id).state,
+                  OutcomeState::NotRun);
+    }
+}
+
 }  // namespace moq::interop::requirements

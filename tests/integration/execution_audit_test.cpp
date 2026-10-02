@@ -68,6 +68,23 @@ TEST(ExecutionAuditTest, CanonicalHashIgnoresEvidenceOrderButNotMultiplicity) {
     EXPECT_NE(canonical_result_sha256(first), canonical_result_sha256(second));
 }
 
+TEST(ExecutionAuditTest, CompatibilityMappingsSeparateRepeatGroups) {
+    auto first = run("first", app::TransportKind::NativeQuic);
+    auto second = run("second", app::TransportKind::NativeQuic, OutcomeState::Fail);
+    storage::EvidenceEvent mapping;
+    mapping.kind = "compatibility_error_mapping";
+    mapping.scenario_id = "subscribe";
+    mapping.requirement_id = "R1";
+    mapping.detail = "UNKNOWN_AUTH_TOKEN_ALIAS REQUEST_ERROR code=23";
+    first.events.push_back(mapping);
+    mapping.detail = "UNKNOWN_AUTH_TOKEN_ALIAS REQUEST_ERROR code=25";
+    second.events.push_back(mapping);
+    EXPECT_NE(canonical_result_sha256(first), canonical_result_sha256(second));
+    EXPECT_TRUE(audit_execution(catalog(), bindings(), std::vector{first, second}).consistent());
+    second.events.back().detail = first.events.back().detail;
+    EXPECT_FALSE(audit_execution(catalog(), bindings(), std::vector{first, second}).consistent());
+}
+
 TEST(ExecutionAuditTest, StoredScoreMismatchAndUnfinishedRunAreExplicit) {
     auto incorrect = run("incorrect", app::TransportKind::NativeQuic);
     incorrect.score->required.earned = 0;

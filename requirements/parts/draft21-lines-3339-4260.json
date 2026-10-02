@@ -623,7 +623,7 @@
       "id": "D21-9-10-MUST-370", "strength": "Must",
       "source": {"section": "9.10", "first_line": 4217, "last_line": 4218, "occurrence": 1, "clause": 2},
       "actor": "publisher receiving PUBLISH_STATE_NOTIFY from a subscriber", "summary": "Close the session with PROTOCOL_VIOLATION when PUBLISH_STATE_NOTIFY is received from the subscriber.",
-      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscriber-sends-publish-state-notify"], "evaluators": ["d21-publish-state-notify-direction-error"],
+      "applicability": "Applicable", "testability": "Testable", "scenarios": ["d21-subscriber-sends-publish-state-notify", "d21-publish-established-subscriber-sends-publish-state-notify"], "evaluators": ["d21-publish-state-notify-direction-error"],
       "rationale": "Inject the message from the listener subscriber on both SUBSCRIBE- and PUBLISH-established subscriptions. Direction follows publisher/subscriber roles rather than transport client/server or which side opened the bidirectional stream. Valid publisher notifications are unilateral and do not receive REQUEST_OK or REQUEST_ERROR."
     },
     {

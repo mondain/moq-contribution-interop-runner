@@ -146,7 +146,7 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
-    ASSERT_EQ(health.at("executable_profiles").size(), 40);
+    ASSERT_EQ(health.at("executable_profiles").size(), 718);
     for (const auto& profile : health.at("executable_profiles")) {
         EXPECT_TRUE(app::executable_scenario(
             profile.at("draft").get<unsigned>(),
@@ -194,8 +194,8 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
                   health.at("executable_profiles").at(index).at("draft"));
         EXPECT_FALSE(profile.at("configured"));
     }
-    for (std::size_t index = 0; index < 20; ++index) {
-        const auto& profile = health.at("executable_profiles").at(index + 20);
+    for (std::size_t index = 0; index < 359; ++index) {
+        const auto& profile = health.at("executable_profiles").at(index + 359);
         EXPECT_EQ(profile.at("mode"), "driven");
         EXPECT_EQ(profile.at("transport"),
                   health.at("executable_profiles").at(index).at("transport"));
@@ -251,8 +251,8 @@ TEST_F(HttpApiTest, PublishesAuditableCompletenessByDraftAndTransport) {
     ASSERT_TRUE(page);
     EXPECT_EQ(page->status, 200);
     EXPECT_NE(page->body.find("/results/completeness.json"), std::string::npos);
-    EXPECT_NE(page->body.find("9/175"), std::string::npos);
-    EXPECT_NE(page->body.find("12/175"), std::string::npos);
+    EXPECT_NE(page->body.find("76/175"), std::string::npos);
+    EXPECT_NE(page->body.find("76/175"), std::string::npos);
 }
 
 TEST_F(HttpApiTest, ScoredRowWithoutEvaluatorEvidenceRemainsNotRun) {
@@ -385,6 +385,61 @@ TEST_F(HttpApiTest, RejectsExecutableRunWhenListenerIsUnconfigured) {
     EXPECT_EQ(Json::parse(response->body).at("error").at("code"),
               "publisher_listener_unavailable");
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+TEST_F(HttpApiTest, EveryRawProbeAcceptsObservedRequestWithoutTrack) {
+    const auto health = get_json("/healthz");
+    for (const auto& profile : health.at("executable_profiles")) {
+        const auto draft = profile.at("draft").get<unsigned>();
+        const auto scenario = profile.at("scenario").get<std::string>();
+        if (profile.at("mode") != "observed" || app::scenario_requires_track(draft, scenario)) continue;
+        const Json request = {{"draft", draft}, {"transport", profile.at("transport")},
+            {"mode", "observed"}, {"scenarios", Json::array({scenario})}, {"timeout_ms", 1000}};
+        const auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 503) << scenario << ": " << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "publisher_listener_unavailable");
+    }
+}
+
+TEST_F(HttpApiTest, RawContextFamiliesReachListenerAndValidateEverySelection) {
+    Json request = {{"draft",21},{"transport","native-quic"},{"mode","observed"},
+        {"scenarios",Json::array({"d21-duplicate-request-goaway","d21-goaway-on-distinct-request-streams"})},
+        {"timeout_ms",1000}};
+    const auto post = [&](int expected) {
+        const auto response = client_->Post("/api/v1/runs",request.dump(),"application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status,expected) << response->body;
+        EXPECT_EQ(store_->list({1,0}).total,0u);
+    };
+    // No fixture is needed for either GOAWAY context; both reach listener setup.
+    post(503);
+    request["scenarios"][1]="d21-subscriber-sends-publish-state-notify";
+    post(400);
+    request["track"]={{"namespace_hex",Json::array({"6e"})},{"name_hex","74"}};
+    post(503);
+    // Fixture constraints of a later context apply before allocating a listener.
+    request["track"]["namespace_hex"]=Json::array({"2e73657373696f6e"});
+    request["track"]["name_hex"]="";
+    post(400);
+    request["track"]={{"namespace_hex",Json::array({"6e"})},{"name_hex","74"}};
+    request["scenarios"][1]="d21-publisher-request-stream-placement";
+    post(422); // Typed controller combinations do not supply raw transcripts.
+    request["scenarios"][1]="not-an-executable-scenario";
+    post(422);
+}
+
+TEST_F(HttpApiTest, RawContextFamiliesRejectEmptyDuplicateAndExcessiveSelections) {
+    for (const auto& scenarios : std::vector<Json>{Json::array(),
+             Json::array({"d21-duplicate-request-goaway","d21-duplicate-request-goaway"}),
+             Json(std::vector<std::string>(101,"d21-duplicate-request-goaway"))}) {
+        const Json request={{"draft",21},{"transport","native-quic"},{"mode","observed"},
+            {"scenarios",scenarios},{"timeout_ms",1000}};
+        const auto response=client_->Post("/api/v1/runs",request.dump(),"application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status,400)<<response->body;
+        EXPECT_EQ(store_->list({1,0}).total,0u);
+    }
 }
 
 TEST_F(HttpApiTest, ExposesDuplicateSubscriptionScenarioAsExecutable) {
@@ -608,4 +663,76 @@ TEST_F(HttpApiTest, StopsAndRestartsCleanlyInProcess) {
 }
 
 }  // namespace
+
+TEST_F(HttpApiTest, DiscoveryOverlapRejectsUnconstructibleFixturesBeforeListenerAllocation) {
+    for(const auto& scenario:std::vector<std::pair<unsigned,std::string>>{
+        {18,"receive-overlapping-subscribe-namespace-in-same-session"},
+        {21,"d21-discovery-update-independent-overlap-spaces"}}) {
+        for(const auto& fields:std::vector<std::vector<std::string>>{std::vector<std::string>(32,"61"),{std::string(8190,'6')},{"2e"}}) {
+            const Json request={{"draft",scenario.first},{"transport","native-quic"},{"mode","observed"},
+                {"scenarios",Json::array({scenario.second})},{"timeout_ms",1000},
+                {"track",{{"namespace_hex",fields},{"name_hex",""}}}};
+            const auto response=client_->Post("/api/v1/runs",request.dump(),"application/json");
+            ASSERT_TRUE(response);
+            EXPECT_EQ(response->status,400)<<response->body;
+        }
+        const auto health=get_json("/healthz");
+        std::set<std::pair<std::string,std::string>> combinations;
+        for(const auto& profile:health.at("executable_profiles"))if(profile.at("draft")==scenario.first && profile.at("scenario")==scenario.second) {
+            EXPECT_TRUE(combinations.emplace(profile.at("transport").get<std::string>(),profile.at("mode").get<std::string>()).second);
+        }
+        EXPECT_EQ(combinations.size(),4u);
+        const Json valid={{"draft",scenario.first},{"transport","native-quic"},{"mode","observed"},
+            {"scenarios",Json::array({scenario.second})},{"timeout_ms",1000},
+            {"track",{{"namespace_hex",Json::array()},{"name_hex",""}}}};
+        const auto response=client_->Post("/api/v1/runs",valid.dump(),"application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status,503)<<response->body;
+    }
+}
+
+TEST_F(HttpApiTest, FirstFetchProfilesAdvertiseUniqueContextsAndPreflightFixtures) {
+    for (const auto& scenario : std::vector<std::pair<unsigned,std::string>>{
+        {18,"fetch-known-first-object-with-nonzero-group-and-object-ids"},{21,"d21-fetch-first-object-flags"},
+        {18,"fetch-multiple-published-groups-in-each-explicit-order"},
+        {21,"d21-fetch-ascending-groups"},{21,"d21-fetch-descending-groups"},
+        {21,"d21-fetch-default-group-order"},{21,"d21-publish-state-notify-on-fetch"},
+        {21,"d21-subscriber-sends-publish-state-notify"},
+        {21,"d21-publish-established-subscriber-sends-publish-state-notify"},
+        {18,"publish-and-retrieve-same-object-and-track-immutable-properties"},
+        {18,"repeat-immutable-property-with-alternative-varint-encodings-available"},
+        {18,"publish-object-with-immutable-properties"},
+        {21,"d21-immutable-property-repeat"},{21,"d21-repeat-object-retrieval"},
+        {21,"d21-object-immutable-property-singleton"}}) {
+        const auto health = get_json("/healthz");
+        std::set<std::pair<std::string,std::string>> combinations;
+        for (const auto& profile : health.at("executable_profiles")) {
+            if (profile.at("draft")==scenario.first && profile.at("scenario")==scenario.second) {
+                EXPECT_TRUE(combinations.emplace(profile.at("transport").get<std::string>(),profile.at("mode").get<std::string>()).second);
+            }
+        }
+        EXPECT_EQ(combinations.size(),4u);
+        const Json missing = {{"draft",scenario.first},{"transport","native-quic"},{"mode","observed"},
+            {"scenarios",Json::array({scenario.second})},{"timeout_ms",1000}};
+        const auto missing_response = client_->Post("/api/v1/runs",missing.dump(),"application/json");
+        ASSERT_TRUE(missing_response);
+        EXPECT_EQ(missing_response->status,400)<<missing_response->body;
+        const auto request = [&](Json fields,const char* name) {
+            return Json{{"draft",scenario.first},{"transport","native-quic"},{"mode","observed"},
+                {"scenarios",Json::array({scenario.second})},{"timeout_ms",1000},
+                {"track",{{"namespace_hex",std::move(fields)},{"name_hex",name}}}};
+        };
+        for (const auto& invalid : std::vector<Json>{request(Json::array({"2e"}),"78"),request(Json::array({"2e73657373696f6e"}),"")}) {
+            const auto response = client_->Post("/api/v1/runs",invalid.dump(),"application/json");
+            ASSERT_TRUE(response);
+            EXPECT_EQ(response->status,400)<<response->body;
+        }
+        // Valid input reaches the unconfigured listener, proving parser acceptance.
+        const auto valid = request(Json::array({"6e"}),"74");
+        const auto response = client_->Post("/api/v1/runs",valid.dump(),"application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status,503)<<response->body;
+    }
+}
+
 }  // namespace moq::interop::http

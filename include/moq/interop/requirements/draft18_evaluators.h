@@ -3,6 +3,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/session/publisher_session.h"
+#include "moq/interop/scenarios/raw_probe.h"
 
 #include <span>
 #include <string>
@@ -19,6 +20,7 @@ struct ScenarioContext {
     bool stimulus_delivered{false};
     std::vector<session::EvidenceEvent> evidence;
     bool webtransport{false};
+    std::optional<scenarios::RawProbeTranscript> raw_probe;
 };
 
 std::vector<Outcome> evaluate_draft18(

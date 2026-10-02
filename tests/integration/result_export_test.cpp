@@ -78,6 +78,17 @@ TEST(ResultExport, IncludesEveryCatalogRowAndEvidenceWithoutChangingScore) {
     EXPECT_EQ(document.at("evidence").at(0).at("detail"), "<unexpected>&");
 }
 
+TEST(ResultExport, ConfiguredErrorMappingLabelsCompatibilityScoring) {
+    auto value = run();
+    EXPECT_EQ(serialize_result(value, catalog()).at("run").at("scoring_profile"), "standards");
+    storage::EvidenceEvent event;
+    event.kind = "compatibility_error_mapping";
+    event.detail = "UNKNOWN_AUTH_TOKEN_ALIAS REQUEST_ERROR code=25";
+    value.events.push_back(event);
+    EXPECT_EQ(serialize_result(value, catalog()).at("run").at("scoring_profile"), "compatibility");
+    EXPECT_NE(serialize_tap14(value, catalog()).find("\"scoring_profile\":\"compatibility\""), std::string::npos);
+}
+
 TEST(ResultExport, LeavesMissingObservationsExplicitAndZeroDenominatorIntact) {
     auto value = run();
     value.outcomes.clear();
@@ -110,7 +121,7 @@ TEST(ResultExport, TapHasStablePlanAndEscapedName) {
               "  ---\n"
               "  {\"draft\":18,\"failed\":1,\"not_run\":0,\"passed\":1,"
               "\"result\":\"fail\",\"run_id\":\"run-7\","
-              "\"scenario_id\":\"scenario#1\\nbad\"}\n"
+              "\"scenario_id\":\"scenario#1\\nbad\",\"scoring_profile\":\"standards\"}\n"
               "  ...\n");
 }
 

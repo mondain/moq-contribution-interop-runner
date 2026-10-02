@@ -27,9 +27,13 @@ bool known_evidence_kind(std::string_view kind) {
         "peer_close", "peer_closed", "local_close", "harness_limit",
         "namespace_observed", "namespace_response_delivered",
         "publish_observed", "response_delivered", "unsupported_stream",
-        "invalid_request_opener"};
+        "invalid_request_opener", "raw_probe_stimulus", "raw_probe_transport_event"};
     return known.contains(kind);
 }
+struct BoundContexts {
+    std::set<std::string> scenarios;
+    std::set<std::string> evaluators;
+};
 
 }  // namespace
 
@@ -53,7 +57,7 @@ CompletenessReport audit_completeness(
         rows.emplace(row.id, &row);
     }
     std::set<std::tuple<unsigned, std::string, std::string, std::string>> seen;
-    std::set<std::string> covered;
+    std::map<std::string,BoundContexts> covered;
     for (const auto& binding : bindings) {
         if (binding.draft != catalog.draft) {
             report.findings.push_back({"wrong_draft_binding", binding.requirement_id,
@@ -95,7 +99,9 @@ CompletenessReport audit_completeness(
                 "binding declares no usable evidence kind", true});
             continue;
         }
-        covered.insert(binding.requirement_id);
+        auto& contexts = covered[binding.requirement_id];
+        contexts.scenarios.insert(binding.scenario_id);
+        contexts.evaluators.insert(binding.evaluator_id);
     }
     for (const auto& row : catalog.requirements) {
         if (row.applicability != Applicability::Applicable ||
@@ -103,13 +109,30 @@ CompletenessReport audit_completeness(
         const bool is_required = required(row.strength);
         if (is_required) ++report.required_total;
         else ++report.optional_total;
-        if (covered.contains(row.id)) {
+        const auto found = covered.find(row.id);
+        const bool complete_contexts = found != covered.end() &&
+            std::all_of(row.scenarios.begin(),row.scenarios.end(),[&](const auto& scenario) {
+                return found->second.scenarios.contains(scenario);
+            }) &&
+            std::all_of(row.evaluators.begin(),row.evaluators.end(),[&](const auto& evaluator) {
+                return found->second.evaluators.contains(evaluator);
+            });
+        if (complete_contexts) {
             if (is_required) ++report.required_covered;
             else ++report.optional_covered;
         } else {
+            std::set<std::string> missing_scenarios(row.scenarios.begin(),row.scenarios.end());
+            std::set<std::string> missing_evaluators(row.evaluators.begin(),row.evaluators.end());
+            if (found != covered.end()) {
+                for (const auto& id : found->second.scenarios) missing_scenarios.erase(id);
+                for (const auto& id : found->second.evaluators) missing_evaluators.erase(id);
+            }
+            std::string detail = "not every named scenario and evaluator has an executable binding with evidence";
+            for (const auto& id : missing_scenarios) detail += " missing_scenario=" + id;
+            for (const auto& id : missing_evaluators) detail += " missing_evaluator=" + id;
             report.findings.push_back({is_required ? "missing_required_evaluator"
                                                    : "missing_optional_evaluator",
-                row.id, "no registered scenario/evaluator with evidence", is_required});
+                row.id, std::move(detail), is_required});
         }
     }
     std::sort(report.findings.begin(), report.findings.end(),

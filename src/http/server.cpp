@@ -1,6 +1,25 @@
 #include "moq/interop/http/server.h"
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/scenarios/draft18_close.h"
+#include "moq/interop/scenarios/draft18_peer_close.h"
+#include "moq/interop/scenarios/draft18_request.h"
+#include "moq/interop/scenarios/draft18_response.h"
+#include "moq/interop/scenarios/fetch_probe.h"
+#include "moq/interop/scenarios/fetch_response.h"
+#include "moq/interop/scenarios/request_response.h"
+#include "moq/interop/scenarios/range_filter.h"
+#include "moq/interop/scenarios/subscription_cancel.h"
+#include "moq/interop/scenarios/discovery_overlap.h"
+#include "moq/interop/scenarios/fetch_first_object.h"
+#include "moq/interop/scenarios/fetch_group_order.h"
+#include "moq/interop/scenarios/immutable_repeat.h"
+#include "moq/interop/scenarios/object_repeat.h"
+#include "moq/interop/scenarios/request_goaway.h"
+#include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/draft21_peer_close.h"
+#include "moq/interop/scenarios/draft21_request.h"
+#include "moq/interop/scenarios/draft21_response.h"
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
@@ -159,8 +178,10 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
         if (mode != "observed" && mode != "driven") {
             throw ApiError{400, "invalid_run_config", "mode must be observed or driven."};
         }
-        if (scenarios.size() > 100) {
-            throw ApiError{400, "invalid_run_config", "at most 100 scenarios may be selected."};
+        if (scenarios.empty() || scenarios.size() > 100 ||
+            std::set<std::string>(scenarios.begin(),scenarios.end()).size() != scenarios.size() ||
+            std::any_of(scenarios.begin(),scenarios.end(),[](const auto& id) { return id.empty(); })) {
+            throw ApiError{400, "invalid_run_config", "Select between 1 and 100 distinct nonempty scenarios."};
         }
         if (timeout <= 0 || timeout > kMaximumTimeoutMs) {
             throw ApiError{400, "invalid_run_config",
@@ -195,6 +216,37 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
             fixture.track_name = std::move(*name);
             track_fixture = std::move(fixture);
         }
+        if (track_fixture && std::any_of(scenarios.begin(),scenarios.end(),[&](const auto& id) {
+            return app::fetch_first_object_scenario(static_cast<unsigned>(draft),id) ||
+                app::fetch_group_order_scenario(static_cast<unsigned>(draft),id) ||
+                app::immutable_repeat_scenario(static_cast<unsigned>(draft),id) ||
+                app::object_repeat_scenario(static_cast<unsigned>(draft),id) ||
+                (draft == 21 && id == "d21-publish-state-notify-on-fetch") ||
+                app::subscriber_notify_scenario(static_cast<unsigned>(draft),id);
+        })) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : track_fixture->namespace_fields) {
+                std::vector<std::byte> value;
+                for (const unsigned char byte : field) value.push_back(static_cast<std::byte>(byte));
+                fields.push_back(std::move(value));
+            }
+            std::vector<std::byte> name;
+            for (const unsigned char byte : track_fixture->track_name) name.push_back(static_cast<std::byte>(byte));
+            if (!scenarios::fetch_first_object_fixture_valid(fields,name))
+                throw ApiError{400,"invalid_run_config","Invalid FETCH track namespace or name."};
+        }
+        if (track_fixture && std::any_of(scenarios.begin(),scenarios.end(),[&](const auto& id) {
+            return app::discovery_overlap_scenario(static_cast<unsigned>(draft),id);
+        })) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : track_fixture->namespace_fields) {
+                std::vector<std::byte> value;
+                for (const unsigned char byte : field) value.push_back(static_cast<std::byte>(byte));
+                fields.push_back(std::move(value));
+            }
+            if (!scenarios::discovery_overlap_namespace_valid(fields))
+                throw ApiError{400,"invalid_run_config","Discovery overlap namespace requires at most 31 fields and 4094 bytes, with a nonreserved first field."};
+        }
         return {draft == 18 ? app::DraftVersion::Draft18 : app::DraftVersion::Draft21,
                 transport == "native-quic" ? app::TransportKind::NativeQuic
                                              : app::TransportKind::WebTransport,
@@ -228,6 +280,9 @@ void html_headers(httplib::Response& response) {
 bool has_declared_evidence(const storage::RunRecord& run,
                            std::span<const requirements::ExecutableBinding> bindings,
                            const std::string& requirement_id) {
+    if (std::any_of(run.events.begin(), run.events.end(), [&](const auto& event) {
+            return event.kind == "compatibility_error_mapping" && event.requirement_id == requirement_id;
+        })) return false;
     for (const auto& binding : bindings) {
         if (binding.requirement_id != requirement_id || binding.evidence_kinds.empty() ||
             std::find(run.config.scenario_ids.begin(), run.config.scenario_ids.end(),
@@ -436,6 +491,128 @@ public:
                     webtransport["transport"] = "webtransport";
                     profiles.push_back(std::move(webtransport));
                 }
+                const auto append_profile = [&](unsigned draft, std::string_view id,
+                                                const char* transport) {
+                    profiles.push_back({{"draft", draft}, {"transport", transport},
+                        {"mode", "observed"}, {"scenario", id},
+                        {"configured", runs && runs->supports(static_cast<app::DraftVersion>(draft))}});
+                };
+                for (const auto& probe : scenarios::draft18_close_profiles()) {
+                    if (!probe.webtransport_only) append_profile(18, probe.scenario_id, "native-quic");
+                    if (!probe.native_only) append_profile(18, probe.scenario_id, "webtransport");
+                }
+                for (const auto& probe : scenarios::draft21_close_probes()) {
+                    append_profile(21, probe.definition.id, "native-quic");
+                    append_profile(21, probe.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft18_request_profiles()) {
+                    append_profile(18, profile.definition.id, "native-quic");
+                    append_profile(18, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft21_request_profiles()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                std::set<std::string> peer_scenarios;
+                for (const auto& profile : scenarios::draft18_peer_close_probes()) {
+                    if (!peer_scenarios.insert(profile.definition.id).second) continue;
+                    append_profile(18, profile.definition.id, "native-quic");
+                    append_profile(18, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft21_peer_close_probes()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft21_response_probes()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft18_response_probes()) {
+                    append_profile(18, profile.definition.id, "native-quic");
+                    append_profile(18, profile.definition.id, "webtransport");
+                }
+                for (const unsigned draft : {18u, 21u}) {
+                    std::set<std::string> fetch_scenarios;
+                    const auto fetches = draft == 18 ? scenarios::draft18_fetch_probes()
+                                                    : scenarios::draft21_fetch_probes();
+                    for (const auto& profile : fetches) {
+                        if (!fetch_scenarios.insert(profile.definition.id).second) continue;
+                        append_profile(draft, profile.definition.id, "native-quic");
+                        append_profile(draft, profile.definition.id, "webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u, 21u}) {
+                    const auto cancellations = draft == 18 ? scenarios::draft18_subscription_cancel_probes()
+                                                          : scenarios::draft21_subscription_cancel_probes();
+                    for (const auto& profile : cancellations) {
+                        append_profile(draft, profile.definition.id, "native-quic");
+                        append_profile(draft, profile.definition.id, "webtransport");
+                    }
+                }
+                for (const auto& profile : scenarios::draft21_fetch_response_probes()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft21_request_response_probes()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                for (const auto& profile : scenarios::draft21_range_filter_probes()) {
+                    append_profile(21, profile.definition.id, "native-quic");
+                    append_profile(21, profile.definition.id, "webtransport");
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto overlaps = draft == 18 ? scenarios::draft18_discovery_overlap_probes()
+                                                       : scenarios::draft21_discovery_overlap_probes();
+                    std::set<std::string> seen;
+                    for (const auto& profile : overlaps) if (seen.insert(profile.definition.id).second) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto first_fetches = draft == 18 ? scenarios::draft18_fetch_first_object_probes()
+                                                          : scenarios::draft21_fetch_first_object_probes();
+                    std::set<std::string> seen;
+                    for (const auto& profile : first_fetches) if (seen.insert(profile.definition.id).second) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto group_orders = draft == 18 ? scenarios::draft18_fetch_group_order_probes()
+                                                         : scenarios::draft21_fetch_group_order_probes();
+                    for (const auto& profile : group_orders) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto goaways = draft == 18 ? scenarios::draft18_request_goaway_probes()
+                                                    : scenarios::draft21_request_goaway_probes();
+                    for (const auto& profile : goaways) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto repeated = draft == 18 ? scenarios::draft18_immutable_repeat_probes()
+                                                      : scenarios::draft21_immutable_repeat_probes();
+                    std::set<std::string> seen;
+                    for (const auto& profile : repeated) if (seen.insert(profile.definition.id).second) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
+                for (const unsigned draft : {18u,21u}) {
+                    const auto repeated = draft == 18 ? scenarios::draft18_object_repeat_probes()
+                                                      : scenarios::draft21_object_repeat_probes();
+                    std::set<std::string> seen;
+                    for (const auto& profile : repeated) if (seen.insert(profile.definition.id).second) {
+                        append_profile(draft,profile.definition.id,"native-quic");
+                        append_profile(draft,profile.definition.id,"webtransport");
+                    }
+                }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
                     auto driven = profiles.at(index);
@@ -489,17 +666,22 @@ public:
                 const auto requested = parse_run_config(request);
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21;
-                if (requested.scenario_ids.size() != 1 ||
-                    !app::executable_scenario(
-                        static_cast<unsigned>(requested.draft),
-                        requested.scenario_ids.front()) ||
+                if (std::any_of(requested.scenario_ids.begin(),requested.scenario_ids.end(),[&](const auto& id) {
+                        return !app::executable_scenario(static_cast<unsigned>(requested.draft),id) ||
+                            (requested.scenario_ids.size() > 1 &&
+                             !app::raw_probe_scenario(static_cast<unsigned>(requested.draft),id));
+                    }) ||
                     (requested.mode == app::RunMode::Driven && runs &&
                      !runs->supports_driven()) ||
                     (runs && !runs->supports(requested.draft))) {
                     throw ApiError{422, "unsupported_run_config",
                                    "The requested scenario or mode is not executable."};
                 }
-                if (!requested.track_fixture || requested.timeout < std::chrono::milliseconds(2)) {
+                if ((!requested.track_fixture && std::any_of(requested.scenario_ids.begin(),requested.scenario_ids.end(),[&](const auto& id) {
+                        return app::scenario_requires_track(static_cast<unsigned>(requested.draft),id);
+                    })) ||
+                    (requested.mode == app::RunMode::Driven && !requested.track_fixture) ||
+                    requested.timeout < std::chrono::milliseconds(2)) {
                     throw ApiError{400, "invalid_run_config",
                                    "This scenario requires track and timeout_ms of at least 2."};
                 }

@@ -97,6 +97,9 @@ std::string serialize_tap14(const storage::RunRecord& run,
         const nlohmann::json diagnostic{
             {"run_id", run.id}, {"draft", catalog.draft},
             {"scenario_id", scenario}, {"result", result},
+            {"scoring_profile", std::any_of(run.events.begin(), run.events.end(), [](const auto& event) {
+                return event.kind == "compatibility_error_mapping";
+            }) ? "compatibility" : "standards"},
             {"passed", summary.passed}, {"failed", summary.failed_count},
             {"not_run", summary.not_run}};
         out << "  ---\n  " << diagnostic.dump() << "\n  ...\n";

@@ -51,6 +51,7 @@ void usage(std::ostream& output) {
               "  --driver-fixture PATH   publisher media fixture\n"
               "  --driver-ca PATH        publisher TLS trust file (defaults to --tls-cert)\n"
               "  --driver-log-root PATH  per-run publisher logs\n"
+              "  --unknown-auth-token-alias-compat-code CODE  explicit REQUEST_ERROR compatibility mapping\n"
               "  --version               print build identity\n"
               "  --help                  show this help\n";
 }
@@ -94,6 +95,16 @@ Options parse_options(int argc, char* argv[]) {
         else if (argument == "--driver-fixture") options.native.driver_fixture = value(argument);
         else if (argument == "--driver-ca") options.native.driver_tls_ca = value(argument);
         else if (argument == "--driver-log-root") options.native.driver_log_root = value(argument);
+        else if (argument == "--unknown-auth-token-alias-compat-code") {
+            auto input = value(argument);
+            int base = 10;
+            if (input.starts_with("0x")) { input.remove_prefix(2); base = 16; }
+            std::uint64_t code = 0;
+            const auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), code, base);
+            if (input.empty() || error != std::errc{} || end != input.data() + input.size())
+                throw std::invalid_argument("compatibility code must be an unsigned decimal or hexadecimal integer");
+            options.native.unknown_auth_token_alias_compatibility_code = code;
+        }
         else throw std::invalid_argument("unknown option: " + std::string(argument));
     }
     if (options.native.driver_executable.empty()) {
