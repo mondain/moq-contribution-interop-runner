@@ -436,11 +436,20 @@ public:
                (result.status == DriverStatus::Exited && result.exit_code.value_or(1) != 0);
     }
 
-    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config) const {
+    static std::string authority_of(const Worker* worker) {
         const auto host = worker->endpoint.address.find(':') != std::string::npos
             ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
+        return host + ":" + std::to_string(worker->endpoint.port);
+    }
+
+    std::string endpoint_uri(const Worker* worker, const RunConfig& run_config,
+                             std::string_view scenario = {}) const {
+        const auto tail = run_config.transport == TransportKind::NativeQuic &&
+                run_config.draft == DraftVersion::Draft21 &&
+                announcement_gap_scenario(21, scenario)
+            ? std::string(gap_native_uri_path_and_query(scenario)) : std::string("/moq");
         return (run_config.transport == TransportKind::WebTransport ? "https://" : "moqt://") +
-               host + ":" + std::to_string(worker->endpoint.port) + "/moq";
+               authority_of(worker) + tail;
     }
 
     void stamp_context_event(Worker* worker, storage::EvidenceEvent& event) const {
@@ -610,12 +619,8 @@ public:
                 run_raw_family(worker, listener, run_config, std::move(definitions));
             } else {
                 if (run_config.mode == RunMode::Driven) {
-                    const auto host = worker->endpoint.address.find(':') != std::string::npos
-                        ? "[" + worker->endpoint.address + "]" : worker->endpoint.address;
-                    const std::string endpoint =
-                        (run_config.transport == TransportKind::WebTransport
-                            ? "https://" : "moqt://") + host + ":" +
-                        std::to_string(worker->endpoint.port) + "/moq";
+                    const std::string endpoint = endpoint_uri(
+                        worker, run_config, run_config.scenario_ids.front());
                     DriverRequest request;
                     request.executable = config.driver_executable;
                     request.arguments = config.driver_arguments;
@@ -976,6 +981,21 @@ public:
             run_config.timeout,
             draft21_setup_probe(run_config.scenario_ids.front()),
             run_config.transport == TransportKind::WebTransport);
+        {
+            // Slice A: the controller needs the scenario and, for a driven
+            // native publisher, the exact URI it was handed.
+            std::optional<scenarios::Draft21ExpectedConnectionUri> uri;
+            const auto& scenario = run_config.scenario_ids.front();
+            if (run_config.mode == RunMode::Driven &&
+                run_config.transport == TransportKind::NativeQuic &&
+                announcement_gap_scenario(21, scenario) &&
+                gap_native_only_scenario(scenario)) {
+                uri = scenarios::Draft21ExpectedConnectionUri{
+                    authority_of(worker),
+                    std::string(gap_native_uri_path_and_query(scenario))};
+            }
+            controller.configure_scenario(scenario, std::move(uri));
+        }
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();
@@ -1063,6 +1083,9 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         // Draft-21 gap slice A: transport-specific announcement scenarios.
         if (draft == 21 && gap_webtransport_only_scenario(id) &&
             config.transport != TransportKind::WebTransport)
+            return {RunStartStatus::Unsupported, {}, {}};
+        if (draft == 21 && gap_native_only_scenario(id) &&
+            config.transport != TransportKind::NativeQuic)
             return {RunStartStatus::Unsupported, {}, {}};
         if (immutable_repeat_scenario(draft, id) || object_repeat_scenario(draft, id) ||
             fetch_first_object_scenario(draft, id) || fetch_group_order_scenario(draft, id) ||

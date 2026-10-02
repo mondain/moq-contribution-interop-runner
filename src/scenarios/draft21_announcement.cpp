@@ -39,6 +39,12 @@ Draft21AnnouncementController::Draft21AnnouncementController(
     context_.webtransport = webtransport;
 }
 
+void Draft21AnnouncementController::configure_scenario(
+    std::string scenario_id, std::optional<Draft21ExpectedConnectionUri> uri) {
+    context_.scenario_id = std::move(scenario_id);
+    context_.expected_uri = std::move(uri);
+}
+
 void Draft21AnnouncementController::record(
     Draft21AnnouncementEventKind kind,
     std::optional<transport::StreamId> stream_id,
@@ -85,8 +91,20 @@ void Draft21AnnouncementController::handle_control(
         const auto* setup = std::get_if<wire::draft21::SetupMessage>(&message);
         if (!setup) continue;
         context_.peer_setup_option_types.clear();
-        for (const auto& option : setup->options)
+        context_.peer_setup_options.clear();
+        for (const auto& option : setup->options) {
             context_.peer_setup_option_types.push_back(option.type);
+            Draft21SetupOptionValue value;
+            value.type = option.type;
+            if (const auto* bytes =
+                    std::get_if<std::vector<std::byte>>(&option.value)) {
+                value.is_bytes = true;
+                value.bytes = *bytes;
+            } else {
+                value.integer = std::get<std::uint64_t>(option.value);
+            }
+            context_.peer_setup_options.push_back(std::move(value));
+        }
         record(Draft21AnnouncementEventKind::PeerSetupReceived, stream_id,
                std::nullopt, std::nullopt,
                context_.peer_setup_option_types);
@@ -400,6 +418,10 @@ Draft21AnnouncementSnapshot Draft21AnnouncementController::poll(
             context_.complete = true;
             status_ = Draft21AnnouncementStatus::Passed;
         } else if (now - *started_ >= timeout_) {
+            // The session was still alive and fully set up when the
+            // observation window ended (no peer close was seen).
+            context_.window_elapsed =
+                control_.phase() == session::draft21::ControlPhase::Active;
             status_ = Draft21AnnouncementStatus::TimedOut;
         }
     }

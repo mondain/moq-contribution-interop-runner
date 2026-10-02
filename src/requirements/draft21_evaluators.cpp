@@ -314,6 +314,8 @@ std::vector<Outcome> evaluate_draft21_announcement(
             state = OutcomeState::NotApplicable;
         } else if (requirement.testability == Testability::NotTestable) {
             state = OutcomeState::NotTestable;
+        } else if (const auto gap = draft21_gap_a_announcement_state(requirement, context)) {
+            state = *gap;
         } else if (requirement.id == "D21-9-1-MUST-NOT-289") {
             if (context.setup_probe == scenarios::Draft21SetupProbe::None &&
                 peer_setup_received && includes(requirement.scenarios, kScenario) &&

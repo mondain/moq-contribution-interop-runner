@@ -12,12 +12,17 @@ namespace moq::interop::app {
 // Scenarios executed by the announcement controller (one scenario per run,
 // not raw probes). Their evidence is the publisher's SETUP and request-stream
 // openings.
-inline constexpr std::array<std::string_view, 5> kDraft21GapAnnouncementScenarios{
+inline constexpr std::array<std::string_view, 10> kDraft21GapAnnouncementScenarios{
     "d21-publisher-request-stream-openers",
     "d21-publisher-setup-option-multiplicity",
     "d21-webtransport-publisher-setup",
     "d21-webtransport-server-sends-authority",
     "d21-webtransport-server-sends-path",
+    "d21-native-publisher-uri-options",
+    "d21-native-publisher-uri-query",
+    "d21-native-publisher-empty-query",
+    "d21-native-quic-required-setup-options",
+    "d21-webtransport-required-setup-options",
 };
 
 // Scenarios that execute as raw probe contexts.
@@ -34,9 +39,24 @@ inline bool announcement_gap_scenario(unsigned draft, std::string_view scenario)
 inline bool gap_webtransport_only_scenario(std::string_view scenario) {
     return scenario == "d21-webtransport-publisher-setup" ||
            scenario == "d21-webtransport-server-sends-authority" ||
-           scenario == "d21-webtransport-server-sends-path";
+           scenario == "d21-webtransport-server-sends-path" ||
+           scenario == "d21-webtransport-required-setup-options";
 }
 
-inline bool gap_native_only_scenario(std::string_view) { return false; }
+inline bool gap_native_only_scenario(std::string_view scenario) {
+    return scenario == "d21-native-publisher-uri-options" ||
+           scenario == "d21-native-publisher-uri-query" ||
+           scenario == "d21-native-publisher-empty-query" ||
+           scenario == "d21-native-quic-required-setup-options";
+}
+
+// Path and query of the moqt URI a driven native publisher is given
+// (Sections 9.1.1 and 9.1.2): the default path, a non-empty query, or a
+// present-but-empty query.
+inline std::string_view gap_native_uri_path_and_query(std::string_view scenario) {
+    if (scenario == "d21-native-publisher-uri-query") return "/moq?run=1";
+    if (scenario == "d21-native-publisher-empty-query") return "/moq?";
+    return "/moq";
+}
 
 }  // namespace moq::interop::app

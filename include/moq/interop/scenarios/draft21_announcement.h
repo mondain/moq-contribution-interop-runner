@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,21 @@ struct Draft21AnnouncementEvent {
     std::vector<std::uint64_t> setup_option_types;
 };
 
+// One decoded Setup Option as received from the publisher (slice A).
+struct Draft21SetupOptionValue {
+    std::uint64_t type{0};
+    bool is_bytes{false};
+    std::uint64_t integer{0};
+    std::vector<std::byte> bytes;
+};
+
+// The moqt URI handed to a driven native-QUIC publisher, split into the pieces
+// Section 9.1.1 and 9.1.2 require in AUTHORITY and PATH.
+struct Draft21ExpectedConnectionUri {
+    std::string authority;
+    std::string path_and_query;
+};
+
 struct Draft21AnnouncementContext {
     bool complete{false};
     bool target_publish_seen{false};
@@ -54,6 +70,13 @@ struct Draft21AnnouncementContext {
     Draft21SetupProbe setup_probe{Draft21SetupProbe::None};
     bool webtransport{false};
     std::vector<std::uint64_t> peer_setup_option_types;
+    // Slice A additions: decoded option values, the scenario being run, the
+    // URI given to a driven native publisher, and whether the observation
+    // window ended with a live, fully set up session.
+    std::vector<Draft21SetupOptionValue> peer_setup_options;
+    std::string scenario_id;
+    std::optional<Draft21ExpectedConnectionUri> expected_uri;
+    bool window_elapsed{false};
 };
 
 struct Draft21AnnouncementSnapshot {
@@ -72,6 +95,11 @@ public:
         std::chrono::milliseconds timeout,
         Draft21SetupProbe setup_probe = Draft21SetupProbe::None,
         bool webtransport = false);
+
+    // Records the scenario and, for a driven native publisher, the connection
+    // URI so evaluators can compare the SETUP AUTHORITY and PATH options.
+    void configure_scenario(std::string scenario_id,
+                            std::optional<Draft21ExpectedConnectionUri> uri = std::nullopt);
 
     Draft21AnnouncementSnapshot poll(Draft21Clock::time_point now);
     [[nodiscard]] const Draft21AnnouncementContext& context() const noexcept;
