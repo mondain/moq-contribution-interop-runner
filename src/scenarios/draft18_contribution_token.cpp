@@ -156,6 +156,9 @@ std::vector<Draft18ContributionProbe> token_probes(std::chrono::milliseconds dea
                 token_request(1, fixture, use_value(*credentials.invalid)), false});
         // A publisher that cannot serve the request may give up; that is what it did.
         definition.publisher_exit_is_evidence = true;
+        // A publisher that announces its namespace first waits for the acknowledgement
+        // (section 10.15) before it serves requests; the answer is not part of the stimulus.
+        definition.acknowledge_publisher_namespace = true;
         const bool sends = !definition.writes.empty();
         definition.response_ready = [sends](const RawProbeTranscript& transcript) {
             return !sends || answered(write_reply(transcript, 0)) || peer_close(transcript).has_value();
@@ -174,6 +177,7 @@ std::vector<Draft18ContributionProbe> token_probes(std::chrono::milliseconds dea
                 token_request(5, fixture, register_alias(*credentials.expired)), 1));
         }
         definition.publisher_exit_is_evidence = true;
+        definition.acknowledge_publisher_namespace = true;
         const bool sends = !definition.writes.empty();
         definition.response_ready = [sends](const RawProbeTranscript& transcript) {
             if (!sends) return true;

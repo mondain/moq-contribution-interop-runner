@@ -86,6 +86,14 @@ TEST(Draft18ContributionToken, WithoutACredentialNothingIsSentAndNothingIsScored
     }
 }
 
+// A publisher that announces its namespace first waits for the acknowledgement before serving requests.
+TEST(Draft18ContributionToken, TheRunnerAcknowledgesThePublishersNamespaceAnnouncement) {
+    for (const auto& all : {configured(), unconfigured()})
+        for (const auto* id : {kInvalid, kExpired})
+            for (const auto& p : all)
+                if (p.definition.id == id) EXPECT_TRUE(p.definition.acknowledge_publisher_namespace) << id;
+}
+
 TEST(Draft18ContributionToken, OnlyTheMatchingCredentialIsConfigured) {
     Draft18TokenCredentials only_expired{std::nullopt, Draft18TokenCredential{4, text("old")}};
     const auto all = draft18_contribution_probes(milliseconds{80}, {text("n")}, text("t"), only_expired);
