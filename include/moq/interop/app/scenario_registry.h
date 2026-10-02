@@ -270,7 +270,7 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (subscriber_notify_scenario(draft,scenario) ||
         (draft == 21 && scenario == "d21-publish-state-notify-on-fetch")) return true;
     if (discovery_overlap_scenario(draft,scenario)) return true;
-    if (announcement_gap_scenario(draft, scenario)) return true;
+    if (announcement_gap_scenario(draft, scenario) || gap_raw_scenario(draft, scenario)) return true;
     const auto original = executable_scenarios(draft).first(
         draft == 18 || draft == 21 ? 5 : 0);
     return std::find(original.begin(), original.end(), scenario) != original.end() ||

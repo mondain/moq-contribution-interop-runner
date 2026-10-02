@@ -37,7 +37,25 @@ inline constexpr std::array<std::string_view, 19> kDraft21GapAnnouncementScenari
 };
 
 // Scenarios that execute as raw probe contexts.
-inline constexpr std::array<std::string_view, 0> kDraft21GapRawScenarios{};
+inline constexpr std::array<std::string_view, 11> kDraft21GapRawScenarios{
+    "d21-publisher-request-response-before-fin",
+    "d21-established-subscription-publisher-fin",
+    "d21-request-stream-terminal-message-order",
+    "d21-original-publisher-opens-new-subgroup",
+    "d21-publish-track-with-mandatory-property",
+    "d21-discover-original-publisher-namespaces",
+    "d21-control-stream-lifetime",
+    "d21-native-quic-datagram-support",
+    "d21-webtransport-h3-datagram-support",
+    "d21-subscribe-bounded-location-range",
+    "d21-update-subscription-location-range",
+};
+
+inline bool gap_raw_scenario(unsigned draft, std::string_view scenario) {
+    return draft == 21 &&
+        std::find(kDraft21GapRawScenarios.begin(), kDraft21GapRawScenarios.end(), scenario) !=
+            kDraft21GapRawScenarios.end();
+}
 
 inline bool announcement_gap_scenario(unsigned draft, std::string_view scenario) {
     return draft == 21 &&
@@ -51,14 +69,16 @@ inline bool gap_webtransport_only_scenario(std::string_view scenario) {
     return scenario == "d21-webtransport-publisher-setup" ||
            scenario == "d21-webtransport-server-sends-authority" ||
            scenario == "d21-webtransport-server-sends-path" ||
-           scenario == "d21-webtransport-required-setup-options";
+           scenario == "d21-webtransport-required-setup-options" ||
+           scenario == "d21-webtransport-h3-datagram-support";
 }
 
 inline bool gap_native_only_scenario(std::string_view scenario) {
     return scenario == "d21-native-publisher-uri-options" ||
            scenario == "d21-native-publisher-uri-query" ||
            scenario == "d21-native-publisher-empty-query" ||
-           scenario == "d21-native-quic-required-setup-options";
+           scenario == "d21-native-quic-required-setup-options" ||
+           scenario == "d21-native-quic-datagram-support";
 }
 
 // Path and query of the moqt URI a driven native publisher is given

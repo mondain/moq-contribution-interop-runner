@@ -222,6 +222,7 @@ app::RunConfig parse_run_config(const httplib::Request& request) {
                 app::immutable_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 app::object_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 (draft == 21 && id == "d21-publish-state-notify-on-fetch") ||
+                app::gap_raw_scenario(static_cast<unsigned>(draft),id) ||
                 app::subscriber_notify_scenario(static_cast<unsigned>(draft),id);
         })) {
             std::vector<std::vector<std::byte>> fields;
@@ -612,6 +613,11 @@ public:
                         append_profile(draft,profile.definition.id,"native-quic");
                         append_profile(draft,profile.definition.id,"webtransport");
                     }
+                }
+                // Draft-21 gap slice A: raw probe scenarios.
+                for (const auto id : app::kDraft21GapRawScenarios) {
+                    if (!app::gap_webtransport_only_scenario(id)) append_profile(21, id, "native-quic");
+                    if (!app::gap_native_only_scenario(id)) append_profile(21, id, "webtransport");
                 }
                 // Draft-21 gap slice A: announcement-controller scenarios.
                 for (const auto id : app::kDraft21GapAnnouncementScenarios) {

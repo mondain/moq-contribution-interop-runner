@@ -34,6 +34,9 @@ const std::vector<std::string_view> kClaimedRows{
     "D21-2-4-2-MUST-NOT-026", "D21-2-4-2-MUST-NOT-028", "D21-2-4-2-MUST-NOT-029",
     "D21-2-4-2-MUST-NOT-030", "D21-6-5-MUST-NOT-166", "D21-6-5-MUST-NOT-167",
     "D21-8-3-MUST-NOT-230", "D21-8-7-MUST-250", "D21-7-5-MUST-206",
+    "D21-6-4-2-2-MUST-157", "D21-6-4-2-2-MUST-158", "D21-6-4-2-2-MUST-NOT-156",
+    "D21-2-2-MUST-020", "D21-3-6-MUST-070", "D21-4-2-MUST-089", "D21-6-3-MUST-NOT-146",
+    "D21-6-2-MUST-139", "D21-3-3-1-MUST-NOT-057",
 };
 
 using scenarios::Draft21AnnouncementContext;
@@ -88,6 +91,21 @@ TEST(Draft21GapA, AnnouncementScenariosRouteToTheAnnouncementController) {
         EXPECT_TRUE(app::scenario_requires_track(21, id)) << id;
         EXPECT_FALSE(app::executable_scenario(18, id)) << id;
     }
+}
+
+TEST(Draft21GapA, RawScenariosRouteToRawProbesAndTransportRules) {
+    for (const auto id : app::kDraft21GapRawScenarios) {
+        EXPECT_TRUE(app::executable_scenario(21, id)) << id;
+        EXPECT_TRUE(app::gap_raw_scenario(21, id)) << id;
+        EXPECT_TRUE(app::raw_probe_scenario(21, id)) << id;
+        EXPECT_FALSE(app::announcement_gap_scenario(21, id)) << id;
+        EXPECT_TRUE(app::scenario_requires_track(21, id)) << id;
+        EXPECT_FALSE(app::executable_scenario(18, id)) << id;
+    }
+    EXPECT_TRUE(app::gap_native_only_scenario("d21-native-quic-datagram-support"));
+    EXPECT_TRUE(app::gap_webtransport_only_scenario("d21-webtransport-h3-datagram-support"));
+    EXPECT_FALSE(app::gap_native_only_scenario("d21-control-stream-lifetime"));
+    EXPECT_FALSE(app::gap_webtransport_only_scenario("d21-control-stream-lifetime"));
 }
 
 TEST(Draft21GapA, BindingsNeverNameUnregisteredScenarios) {

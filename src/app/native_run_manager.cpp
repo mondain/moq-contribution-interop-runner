@@ -18,6 +18,7 @@
 #include "moq/interop/scenarios/discovery_overlap.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/fetch_group_order.h"
+#include "moq/interop/scenarios/draft21_gap_a.h"
 #include "moq/interop/scenarios/immutable_repeat.h"
 #include "moq/interop/scenarios/object_repeat.h"
 #include "moq/interop/scenarios/request_goaway.h"
@@ -850,7 +851,8 @@ public:
         const bool group_order = fetch_group_order_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool notify_fetch = run_config.draft == DraftVersion::Draft21 && id == "d21-publish-state-notify-on-fetch";
         const bool notify_direction = subscriber_notify_scenario(static_cast<unsigned>(run_config.draft),id);
-        if (!fetch && !subscription && !fetch_response && !request_response && !range_filter && !discovery_overlap && !first_fetch && !group_order && !immutable_repeat && !object_repeat && !notify_fetch && !notify_direction) return std::nullopt;
+        const bool gap_a = gap_raw_scenario(static_cast<unsigned>(run_config.draft), id);
+        if (!fetch && !subscription && !fetch_response && !request_response && !range_filter && !discovery_overlap && !first_fetch && !group_order && !immutable_repeat && !object_repeat && !notify_fetch && !notify_direction && !gap_a) return std::nullopt;
         if (!run_config.track_fixture) throw std::invalid_argument("track probe requires a track fixture");
         std::vector<std::vector<std::byte>> name_space;
         for (const auto& field : run_config.track_fixture->namespace_fields)
@@ -861,6 +863,8 @@ public:
             if (found == profiles.end()) throw std::invalid_argument("unknown track probe");
             return std::move(found->definition);
         };
+        if (gap_a) return execute(scenarios::draft21_gap_a_probes(run_config.timeout, name_space,
+            bytes_of(run_config.track_fixture->track_name)));
         if (immutable_repeat) return execute(run_config.draft == DraftVersion::Draft18
             ? scenarios::draft18_immutable_repeat_probes(run_config.timeout, name_space,
                 bytes_of(run_config.track_fixture->track_name))
@@ -1106,6 +1110,12 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         if (draft == 21 && announcement_gap_scenario(21, id) && config.track_fixture &&
             !gap_fixture_valid(id, config.track_fixture->namespace_fields))
             return {RunStartStatus::InvalidConfig, {}, {}};
+        if (gap_raw_scenario(draft, id) && config.track_fixture) {
+            std::vector<std::vector<std::byte>> fields;
+            for (const auto& field : config.track_fixture->namespace_fields) fields.push_back(bytes_of(field));
+            if (!scenarios::fetch_first_object_fixture_valid(fields, bytes_of(config.track_fixture->track_name)))
+                return {RunStartStatus::InvalidConfig, {}, {}};
+        }
         if (draft == 21 && gap_native_only_scenario(id) &&
             config.transport != TransportKind::NativeQuic)
             return {RunStartStatus::Unsupported, {}, {}};

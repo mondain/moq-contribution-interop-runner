@@ -238,8 +238,26 @@ std::optional<OutcomeState> draft21_gap_a_announcement_state(
 }
 
 
+bool draft21_gap_a_scenarios_are_alternatives(const Requirement& row) {
+    return row.id == "D21-6-2-MUST-139";
+}
+
+std::optional<Draft21GapARawResult> draft21_gap_a_raw_result(
+    const Requirement& row, const scenarios::RawProbeTranscript& transcript,
+    const std::vector<scenarios::Draft21GapProbe>& probes) {
+    for (const auto& probe : probes) {
+        if (row.id != probe.requirement_id || transcript.scenario_id != probe.definition.id ||
+            !listed(row.scenarios, probe.definition.id) || !listed(row.evaluators, probe.evaluator_id))
+            continue;
+        const auto verdict = scenarios::evaluate_draft21_gap_a_probe(transcript, probe);
+        if (!verdict) return std::nullopt;
+        return Draft21GapARawResult{*verdict, probe.evaluator_id};
+    }
+    return std::nullopt;
+}
+
 std::vector<ExecutableBinding> draft21_gap_a_bindings() {
-    return {
+    std::vector<ExecutableBinding> bindings{
         {21, "D21-6-3-MUST-NOT-141", "d21-publisher-request-stream-openers",
          "d21-request-stream-first-message-allowed",
          {"publish_observed", "response_delivered"}},
@@ -296,6 +314,10 @@ std::vector<ExecutableBinding> draft21_gap_a_bindings() {
          "d21-explicit-namespace-publication-for-routing",
          {"peer_setup_received", "namespace_observed", "namespace_response_delivered"}},
     };
+    for (const auto& probe : scenarios::draft21_gap_a_probes())
+        bindings.push_back({21, probe.requirement_id, probe.definition.id, probe.evaluator_id,
+                            {"raw_probe_stimulus", "raw_probe_transport_event"}});
+    return bindings;
 }
 
 }  // namespace moq::interop::requirements
