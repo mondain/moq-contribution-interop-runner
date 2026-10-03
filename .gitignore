@@ -33,3 +33,4 @@ graphify-work/*
 /build-fuzz/
 /external/
 /build-picoquic-prod/
+/build-clang/
