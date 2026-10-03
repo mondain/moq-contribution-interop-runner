@@ -634,7 +634,8 @@ file and the lines you read, and what you believe the draft requires.
 | Symptom | Likely cause and fix |
 |---|---|
 | Run ends `error`; events show `publisher_process` with `status` `exited` and no `peer_setup_received` | The publisher (or the adapter, exit 64) exited before connecting. Read `stderr.bin` in the run's log directory; run the adapter by hand with a saved `request.json` |
-| `error` verdict, `harness_error` event | The publisher process failed while the context was running, or it did not stop within the 100 ms grace after SIGTERM. Handle SIGTERM and exit 0 on your own deadline |
+| `error` verdict, `harness_error` event | The `detail` of the event (also `run_error_reason` in the run JSON and the report) says why: the publisher process failed while the context was running, it did not stop within the 100 ms grace after SIGTERM (handle SIGTERM and exit 0 on your own deadline), or the transport rejected a runner write |
+| A context has a `context_event_limit` event and its rows stay `not_run`; the verdict is `incomplete` | The publisher sent more than one context records (4096 events or 4 MiB of stream data) before the scenario finished, typically media at a real bitrate while the probe was still waiting. The context is not scored and the run continues. Send less media while a probe is open, or run fewer, shorter scenarios |
 | Only a `local_close` event; publisher logs a close with `QUIC DATAGRAM not negotiated` | DATAGRAM is not negotiated. Enable QUIC datagrams in the publisher's QUIC stack |
 | TLS or certificate errors in the publisher log | The publisher does not trust `cert.pem`, or the certificate has no subject alternative name for the address used. Regenerate with `-addext subjectAltName=...` and pass the file as the trust anchor (`tls_ca`) |
 | `tls_ca` or fixture path "unreadable" in the adapter | The runner was started with a relative `--tls-cert` or `--driver-fixture` and the adapter runs elsewhere. Use absolute paths |

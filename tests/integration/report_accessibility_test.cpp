@@ -98,4 +98,43 @@ TEST(ReportAccessibility, ShowsTheNoFetchDeclarationAndNotApplicableReasonsAsTex
 }
 
 }  // namespace
+TEST(ReportAccessibility, ShowsRunErrorReasonsAndTruncatedContextsAsEscapedText) {
+    requirements::RequirementCatalog catalog{18, "digest", true,
+        {{"ROW", requirements::Strength::Must, {"5.1", 10, 12, 1, 1}, "publisher", "behavior",
+          requirements::Applicability::Applicable, requirements::Testability::Testable,
+          {"scene"}, {"evaluator"}, "why"}}};
+    storage::RunRecord run;
+    run.id = "run-3";
+    run.config = {app::DraftVersion::Draft18, app::TransportKind::NativeQuic, app::RunMode::Observed,
+                  {"scene"}, std::chrono::milliseconds{1000}};
+    run.build = {"0.1", "rev", {}};
+    run.state = storage::RunState::Finalized;
+    run.outcomes = {{"ROW", requirements::OutcomeState::NotRun}};
+    run.score = requirements::ScoreSummary{requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+    storage::EvidenceEvent limit;
+    limit.kind = "context_event_limit";
+    limit.scenario_id = "scene<1>";
+    limit.detail = "more than 4096 transport events in this context; evidence truncated; this context is unscored";
+    storage::EvidenceEvent error;
+    error.kind = "harness_error";
+    error.scenario_id = "scene";
+    error.detail = "the transport rejected <a probe stream write>";
+    run.events = {limit, error};
+    const auto html = render_run_detail(run, catalog, {});
+    EXPECT_NE(html.find("<strong>Run error:</strong> the transport rejected &lt;a probe stream write&gt;"),
+              std::string::npos);
+    EXPECT_NE(html.find("<caption>Why contexts or the run ended with an error</caption>"), std::string::npos);
+    EXPECT_NE(html.find("<caption>Contexts whose evidence was truncated and are not scored</caption>"),
+              std::string::npos);
+    EXPECT_NE(html.find("<code>scene&lt;1&gt;</code>"), std::string::npos);
+    EXPECT_NE(html.find("this context is unscored"), std::string::npos);
+    EXPECT_EQ(html.find("<a probe"), std::string::npos);
+    // A clean run shows none of it.
+    run.score = requirements::ScoreSummary{requirements::RunVerdict::Incomplete, {0, 0}, {0, 0}, {0, 0}};
+    run.events.clear();
+    const auto clean = render_run_detail(run, catalog, {});
+    EXPECT_EQ(clean.find("Run error:"), std::string::npos);
+    EXPECT_EQ(clean.find("were truncated"), std::string::npos);
+}
+
 }  // namespace moq::interop::http::detail

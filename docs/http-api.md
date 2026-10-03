@@ -174,6 +174,9 @@ runner started with a driver executable; otherwise the request is rejected.
 | `verdict` | `pass`, `fail`, `incomplete`, `error` or `null` while active |
 | `score` | `required`, `weighted` and `coverage`, each `{earned, possible}`; see [scoring-and-audit.md](scoring-and-audit.md) |
 | `scoring_profile` | `standards`, or `compatibility` when an unknown-alias compatibility code is configured |
+| `run_error_reason` | When `verdict` is `error`, a sentence saying why (the first `error_reasons` entry); `null` otherwise |
+| `error_reasons` | `{scenario_id, kind, detail}` for every `harness_error`, `run_aborted` and `run_stopped` event of the run |
+| `truncated_contexts` | `{scenario_id, detail}` for every context whose evidence hit a recording limit (`context_event_limit`). Such a context is not scored and does not make the verdict `error` |
 | `outcomes` | `{requirement_id, state}` per observation; states are `pass`, `fail`, `not_run`, `not_testable`, `not_applicable` |
 | `events` | `{total, href}` for the event log |
 
@@ -195,7 +198,10 @@ normal runs include:
 | `request_observed`, `initial_response_observed`, `object_observed` | Decoded protocol messages and objects |
 | `publisher_process` | Driven mode: the adapter process result (`status`, `exit_code`, `term_signal`, and `stdout_log` and `stderr_log` with `path`, `bytes`, `sha256`) |
 | `publisher_exit_after_refusal` | The publisher exited after the runner refused or rejected it; not a harness fault |
-| `harness_error` | The publisher process failed in a way that makes the context unusable |
+| `harness_error` | The context became unusable (publisher process failed, transport rejected a write, and so on); `detail` is the specific reason. It ends the run as `error` |
+| `run_aborted` | Added after a `harness_error` when later contexts of the run were not run; `detail` names the reason and the contexts not run |
+| `run_stopped` | The run was stopped on request before every selected context finished |
+| `context_event_limit` | The publisher sent more than one context records (4096 recorded transport events or 4 MiB of stream data; adjacent chunks of one publisher data stream count as one event). Later events were not recorded, this context is not scored (its rows stay `not_run`), and the run goes on with the next context, so it is `incomplete`, not `error` |
 | `publisher_capabilities` | First event of every run: the effective declaration, `fetch=true` or `fetch=false`. It belongs to the run, so it has no `scenario_id` |
 | `context_skipped` | The scenario was not started because the publisher declared it does not implement a capability it needs; `detail` is `publisher declared no FETCH support` |
 | `runner_recovery` | Added at restart to a run that was interrupted |

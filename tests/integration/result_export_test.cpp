@@ -101,6 +101,44 @@ TEST(ResultExport, LeavesMissingObservationsExplicitAndZeroDenominatorIntact) {
     EXPECT_EQ(document.at("run").at("verdict"), "error");
 }
 
+TEST(ResultExport, ErroredRunAlwaysCarriesAReasonAndTruncatedContextsAreListed) {
+    auto value = run();
+    value.events.clear();
+    auto document = serialize_result(value, catalog());
+    EXPECT_TRUE(document.at("run").at("run_error_reason").is_null());
+    EXPECT_TRUE(document.at("run").at("error_reasons").empty());
+    EXPECT_TRUE(document.at("run").at("truncated_contexts").empty());
+    EXPECT_EQ(document.at("schema_version"), 1);
+
+    storage::EvidenceEvent limit;
+    limit.kind = "context_event_limit";
+    limit.scenario_id = "scenario-a";
+    limit.detail = "more than 4096 transport events in this context; evidence truncated; this context is unscored";
+    storage::EvidenceEvent error;
+    error.kind = "harness_error";
+    error.scenario_id = "scenario-b";
+    error.detail = "the transport rejected a probe stream write";
+    value.events = {limit};
+    value.score = requirements::ScoreSummary{requirements::RunVerdict::Incomplete, {0, 0}, {0, 0}, {0, 0}};
+    document = serialize_result(value, catalog());
+    // Truncation alone is not an error and gives no run-level error reason.
+    EXPECT_TRUE(document.at("run").at("run_error_reason").is_null());
+    ASSERT_EQ(document.at("run").at("truncated_contexts").size(), 1u);
+    EXPECT_EQ(document.at("run").at("truncated_contexts").at(0).at("scenario_id"), "scenario-a");
+
+    value.events = {limit, error};
+    value.score = requirements::ScoreSummary{requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+    document = serialize_result(value, catalog());
+    EXPECT_EQ(document.at("run").at("run_error_reason"), "the transport rejected a probe stream write");
+    ASSERT_EQ(document.at("run").at("error_reasons").size(), 1u);
+    EXPECT_EQ(document.at("run").at("error_reasons").at(0).at("kind"), "harness_error");
+
+    // Even an error nobody recorded a reason for says so.
+    value.events.clear();
+    document = serialize_result(value, catalog());
+    EXPECT_FALSE(document.at("run").at("run_error_reason").is_null());
+}
+
 TEST(ResultExport, InvalidMixedObservationsAreNotReportedAsPass) {
     auto value = run();
     value.score = requirements::ScoreSummary{requirements::RunVerdict::Error,

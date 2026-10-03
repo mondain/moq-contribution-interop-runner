@@ -204,6 +204,32 @@ std::string render_run_detail(const storage::RunRecord& run,
            << ratio(score, "required") << "; Weighted score: "
            << ratio(score, "weighted") << "; Coverage: "
            << ratio(score, "coverage") << ".</p>";
+    const auto& run_document = document.at("run");
+    if (!run_document.at("run_error_reason").is_null())
+        output << "<p><strong>Run error:</strong> "
+               << escape_html(run_document.at("run_error_reason").get<std::string>()) << "</p>";
+    if (!run_document.at("error_reasons").empty()) {
+        output << "<table><caption>Why contexts or the run ended with an error</caption><thead><tr>"
+                  "<th scope=\"col\">Scenario</th><th scope=\"col\">Kind</th>"
+                  "<th scope=\"col\">Reason</th></tr></thead><tbody>";
+        for (const auto& entry : run_document.at("error_reasons"))
+            output << "<tr><th scope=\"row\"><code>"
+                   << escape_html(entry.at("scenario_id").is_null() ? std::string{}
+                                                                     : entry.at("scenario_id").get<std::string>())
+                   << "</code></th><td>" << escape_html(entry.at("kind").get<std::string>()) << "</td><td>"
+                   << escape_html(entry.at("detail").get<std::string>()) << "</td></tr>";
+        output << "</tbody></table>";
+    }
+    if (!run_document.at("truncated_contexts").empty()) {
+        output << "<table><caption>Contexts whose evidence was truncated and are not scored</caption>"
+                  "<thead><tr><th scope=\"col\">Scenario</th><th scope=\"col\">Reason</th></tr></thead><tbody>";
+        for (const auto& entry : run_document.at("truncated_contexts"))
+            output << "<tr><th scope=\"row\"><code>"
+                   << escape_html(entry.at("scenario_id").is_null() ? std::string{}
+                                                                     : entry.at("scenario_id").get<std::string>())
+                   << "</code></th><td>" << escape_html(entry.at("detail").get<std::string>()) << "</td></tr>";
+        output << "</tbody></table>";
+    }
     output << "<form method=\"get\" action=\"/results/" << escape_html(run.id)
            << "\"><fieldset><legend>Filter requirements</legend>"
               "<label>Strength <input name=\"strength\" value=\""

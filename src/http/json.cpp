@@ -197,6 +197,22 @@ Json run_summary_json(const storage::RunSummary& run) {
 }
 
 Json run_json(const storage::RunRecord& run) {
+    // Why the run, or one of its contexts, did not end normally. Built from the evidence the
+    // run recorded, so the reason an operator sees is the one the harness stored.
+    Json error_reasons = Json::array();
+    Json truncated_contexts = Json::array();
+    for (const auto& event : run.events) {
+        const Json scenario = event.scenario_id ? Json(*event.scenario_id) : Json(nullptr);
+        if (event.kind == "harness_error" || event.kind == "run_aborted" || event.kind == "run_stopped")
+            error_reasons.push_back({{"scenario_id", scenario}, {"kind", event.kind}, {"detail", event.detail}});
+        else if (event.kind == "context_event_limit")
+            truncated_contexts.push_back({{"scenario_id", scenario}, {"detail", event.detail}});
+    }
+    Json run_error_reason = nullptr;
+    if (run.score && run.score->verdict == requirements::RunVerdict::Error)
+        run_error_reason = error_reasons.empty()
+            ? Json("the run ended with an error and recorded no reason")
+            : error_reasons.front().at("detail");
     Json outcomes = Json::array();
     for (const auto& outcome : run.outcomes) {
         outcomes.push_back({{"requirement_id", outcome.requirement_id},
@@ -210,6 +226,9 @@ Json run_json(const storage::RunRecord& run) {
             {"finalized_at_unix_ns", run.finalized_at_unix_ns},
             {"verdict", run.score ? Json(name(run.score->verdict)) : Json(nullptr)},
             {"score", run.score ? score_json(*run.score) : Json(nullptr)},
+            {"run_error_reason", std::move(run_error_reason)},
+            {"error_reasons", std::move(error_reasons)},
+            {"truncated_contexts", std::move(truncated_contexts)},
             {"scoring_profile", std::any_of(run.events.begin(), run.events.end(), [](const auto& event) {
                 return event.kind == "compatibility_error_mapping";
             }) ? "compatibility" : "standards"},
