@@ -171,6 +171,11 @@ and labels it with the exact Git revision. It refuses a dirty worktree or a
 conflicting `MOQ_INTEROP_SOURCE_REVISION`. `scripts/container-build.sh config`
 prints the resolved Compose configuration.
 
+The image compiles with two parallel jobs by default. On a larger machine set
+`MOQ_INTEROP_BUILD_JOBS` (for example `MOQ_INTEROP_BUILD_JOBS=$(nproc) scripts/container-build.sh build`),
+or pass `--build-arg BUILD_JOBS=N` to a plain `docker build`. The job count does not
+change the image contents.
+
 ## Docker Compose
 
 Prepare a directory with `cert.pem` and `key.pem` readable by UID 10001, build
