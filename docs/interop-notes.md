@@ -68,6 +68,26 @@ reason `QUIC DATAGRAM not negotiated`).
 This is an interop observation about two publisher builds. It is not a validator
 pass and not a reason to loosen the requirement.
 
+## Results observed with moqxr 0993cf7
+
+The release audit pins moqxr `0993cf7d537b0d7af56f87f7017b3fc14f39b614`
+(`0.4.1-dev+g0993cf7`). Against it, three-run repeatability passed for draft 18 and
+draft 21 over WebTransport, and the four-way driven matrix passed (draft 18 native 3,
+WebTransport 5; draft 21 native 3, WebTransport 5; no failures).
+
+A full 758-run sweep compared with the 0.4.1 sweep: draft 18 rows passing went from 57
+to 81 and failing from 30 to 4; draft 21 rows passing went from 41 to 56 and failing from
+26 to 12. Verdict counts: fail 106 to 38, error 56 to 24.
+
+Rows that passed on 0.4.1 and no longer produce a passing verdict:
+
+- `D18-10-12-MUST-001` now fails. moqxr answers an unknown FETCH Type with a request
+  error instead of closing the session (punch list M-21).
+- `D18-10-9-MUST-001`, `D18-11-2-1-MUST-001` and `D21-11-5-1-MUST-566` ended
+  `incomplete` with no evidence: the stimulus was not accepted before the context timed
+  out. They are not failures and are not scored; they are runner-side coverage to
+  re-examine against this moqxr revision.
+
 ## Results observed with moqxr 0.4.1
 
 On 2026-10-02, against `openmoq-publisher 0.4.1 (commit 9bda5c9)` and the

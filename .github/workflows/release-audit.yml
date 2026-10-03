@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: openmoq/moqxr
-          ref: dda5025a0531faa019d97e9fc5c1ebc024605c04
+          ref: 0993cf7d537b0d7af56f87f7017b3fc14f39b614
           path: external/moqxr
       - name: Install build and audit dependencies
         run: |
