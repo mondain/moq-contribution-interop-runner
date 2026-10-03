@@ -630,7 +630,8 @@ public:
         throw std::runtime_error("publisher driver start failed: " + started.error);
     }
 
-    void finalize_raw_family(Worker* worker, const RunConfig& run_config, bool operational_error) {
+    void finalize_raw_family(Worker* worker, const RunConfig& run_config, bool operational_error,
+                             std::string_view last_scenario_id) {
         std::vector<requirements::Outcome> outcomes;
         if (run_config.draft == DraftVersion::Draft21) {
             outcomes = requirements::evaluate_draft21_raw_probes(*draft21, worker->transcripts);
@@ -655,6 +656,11 @@ public:
                                      run_config.publisher_capabilities, outcomes);
         auto summary = requirements::score(catalog, outcomes);
         if (operational_error || worker->stop_requested) summary.verdict = requirements::RunVerdict::Error;
+        // An errored run always says why: operational errors were recorded where they
+        // happened, and a stop request is recorded here.
+        if (worker->stop_requested && !operational_error)
+            append_context_event(worker, last_scenario_id, "run_stopped",
+                                 "the run was stopped before every selected context finished");
         store->finalize(worker->id, summary, outcomes);
     }
 
@@ -667,8 +673,10 @@ public:
             std::any_of(transcript.events.begin(), transcript.events.end(), [](const auto& event) {
                 return std::holds_alternative<transport::PeerCloseEvent>(event);
             });
+        // The runner ends a context whose evidence hit a recording limit, so a publisher that
+        // exits because of that is a consequence of the runner, not a harness fault.
         return refused_for_missing_datagram(transcript) || closed_by_peer ||
-               (exit_is_evidence && !transcript.harness_failed);
+               transcript.event_limit_reached || (exit_is_evidence && !transcript.harness_failed);
     }
 
     static bool refused_for_missing_datagram(const scenarios::RawProbeTranscript& transcript) {
@@ -744,6 +752,8 @@ public:
                 } else if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
+                    if (transcript.harness_failure_reason.empty())
+                        transcript.harness_failure_reason = "publisher process failed";
                     append_context_event(worker, current_id, "harness_error", "publisher process failed");
                 }
                 if (worker->stop_requested) transcript.complete = false;
@@ -754,8 +764,21 @@ public:
                     completed.complete && !completed.harness_failed ? "context_complete" : "context_end",
                     "complete=" + std::string(completed.complete ? "true" : "false") +
                     " timed_out=" + (completed.timed_out ? "true" : "false") +
+                    " event_limit=" + (completed.event_limit_reached ? "true" : "false") +
                     " cancelled=" + (worker->stop_requested ? "true" : "false"));
-                if (operational_error || worker->stop_requested) break;
+                if (operational_error || worker->stop_requested) {
+                    // Contexts that never ran are named, so the run explains its own end.
+                    std::string not_run;
+                    for (std::size_t later = index + 1; later < definitions.size(); ++later)
+                        not_run += (not_run.empty() ? "" : ",") + definitions[later].id;
+                    if (operational_error && !not_run.empty())
+                        append_context_event(worker, current_id, "run_aborted",
+                            "the run ended after context " + std::to_string(index + 1) + " of " +
+                            std::to_string(definitions.size()) + " because of a harness error (" +
+                            (completed.harness_failure_reason.empty() ? "see harness_error" : completed.harness_failure_reason) +
+                            "); contexts not run: " + not_run);
+                    break;
+                }
             }
         } catch (const std::exception& error) {
             operational_error = true;
@@ -767,7 +790,7 @@ public:
             }
         }
         listener.reset();
-        finalize_raw_family(worker, run_config, operational_error);
+        finalize_raw_family(worker, run_config, operational_error, current_id);
     }
 
     void run(Worker* worker,
@@ -827,6 +850,13 @@ public:
                       << error.what() << '\n';
             try {
                 record_driver();
+                storage::EvidenceEvent reason;
+                reason.kind = "harness_error";
+                reason.detail = error.what();
+                reason.scenario_id = run_config.scenario_ids.empty() ? std::string{} : run_config.scenario_ids.front();
+                reason.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                try { store->append_events(worker->id, std::span(&reason, 1)); } catch (...) {}
                 const requirements::ScoreSummary failure{
                     requirements::RunVerdict::Error,
                     {0, 0}, {0, 0}, {0, 0}};
@@ -881,73 +911,87 @@ public:
                                                  std::move(replacement_uri));
         std::size_t recorded = 0;
         std::size_t replacement_recorded = 0;
+        // Stores the recorded events before `limit` (and any replacement-session events) that
+        // are not stored yet.
+        const auto persist = [&](const scenarios::RawProbeTranscript& transcript, std::size_t limit,
+                                 scenarios::RawProbeClock::time_point now) {
+            std::vector<storage::EvidenceEvent> batch;
+            for (; recorded < limit; ++recorded) {
+                storage::EvidenceEvent event;
+                event.scenario_id = transcript.scenario_id;
+                // An event may be stored after it arrived (a growing tail is held back), so it
+                // carries the time it arrived, not the time it was stored.
+                const auto arrived = recorded < transcript.event_times.size() ? transcript.event_times[recorded] : now;
+                event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(arrived-worker->started).count();
+                event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch() - (now - arrived)).count();
+                const auto& source = transcript.events[recorded];
+                if (const auto* close = std::get_if<transport::PeerCloseEvent>(&source)) {
+                    event.kind = "peer_close";
+                    event.detail = std::string(close->error_space == transport::CloseErrorSpace::Application ? "application" : "transport") +
+                        " close code=" + std::to_string(close->error_code) +
+                        " transport_event_index=" + std::to_string(recorded);
+                } else if (const auto* established = std::get_if<transport::ConnectionEstablishedEvent>(&source)) {
+                    worker->connection_id = hex_bytes(established->local_connection_id);
+                    event.kind = "transport_established";
+                    event.detail = "local_connection_id=" + worker->connection_id +
+                        " peer_connection_id=" + hex_bytes(established->peer_connection_id) +
+                        " alpn=" + hex_bytes(established->alpn) +
+                        " max_datagram_payload=" + std::to_string(established->max_datagram_payload) +
+                        " transport_event_index=" + std::to_string(recorded);
+                } else if (std::holds_alternative<transport::EventQueueOverflowEvent>(source) ||
+                           std::holds_alternative<transport::TransportErrorEvent>(source)) {
+                    event.kind = "harness_limit";
+                    event.detail = "raw probe transport evidence unavailable";
+                } else {
+                    event.kind = "raw_probe_transport_event";
+                    event.detail = "transport event variant=" + std::to_string(source.index());
+                    if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
+                        event.stream_id = std::to_string(data->stream_id);
+                        event.detail += " fin=" + std::string(data->fin ? "true" : "false") +
+                            " bytes=" + hex_bytes(data->data);
+                    } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&source)) {
+                        event.stream_id = std::to_string(reset->stream_id);
+                        event.detail += " operation=peer-reset application_error=" + (reset->application_error ? std::to_string(*reset->application_error) : "unavailable");
+                    } else if (const auto* stop = std::get_if<transport::PeerStopSendingEvent>(&source)) {
+                        event.stream_id = std::to_string(stop->stream_id);
+                        event.detail += " operation=peer-stop-sending application_error=" + (stop->application_error ? std::to_string(*stop->application_error) : "unavailable");
+                    }
+                    event.detail += " transport_event_index=" + std::to_string(recorded);
+                }
+                event.connection_id = worker->connection_id;
+                event.detail += " ordinal=" + std::to_string(worker->context_ordinal);
+                batch.push_back(std::move(event));
+            }
+            for (; replacement_recorded < transcript.replacement_events.size(); ++replacement_recorded) {
+                storage::EvidenceEvent event;
+                event.scenario_id = transcript.scenario_id;
+                event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
+                event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                const auto& source = transcript.replacement_events[replacement_recorded];
+                event.kind = "raw_probe_replacement_event";
+                event.detail = "replacement session event variant=" + std::to_string(source.index());
+                if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
+                    event.stream_id = std::to_string(data->stream_id);
+                    event.detail += " fin=" + std::string(data->fin ? "true" : "false") + " bytes=" + hex_bytes(data->data);
+                }
+                event.detail += " replacement_event_index=" + std::to_string(replacement_recorded) +
+                    " ordinal=" + std::to_string(worker->context_ordinal);
+                batch.push_back(std::move(event));
+            }
+            if (!batch.empty()) store->append_events(worker->id,batch);
+        };
         std::string operational_error;
         try {
             while (!worker->stop_requested) {
                 const auto now = scenarios::RawProbeClock::now();
                 const auto& transcript = controller.poll(now);
-                std::vector<storage::EvidenceEvent> batch;
-                for (; recorded < transcript.events.size(); ++recorded) {
-                    storage::EvidenceEvent event;
-                    event.scenario_id = transcript.scenario_id;
-                    event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
-                    event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                    const auto& source = transcript.events[recorded];
-                    if (const auto* close = std::get_if<transport::PeerCloseEvent>(&source)) {
-                        event.kind = "peer_close";
-                        event.detail = std::string(close->error_space == transport::CloseErrorSpace::Application ? "application" : "transport") +
-                            " close code=" + std::to_string(close->error_code) +
-                            " transport_event_index=" + std::to_string(recorded);
-                    } else if (const auto* established = std::get_if<transport::ConnectionEstablishedEvent>(&source)) {
-                        worker->connection_id = hex_bytes(established->local_connection_id);
-                        event.kind = "transport_established";
-                        event.detail = "local_connection_id=" + worker->connection_id +
-                            " peer_connection_id=" + hex_bytes(established->peer_connection_id) +
-                            " alpn=" + hex_bytes(established->alpn) +
-                            " max_datagram_payload=" + std::to_string(established->max_datagram_payload) +
-                            " transport_event_index=" + std::to_string(recorded);
-                    } else if (std::holds_alternative<transport::EventQueueOverflowEvent>(source) ||
-                               std::holds_alternative<transport::TransportErrorEvent>(source)) {
-                        event.kind = "harness_limit";
-                        event.detail = "raw probe transport evidence unavailable";
-                    } else {
-                        event.kind = "raw_probe_transport_event";
-                        event.detail = "transport event variant=" + std::to_string(source.index());
-                        if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
-                            event.stream_id = std::to_string(data->stream_id);
-                            event.detail += " fin=" + std::string(data->fin ? "true" : "false") +
-                                " bytes=" + hex_bytes(data->data);
-                        } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&source)) {
-                            event.stream_id = std::to_string(reset->stream_id);
-                            event.detail += " operation=peer-reset application_error=" + (reset->application_error ? std::to_string(*reset->application_error) : "unavailable");
-                        } else if (const auto* stop = std::get_if<transport::PeerStopSendingEvent>(&source)) {
-                            event.stream_id = std::to_string(stop->stream_id);
-                            event.detail += " operation=peer-stop-sending application_error=" + (stop->application_error ? std::to_string(*stop->application_error) : "unavailable");
-                        }
-                        event.detail += " transport_event_index=" + std::to_string(recorded);
-                    }
-                    event.connection_id = worker->connection_id;
-                    event.detail += " ordinal=" + std::to_string(worker->context_ordinal);
-                    batch.push_back(std::move(event));
-                }
-                for (; replacement_recorded < transcript.replacement_events.size(); ++replacement_recorded) {
-                    storage::EvidenceEvent event;
-                    event.scenario_id = transcript.scenario_id;
-                    event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
-                    event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                    const auto& source = transcript.replacement_events[replacement_recorded];
-                    event.kind = "raw_probe_replacement_event";
-                    event.detail = "replacement session event variant=" + std::to_string(source.index());
-                    if (const auto* data = std::get_if<transport::StreamDataEvent>(&source)) {
-                        event.stream_id = std::to_string(data->stream_id);
-                        event.detail += " fin=" + std::string(data->fin ? "true" : "false") + " bytes=" + hex_bytes(data->data);
-                    }
-                    event.detail += " replacement_event_index=" + std::to_string(replacement_recorded) +
-                        " ordinal=" + std::to_string(worker->context_ordinal);
-                    batch.push_back(std::move(event));
-                }
-                if (!batch.empty()) store->append_events(worker->id,batch);
-                if (transcript.complete || transcript.harness_failed || transcript.timed_out || now >= deadline) break;
+                const bool finished = transcript.complete || transcript.harness_failed ||
+                    transcript.event_limit_reached || transcript.timed_out || now >= deadline;
+                // The last event may still grow by merging (RawProbeController::coalesce); it is
+                // stored once settled or when the context ends, so stored rows equal the transcript.
+                persist(transcript, finished ? transcript.events.size() : controller.settled_event_count(), now);
+                if (finished) break;
                 if (handle.valid()) {
                     const auto process = driver->poll(handle);
                     // A publisher may decline the host-less URI of the section 3.1.1 scenario.
@@ -962,15 +1006,30 @@ public:
         } catch (const std::exception& error) {
             operational_error = error.what();
         }
+        // However the loop ended, every event the transcript holds is stored in full.
+        try {
+            persist(controller.transcript(), controller.transcript().events.size(), scenarios::RawProbeClock::now());
+        } catch (const std::exception& error) {
+            if (operational_error.empty()) operational_error = error.what();
+        }
         auto transcript = controller.transcript();
         if (!operational_error.empty()) {
             transcript.complete = false;
             transcript.harness_failed = true;
+            transcript.harness_failure_reason = operational_error;
             append_context_event(worker, transcript.scenario_id, "harness_error", operational_error);
+        } else if (transcript.harness_failed) {
+            append_context_event(worker, transcript.scenario_id, "harness_error",
+                transcript.harness_failure_reason.empty() ? "harness failure without a recorded reason"
+                                                          : transcript.harness_failure_reason);
         }
+        // Truncated evidence is its own, scored-as-nothing, condition of this context only.
+        if (transcript.event_limit_reached)
+            append_context_event(worker, transcript.scenario_id, "context_event_limit",
+                                 transcript.event_limit_reason);
         if (worker->stop_requested) transcript.complete = false;
-        if (!transcript.complete && !transcript.harness_failed && !worker->stop_requested &&
-            scenarios::RawProbeClock::now() >= deadline)
+        if (!transcript.complete && !transcript.harness_failed && !transcript.event_limit_reached &&
+            !worker->stop_requested && scenarios::RawProbeClock::now() >= deadline)
             transcript.timed_out = true;
         transcript.unknown_auth_token_alias_compatibility_code = config.unknown_auth_token_alias_compatibility_code;
         transcript.denied_authorization_token = config.denied_authorization_token;
@@ -1570,6 +1629,12 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
         impl_->workers.pop_back();
         impl_->reserved_ports.erase(endpoint.port);
         if (replacement_port) impl_->reserved_ports.erase(*replacement_port);
+        try {
+            storage::EvidenceEvent reason;
+            reason.kind = "harness_error";
+            reason.detail = "the run's worker thread could not be started";
+            impl_->store->append_events(id, std::span(&reason, 1));
+        } catch (...) {}
         const requirements::ScoreSummary failure{
             requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
         impl_->store->finalize(id, failure, {});

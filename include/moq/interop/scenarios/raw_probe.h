@@ -17,6 +17,20 @@
 namespace moq::interop::scenarios {
 
 using RawProbeClock = std::chrono::steady_clock;
+// Bounds on what one context records. Every evaluator also bounds the events it will read
+// by the same number (their own kMaximumEvents copies are defined from it), so a transcript
+// the controller cut at these limits can never be mistaken for a complete one: it carries
+// RawProbeTranscript::event_limit_reached and is never scored.
+inline constexpr std::size_t kRawProbeMaximumEvents = 4096;
+// Stream bytes recorded per context. Each recorded event is persisted as a row holding its
+// bytes as hex, so this also bounds the stored evidence of one context (about twice this
+// many characters). Scored evidence is far smaller: the largest evaluator bound is 1 MiB.
+inline constexpr std::size_t kRawProbeMaximumEvidenceBytes = std::size_t{4} << 20;
+// Adjacent chunks of one publisher data stream are recorded as one event up to this size,
+// and only into an event that is already at least kRawProbeCoalesceMinimumBytes long, so
+// small protocol messages keep the chunk boundaries the transport delivered.
+inline constexpr std::size_t kRawProbeMaximumCoalescedBytes = 16 * 1024;
+inline constexpr std::size_t kRawProbeCoalesceMinimumBytes = 512;
 // Credit, UniCredit, DropInbound and ResumeInbound are transport steps rather
 // than streams and carry no bytes. Credit and UniCredit raise the peer's
 // bidirectional or unidirectional stream limit by `application_error` (reused
@@ -240,6 +254,16 @@ struct RawProbeTranscript {
     bool stimulus_delivered{false};
     bool complete{false};
     bool harness_failed{false};
+    // Why harness_failed was set: the first reason recorded. Empty unless harness_failed.
+    std::string harness_failure_reason;
+    // The publisher sent more than a context records (kRawProbeMaximumEvents events,
+    // kRawProbeMaximumEvidenceBytes stream bytes, or more than a gate or candidate buffer
+    // may hold). Later events were not recorded, so this context's evidence is truncated and
+    // it is never scored (raw_probe_stimulus_valid is false, and the evaluators skip it).
+    // That is a property of the publisher's output, not a fault of the harness, so the run
+    // goes on with its next context.
+    bool event_limit_reached{false};
+    std::string event_limit_reason;
     bool timed_out{false};
     std::optional<std::size_t> delivery_event_count;
     std::vector<transport::TransportEvent> events;
@@ -305,10 +329,18 @@ public:
     ~RawProbeController();
     const RawProbeTranscript& poll(RawProbeClock::time_point now);
     const RawProbeTranscript& transcript() const noexcept;
+    // Events before this index will not change any more. The last recorded event may still
+    // grow when the next chunk of its stream is merged into it (see coalesce), so a run that
+    // stores events as they arrive must store only the settled ones until the context ends.
+    std::size_t settled_event_count() const noexcept;
 private:
     bool flush(RawProbeAcceptedWrite& write);
     void send_auto_replies();
-    void fail();
+    void fail(std::string reason);
+    void truncate(std::string reason);
+    bool coalesce(const transport::StreamDataEvent& incoming);
+    bool can_extend(const transport::StreamDataEvent& tail) const;
+    std::size_t latest_event_marker() const;
     transport::SessionTransport& transport_;
     transport::SessionTransport* replacement_;
     bool replacement_setup_sent_{false};
@@ -335,5 +367,6 @@ private:
     std::optional<RawProbeClock::time_point> delivered_at_;
     std::optional<RawProbeClock::time_point> started_at_;
     std::size_t next_write_{0};
+    std::size_t evidence_bytes_{0};
 };
 }  // namespace moq::interop::scenarios

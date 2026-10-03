@@ -10,7 +10,7 @@ namespace {
 namespace d18 = wire::draft18;
 using Bytes = std::vector<std::byte>;
 constexpr std::size_t kMaximumResponseBytes = 2 * 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 
 Bytes bytes(std::initializer_list<unsigned> values) {
     Bytes result;

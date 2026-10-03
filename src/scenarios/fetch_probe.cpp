@@ -19,7 +19,7 @@ namespace d21 = wire::draft21;
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 constexpr std::size_t kMaximumFrame = 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 constexpr std::size_t kMaximumHeader = 18;
 constexpr std::uint64_t kRequestId = 1;
 

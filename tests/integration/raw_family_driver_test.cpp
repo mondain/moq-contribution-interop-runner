@@ -256,6 +256,58 @@ TEST(RawFamilyDriver, SecondSpawnFailurePreservesFirstProofWithoutFullFamilyPass
     EXPECT_TRUE(manager.stop(started.id));
 }
 
+TEST(RawFamilyDriver, ChattyPublisherEndsOneContextButNeverTheRun) {
+    DriverLogs logs;
+    const auto full21=catalog(21);
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    app::NativeRunManager manager(catalog(18),full21,store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",
+         .port_start=0,.port_end=0,.maximum_active_runs=1,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem",
+         .driver_executable=PICOQUIC_FAMILY_FLOOD_PATH,
+         .driver_arguments={"flood-first"},
+         .driver_log_root=logs.path});
+    const std::vector<std::string> ids={"d21-duplicate-request-goaway","d21-goaway-on-distinct-request-streams"};
+    const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,ids,2s,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto deadline=std::chrono::steady_clock::now()+12s;
+    while (store->load(started.id).state!=storage::RunState::Finalized && std::chrono::steady_clock::now()<deadline)
+        std::this_thread::sleep_for(1ms);
+    const auto run=store->load(started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    ASSERT_TRUE(run.score);
+    // The first publisher sent more than the evidence bound; the second context still ran.
+    const auto count=[&](std::string_view kind,std::string_view scenario) {
+        return std::count_if(run.events.begin(),run.events.end(),[&](const auto& event) {
+            return event.kind==kind && event.scenario_id==scenario;
+        });
+    };
+    EXPECT_EQ(count("transport_established",ids[0]),1);
+    EXPECT_EQ(count("transport_established",ids[1]),1);
+    EXPECT_EQ(count("context_event_limit",ids[0]),1);
+    EXPECT_EQ(count("context_event_limit",ids[1]),0);
+    // What was stored is bounded, and merged chunks are stored whole (more than one 1200 byte
+    // packet of bytes in a single row), so the rows equal the transcript that was cut.
+    EXPECT_LE(count("raw_probe_transport_event",ids[0]),4096);
+    EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+        const auto bytes=event.detail.find(" bytes=");
+        return event.kind=="raw_probe_transport_event" && event.scenario_id==ids[0] &&
+               bytes!=std::string::npos && event.detail.find(' ',bytes+7)-(bytes+7)>2*4000;
+    }));
+    EXPECT_EQ(count("harness_error",ids[0]),0);
+    EXPECT_EQ(count("context_end",ids[1])+count("context_complete",ids[1]),1);
+    // Truncated evidence is never scored and is not an operational error.
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Incomplete);
+    const auto row=std::find_if(run.outcomes.begin(),run.outcomes.end(),[](const auto& value) {
+        return value.requirement_id=="D21-9-2-MUST-328";
+    });
+    ASSERT_NE(row,run.outcomes.end());
+    EXPECT_EQ(row->state,requirements::OutcomeState::NotRun);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
 app::NativeRunManager capability_manager(const std::shared_ptr<storage::SqliteRunStore>& store,
                                          const DriverLogs& logs) {
     return app::NativeRunManager(catalog(18),catalog(21),store,

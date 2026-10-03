@@ -15,7 +15,7 @@ namespace d21 = wire::draft21;
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 constexpr std::size_t kMaximumFrame = 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 Bytes bytes(std::initializer_list<unsigned> values) {
     Bytes result;
     for (auto value : values) result.push_back(static_cast<std::byte>(value));

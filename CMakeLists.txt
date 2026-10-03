@@ -409,14 +409,19 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
+    add_executable(moq-interop-raw-family-flood-peer tests/support/raw_family_flood_peer.cpp)
+    target_link_libraries(moq-interop-raw-family-flood-peer PRIVATE
+        moq-interop-test-client nlohmann_json::nlohmann_json)
     add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
     target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
         moq-interop-runs nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
-        PICOQUIC_FAMILY_DRIVER_PATH="$<TARGET_FILE:moq-interop-raw-family-driver-peer>")
-    add_dependencies(moq-interop-raw-family-driver-tests moq-interop-raw-family-driver-peer)
+        PICOQUIC_FAMILY_DRIVER_PATH="$<TARGET_FILE:moq-interop-raw-family-driver-peer>"
+        PICOQUIC_FAMILY_FLOOD_PATH="$<TARGET_FILE:moq-interop-raw-family-flood-peer>")
+    add_dependencies(moq-interop-raw-family-driver-tests moq-interop-raw-family-driver-peer
+                     moq-interop-raw-family-flood-peer)
     target_compile_options(moq-interop-raw-family-driver-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME raw-family-driver COMMAND moq-interop-raw-family-driver-tests)
@@ -648,6 +653,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-probe-tests tests/protocol/raw_probe_test.cpp)
     target_link_libraries(moq-interop-raw-probe-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME raw-probe COMMAND moq-interop-raw-probe-tests)
+
+    add_executable(moq-interop-raw-probe-event-limit-tests tests/protocol/raw_probe_event_limit_test.cpp)
+    target_link_libraries(moq-interop-raw-probe-event-limit-tests PRIVATE moq-interop-scenarios moq-interop-requirements GTest::gtest_main)
+    add_test(NAME raw-probe-event-limit COMMAND moq-interop-raw-probe-event-limit-tests)
 
     add_executable(moq-interop-raw-probe-liveness-tests tests/protocol/raw_probe_liveness_test.cpp)
     target_link_libraries(moq-interop-raw-probe-liveness-tests PRIVATE moq-interop-scenarios GTest::gtest_main)

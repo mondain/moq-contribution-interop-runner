@@ -23,7 +23,7 @@ using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 
 constexpr std::size_t kMaximumBytes = 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 constexpr std::size_t kMaximumStreams = 64;
 constexpr std::uint64_t kGroup = 7;
 constexpr std::uint64_t kObject = 9;

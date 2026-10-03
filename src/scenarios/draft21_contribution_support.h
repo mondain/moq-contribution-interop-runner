@@ -23,7 +23,7 @@ namespace moq::interop::scenarios::d21c {
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 constexpr std::size_t kMaximumTotalBytes = 1u << 20;
 
 struct Fixture {

@@ -285,6 +285,8 @@ OutcomeState aggregate_raw_profiles(const Requirement& requirement,
         for (const auto& context : contexts) {
             if (context.scenario_id != id || !context.complete ||
                 !context.stimulus_delivered || !context.raw_probe) continue;
+            // Evidence cut at a recording limit is never scored, whatever else it shows.
+            if (context.raw_probe->event_limit_reached) continue;
             const auto result = evaluate(profile,context);
             if (result && !*result) return OutcomeState::Fail;
             if (result && &context == sole_context) {

@@ -30,7 +30,7 @@ using Namespace = std::vector<Bytes>;
 using Observe = std::function<std::optional<bool>(const RawProbeTranscript&, bool)>;
 
 inline constexpr std::size_t kMaximumFrame = 65546;
-inline constexpr std::size_t kMaximumEvents = 4096;
+inline constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 inline constexpr std::uint64_t kSetupType = 0x2F00;
 // Section 10.6 and 15.10.2: REQUEST_ERROR codes used by these families.
 inline constexpr std::uint64_t kErrorGoingAway = 0x6;

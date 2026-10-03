@@ -23,7 +23,7 @@ using Namespace = std::vector<Bytes>;
 using Value = std::variant<std::uint64_t, Bytes>;
 using Pairs = std::vector<std::pair<std::uint64_t, Value>>;
 constexpr std::size_t kMaximumBytes = 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 struct Fixture { Namespace track_namespace; Bytes track_name; };
 struct Wrapper { std::optional<Bytes> bytes; Pairs contents; };
 struct Retrieval {

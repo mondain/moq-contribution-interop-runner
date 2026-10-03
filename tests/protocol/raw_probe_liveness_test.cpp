@@ -158,6 +158,38 @@ TEST_P(Liveness, ServedFollowUpWithoutCloseIsFailAndStimulusIsUnchanged) {
     EXPECT_EQ(evaluate_raw_probe_close(done, scenario.unbound, scenario.expected_close), std::optional<bool>{false});
 }
 
+// Chunks of one publisher data stream are recorded as one event, but never across a moment
+// the transcript counts events at: the stimulus acceptance and the follow-up's anchor and
+// acceptance are such moments.
+TEST_P(Liveness, DataChunksAreNeverMergedAcrossRecordedEventCounts) {
+    const auto scenario = make(GetParam().first, GetParam().second);
+    const auto chunk = [](unsigned v) { return Bytes(600, static_cast<std::byte>(v)); };
+    const auto chunk2 = [](unsigned v) { return Bytes(1200, static_cast<std::byte>(v)); };
+    Session session(bound(scenario));
+    session.send(transport::StreamDataEvent{6, chunk(1), false});
+    session.poll(0ms);   // the stimulus is accepted after 3 events (CONNECTION, SETUP, chunk 1)
+    ASSERT_EQ(session.transcript().delivery_event_count, 3u);
+    session.send(transport::StreamDataEvent{6, chunk(2), false});
+    session.poll(100ms);
+    ASSERT_EQ(session.transcript().events.size(), 4u);   // not merged into chunk 1: it came after
+    session.send(transport::StreamDataEvent{6, chunk(2), false});
+    session.poll(200ms);
+    ASSERT_EQ(session.transcript().events.size(), 4u);   // merged: no count lies past event 3
+    EXPECT_EQ(std::get<transport::StreamDataEvent>(session.transcript().events[3]).data, chunk2(2));
+    session.poll(500ms);   // the follow-up is anchored and accepted here
+    ASSERT_TRUE(session.transcript().liveness.has_value());
+    const auto marker = session.transcript().liveness->write.delivery_event_count;
+    ASSERT_TRUE(marker.has_value());
+    EXPECT_EQ(*marker, 4u);
+    EXPECT_EQ(session.transcript().liveness->anchor_event_count, 4u);
+    session.send(transport::StreamDataEvent{6, chunk(3), false});
+    session.poll(520ms);
+    // The chunk after the follow-up stays a separate event, behind the marker.
+    ASSERT_EQ(session.transcript().events.size(), 5u);
+    EXPECT_EQ(std::get<transport::StreamDataEvent>(session.transcript().events[*marker]).data, chunk(3));
+    EXPECT_EQ(std::get<transport::StreamDataEvent>(session.transcript().events[2]).data, chunk(1));
+}
+
 TEST_P(Liveness, CloseWithTheRequiredCodeStillPasses) {
     const auto scenario = make(GetParam().first, GetParam().second);
     for (const auto when : {10ms, 700ms, 1100ms}) {

@@ -19,7 +19,7 @@ namespace d21 = wire::draft21;
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 constexpr std::size_t kMaximumBytes = 65546;
-constexpr std::size_t kMaximumEvents = 4096;
+constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 struct Fixture { Namespace ns; Bytes name; };
 
 Bytes bytes(std::initializer_list<unsigned> values) {

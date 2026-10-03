@@ -21,7 +21,7 @@ namespace d18 = wire::draft18;
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
 
-inline constexpr std::size_t kMaximumEvents = 4096;
+inline constexpr std::size_t kMaximumEvents = kRawProbeMaximumEvents;
 inline constexpr std::size_t kMaximumBytes = 65546;
 
 struct Fixture {

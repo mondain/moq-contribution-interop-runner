@@ -333,7 +333,11 @@ TEST(RawProbeEvidenceGate, BoundedCrossStreamInputCannotBeBypassedByCallback) {
     ProbeTransport transport;RawProbeController controller(transport,definition);
     transport.events={transport::ConnectionEstablishedEvent{},transport::StreamDataEvent{2,b({0xaf,0,0,0}),false},
         transport::StreamDataEvent{6,std::vector<std::byte>(65547,std::byte{0}),false}};
-    EXPECT_TRUE(controller.poll(RawProbeClock::time_point{}).harness_failed);
+    // Gate input beyond its bound truncates this context's evidence; it is not a harness fault.
+    const auto& truncated=controller.poll(RawProbeClock::time_point{});
+    EXPECT_TRUE(truncated.event_limit_reached);
+    EXPECT_FALSE(truncated.harness_failed);
+    EXPECT_FALSE(truncated.event_limit_reason.empty());
     EXPECT_TRUE(transport.stop_calls.empty());
     auto forged=independent_stop_transcript();
     std::get<transport::StreamDataEvent>(forged.events[2]).data.assign(65547,std::byte{0});
@@ -347,7 +351,8 @@ TEST(RawProbeEvidenceGate, BoundedCrossStreamInputCannotBeBypassedByCallback) {
             transport::StreamDataEvent{6,std::vector<std::byte>(32771,std::byte{0}),false},
             transport::StreamDataEvent{10,std::vector<std::byte>(32771 + (exceeds ? 1u : 0u),std::byte{0}),false}};
         const auto& result=bounded.poll(RawProbeClock::time_point{});
-        EXPECT_EQ(result.harness_failed,exceeds);
+        EXPECT_EQ(result.event_limit_reached,exceeds);
+        EXPECT_FALSE(result.harness_failed);
         EXPECT_EQ(result.stimulus_delivered,!exceeds);
         EXPECT_EQ(split.stop_calls.size(),exceeds ? 0u : 1u);
         if (!exceeds) {
@@ -493,7 +498,7 @@ TEST(RawProbeStaged, ResponseBeforeFullPriorWriteAcceptanceCannotUnlockContinuat
     ASSERT_TRUE(controller.poll(now).complete);
     EXPECT_EQ(evaluate_raw_probe_close(controller.transcript(),definition,3),true);
 }
-TEST(RawProbeStaged, OversizedGateInputFailsHarnessAndCannotProveSuccess) {
+TEST(RawProbeStaged, OversizedGateInputTruncatesEvidenceAndCannotProveSuccess) {
     const auto definition = staged_definition(false);
     auto forged = staged_transcript(false);
     std::get<transport::StreamDataEvent>(forged.events[2]).data.assign(65547,std::byte{0});
@@ -505,7 +510,9 @@ TEST(RawProbeStaged, OversizedGateInputFailsHarnessAndCannotProveSuccess) {
         transport::StreamDataEvent{2,b({0xaf,0,0,0}),false}};
     EXPECT_FALSE(controller.poll(now).stimulus_delivered);
     transport.events = {forged.events[2]};
-    EXPECT_TRUE(controller.poll(now).harness_failed);
+    const auto& truncated = controller.poll(now);
+    EXPECT_TRUE(truncated.event_limit_reached);
+    EXPECT_FALSE(truncated.harness_failed);
     EXPECT_EQ(transport.output[1],definition.writes[0].bytes);
 }
 TEST(RawProbeStaged, InvalidStreamReferencesAndReuseOfClosedOrStaleStateAreRejected) {
@@ -592,13 +599,16 @@ TEST(RawProbe, SetupBeforeEstablishmentCannotUnlockPeerResponse) {
     EXPECT_TRUE(result.harness_failed);
     EXPECT_TRUE(transport.output[0].empty());
 }
-TEST(RawProbe, PeerRequestBufferLimitIsHarnessFailure) {
+TEST(RawProbe, PeerRequestBufferLimitTruncatesEvidenceWithoutHarnessFailure) {
     ProbeTransport transport;
     RawProbeController controller(transport, reactive_definition());
     transport.events = {transport::ConnectionEstablishedEvent{},
         transport::StreamDataEvent{2, b({0xaf, 0, 0, 0}), false},
         transport::StreamDataEvent{0, std::vector<std::byte>(65547), false}};
-    EXPECT_TRUE(controller.poll(RawProbeClock::time_point{}).harness_failed);
+    const auto& result = controller.poll(RawProbeClock::time_point{});
+    EXPECT_TRUE(result.event_limit_reached);
+    EXPECT_FALSE(result.harness_failed);
+    EXPECT_NE(result.event_limit_reason.find("unscored"), std::string::npos);
     EXPECT_TRUE(transport.output[0].empty());
 }
 TEST(RawProbe, WaitsForCompletePeerSetupAndRecordsAcceptedBytes) {
@@ -988,7 +998,9 @@ TEST(RawProbePrepared, BoundsEvidenceAndRejectsStaticPreparationMetadata) {
     RawProbeController controller(transport,definition);
     transport.events={transport::ConnectionEstablishedEvent{},transport::StreamDataEvent{2,b({1}),false},
         transport::DatagramEvent{std::vector<std::byte>(65546)}};
-    EXPECT_TRUE(controller.poll(RawProbeClock::now()).harness_failed);
+    const auto& truncated=controller.poll(RawProbeClock::now());
+    EXPECT_TRUE(truncated.event_limit_reached);
+    EXPECT_FALSE(truncated.harness_failed);
     EXPECT_EQ(calls,0u);
     EXPECT_EQ(transport.output.count(1),0u);
     auto static_definition=staged_definition(false);

@@ -757,4 +757,49 @@ TEST(Draft18ResponseEvaluators, ActualCatalogRequiresCompleteUniqueCleanupEviden
     }
 }
 
+// Evidence cut at a recording limit (RawProbeTranscript::event_limit_reached) is unscored:
+// the same transcripts that pass or fail without the flag are NotRun with it, and the
+// direct close evaluator gives no verdict either.
+TEST(Draft18TruncatedEvidence, NeverPassesOrFailsAnyRawFamilyRow) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(18, root / "docs", root / "requirements/draft-digests.json");
+    const auto checked = RequirementCatalog::load(source, root / "requirements/draft18.json");
+    std::size_t controls = 0;
+    for (const auto& profile : scenarios::draft18_close_profiles()) {
+        SCOPED_TRACE(std::string(profile.scenario_id));
+        const auto definition = scenarios::draft18_close_probe(profile.scenario_id, std::chrono::milliseconds(10));
+        auto transcript = test::raw_probe_transcript(definition);
+        transcript.events.push_back(transport::PeerCloseEvent{
+            transport::CloseErrorSpace::Application, profile.expected_close.value_or(3), {}});
+        ScenarioContext context;
+        context.scenario_id = profile.scenario_id;
+        context.webtransport = profile.webtransport_only;
+        context.complete = context.stimulus_delivered = true;
+        context.raw_probe = transcript;
+        const auto state = [&] {
+            return outcome_for(evaluate_draft18(checked, std::span(&context, 1)),
+                               std::string(profile.requirement_id)).state;
+        };
+        const auto direct = [&] {
+            return scenarios::evaluate_raw_probe_close(*context.raw_probe, definition, profile.expected_close);
+        };
+        ASSERT_EQ(state(), OutcomeState::Pass);   // the control: this transcript does pass
+        ASSERT_EQ(direct(), std::optional<bool>(true));
+        context.raw_probe->event_limit_reached = true;
+        EXPECT_EQ(state(), OutcomeState::NotRun);
+        EXPECT_EQ(direct(), std::nullopt);
+        ++controls;
+        if (profile.expected_close) {
+            context.raw_probe = transcript;
+            std::get<transport::PeerCloseEvent>(context.raw_probe->events.back()).error_code = 0;
+            ASSERT_EQ(state(), OutcomeState::Fail);  // and this one does fail
+            context.raw_probe->event_limit_reached = true;
+            EXPECT_EQ(state(), OutcomeState::NotRun);
+            EXPECT_EQ(direct(), std::nullopt);
+            ++controls;
+        }
+    }
+    EXPECT_GT(controls, 10u);
+}
+
 }  // namespace moq::interop::requirements

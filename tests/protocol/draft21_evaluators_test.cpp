@@ -945,4 +945,41 @@ TEST(Draft21ResponseFamilies, ActualCatalogNeedsEveryNamedContextAndFailureDomin
     }
 }
 
+// Evidence cut at a recording limit is unscored: transcripts that pass or fail without
+// RawProbeTranscript::event_limit_reached are NotRun with it, for every close probe.
+TEST(Draft21TruncatedEvidence, NeverPassesOrFailsAnyCloseRow) {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = load_draft_source(21, root / "docs", root / "requirements/draft-digests.json");
+    const auto catalog = RequirementCatalog::load(source, root / "requirements/draft21.json");
+    std::size_t controls = 0;
+    for (const auto& probe : scenarios::draft21_close_probes()) {
+        SCOPED_TRACE(probe.definition.id);
+        const auto row = std::find_if(catalog.requirements.begin(), catalog.requirements.end(),
+            [&](const auto& candidate) { return candidate.id == probe.requirement_id; });
+        ASSERT_NE(row, catalog.requirements.end());
+        if (row->scenarios.size() != 1) continue;  // such a row needs other contexts to pass
+        auto transcript = close_probe_context(probe);
+        transcript.events.push_back(transport::PeerCloseEvent{
+            transport::CloseErrorSpace::Application, probe.expected_close.value_or(3), {}});
+        const auto state = [&](const auto& candidate) {
+            return outcome_for(evaluate_draft21_close_probe(catalog, candidate), probe.requirement_id).state;
+        };
+        ASSERT_EQ(state(transcript), OutcomeState::Pass);
+        auto truncated = transcript;
+        truncated.event_limit_reached = true;
+        EXPECT_EQ(state(truncated), OutcomeState::NotRun);
+        EXPECT_EQ(scenarios::evaluate_raw_probe_close(truncated, probe.definition, probe.expected_close),
+                  std::nullopt);
+        ++controls;
+        if (probe.expected_close) {
+            transcript.events.back() = transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 99, {}};
+            ASSERT_EQ(state(transcript), OutcomeState::Fail);
+            transcript.event_limit_reached = true;
+            EXPECT_EQ(state(transcript), OutcomeState::NotRun);
+            ++controls;
+        }
+    }
+    EXPECT_GT(controls, 10u);
+}
+
 }  // namespace moq::interop::requirements

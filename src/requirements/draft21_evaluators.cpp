@@ -581,6 +581,9 @@ std::vector<Outcome> evaluate_draft21_raw_probes(
             for (const auto& transcript : transcripts) {
                 if (includes(row.scenarios, transcript.scenario_id.c_str()))
                     ++contexts[transcript.scenario_id];
+                // Evidence cut at a recording limit is never scored: the context counts as
+                // run (so the row cannot pass on the others) but proves nothing either way.
+                if (transcript.event_limit_reached) continue;
                 auto result = raw_result(row, transcript, closes, requests, peers, responses, fetches, cancellations, fetch_responses, request_responses, ranges, overlaps, first_fetches, group_orders, goaways, immutable_profiles, object_profiles);
                 if (!result) {
                     // Slice A raw probes (draft21_gap_a.cpp).
