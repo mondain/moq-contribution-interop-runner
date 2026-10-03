@@ -812,7 +812,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_include_directories(moq-interop-report-accessibility-tests PRIVATE
         "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-report-accessibility-tests PRIVATE
-        moq-interop-http GTest::gtest_main)
+        moq-interop-http nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME report-accessibility COMMAND moq-interop-report-accessibility-tests)
 
     add_executable(moq-interop-publisher-driver-tests
