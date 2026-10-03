@@ -90,6 +90,10 @@ Rows that passed on 0.4.1 and no longer produce a passing verdict:
 
 ## Results observed with moqxr 0.4.1
 
+> Historical: the sections below record what moqxr 0.4.1 did on 2026-10-02. Many of
+> the deviations were fixed in `0993cf7`; the current status of each is in the table in
+> [moqxr-punch-list.md](moqxr-punch-list.md) and the summary in the section above.
+
 On 2026-10-02, against `openmoq-publisher 0.4.1 (commit 9bda5c9)` and the
 `locmaf-publisher.mp4` fixture from the moqxr tests, `bash tests/e2e/moqxr-matrix.sh`
 ran four driven runs, each with one reference scenario

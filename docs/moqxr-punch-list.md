@@ -3,8 +3,46 @@
 This is a work list for an agent fixing `openmoq-publisher` (moqxr) so that it
 conforms to MoQT draft 18 and draft 21. Every item comes from a run of the interop
 runner in this repository against `openmoq-publisher 0.4.1 (commit 9bda5c9)`, with
-the evidence and draft citation recorded below. Background and the full result set
+the evidence and draft citation recorded below. The item bodies keep that original
+evidence; the status table that follows records what a later sweep against moqxr
+`0993cf7` showed. Background and the full result set
 are in [interop-notes.md](interop-notes.md).
+
+## Status against moqxr 0993cf7
+
+A full sweep (about 760 driven runs) against `0993cf7` (`0.4.1-dev`) was compared with
+the 0.4.1 sweep. "Pass" means a row now passes. "No verdict" means it no longer fails
+but the sweep recorded no pass either (the run ended `incomplete`), so the fix is not
+confirmed. An item body below describes the 0.4.1 behavior unless it says otherwise.
+
+| Item | Status on 0993cf7 | Rows still failing |
+|------|-------------------|--------------------|
+| M-01 duplicate unknown SETUP options | Fixed for draft 18 (4 rows pass); D21-13-MUST-593 has no verdict | none |
+| M-02 malformed namespaces and names | Draft 18 fixed; draft 21 open | D21-8-7-MUST-251 |
+| M-03 SUBSCRIBE_NAMESPACE 32-field limit | Draft 18 fixed; draft 21 open | D21-9-15-MUST-383 |
+| M-04 DOES_NOT_EXIST code | Fixed (7 rows pass) | none |
+| M-05 namespace prefix overlap | Draft 18 fixed; D21-9-15-MUST-385 has no verdict | none |
+| M-06 duplicate SUBSCRIBE | Fixed | none |
+| M-07 FIRST_OBJECT | Fixed | none |
+| M-08 server SETUP AUTHORITY or PATH | Fixed (4 rows pass) | none |
+| M-09 unknown messages and stream types | Mostly fixed (8 of 10 rows pass or have no failure) | D18-10-4-MUST-007, D18-10-MUST-008 |
+| M-10 AUTHORIZATION TOKEN structure | Draft 18 fixed; draft 21 open | D21-8-9-MUST-267, D21-8-9-MUST-277 |
+| M-11 Range Filter without MAX_FILTER_RANGES | Open | D21-3-3-2-MUST-065, D21-9-1-6-MUST-315 |
+| M-12 nested FILL_PARAMETERS | Open | D21-9-20-9-MUST-429, D21-9-20-10-MUST-432, D21-9-20-16-MUST-447 |
+| M-13 REQUEST_UPDATE_OK LARGEST_OBJECT | No verdict | none |
+| M-14 Track Properties tolerated | Unscored (timeout artifact, see interop-notes) | none |
+| M-15 REDIRECT and oversized REQUEST_ERROR | Fixed (3 rows pass) | none |
+| M-16 Request-ID checks | No work needed; still passing | none |
+| M-17 unsupported request types | Partly fixed: FETCH and TRACK_STATUS now get NOT_SUPPORTED. See the note under M-17 | D18-10-12-2-MUST-004 |
+| M-18 WebTransport datagram validation | No failing rows; D18-11-4-2-MUST-002 unscored | none |
+| M-19 control-stream GOAWAY URI | No failing rows; not scored by any sweep run | none |
+| M-20 rejected announcement ends the session | No failing rows; D18-14-MUST-004 not scored | none |
+| M-21 unknown FETCH Type | New, open | D18-10-12-MUST-001 |
+
+D18-10-12-2-MUST-004 failed in the sweep because the sweep did not declare the
+publisher cache-less. Run with `--publisher-no-fetch` (or `"publisher_capabilities":
+{"fetch": false}`) and the FETCH-dependent rows become not applicable instead of
+failing. Re-check this row with the declaration before treating it as a moqxr defect.
 
 ## Ground rules
 
@@ -390,7 +428,7 @@ recommendation (a SHOULD), not a MUST:
   error code, rather than ignoring them." NOT_SUPPORTED is code 0x3 in both drafts
   (draft 18 table at 6850, draft 21 at 7659). Draft 18 line 3895 defines it: the
   endpoint does not support the type of request.
-- **Observed:** a well-formed FETCH (or TRACK_STATUS) gets `REQUEST_ERROR` code 0x1
+- **Observed (0.4.1; fixed in `0993cf7`, which now answers NOT_SUPPORTED without ending the session, but see M-21):** a well-formed FETCH (or TRACK_STATUS) gets `REQUEST_ERROR` code 0x1
   (UNAUTHORIZED) with the text "unsupported request stream", and then moqxr closes the
   session with PROTOCOL_VIOLATION and logs "received unsupported request stream".
 - **Where:** `moqt_session.cpp` lines 4331-4333, 7522, 8999-9001, 10107.
