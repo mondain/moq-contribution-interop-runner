@@ -103,6 +103,9 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes \
             -keyout "$test_dir/key.pem" -out "$test_dir/cert.pem" \
             -subj /CN=localhost -days 1 >/dev/null 2>&1
+          # The runner in the image is uid 10001, so it must be able to enter this directory
+          # (mktemp creates it 0700) as well as read the files.
+          chmod 755 "$test_dir"
           chmod 644 "$test_dir/key.pem" "$test_dir/cert.pem"
           docker run -d --name moq-interop-ci --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m \
