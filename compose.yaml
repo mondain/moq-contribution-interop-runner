@@ -6,6 +6,7 @@ services:
       args:
         SOURCE_REVISION: ${MOQ_INTEROP_SOURCE_REVISION:?set MOQ_INTEROP_SOURCE_REVISION to the exact source revision}
         SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH:?set SOURCE_DATE_EPOCH through scripts/container-build.sh}
+        BUILD_JOBS: ${MOQ_INTEROP_BUILD_JOBS:-2}
     user: "10001:10001"
     read_only: true
     tmpfs:

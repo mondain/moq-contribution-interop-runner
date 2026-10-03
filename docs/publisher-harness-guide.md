@@ -98,6 +98,20 @@ WebTransport (`"transport": "webtransport"`) additionally returns `url`
 Start your publisher now. The run ends when its scenario completes, the timeout
 expires or you stop it.
 
+For a run with several scenarios, the endpoint in `publisher_endpoint` is only the
+first context's. Each `context_ready` event carries the endpoint URI to use for that
+context in its `detail` (`endpoint=...`); connect to that, not to a URI you saved
+earlier. The address and port stay the same, but over native QUIC a few contexts
+change the rest of the URI on purpose, because the URI is the thing under test:
+
+| Context | Endpoint in `context_ready` | What to do |
+|---|---|---|
+| Draft 18 `connect-with-empty-host-moqt-uri` | `moqt://:PORT/moq`, a URI with no host | A conforming publisher does not use it; the row can only fail if a connection arrives. Not connecting is expected, and it does not mean your publisher is broken |
+| Draft 18 `connect-publisher-to-native-uri-with-query` | `moqt://HOST:PORT/moq?interop=1` | Connect with the query kept in the URI |
+| Draft 21 native URI scenarios | `/moq`, `/moq?run=1` or `/moq?` as the scenario names | Connect with the exact path and query |
+
+Over WebTransport the URL is always `https://ADDRESS:PORT/moq`.
+
 ### 2.3 Poll, then read the results
 
 ```sh

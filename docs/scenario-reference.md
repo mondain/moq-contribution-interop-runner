@@ -27,8 +27,10 @@ for what each one requires. For how outcomes and scores work see
   `d21-setup-duplicate-unknown-options`, `d21-server-sends-authority`,
   `d21-server-sends-path`, and the typed FETCH and discovery profiles) take
   exactly one scenario per run. Mixing them with raw probes returns HTTP 422.
-- In observed mode, read the run's events and reconnect to the same endpoint
-  each time a `context_ready` event names the next scenario. In driven mode the
+- In observed mode, read the run's events and reconnect each time a `context_ready`
+  event names the next scenario, using the endpoint URI in that event: the address
+  and port stay the same, but some native-QUIC contexts vary the path or query, and
+  one draft 18 context uses a URI with an empty host. In driven mode the
   adapter is started once per context and receives the scenario ID in its
   request. Observed mode does not authenticate the publisher's identity.
 - QUIC DATAGRAM must be negotiated; see [the harness guide](publisher-harness-guide.md#7-requirements-your-publisher-must-meet).

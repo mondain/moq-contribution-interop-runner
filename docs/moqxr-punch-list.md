@@ -559,3 +559,19 @@ These come out of the same results but belong to the runner repository:
   `d21-unknown-request-stream-message`, `d21-duplicate-invalid-request-id`).
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
+
+### M-21 An unknown FETCH Type must close the session, not draw REQUEST_ERROR (draft 18)
+
+Found against moqxr `0993cf7` (0.4.1-dev), which resolved M-17 by answering FETCH and
+TRACK_STATUS with NOT_SUPPORTED. That reply is sent before the FETCH Type is looked at.
+
+- **Draft:** draft 18 line 4355: "An endpoint that receives a Fetch Type other than 0x1,
+  0x2 or 0x3 MUST close the session with a PROTOCOL_VIOLATION."
+- **Row:** D18-10-12-MUST-001, scenario `receive-fetch-with-unknown-type`. It passed on
+  0.4.1 (which closed on every FETCH) and fails deterministically on `0993cf7`, on both
+  transports: no close, and the run records no PROTOCOL_VIOLATION.
+- **Where:** `moqt_session.cpp`, the `request_type == 0x16 || 0x0d` branch near line 4444.
+  It decodes only the Request ID and never reads the Fetch Type.
+- **Fix:** for FETCH (0x16), decode the Fetch Type after the Request ID; if it is not
+  0x1, 0x2 or 0x3, close with PROTOCOL_VIOLATION. A valid type still gets NOT_SUPPORTED.
+  This needs no cache and does not require implementing FETCH.

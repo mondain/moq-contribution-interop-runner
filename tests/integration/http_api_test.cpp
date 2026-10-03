@@ -403,6 +403,31 @@ TEST_F(HttpApiTest, HealthzExposesRequiresFetchPerProfileAndTheStartupDefault) {
     EXPECT_FALSE(get_json("/healthz").at("publisher_capability_defaults").at("fetch").get<bool>());
 }
 
+TEST_F(HttpApiTest, UnsupportedRunConfigNamesTheOffendingScenario) {
+    const auto post = [&](const Json& scenarios) {
+        const auto response = client_->Post("/api/v1/runs",
+            Json{{"draft", 18}, {"transport", "webtransport"}, {"mode", "observed"},
+                 {"scenarios", scenarios}, {"timeout_ms", 1000}}.dump(),
+            "application/json");
+        EXPECT_TRUE(response);
+        EXPECT_EQ(response->status, 422);
+        const auto error = Json::parse(response->body).at("error");
+        EXPECT_EQ(error.at("code"), "unsupported_run_config");
+        return error.at("message").get<std::string>();
+    };
+    // An unknown scenario is named, even when it sits among valid ones.
+    const auto unknown = post(Json::array({"receive-unknown-message-type", "no-such-scenario",
+                                           "receive-unknown-unidirectional-stream-type"}));
+    EXPECT_NE(unknown.find("'no-such-scenario'"), std::string::npos) << unknown;
+    EXPECT_NE(unknown.find("draft 18"), std::string::npos) << unknown;
+    // A typed scenario in a multi-scenario list is named and the rule is stated.
+    const auto typed = post(Json::array({"receive-unknown-message-type", "subscribe-to-publisher-track"}));
+    EXPECT_NE(typed.find("'subscribe-to-publisher-track'"), std::string::npos) << typed;
+    EXPECT_NE(typed.find("typed scenario"), std::string::npos) << typed;
+    EXPECT_NE(typed.find("on its own"), std::string::npos) << typed;
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
 TEST_F(HttpApiTest, CreatesListsAndLoadsRunsWithEvents) {
     const auto malformed = client_->Post("/api/v1/runs", "{", "application/json");
     ASSERT_TRUE(malformed);

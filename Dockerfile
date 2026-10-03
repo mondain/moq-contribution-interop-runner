@@ -15,6 +15,9 @@ FROM apt-base AS builder
 
 ARG SOURCE_REVISION
 ARG SOURCE_DATE_EPOCH
+# Parallel compile jobs. It does not change the output: the image is built with a fixed
+# SOURCE_DATE_EPOCH and no linker build id. Raise it on a large machine.
+ARG BUILD_JOBS=2
 RUN if ! printf '%s\n' "${SOURCE_REVISION}" | grep -Eq '^[0-9a-f]{40}$'; then \
         echo 'SOURCE_REVISION must be a full lowercase Git object ID' >&2; exit 2; fi
 
@@ -46,7 +49,7 @@ RUN cmake -S . -B /build \
         -DCMAKE_INSTALL_PREFIX=/opt/moq-interop \
         -DMOQ_INTEROP_BUILD_TESTS=OFF \
         -DMOQ_INTEROP_SOURCE_REVISION=${SOURCE_REVISION} \
-    && cmake --build /build --parallel 2 \
+    && cmake --build /build --parallel "${BUILD_JOBS}" \
     && cmake --install /build --strip
 
 FROM apt-base AS runtime

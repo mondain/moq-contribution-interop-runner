@@ -149,9 +149,13 @@ finalized run returns 409 `run_finalized`.
 ### Observed and driven mode
 
 In observed mode you start the publisher yourself and point it at
-`publisher_endpoint`. For a multi-scenario run, read the events and reconnect to
-the same endpoint with a fresh session each time a `context_ready` event names
-the next scenario. The runner does not authenticate which process connects.
+`publisher_endpoint`. For a multi-scenario run, read the events and reconnect with
+a fresh session each time a `context_ready` event names the next scenario, using the
+endpoint URI in that event's `detail`: the address and port are constant, but over
+native QUIC a few contexts change the path, add a query, or (draft 18
+`connect-with-empty-host-moqt-uri`) leave the host empty, because the URI itself is
+under test. See [publisher-harness-guide.md](publisher-harness-guide.md#22-create-a-run-and-connect-observed-mode).
+The runner does not authenticate which process connects.
 
 In driven mode the runner launches the executable configured with
 `--driver-executable` once per context, writes a JSON request file and passes it
@@ -283,7 +287,7 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 | 409 | `run_finalized` | Stop requested for a finalized run |
 | 409 | `run_not_active` | The run is not active in this process |
 | 422 | `scenario_requires_publisher_capability` | Every selected scenario needs a capability the run declares the publisher does not implement (today only FETCH); the message names the first scenario and the capability |
-| 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. Unsupported scenarios are never silently scored |
+| 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. The message names the offending scenario and the reason. Unsupported scenarios are never silently scored |
 | 500 | `internal_error` | Unexpected failure |
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |
 | 503 | `publisher_ports_exhausted` | Every port in the range is in use (replacement-session scenarios need two free ports) |
