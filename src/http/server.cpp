@@ -729,16 +729,33 @@ public:
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities);
                 const bool draft21_scenario =
                     requested.draft == app::DraftVersion::Draft21;
-                if (std::any_of(requested.scenario_ids.begin(),requested.scenario_ids.end(),[&](const auto& id) {
-                        return !app::executable_scenario(static_cast<unsigned>(requested.draft),id) ||
-                            (requested.scenario_ids.size() > 1 &&
-                             !app::raw_probe_scenario(static_cast<unsigned>(requested.draft),id));
-                    }) ||
-                    (requested.mode == app::RunMode::Driven && runs &&
-                     !runs->supports_driven()) ||
-                    (runs && !runs->supports(requested.draft))) {
-                    throw ApiError{422, "unsupported_run_config",
-                                   "The requested scenario or mode is not executable."};
+                {
+                    // Say which part of the selection is unsupported, and why, so the caller
+                    // does not have to bisect a long scenario list.
+                    const auto draft_number = static_cast<unsigned>(requested.draft);
+                    for (const auto& id : requested.scenario_ids) {
+                        if (!app::executable_scenario(draft_number, id))
+                            throw ApiError{422, "unsupported_run_config",
+                                "Scenario '" + id + "' is not an executable scenario for draft " +
+                                std::to_string(draft_number) + "."};
+                    }
+                    if (requested.scenario_ids.size() > 1) {
+                        for (const auto& id : requested.scenario_ids) {
+                            if (!app::raw_probe_scenario(draft_number, id))
+                                throw ApiError{422, "unsupported_run_config",
+                                    "Scenario '" + id + "' is a typed scenario and cannot be "
+                                    "combined with other scenarios in one run; only raw-probe "
+                                    "scenarios can be selected together. Run it on its own."};
+                        }
+                    }
+                    if (requested.mode == app::RunMode::Driven && runs && !runs->supports_driven())
+                        throw ApiError{422, "unsupported_run_config",
+                            "Driven mode is not configured on this runner; start it with "
+                            "--driver-executable or use observed mode."};
+                    if (runs && !runs->supports(requested.draft))
+                        throw ApiError{422, "unsupported_run_config",
+                            "Draft " + std::to_string(draft_number) +
+                            " is not supported by this runner's publisher listener."};
                 }
                 {
                     // Every selected scenario needs a capability the publisher declared absent:
