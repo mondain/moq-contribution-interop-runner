@@ -36,6 +36,7 @@
 #include "moq/interop/scenarios/run_controller.h"
 #include "moq/interop/transport/webtransport_listener.h"
 
+#include <cstdio>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -1501,8 +1502,13 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             }
             break;
         }
-        if (created.error != transport::NativeQuicListenerError::BindFailed)
+        if (created.error != transport::NativeQuicListenerError::BindFailed) {
+            // The API reports only that the listener could not start; the operator needs the reason.
+            std::fprintf(stderr, "publisher listener could not start on port %u%s\n",
+                         static_cast<unsigned>(port),
+                         Impl::describe_listener_failure(created, port).c_str());
             return {RunStartStatus::ListenerError, {}, {}};
+        }
     }
     if (!listener) return {RunStartStatus::PortExhausted, {}, {}};
 
