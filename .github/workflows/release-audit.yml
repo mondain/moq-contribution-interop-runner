@@ -8,8 +8,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           repository: openmoq/moqxr
           ref: dda5025a0531faa019d97e9fc5c1ebc024605c04
@@ -50,7 +50,7 @@ jobs:
           exit 0
       - name: Upload release audit evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: draft-release-audit
           path: ${{ runner.temp }}/release-audit/

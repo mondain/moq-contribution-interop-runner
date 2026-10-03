@@ -101,7 +101,14 @@ set +e
     --format json >"$test_dir/audit.json"
 audit_status=$?
 set -e
-[[ "$audit_status" -eq 1 ]] || exit 1
+# Exit status 0 means the static completeness gate passes and 1 that it does not; the
+# status must agree with the report, whichever way the catalog currently stands.
+static_complete=$(jq -r '.static_complete' "$test_dir/audit.json")
+if [[ "$static_complete" == true ]]; then
+    [[ "$audit_status" -eq 0 ]] || exit 1
+else
+    [[ "$audit_status" -eq 1 ]] || exit 1
+fi
 if ! jq -e '.execution_audit.consistent == true and
     .execution_audit.run_count == 3 and
     .execution_audit.scored_rows > 0' "$test_dir/audit.json" >/dev/null; then
