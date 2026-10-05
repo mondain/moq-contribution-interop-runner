@@ -136,6 +136,7 @@ add_library(moq-interop-requirements
     src/requirements/carry_forward.cpp
     src/requirements/lineage.cpp
     src/requirements/lineage_policy.cpp
+    src/requirements/lineage_translate.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
@@ -776,6 +777,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lineage-registry-tests tests/unit/lineage_registry_test.cpp)
     target_link_libraries(moq-interop-lineage-registry-tests PRIVATE moq-interop-app GTest::gtest_main)
     add_test(NAME lineage-registry COMMAND moq-interop-lineage-registry-tests)
+
+    add_executable(moq-interop-lineage-translate-tests tests/unit/lineage_translate_test.cpp)
+    target_link_libraries(moq-interop-lineage-translate-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME lineage-translate COMMAND moq-interop-lineage-translate-tests)
 
     add_executable(moq-interop-draft-source-tests tests/unit/draft_source_test.cpp)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE
