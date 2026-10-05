@@ -15,7 +15,8 @@ std::vector<std::byte> residual_location_range_for_test(std::uint64_t start_grou
                                                         std::uint64_t end_group_delta, std::uint64_t end_object);
 std::vector<std::byte> residual_bounded_filter_for_test(std::uint64_t group, std::uint64_t first,
                                                         std::uint64_t last);
-// FILL_PARAMETERS (0x23) holding the nested filter: vi(0x23) vi(len) vi(count) nested parameters.
+// FILL_PARAMETERS (0x23) holding the nested filter: vi(0x23) vi(len) then the nested parameters; the
+// contents carry no Number of Parameters (count).
 std::vector<std::byte> residual_fill_whole_track_for_test();
 std::vector<std::byte> d21b_future_start_filter_for_test();
 std::vector<std::byte> session_far_start_filter_for_test();

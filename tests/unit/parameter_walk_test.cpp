@@ -7,6 +7,7 @@
 #include "moq/interop/scenarios/parameter_walk.h"
 #include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/cursor.h"
+#include "moq/interop/wire/draft22/location_filter.h"
 
 #include <gtest/gtest.h>
 
@@ -14,6 +15,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace moq::interop::scenarios {
@@ -54,7 +57,9 @@ SessionWalkForTest session(std::string_view params_hex, std::uint64_t count) {
     return d21c::session_walk_parameters_for_test(h(params_hex), count);
 }
 
-// Where an aborted walk leaves the cursor is not observable to either caller, so it is not compared.
+// Where an aborted wire draft 22 walk leaves the cursor is unspecified (parameter_walk.h) and observable to
+// neither caller, so it is not compared there. Wire draft 21 aborts pin it (broken_walk's `consumed`): the
+// shared walk leaves it where the old reader did.
 SessionWalkForTest aborted(std::string_view params_hex, std::uint64_t count) {
     auto walk = session(params_hex, count);
     walk.consumed = 0;
@@ -69,11 +74,12 @@ SessionWalkForTest complete_walk(std::size_t count, std::size_t consumed) {
     return walk;
 }
 
-SessionWalkForTest broken_walk(std::size_t count, std::size_t parsed) {
+SessionWalkForTest broken_walk(std::size_t count, std::size_t parsed, std::size_t consumed = 0) {
     SessionWalkForTest walk;
     walk.declared = count;
     walk.parsed = parsed;
     walk.structure = false;
+    walk.consumed = consumed;
     return walk;
 }
 
@@ -119,10 +125,11 @@ TEST(ParameterWalkReaders, Wire21FilterNestedInFillParameters) {
 
 TEST(ParameterWalkReaders, Wire21TruncatedFilterAborts) {
     EXPECT_FALSE(block("01", "21 05 07").ok);
-    EXPECT_EQ(aborted("21 05 07", 1), broken_walk(1, 0));
+    // The cursor stops after the Length, as the old reader left it.
+    EXPECT_EQ(session("21 05 07", 1), broken_walk(1, 0, 2));
     // A Length beyond 65535 is refused like a truncation.
     EXPECT_FALSE(block("01", "21 c10000").ok);
-    EXPECT_EQ(aborted("21 c10000", 1), broken_walk(1, 0));
+    EXPECT_EQ(session("21 c10000", 1), broken_walk(1, 0, 4));
 }
 
 TEST(ParameterWalkReaders, Wire21UnknownTypeOverflowAndRepeat) {
@@ -371,6 +378,53 @@ TEST(ParameterWalk, Wire22TruncatedAndUndefinedFilterAbort) {
     EXPECT_EQ(undefined.result.status, ParameterWalkStatus::Malformed);
     EXPECT_EQ(undefined.result.visited, 0u);
     EXPECT_EQ(undefined.result.failed_type, std::optional<std::uint64_t>{0x21});
+}
+
+// Types 0 (None), 1 (RelativeGroup) and 3 (AbsoluteBounded), encoded by the draft 22 encoder, round trip
+// through the walk: the filter is found, its extent is exactly the encoding, and the parameter after it
+// (GROUP_ORDER 0x22, delta 1) is read.
+TEST(ParameterWalk, Wire22FilterTypesZeroOneAndThreeRoundTrip) {
+    using wire::draft22::LocationFilter;
+    using wire::draft22::LocationFilterType;
+    ScopedWireDraft wire22(22);
+    const std::vector<std::pair<LocationFilter, std::string_view>> cases{
+        {{LocationFilterType::None, 0, 0, std::nullopt, std::nullopt}, "00"},
+        {{LocationFilterType::RelativeGroup, 300, 0, std::nullopt, std::nullopt}, "01 812c"},
+        {{LocationFilterType::AbsoluteBounded, 200, 9, 3, std::nullopt}, "03 80c8 09 03"},
+    };
+    for (const auto& [filter, expected] : cases) {
+        SCOPED_TRACE(std::string(expected));
+        wire::ByteWriter writer(64);
+        ASSERT_FALSE(wire::draft22::encode_location_filter(filter, writer).has_value());
+        const auto encoded = writer.bytes();
+        ASSERT_EQ(Bytes(encoded.begin(), encoded.end()), h(expected));
+
+        Bytes body = h("21");
+        body.insert(body.end(), encoded.begin(), encoded.end());
+        const auto following = h("01 01");
+        body.insert(body.end(), following.begin(), following.end());
+        wire::Cursor cursor(body);
+        std::vector<Seen> seen;
+        const auto result = walk_message_parameters(cursor, 2, collect(seen));
+        EXPECT_EQ(result.status, ParameterWalkStatus::Complete);
+        EXPECT_EQ(cursor.remaining(), 0u);
+        ASSERT_EQ(seen.size(), 2u);
+        EXPECT_EQ(seen[0].type, 0x21u);
+        EXPECT_EQ(seen[0].kind, ParameterValueKind::LocationFilter);
+        EXPECT_EQ(seen[0].value, h(expected));
+        EXPECT_EQ(seen[1].type, 0x22u);
+        EXPECT_EQ(seen[1].value, h("01"));
+
+        wire::Cursor value(seen[0].value);
+        const auto decoded = wire::draft22::decode_location_filter(value);
+        const auto* back = std::get_if<LocationFilter>(&decoded);
+        ASSERT_NE(back, nullptr);
+        EXPECT_EQ(back->type, filter.type);
+        EXPECT_EQ(back->start_group, filter.start_group);
+        EXPECT_EQ(back->start_object, filter.start_object);
+        EXPECT_EQ(back->end_group_delta, filter.end_group_delta);
+        EXPECT_EQ(back->end_object, filter.end_object);
+    }
 }
 
 TEST(ParameterWalk, UnknownTypeAndTypeOverflow) {

@@ -26,7 +26,6 @@
 #include "moq/interop/wire/draft21/request_error.h"
 
 #include <algorithm>
-#include <limits>
 #include <map>
 #include <set>
 

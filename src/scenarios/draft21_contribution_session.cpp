@@ -13,7 +13,6 @@
 #include "moq/interop/wire/draft21/setup.h"
 #include "moq/interop/wire/draft21/successful_response.h"
 
-#include <limits>
 #include <set>
 
 namespace moq::interop::scenarios::d21c {
