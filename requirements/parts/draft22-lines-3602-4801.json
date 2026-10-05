@@ -41,7 +41,7 @@
       "evaluators": [
         "d22-delete-retires-token-alias"
       ],
-      "rationale": "Send authorization parameters in allowed publisher-receivable requests under Section 9.20.3. After DELETE, USE_ALIAS is unknown and the same alias can be registered anew; retirement does not retroactively revoke previously authorized operations or forbid re-registering the same Token Type/Value. This does not require physical memory erasure."
+      "rationale": "Send authorization parameters in allowed publisher-receivable requests under Section 9.20.2. After DELETE, USE_ALIAS is unknown and the same alias can be registered anew; retirement does not retroactively revoke previously authorized operations or forbid re-registering the same Token Type/Value. This does not require physical memory erasure."
     },
     {
       "id": "D22-8-9-MUST-277",
@@ -350,7 +350,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The sender role includes publishers, but the literal control stream wording conflicts with Sections 6.3 and 9: each endpoint has one unidirectional control stream, while ordinary authorization-bearing messages use request streams. A deterministic multi-stream oracle would have to substitute request streams, so this unresolved draft-21 terminology requires clarification before a normative evaluator is assigned. SETUP has separate registration rules."
+      "rationale": "The sender role includes publishers, but the literal control stream wording conflicts with Sections 6.3 and 9: each endpoint has one unidirectional control stream, while ordinary authorization-bearing messages use request streams. A deterministic multi-stream oracle would have to substitute request streams, so this unresolved terminology (unchanged in draft 22) requires clarification before a normative evaluator is assigned. SETUP has separate registration rules."
     },
     {
       "id": "D22-8-9-MAY-292",
@@ -398,7 +398,7 @@
       "source": {
         "section": "9",
         "first_line": 3802,
-        "last_line": 3873,
+        "last_line": 3803,
         "occurrence": 1,
         "clause": 1
       },
@@ -549,7 +549,7 @@
       "evaluators": [
         "d22-setup-option-duplicates-only-when-permitted"
       ],
-      "rationale": "Decode publisher SETUP and compare option types with their draft-21 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
+      "rationale": "Decode publisher SETUP and compare option types with their draft 22 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
     },
     {
       "id": "D22-9-1-MUST-301",
@@ -716,7 +716,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The unambiguous isolated case is a native-QUIC publisher server receiving malformed client AUTHORITY, outside the listener-only harness. Injecting it from this server also mandates INVALID_AUTHORITY; draft 21 does not specify error precedence between malformed and forbidden-role options. Do not force one error as a client-side oracle."
+      "rationale": "The unambiguous isolated case is a native-QUIC publisher server receiving malformed client AUTHORITY, outside the listener-only harness. Injecting it from this server also mandates INVALID_AUTHORITY; draft 22 does not specify error precedence between malformed and forbidden-role options. Do not force one error as a client-side oracle."
     },
     {
       "id": "D22-9-1-2-MUST-NOT-309",
@@ -2040,7 +2040,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscription-state destruction is internal and cannot be inferred from lack of subsequent data. This publisher-initiated completion rule coexists with Section 3.1.1's explicit permission to remove state on receiving STOP_SENDING and after request failure; it must not require a PUBLISH_DONE after every cancellation. Stream state can outlive subscription state."
+      "rationale": "Subscription-state destruction is internal and cannot be inferred from lack of subsequent data. This publisher-initiated completion rule coexists with Section 3.1.2's explicit permission to remove state on receiving STOP_SENDING and after request failure; it must not require a PUBLISH_DONE after every cancellation. Stream state can outlive subscription state."
     },
     {
       "id": "D22-9-9-SHOULD-372",
@@ -2258,7 +2258,7 @@
       "evaluators": [
         "d22-notify-no-unsolicited-subscriber-value-change"
       ],
-      "rationale": "Track the listener subscriber's requested values and publisher notifications, using FORWARD from Section 9.20.19 as an explicitly permitted notification parameter. Omitted parameters remain unchanged; report only a value change without a matching subscriber request. Publisher-controlled updates and reporting the requested current value remain allowed."
+      "rationale": "Track the listener subscriber's requested values and publisher notifications, using FORWARD from Section 9.20.18 as an explicitly permitted notification parameter. Omitted parameters remain unchanged; report only a value change without a matching subscriber request. Publisher-controlled updates and reporting the requested current value remain allowed."
     },
     {
       "id": "D22-9-10-MUST-383",

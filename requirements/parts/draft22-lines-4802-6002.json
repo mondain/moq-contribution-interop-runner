@@ -77,7 +77,7 @@
       "evaluators": [
         "d22-parameter-type-order"
       ],
-      "rationale": "Decode publisher-originated messages using draft-21 vi64 Type Deltas and definition-specific values. Ascending order accommodates explicitly permitted repeated Types with zero delta; Section 9.20's duplicate rule remains independent. These are not Setup Options or generic Key-Value-Pair values."
+      "rationale": "Decode publisher-originated messages using vi64 Type Deltas and definition-specific values. Ascending order accommodates explicitly permitted repeated Types with zero delta; Section 9.20's duplicate rule remains independent. These are not Setup Options or generic Key-Value-Pair values."
     },
     {
       "id": "D22-9-20-MUST-388",
@@ -121,7 +121,7 @@
       "evaluators": [
         "d22-sent-parameters-defined-or-negotiated"
       ],
-      "rationale": "Capture exact draft-21 setup negotiation and subsequent publisher messages. A known draft-21 type or an explicitly negotiated extension type is allowed; an unnegotiated type from any other draft is not silently treated as compatible."
+      "rationale": "Capture exact draft 22 setup negotiation and subsequent publisher messages. A known draft 22 type or an explicitly negotiated extension type is allowed; an unnegotiated type from any other draft is not silently treated as compatible."
     },
     {
       "id": "D22-9-20-MUST-390",
@@ -165,7 +165,7 @@
       "evaluators": [
         "d22-sent-parameter-duplicates-permitted-only"
       ],
-      "rationale": "Inspect each publisher message against its parameter definitions. Section 3.3.2 permits certain repeated filter types and Section 9.20.16 gives nested fill an independent scope. Do not infer general duplicate AUTHORIZATION_TOKEN permission from the separate Setup Option definition."
+      "rationale": "Inspect each publisher message against its parameter definitions. Section 3.3.2 permits certain repeated filter types and Section 9.20.15 gives nested fill an independent scope. Do not infer general duplicate AUTHORIZATION_TOKEN permission from the separate Setup Option definition."
     },
     {
       "id": "D22-9-20-SHOULD-392",
@@ -375,7 +375,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener supplies subscriber timeout preferences. Section 9.18.1 also permits subscription parameters in SUBSCRIBE_TRACKS unless otherwise specified, while Section 9.20.16 does not list this parameter inside fill. None of these sender permissions are publisher enforcement obligations."
+      "rationale": "The listener supplies subscriber timeout preferences. Section 3.6.2 also permits subscription parameters in SUBSCRIBE_TRACKS unless otherwise specified, while Section 9.20.15 does not list this parameter inside fill. None of these sender permissions are publisher enforcement obligations."
     },
     {
       "id": "D22-9-20-3-SHOULD-NOT-402",
@@ -433,7 +433,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscriber parameter emission belongs to the listener, including inherited SUBSCRIBE_TRACKS permission under Section 9.18.1. Publisher timeout behavior comes from Section 5.2; the fill whitelist does not permit this parameter inside FILL_PARAMETERS."
+      "rationale": "Subscriber parameter emission belongs to the listener, including inherited SUBSCRIBE_TRACKS permission under Section 3.6.2. Publisher timeout behavior comes from Section 5.2; the fill whitelist does not permit this parameter inside FILL_PARAMETERS."
     },
     {
       "id": "D22-9-20-4-SHOULD-NOT-405",
@@ -671,7 +671,7 @@
       "evaluators": [
         "d22-publisher-subscriber-priority-capability"
       ],
-      "rationale": "Observe optional priority advertisement, including explicit initial parameters in PUBLISH resulting from SUBSCRIBE_TRACKS under Section 9.18.1. Lower values mean higher priority and omitted SUBSCRIBE or FETCH defaults to 128. Parameter carriage does not prove the private scheduling choices of Section 5.1."
+      "rationale": "Observe optional priority advertisement, including explicit initial parameters in PUBLISH resulting from SUBSCRIBE_TRACKS under Section 3.6.2. Lower values mean higher priority and omitted SUBSCRIBE or FETCH defaults to 128. Parameter carriage does not prove the private scheduling choices of Section 5.1."
     },
     {
       "id": "D22-9-20-7-MAY-418",
@@ -689,7 +689,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "These sender permissions belong to the listener. Section 9.18.1 extends subscription parameters to SUBSCRIBE_TRACKS, and the explicit fill whitelist in Section 9.20.16 also permits SUBSCRIBER_PRIORITY in the independent fill scope."
+      "rationale": "These sender permissions belong to the listener. Section 3.6.2 extends subscription parameters to SUBSCRIBE_TRACKS, and the explicit fill whitelist in Section 9.20.15 also permits SUBSCRIBER_PRIORITY in the independent fill scope."
     },
     {
       "id": "D22-9-20-8-MAY-419",
@@ -937,7 +937,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener sends the optional length-prefixed nested parameter sequence. Its presence requests fill subject to Section 3.4, including Forward State and empty-range exceptions. Section 9.18.1 also permits joining via SUBSCRIBE_TRACKS; this sender permission does not override those conditions."
+      "rationale": "The listener sends the optional length-prefixed nested parameter sequence. Its presence requests fill subject to Section 3.4, including Forward State and empty-range exceptions. Section 3.6.2 also permits joining via SUBSCRIBE_TRACKS; this sender permission does not override those conditions."
     },
     {
       "id": "D22-9-20-15-MAY-431",
@@ -968,7 +968,7 @@
         "clause": 1
       },
       "actor": "endpoint receiving a disallowed nested fill parameter",
-      "summary": "Close the session with PROTOCOL_VIOLATION if FILL_PARAMETERS contains a parameter not listed in Table 6.",
+      "summary": "Close the session with PROTOCOL_VIOLATION if FILL_PARAMETERS contains a parameter not listed in Table 7.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -979,7 +979,7 @@
       "evaluators": [
         "d22-fill-parameter-whitelist-protocol-violation"
       ],
-      "rationale": "Inject well-formed known but unlisted parameters inside a legal FILL_PARAMETERS field. AUTHORIZATION_TOKEN, TRACK_PROPERTY_FILTER and nested FILL_PARAMETERS are not in Table 6. Inherited authorization in Section 3.4 does not license a token inside the nested scope."
+      "rationale": "Inject well-formed known but unlisted parameters inside a legal FILL_PARAMETERS field. AUTHORIZATION_TOKEN, TRACK_PROPERTY_FILTER and nested FILL_PARAMETERS are not in Table 7. Inherited authorization in Section 3.4 does not license a token inside the nested scope."
     },
     {
       "id": "D22-9-20-15-MAY-433",
@@ -1158,7 +1158,7 @@
       "evaluators": [
         "d22-published-track-largest-object-present"
       ],
-      "rationale": "Use a known Track after an observed Object's first byte establishes publication under Section 3.1.3, then stimulate SUBSCRIBE_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, PUBLISH or PUBLISH_STATE_NOTIFY. Merely queued Objects do not establish the precondition. Absence of wire Objects alone cannot prove the publisher has never published elsewhere."
+      "rationale": "Use a known Track after an observed Object's first byte establishes publication under Section 3.1.4, then stimulate SUBSCRIBE_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, PUBLISH or PUBLISH_STATE_NOTIFY. Merely queued Objects do not establish the precondition. Absence of wire Objects alone cannot prove the publisher has never published elsewhere."
     },
     {
       "id": "D22-9-20-17-MUST-442",
@@ -1188,7 +1188,7 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher communicating Forwarding State",
+      "actor": "publisher communicating the paused state (FORWARD)",
       "summary": "Include FORWARD in PUBLISH, a legal subscription REQUEST_UPDATE or PUBLISH_STATE_NOTIFY.",
       "applicability": "Applicable",
       "testability": "Testable",
@@ -1210,13 +1210,13 @@
         "occurrence": 1,
         "clause": 2
       },
-      "actor": "subscriber setting Forwarding State",
+      "actor": "subscriber setting the paused state (FORWARD)",
       "summary": "Include FORWARD in SUBSCRIBE, SUBSCRIBE_TRACKS or REQUEST_UPDATE for a subscription or SUBSCRIBE_TRACKS request.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener sends these subscriber controls. For SUBSCRIBE_TRACKS updates, only future matching subscriptions receive the new Forwarding State; existing subscriptions are unaffected. The parameter is absent from Table 6, so FORWARD cannot be placed inside FILL_PARAMETERS."
+      "rationale": "The listener sends these subscriber controls. For SUBSCRIBE_TRACKS updates, only future matching subscriptions take the new paused state; existing subscriptions are unaffected. The parameter is absent from Table 7, so FORWARD cannot be placed inside FILL_PARAMETERS."
     },
     {
       "id": "D22-9-20-18-MUST-445",

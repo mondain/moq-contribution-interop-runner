@@ -10,7 +10,42 @@
       "LOCATION_FILTER Parameter",
       "PUBLISH_NAMESPACE Message"
     ],
-    "conclusion": "Two wire blocks differ between draft 21 and draft 22. LOCATION_FILTER Parameter is a real wire change (#1913, #1953): the draft 21 length-prefixed form (Parameter Type, Length (vi64), optional StartGroup, StartObject, EndGroupDelta, EndObject, with the field count inferred from Length) is replaced by Parameter Type followed by an explicit Location Filter Type (vi64) in place of the Length field, which selects the fields that follow: 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields; any other Location Filter Type is a PROTOCOL_VIOLATION, so encoders and decoders of 0x21 (top level and inside FILL_PARAMETERS) must change and sub-project B (the codec task) must cover it. PUBLISH_NAMESPACE Message is editorial: its field Track Namespace (..) is renamed Track Namespace Prefix (..) with the same Section 8.7 Track Namespace encoding and position, prefix matching was already the draft 21 behavior (Section 7.5 of draft 21), and the new statement that AUTHORIZATION_TOKEN is the only allowed parameter matches draft 21 Section 9.20.3, so the bytes on the wire are unchanged and no codec change is needed for it. No blocks were added or removed."
+    "conclusion": "Two wire blocks differ between draft 21 and draft 22. LOCATION_FILTER Parameter is a real wire change (#1913, #1953): the draft 21 length-prefixed form (Parameter Type, Length (vi64), optional StartGroup, StartObject, EndGroupDelta, EndObject, with the field count inferred from Length) is replaced by Parameter Type followed by an explicit Location Filter Type (vi64) in place of the Length field, which selects the fields that follow: 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields; any other Location Filter Type is a PROTOCOL_VIOLATION, so encoders and decoders of 0x21 (top level and inside FILL_PARAMETERS) must change and sub-project B (the codec task) must cover it. PUBLISH_NAMESPACE Message is editorial: its field Track Namespace (..) is renamed Track Namespace Prefix (..) with the same Section 8.7 Track Namespace encoding and position, prefix matching was already the draft 21 behavior (Section 7.5 of draft 21), and the new statement that AUTHORIZATION_TOKEN is the only allowed parameter matches draft 21 Section 9.20.3, so the bytes on the wire are unchanged and no codec change is needed for it. No blocks were added or removed. The Next Object encoding also changed: draft 21 used StartGroup=0, StartObject=0 under the length-inferred form, while draft 22 uses Location Filter Type 0x05 and Type 0x02 with {0, 0} is now an absolute start."
+  },
+  "handoff": {
+    "for_wire_codecs_B": [
+      "LOCATION_FILTER (Parameter Type 0x21): Location Filter Type (vi64) replaces the draft 21 Length field; 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields, and any other type is a PROTOCOL_VIOLATION (draft 22 lines 5291-5311). The same encoding applies at top level and inside FILL_PARAMETERS.",
+      "Next Object is no longer encoded as StartGroup=0, StartObject=0: Type 0x02 with {0, 0} is an absolute start, so the draft 21 two-zero form must map to Type 0x05, not to 0x02.",
+      "PUBLISH_NAMESPACE Message: the field Track Namespace is renamed Track Namespace Prefix; the encoding and field position are unchanged.",
+      "extract_wire_blocks finds 41 wire blocks in each draft; 2 changed (LOCATION_FILTER Parameter, PUBLISH_NAMESPACE Message) and the other 39 are identical, with none added or removed.",
+      "Block names that repeat get a positional #N suffix in extract_wire_blocks (none occur in drafts 21 or 22), so a future re-diff cannot rely on those suffixes to pair blocks."
+    ],
+    "for_scenarios_D": [
+      "draft22.json has 267 Applicable/Testable rows whose d22- scenario and evaluator ids are planned and not yet registered; complete:false is what keeps the completeness gate off for draft 22.",
+      "Two planned ids have no draft 21 ancestor: d22-fetch-bounded-location-range and d22-fetch-objects-within-requested-location-range on D22-3-3-1-MUST-NOT-069, whose MUST NOT now also covers FETCH delivery.",
+      "Three draft 21 ids have no draft 22 successor because their anchor D21-4-1-MUST-083 became the non-normative 'will respond' at draft 22 line 1706: d21-subscribe-tracks-accepted, d21-subscribe-tracks-rejected, d21-subscribe-tracks-single-first-response; only the subscriber close rule D22-3-6-MUST-082 remains.",
+      "Four draft 21 ids have no draft 22 successor because their anchors D21-9-15-MUST-383 and D21-9-18-MUST-391 were dropped: d21-subscribe-namespace-prefix-too-many-fields, d21-namespace-discovery-prefix-bound, d21-subscribe-tracks-prefix-too-many-fields, d21-track-discovery-prefix-bound; the general rule D22-8-7-MUST-270 carries only d22-subscribe-33-namespace-fields and d22-too-many-namespace-fields-protocol-violation.",
+      "The unknown Location Filter Type rule (draft 22 line 5311) has no BCP 14 keyword and therefore no catalog row, yet it is publisher-observable; suggested negative-path scenario d22-location-filter-unknown-type with evaluator d22-location-filter-unknown-type-protocol-violation, attached to D22-9-20-9-MUST-424 or to a codec conformance check.",
+      "Location filter stimuli for D22-9-20-9-MAY-422, D22-9-20-9-MUST-424 and D22-3-3-1-MUST-NOT-069 must encode the explicit Location Filter Type; the StartGroup plus EndGroupDelta overflow of D22-9-20-9-MUST-424 arises only for Types 0x03 and 0x04.",
+      "D22-9-MUST-294 holds both a publisher half (testable: PUBLISH and PUBLISH_NAMESPACE first on a new request stream) and a subscriber half that is a runner stimulus.",
+      "D22-9-20-15-MAY-431 is one row for the whole 8-parameter FILL_PARAMETERS nesting list (Table 7), replacing 8 draft 21 rows.",
+      "D22-7-5-MAY-218 is a NotApplicable placeholder duplicate of D22-7-5-MAY-217 kept for positional ids; removing it would renumber every later row (D22-7-5-MAY-219 through D22-A-11-MUST-613), so do that only before D binds ids."
+    ],
+    "for_plumbing_C": [
+      "src/app/main.cpp loads catalogs by explicit draft number (18 and 21) and must learn draft 22.",
+      "install(DIRECTORY requirements/) already ships draft22.json and the delta file.",
+      "tests/unit/completeness_test.cpp loops over {18u, 21u} and must grow to 22 when the completeness gate is turned on for draft 22; tests/unit/catalog_audit_test.cpp pins real occurrence counts per draft (18, 21 and now 22: 495)."
+    ],
+    "for_ecosystem_E": [
+      "The README layout table and docs/scoring-and-audit.md describe only drafts 18 and 21 and should add draft 22.",
+      "The carry tool (moq-interop-catalog-carry) and its rule 'generate writes the unreviewed baseline only; after hand review use only merge' should be documented with the other audit tools."
+    ],
+    "tool_notes": [
+      "generate on a clean tree reproduces only the unreviewed baseline (commit bcaa02b); the reviewed catalog lives in requirements/parts and the delta notes, and generate --force over it discards every hand edit.",
+      "Known matcher issues: clean_lines joins paragraphs across a page break (misclassifying D22-8-4-MAY-263 and D22-9-MUST-294 as new); twin SUBSCRIBE_NAMESPACE/SUBSCRIBE_TRACKS sentences get cross-paired (first response, subscriber close and authorization were re-paired by hand); the greedy exact pass can label an identical match as moved.",
+      "D21-4-1-MUST-082 is double-accounted: it has a removed entry (superseded) and is also the reworded counterpart of D22-4-2-MUST-108.",
+      "LOCATION_FILTER: Next Object is Type 0x05 (Type 0x02 {0, 0} is an absolute start) and any Location Filter Type above 0x05 is a PROTOCOL_VIOLATION without a catalog row."
+    ]
   },
   "entries": [
     {
@@ -161,7 +196,7 @@
       "draft22_id": "D22-2-2-MUST-NOT-019",
       "draft21_id": "D21-2-2-MUST-NOT-017",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -347,7 +382,7 @@
       "draft22_id": "D22-3-1-MAY-042",
       "draft21_id": "D21-3-1-MAY-040",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -379,7 +414,7 @@
       "draft22_id": "D22-3-1-MAY-046",
       "draft21_id": "D21-3-1-MAY-044",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -403,7 +438,7 @@
       "draft22_id": "D22-3-1-2-MUST-NOT-049",
       "draft21_id": "D21-3-1-1-MUST-NOT-047",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -573,7 +608,7 @@
       "draft22_id": "D22-3-3-2-MAY-070",
       "draft21_id": "D21-3-3-2-MAY-058",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -717,7 +752,7 @@
       "draft22_id": "D22-3-7-MUST-088",
       "draft21_id": "D21-3-6-MUST-070",
       "change": "moved",
-      "note": "section moved",
+      "note": "section moved; references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -917,7 +952,7 @@
       "draft22_id": "D22-4-2-MUST-113",
       "draft21_id": "D21-9-15-MUST-388",
       "change": "moved",
-      "note": "section moved",
+      "note": "section moved; references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -989,7 +1024,7 @@
       "draft22_id": "D22-5-1-2-SHOULD-122",
       "draft21_id": "D21-5-1-2-SHOULD-108",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1005,7 +1040,7 @@
       "draft22_id": "D22-5-1-2-SHOULD-124",
       "draft21_id": "D21-5-1-2-SHOULD-110",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1021,7 +1056,7 @@
       "draft22_id": "D22-5-1-2-SHOULD-126",
       "draft21_id": "D21-5-1-2-SHOULD-112",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1085,7 +1120,7 @@
       "draft22_id": "D22-5-1-3-SHOULD-134",
       "draft21_id": "D21-5-1-3-SHOULD-120",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1165,7 +1200,7 @@
       "draft22_id": "D22-5-2-MUST-144",
       "draft21_id": "D21-5-2-MUST-130",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1221,7 +1256,7 @@
       "draft22_id": "D22-6-1-2-MAY-151",
       "draft21_id": "D21-6-1-2-MAY-137",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1533,7 +1568,7 @@
       "draft22_id": "D22-6-6-1-SHOULD-190",
       "draft21_id": "D21-6-6-1-SHOULD-176",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1573,7 +1608,7 @@
       "draft22_id": "D22-7-1-MAY-195",
       "draft21_id": "D21-7-1-MAY-181",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1725,7 +1760,7 @@
       "draft22_id": "D22-7-4-1-MAY-214",
       "draft21_id": "D21-7-4-1-MAY-200",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1957,7 +1992,7 @@
       "draft22_id": "D22-7-8-MUST-NOT-243",
       "draft21_id": "D21-7-7-MUST-NOT-225",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -1997,7 +2032,7 @@
       "draft22_id": "D22-8-3-MUST-NOT-248",
       "draft21_id": "D21-8-3-MUST-NOT-230",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2157,7 +2192,7 @@
       "draft22_id": "D22-8-7-MUST-268",
       "draft21_id": "D21-8-7-MUST-250",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2165,7 +2200,7 @@
       "draft22_id": "D22-8-7-MUST-269",
       "draft21_id": "D21-8-7-MUST-251",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2221,7 +2256,7 @@
       "draft22_id": "D22-8-9-MUST-276",
       "draft21_id": "D21-8-9-MUST-264",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2341,7 +2376,7 @@
       "draft22_id": "D22-8-9-MUST-NOT-291",
       "draft21_id": "D21-8-9-MUST-NOT-279",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2413,7 +2448,7 @@
       "draft22_id": "D22-9-1-MUST-NOT-300",
       "draft21_id": "D21-9-1-MUST-NOT-289",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2477,7 +2512,7 @@
       "draft22_id": "D22-9-1-1-MUST-308",
       "draft21_id": "D21-9-1-1-MUST-297",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -2981,7 +3016,7 @@
       "draft22_id": "D22-9-9-MUST-NOT-371",
       "draft21_id": "D21-9-9-MUST-NOT-360",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3069,7 +3104,7 @@
       "draft22_id": "D22-9-10-MUST-NOT-382",
       "draft21_id": "D21-9-10-MUST-NOT-371",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3109,7 +3144,7 @@
       "draft22_id": "D22-9-20-MUST-387",
       "draft21_id": "D21-9-20-MUST-395",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3125,7 +3160,7 @@
       "draft22_id": "D22-9-20-MUST-389",
       "draft21_id": "D21-9-20-MUST-397",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3141,7 +3176,7 @@
       "draft22_id": "D22-9-20-MUST-NOT-391",
       "draft21_id": "D21-9-20-MUST-NOT-399",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3221,7 +3256,7 @@
       "draft22_id": "D22-9-20-3-MAY-401",
       "draft21_id": "D21-9-20-4-MAY-409",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3245,7 +3280,7 @@
       "draft22_id": "D22-9-20-4-MAY-404",
       "draft21_id": "D21-9-20-5-MAY-412",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3349,7 +3384,7 @@
       "draft22_id": "D22-9-20-7-MAY-417",
       "draft21_id": "D21-9-20-8-MAY-425",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3357,7 +3392,7 @@
       "draft22_id": "D22-9-20-7-MAY-418",
       "draft21_id": "D21-9-20-8-MAY-426",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3459,7 +3494,7 @@
       "draft22_id": "D22-9-20-15-MAY-430",
       "draft21_id": "D21-9-20-16-MAY-438",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3475,7 +3510,7 @@
       "draft22_id": "D22-9-20-15-MUST-432",
       "draft21_id": "D21-9-20-16-MUST-447",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3547,7 +3582,7 @@
       "draft22_id": "D22-9-20-17-MUST-441",
       "draft21_id": "D21-9-20-18-MUST-456",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3563,7 +3598,7 @@
       "draft22_id": "D22-9-20-18-MAY-443",
       "draft21_id": "D21-9-20-19-MAY-458",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3571,7 +3606,7 @@
       "draft22_id": "D22-9-20-18-MAY-444",
       "draft21_id": "D21-9-20-19-MAY-459",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3955,7 +3990,7 @@
       "draft22_id": "D22-11-1-1-MUST-492",
       "draft21_id": "D21-11-1-2-MUST-510",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -3987,7 +4022,7 @@
       "draft22_id": "D22-11-2-1-MUST-496",
       "draft21_id": "D21-11-2-1-MUST-516",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4019,7 +4054,7 @@
       "draft22_id": "D22-11-2-1-MUST-500",
       "draft21_id": "D21-11-2-1-MUST-520",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4083,7 +4118,7 @@
       "draft22_id": "D22-11-3-1-MUST-508",
       "draft21_id": "D21-11-3-1-MUST-532",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4123,7 +4158,7 @@
       "draft22_id": "D22-11-3-2-MUST-513",
       "draft21_id": "D21-11-3-2-MUST-537",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4283,7 +4318,7 @@
       "draft22_id": "D22-11-4-1-1-MUST-533",
       "draft21_id": "D21-11-4-1-1-MUST-557",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4563,7 +4598,7 @@
       "draft22_id": "D22-13-MUST-568",
       "draft21_id": "D21-13-MUST-593",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4587,7 +4622,7 @@
       "draft22_id": "D22-13-MUST-571",
       "draft21_id": "D21-13-MUST-596",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4603,7 +4638,7 @@
       "draft22_id": "D22-13-MUST-573",
       "draft21_id": "D21-13-MUST-598",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4867,7 +4902,7 @@
       "draft22_id": "D22-16-8-MUST-606",
       "draft21_id": "D21-16-8-MUST-631",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4875,7 +4910,7 @@
       "draft22_id": "D22-16-8-MUST-607",
       "draft21_id": "D21-16-8-MUST-632",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4883,7 +4918,7 @@
       "draft22_id": "D22-16-8-MUST-608",
       "draft21_id": "D21-16-8-MUST-633",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4891,7 +4926,7 @@
       "draft22_id": "D22-16-8-MUST-NOT-609",
       "draft21_id": "D21-16-8-MUST-NOT-634",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },
@@ -4899,7 +4934,7 @@
       "draft22_id": "D22-16-9-MUST-610",
       "draft21_id": "D21-16-9-MUST-635",
       "change": "identical",
-      "note": "",
+      "note": "references updated to draft 22 numbering",
       "reviewed": true,
       "tags": []
     },

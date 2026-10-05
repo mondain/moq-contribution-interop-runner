@@ -41,7 +41,7 @@
       "evaluators": [
         "d22-native-quic-session-capability"
       ],
-      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 21. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
+      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 22. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
     },
     {
       "id": "D22-6-1-2-MAY-152",
@@ -857,7 +857,7 @@
       "evaluators": [
         "d22-goaway-timeout-session-close"
       ],
-      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2428 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
+      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2876 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
     },
     {
       "id": "D22-6-6-1-SHOULD-191",
@@ -951,7 +951,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the first permitted cache-field update, constrained to the one-way state transition in Section 2.1.1. Cache poisoning protection concerns the relay, not the contribution publisher."
+      "rationale": "This is the first permitted cache-field update, constrained to the one-way state transition in Section 2.1.2. Cache poisoning protection concerns the relay, not the contribution publisher."
     },
     {
       "id": "D22-7-1-MAY-196",
@@ -1293,7 +1293,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is explicitly subscriber-side relay switchover. Publisher-side migration has a separate permission in Section 7.5.1."
+      "rationale": "This is explicitly subscriber-side relay switchover. Publisher-side migration has a separate permission in Section 7.6.1."
     },
     {
       "id": "D22-7-5-SHOULD-215",
@@ -1823,7 +1823,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The Section 11.1.1 Object header is the relay-visible representation being preserved. This is an intermediary nonmodification duty, distinct from the publisher's original Object construction."
+      "rationale": "The Section 2.1.1 Object fields are the relay-visible representation being preserved. This is an intermediary nonmodification duty, distinct from the publisher's original Object construction."
     },
     {
       "id": "D22-7-8-MUST-244",
@@ -1917,7 +1917,7 @@
       "evaluators": [
         "d22-emitted-key-value-types-within-uint64"
       ],
-      "rationale": "A publisher emits Key-Value-Pairs in SETUP and Track/Object Properties. Decode the draft-21 1-to-9-byte integer form with checked arithmetic at the peer; this is not QUIC's 62-bit integer encoding. Receiver rejection is a separate anchor."
+      "rationale": "A publisher emits Key-Value-Pairs in SETUP and Track/Object Properties. Decode the Section 8.1 1-to-9-byte integer form with checked arithmetic at the peer; this is not QUIC's 62-bit integer encoding. Receiver rejection is a separate anchor."
     },
     {
       "id": "D22-8-3-MUST-249",
@@ -2306,7 +2306,7 @@
       "evaluators": [
         "d22-emitted-namespace-fields-nonempty"
       ],
-      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 818-819) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
+      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 885-886) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
     },
     {
       "id": "D22-8-7-MUST-269",
@@ -2328,7 +2328,7 @@
       "evaluators": [
         "d22-empty-namespace-field-protocol-violation"
       ],
-      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 818-819)."
+      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 885-886)."
     },
     {
       "id": "D22-8-7-MUST-270",

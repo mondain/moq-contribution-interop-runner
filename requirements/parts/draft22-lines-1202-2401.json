@@ -404,7 +404,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This optional message construction belongs to the subscriber requesting track discovery. The receiver's distinct duplicate-key rejection requirement is classified at line 1225."
+      "rationale": "This optional message construction belongs to the subscriber requesting track discovery. The receiver's distinct duplicate-key rejection requirement is classified at line 1493."
     },
     {
       "id": "D22-3-3-2-MAY-071",
@@ -771,7 +771,7 @@
       "evaluators": [
         "d22-mandatory-properties-confined-to-track-scope"
       ],
-      "rationale": "Inspect Track Properties in PUBLISH, SUBSCRIBE_OK or FETCH_OK and Object Properties in subsequent Objects. An Object carrying a Mandatory Track Property is malformed under Sections 3.6 and 12.1. The sender's wire scope is observable without needing to understand the property's extension semantics."
+      "rationale": "Inspect Track Properties in PUBLISH, SUBSCRIBE_OK or FETCH_OK and Object Properties in subsequent Objects. An Object carrying a Mandatory Track Property is malformed under Sections 3.7 and 12.1. The sender's wire scope is observable without needing to understand the property's extension semantics."
     },
     {
       "id": "D22-3-7-MUST-NOT-089",
@@ -1259,7 +1259,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener is the subscriber consuming namespace updates. The original publisher's emission prohibition is separately captured at line 4544."
+      "rationale": "The listener is the subscriber consuming namespace updates. The original publisher's emission prohibition is separately captured at line 1947."
     },
     {
       "id": "D22-4-2-MAY-114",
@@ -1433,7 +1433,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This draft-21 fill exception is a separate scheduling branch. Section 9.20.9 confirms that FILL_PARAMETERS Group Order governs ordering relative to subscription-delivered Objects, but the scheduling stage remains internal and does not promise peer arrival order."
+      "rationale": "This fill exception is a separate scheduling branch. Section 9.20.8 confirms that FILL_PARAMETERS Group Order governs ordering relative to subscription-delivered Objects, but the scheduling stage remains internal and does not promise peer arrival order."
     },
     {
       "id": "D22-5-1-2-SHOULD-123",
@@ -1469,7 +1469,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This branch compares Subgroup forwarding preferences after the earlier priority and fill rules. A receiver sees transmitted data rather than the publisher's set of schedulable Objects or scheduling decisions."
+      "rationale": "This branch compares Subgroup IDs of Delivery Mode Subgroup Objects after the earlier priority and fill rules. A receiver sees transmitted data rather than the publisher's set of schedulable Objects or scheduling decisions."
     },
     {
       "id": "D22-5-1-2-SHOULD-125",
@@ -1500,12 +1500,12 @@
         "clause": 8
       },
       "actor": "publisher",
-      "summary": "In rule 4's remaining equal-priority, same-subscription, same-Track and same-Group tie, if the two Objects have different Forwarding Preferences, select the datagram first.",
+      "summary": "In rule 4's remaining equal-priority, same-subscription, same-Track and same-Group tie, if the two Objects have different Delivery Modes, select the datagram first.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This final rule-4 branch distinguishes datagrams from Subgroup streams; it does not override earlier priority or fill tie-breaks. Local scheduling and transport delivery remain different observations under lines 1760-1765."
+      "rationale": "This final rule-4 branch distinguishes datagrams from Subgroup streams; it does not override earlier priority or fill tie-breaks. Local scheduling and transport delivery remain different observations under lines 2169-2174."
     },
     {
       "id": "D22-5-1-2-SHOULD-127",
@@ -1649,7 +1649,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A publisher implementation is included, but this advice neither fixes a unique midpoint nor identifies a wire field that proves the implementation's default policy. Sections 9.20.8 and 10.4 separately specify defaults for particular fields; those definitions do not turn this general recommendation into an exact-value test."
+      "rationale": "A publisher implementation is included, but this advice neither fixes a unique midpoint nor identifies a wire field that proves the implementation's default policy. Sections 9.20.7 and 10.4 separately specify defaults for particular fields; those definitions do not turn this general recommendation into an exact-value test."
     },
     {
       "id": "D22-5-2-MUST-135",
@@ -1837,7 +1837,7 @@
       "evaluators": [
         "d22-uncommitted-subgroup-timeout-reset"
       ],
-      "rationale": "A driven application can announce Subgroup completion at a known time while the controlled receiver withholds acknowledgments, ensuring the stream cannot be fully committed; a reset then provides the bounded wire outcome. This clause does not specify a reset code, unlike the OBJECT_DELIVERY_TIMEOUT reset at line 1862. Section 11.3.2 permits a reset after a sent FIN and explains the closure context."
+      "rationale": "A driven application can announce Subgroup completion at a known time while the controlled receiver withholds acknowledgments, ensuring the stream cannot be fully committed; a reset then provides the bounded wire outcome. This clause does not specify a reset code, unlike the OBJECT_DELIVERY_TIMEOUT reset at lines 2265-2266. Section 11.3.2 permits a reset after a sent FIN and explains the closure context."
     },
     {
       "id": "D22-5-2-MAY-145",

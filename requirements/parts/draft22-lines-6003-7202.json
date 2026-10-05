@@ -19,7 +19,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 11.3.1 (lines 5979-5980) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 5835-5839) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5685-5687 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5678-5680)."
+      "rationale": "Section 11.3.1 (lines 6261-6262) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 6123-6127) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5973-5975 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5966-5968)."
     },
     {
       "id": "D22-11-1-2-MUST-493",
@@ -91,7 +91,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The original publisher emits Object datagrams rather than receiving them. This reserved-bit receiving rule is distinct from the publisher's zero-bit serialization obligation at line 5850."
+      "rationale": "The original publisher emits Object datagrams rather than receiving them. This reserved-bit receiving rule is distinct from the publisher's zero-bit serialization obligation at line 6138."
     },
     {
       "id": "D22-11-2-1-MUST-497",
@@ -163,7 +163,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The invalid-value list repeats the receiver condition from line 5798. Both lexical anchors remain classified, but neither becomes a publisher Object-reception duty."
+      "rationale": "The invalid-value list repeats the receiver condition from line 6086. Both lexical anchors remain classified, but neither becomes a publisher Object-reception duty."
     },
     {
       "id": "D22-11-2-1-MUST-501",
@@ -311,7 +311,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the data-receiver consequence; the independent sender encoding constraint is retained at line 5968."
+      "rationale": "This is the data-receiver consequence; the independent sender encoding constraint is retained at line 6250."
     },
     {
       "id": "D22-11-3-1-MUST-509",
@@ -414,7 +414,7 @@
       "evaluators": [
         "d22-incomplete-subgroup-reset"
       ],
-      "rationale": "Use a controlled Object set and cancellation, delivery timeout, publisher early termination, location changes or Forward State omission. A fully received FIN with known omitted Objects disproves completeness; absence after a reset does not prove what the sender had already handed to QUIC. After receiving all data and FIN, a subsequent reset may be ignored under lines 6053-6057."
+      "rationale": "Use a controlled Object set and cancellation, delivery timeout, publisher early termination, location changes or Forward State omission. A fully received FIN with known omitted Objects disproves completeness; absence after a reset does not prove what the sender had already handed to QUIC. After receiving all data and FIN, a subsequent reset may be ignored under lines 6341-6345."
     },
     {
       "id": "D22-11-3-2-SHOULD-514",
@@ -805,7 +805,7 @@
         "clause": 1
       },
       "actor": "publisher fetching a Datagram-preference Object",
-      "summary": "Set FETCH Serialization Flags bit 0x40 to 1 for an Object with Datagram forwarding preference.",
+      "summary": "Set FETCH Serialization Flags bit 0x40 to 1 for an Object with Datagram Delivery Mode.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -814,7 +814,7 @@
       "evaluators": [
         "d22-fetch-datagram-flag"
       ],
-      "rationale": "FETCH always uses a stream but preserves the Object's Datagram preference through this flag and has no Subgroup ID for that Object. The draft's Section 11.1.3 cross-reference is imprecise; Sections 11.1.1 and 11.4.1 define these fields in the same draft."
+      "rationale": "FETCH always uses a stream but preserves the Object's Datagram Delivery Mode through this flag and has no Subgroup ID for that Object. The draft's Section 11.1.2 (Object Properties) cross-reference is imprecise; Sections 2.1.1 and 11.4.1 define these fields in the same draft."
     },
     {
       "id": "D22-11-4-1-1-SHOULD-534",
@@ -1541,7 +1541,7 @@
         "d22-grease-publisher-context-handling",
         "d22-unknown-stop-sending-graceful-handling"
       ],
-      "rationale": "Exercise publisher-reachable Setup Options, REQUEST_ERROR, MOQT Auth Token Type and Stream Reset Error Code values with otherwise valid framing. Send an unknown error code in STOP_SENDING on an outgoing subgroup stream; Section 12.5 shares that code namespace with resets. Check ordinary subgroup cancellation handling and continued usability of another request or subgroup without upgrading the reset recommendation at line 6125 to a MUST or requiring a specific reset code. Auth Token Type greasing does not require accepting unauthorized requests. Unknown token Alias Types, Message Parameters, message types and stream types are different namespaces. The following rows retain separate Property and internal error-equivalence boundaries."
+      "rationale": "Exercise publisher-reachable Setup Options, REQUEST_ERROR, MOQT Auth Token Type and Stream Reset Error Code values with otherwise valid framing. Send an unknown error code in STOP_SENDING on an outgoing subgroup stream; Section 12.5 shares that code namespace with resets. Check ordinary subgroup cancellation handling and continued usability of another request or subgroup without upgrading the reset recommendation at line 6412 to a MUST or requiring a specific reset code. Auth Token Type greasing does not require accepting unauthorized requests. Unknown token Alias Types, Message Parameters, message types and stream types are different namespaces. The following rows retain separate Property and internal error-equivalence boundaries."
     },
     {
       "id": "D22-13-MUST-NOT-569",
@@ -1607,7 +1607,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 8.4 requires relays to preserve, forward and cache unsupported properties, subject to Mandatory Track Properties in Section 3.6. The original publisher does not receive upstream Tracks or Objects to relay. Section 9.3 requires empty properties in its PUBLISH_OK, REQUEST_UPDATE_OK and PUBLISH_NAMESPACE_OK responses; putting unknown properties there tests that placement error instead. This cross-reference neither waives mandatory-property handling nor creates publisher cache duties."
+      "rationale": "Section 8.4 requires relays to preserve, forward and cache unsupported properties, subject to Mandatory Track Properties in Section 3.7. The original publisher does not receive upstream Tracks or Objects to relay. Section 9.3 requires empty properties in its PUBLISH_OK, REQUEST_UPDATE_OK and PUBLISH_NAMESPACE_OK responses; putting unknown properties there tests that placement error instead. This cross-reference neither waives mandatory-property handling nor creates publisher cache duties."
     },
     {
       "id": "D22-13-MUST-572",
@@ -1643,7 +1643,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "REQUEST_ERROR can reject publisher-originated PUBLISH or PUBLISH_NAMESPACE. INTERNAL_ERROR in Section 12.3 is an implementation-specific or generic error, without a mandatory retry or distinct observable recovery. Session survival is separately testable at line 6758; it alone cannot establish internal error equivalence. No error echo or retry is invented here."
+      "rationale": "REQUEST_ERROR can reject publisher-originated PUBLISH or PUBLISH_NAMESPACE. INTERNAL_ERROR in Section 12.3 is an implementation-specific or generic error, without a mandatory retry or distinct observable recovery. Session survival is separately testable at line 7038; it alone cannot establish internal error equivalence. No error echo or retry is invented here."
     },
     {
       "id": "D22-13-MUST-574",

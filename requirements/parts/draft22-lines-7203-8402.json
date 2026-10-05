@@ -404,7 +404,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This IANA paragraph specifies endpoint parsing, not registration. In the contribution role the publisher sends Track and Object properties; Section 9.3 requires its publication and update OK responses to contain no Track Properties. Unsupported Mandatory Track Properties retain Section 3.6 handling, and relay forwarding and caching duties under Section 8.4 are not waived. Unknown types do not excuse malformed length framing."
+      "rationale": "This IANA paragraph specifies endpoint parsing, not registration. In the contribution role the publisher sends Track and Object properties; Section 9.3 requires its publication and update OK responses to contain no Track Properties. Unsupported Mandatory Track Properties retain Section 3.7 handling, and relay forwarding and caching duties under Section 8.4 are not waived. Unknown types do not excuse malformed length framing."
     },
     {
       "id": "D22-16-8-MUST-607",
@@ -422,7 +422,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is an endpoint receive obligation, but the original publisher has no incoming subscribed Track or Object property context. Section 9.3 makes nonempty properties in its publication OK responses a separate placement violation. Section 3.6 mandatory-property handling and Section 8.4 relay preservation still apply to their own actors; ignoring semantics does not permit ignoring malformed integer framing."
+      "rationale": "This is an endpoint receive obligation, but the original publisher has no incoming subscribed Track or Object property context. Section 9.3 makes nonempty properties in its publication OK responses a separate placement violation. Section 3.7 mandatory-property handling and Section 8.4 relay preservation still apply to their own actors; ignoring semantics does not permit ignoring malformed integer framing."
     },
     {
       "id": "D22-16-8-MUST-608",
@@ -440,7 +440,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The registry policy constrains new Property registrations, not a publisher's received or emitted messages. Section 3.6 separately defines runtime handling of Mandatory Track Properties; this registration row does not replace it."
+      "rationale": "The registry policy constrains new Property registrations, not a publisher's received or emitted messages. Section 3.7 separately defines runtime handling of Mandatory Track Properties; this registration row does not replace it."
     },
     {
       "id": "D22-16-8-MUST-NOT-609",
@@ -458,7 +458,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This prohibition concerns IANA registration in the Mandatory Track Property range. It is separate from the Section 3.6 rule that an Object carrying such a Property is malformed."
+      "rationale": "This prohibition concerns IANA registration in the Mandatory Track Property range. It is separate from the Section 3.7 rule that an Object carrying such a Property is malformed."
     },
     {
       "id": "D22-16-9-MUST-610",
@@ -476,7 +476,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the registrant's payload-permission declaration, not a new publisher payload rule. Section 11.1.2 consumes the registry permission for wire Objects; this row does not freeze all future nonzero status values to empty payloads."
+      "rationale": "This is the registrant's payload-permission declaration, not a new publisher payload rule. Section 11.1.1 consumes the registry permission for wire Objects; this row does not freeze all future nonzero status values to empty payloads."
     }
   ]
 }

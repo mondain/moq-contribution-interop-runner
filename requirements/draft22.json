@@ -359,7 +359,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 11.3.1 (lines 5873-5875, with the SUBGROUP_HEADER of lines 5896-5902) makes every Object on a Subgroup stream belong to the one Subgroup named by that stream's single SUBGROUP_HEADER Group ID and Subgroup ID, and the Subgroup Object fields (lines 6001-6007) carry only an Object ID Delta, properties, payload length, status and payload, never a Subgroup field. Objects of two distinct Subgroups on one stream therefore have no wire representation: a receiver can only read them as one Subgroup, so the violation is decided inside the publisher before serialization and no byte sequence, even from a cooperating publisher, exhibits it. The separate rule that one Subgroup must not span streams (lines 719-722, second clause) is a different statement."
+      "rationale": "Section 11.3.1 (lines 6170-6172, with the SUBGROUP_HEADER of lines 6177-6183) makes every Object on a Subgroup stream belong to the one Subgroup named by that stream's single SUBGROUP_HEADER Group ID and Subgroup ID, and the Subgroup Object fields (lines 6283-6289) carry only an Object ID Delta, properties, payload length, status and payload, never a Subgroup field. Objects of two distinct Subgroups on one stream therefore have no wire representation: a receiver can only read them as one Subgroup, so the violation is decided inside the publisher before serialization and no byte sequence, even from a cooperating publisher, exhibits it. The separate rule that one Subgroup must not span streams (lines 795-798, second clause) is a different statement."
     },
     {
       "id": "D22-2-2-MUST-NOT-020",
@@ -831,7 +831,7 @@
       "evaluators": [
         "d22-concurrent-same-track-distinct-aliases"
       ],
-      "rationale": "Distinct aliases are a separately observable optional assignment strategy. The prohibition in Section 3.1.2 is one alias identifying two different Tracks simultaneously, not one Track having several aliases."
+      "rationale": "Distinct aliases are a separately observable optional assignment strategy. The prohibition in Section 3.1.3 is one alias identifying two different Tracks simultaneously, not one Track having several aliases."
     },
     {
       "id": "D22-3-1-MUST-043",
@@ -916,7 +916,7 @@
       "evaluators": [
         "d22-publish-objects-before-request-ok"
       ],
-      "rationale": "Delay REQUEST_OK for an otherwise valid Forward=1 PUBLISH, observe optional early Objects, then accept it. Section 9.3 defines PUBLISH_OK as REQUEST_OK. This paragraph expressly contemplates later rejection; Section 3.1.1's blanket ban on Objects for requests ending in error creates an ambiguity for pre-rejection delivery, so that conflicting case is not assigned a normative verdict here."
+      "rationale": "Delay REQUEST_OK for an otherwise valid Forward=1 PUBLISH, observe optional early Objects, then accept it. Section 9.3 defines PUBLISH_OK as REQUEST_OK. This paragraph expressly contemplates later rejection; Section 3.1.2's blanket ban on Objects for requests ending in error creates an ambiguity for pre-rejection delivery, so that conflicting case is not assigned a normative verdict here."
     },
     {
       "id": "D22-3-1-2-MUST-047",
@@ -979,7 +979,7 @@
       "evaluators": [
         "d22-error-subscription-has-no-object-delivery"
       ],
-      "rationale": "Exercise rejection before producing any Objects and verify that production after the rejection causes no delivery. There is a draft ambiguity: Section 3.1 explicitly allows early PUBLISH Objects even when a subscriber later rejects, while this sentence bans Objects for requests ending in error. Do not retrospectively fail pre-rejection early delivery under this mapping. FETCH is separate and Section 3.2.1 expressly permits cached delivery before a fetch error."
+      "rationale": "Exercise rejection before producing any Objects and verify that production after the rejection causes no delivery. There is a draft ambiguity: Section 3.1 explicitly allows early PUBLISH Objects even when a subscriber later rejects, while this sentence bans Objects for requests ending in error. Do not retrospectively fail pre-rejection early delivery under this mapping. FETCH is separate and Section 3.2.4 expressly permits cached delivery before a fetch error."
     },
     {
       "id": "D22-3-1-3-MUST-NOT-050",
@@ -1404,7 +1404,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This optional message construction belongs to the subscriber requesting track discovery. The receiver's distinct duplicate-key rejection requirement is classified at line 1225."
+      "rationale": "This optional message construction belongs to the subscriber requesting track discovery. The receiver's distinct duplicate-key rejection requirement is classified at line 1493."
     },
     {
       "id": "D22-3-3-2-MAY-071",
@@ -1771,7 +1771,7 @@
       "evaluators": [
         "d22-mandatory-properties-confined-to-track-scope"
       ],
-      "rationale": "Inspect Track Properties in PUBLISH, SUBSCRIBE_OK or FETCH_OK and Object Properties in subsequent Objects. An Object carrying a Mandatory Track Property is malformed under Sections 3.6 and 12.1. The sender's wire scope is observable without needing to understand the property's extension semantics."
+      "rationale": "Inspect Track Properties in PUBLISH, SUBSCRIBE_OK or FETCH_OK and Object Properties in subsequent Objects. An Object carrying a Mandatory Track Property is malformed under Sections 3.7 and 12.1. The sender's wire scope is observable without needing to understand the property's extension semantics."
     },
     {
       "id": "D22-3-7-MUST-NOT-089",
@@ -2259,7 +2259,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener is the subscriber consuming namespace updates. The original publisher's emission prohibition is separately captured at line 4544."
+      "rationale": "The listener is the subscriber consuming namespace updates. The original publisher's emission prohibition is separately captured at line 1947."
     },
     {
       "id": "D22-4-2-MAY-114",
@@ -2433,7 +2433,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This draft-21 fill exception is a separate scheduling branch. Section 9.20.9 confirms that FILL_PARAMETERS Group Order governs ordering relative to subscription-delivered Objects, but the scheduling stage remains internal and does not promise peer arrival order."
+      "rationale": "This fill exception is a separate scheduling branch. Section 9.20.8 confirms that FILL_PARAMETERS Group Order governs ordering relative to subscription-delivered Objects, but the scheduling stage remains internal and does not promise peer arrival order."
     },
     {
       "id": "D22-5-1-2-SHOULD-123",
@@ -2469,7 +2469,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This branch compares Subgroup forwarding preferences after the earlier priority and fill rules. A receiver sees transmitted data rather than the publisher's set of schedulable Objects or scheduling decisions."
+      "rationale": "This branch compares Subgroup IDs of Delivery Mode Subgroup Objects after the earlier priority and fill rules. A receiver sees transmitted data rather than the publisher's set of schedulable Objects or scheduling decisions."
     },
     {
       "id": "D22-5-1-2-SHOULD-125",
@@ -2500,12 +2500,12 @@
         "clause": 8
       },
       "actor": "publisher",
-      "summary": "In rule 4's remaining equal-priority, same-subscription, same-Track and same-Group tie, if the two Objects have different Forwarding Preferences, select the datagram first.",
+      "summary": "In rule 4's remaining equal-priority, same-subscription, same-Track and same-Group tie, if the two Objects have different Delivery Modes, select the datagram first.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This final rule-4 branch distinguishes datagrams from Subgroup streams; it does not override earlier priority or fill tie-breaks. Local scheduling and transport delivery remain different observations under lines 1760-1765."
+      "rationale": "This final rule-4 branch distinguishes datagrams from Subgroup streams; it does not override earlier priority or fill tie-breaks. Local scheduling and transport delivery remain different observations under lines 2169-2174."
     },
     {
       "id": "D22-5-1-2-SHOULD-127",
@@ -2649,7 +2649,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A publisher implementation is included, but this advice neither fixes a unique midpoint nor identifies a wire field that proves the implementation's default policy. Sections 9.20.8 and 10.4 separately specify defaults for particular fields; those definitions do not turn this general recommendation into an exact-value test."
+      "rationale": "A publisher implementation is included, but this advice neither fixes a unique midpoint nor identifies a wire field that proves the implementation's default policy. Sections 9.20.7 and 10.4 separately specify defaults for particular fields; those definitions do not turn this general recommendation into an exact-value test."
     },
     {
       "id": "D22-5-2-MUST-135",
@@ -2837,7 +2837,7 @@
       "evaluators": [
         "d22-uncommitted-subgroup-timeout-reset"
       ],
-      "rationale": "A driven application can announce Subgroup completion at a known time while the controlled receiver withholds acknowledgments, ensuring the stream cannot be fully committed; a reset then provides the bounded wire outcome. This clause does not specify a reset code, unlike the OBJECT_DELIVERY_TIMEOUT reset at line 1862. Section 11.3.2 permits a reset after a sent FIN and explains the closure context."
+      "rationale": "A driven application can announce Subgroup completion at a known time while the controlled receiver withholds acknowledgments, ensuring the stream cannot be fully committed; a reset then provides the bounded wire outcome. This clause does not specify a reset code, unlike the OBJECT_DELIVERY_TIMEOUT reset at lines 2265-2266. Section 11.3.2 permits a reset after a sent FIN and explains the closure context."
     },
     {
       "id": "D22-5-2-MAY-145",
@@ -2971,7 +2971,7 @@
       "evaluators": [
         "d22-native-quic-session-capability"
       ],
-      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 21. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
+      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 22. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
     },
     {
       "id": "D22-6-1-2-MAY-152",
@@ -3787,7 +3787,7 @@
       "evaluators": [
         "d22-goaway-timeout-session-close"
       ],
-      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2428 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
+      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2876 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
     },
     {
       "id": "D22-6-6-1-SHOULD-191",
@@ -3881,7 +3881,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the first permitted cache-field update, constrained to the one-way state transition in Section 2.1.1. Cache poisoning protection concerns the relay, not the contribution publisher."
+      "rationale": "This is the first permitted cache-field update, constrained to the one-way state transition in Section 2.1.2. Cache poisoning protection concerns the relay, not the contribution publisher."
     },
     {
       "id": "D22-7-1-MAY-196",
@@ -4223,7 +4223,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is explicitly subscriber-side relay switchover. Publisher-side migration has a separate permission in Section 7.5.1."
+      "rationale": "This is explicitly subscriber-side relay switchover. Publisher-side migration has a separate permission in Section 7.6.1."
     },
     {
       "id": "D22-7-5-SHOULD-215",
@@ -4753,7 +4753,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The Section 11.1.1 Object header is the relay-visible representation being preserved. This is an intermediary nonmodification duty, distinct from the publisher's original Object construction."
+      "rationale": "The Section 2.1.1 Object fields are the relay-visible representation being preserved. This is an intermediary nonmodification duty, distinct from the publisher's original Object construction."
     },
     {
       "id": "D22-7-8-MUST-244",
@@ -4847,7 +4847,7 @@
       "evaluators": [
         "d22-emitted-key-value-types-within-uint64"
       ],
-      "rationale": "A publisher emits Key-Value-Pairs in SETUP and Track/Object Properties. Decode the draft-21 1-to-9-byte integer form with checked arithmetic at the peer; this is not QUIC's 62-bit integer encoding. Receiver rejection is a separate anchor."
+      "rationale": "A publisher emits Key-Value-Pairs in SETUP and Track/Object Properties. Decode the Section 8.1 1-to-9-byte integer form with checked arithmetic at the peer; this is not QUIC's 62-bit integer encoding. Receiver rejection is a separate anchor."
     },
     {
       "id": "D22-8-3-MUST-249",
@@ -5236,7 +5236,7 @@
       "evaluators": [
         "d22-emitted-namespace-fields-nonempty"
       ],
-      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 818-819) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
+      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 885-886) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
     },
     {
       "id": "D22-8-7-MUST-269",
@@ -5258,7 +5258,7 @@
       "evaluators": [
         "d22-empty-namespace-field-protocol-violation"
       ],
-      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 818-819)."
+      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 885-886)."
     },
     {
       "id": "D22-8-7-MUST-270",
@@ -5400,7 +5400,7 @@
       "evaluators": [
         "d22-delete-retires-token-alias"
       ],
-      "rationale": "Send authorization parameters in allowed publisher-receivable requests under Section 9.20.3. After DELETE, USE_ALIAS is unknown and the same alias can be registered anew; retirement does not retroactively revoke previously authorized operations or forbid re-registering the same Token Type/Value. This does not require physical memory erasure."
+      "rationale": "Send authorization parameters in allowed publisher-receivable requests under Section 9.20.2. After DELETE, USE_ALIAS is unknown and the same alias can be registered anew; retirement does not retroactively revoke previously authorized operations or forbid re-registering the same Token Type/Value. This does not require physical memory erasure."
     },
     {
       "id": "D22-8-9-MUST-277",
@@ -5709,7 +5709,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The sender role includes publishers, but the literal control stream wording conflicts with Sections 6.3 and 9: each endpoint has one unidirectional control stream, while ordinary authorization-bearing messages use request streams. A deterministic multi-stream oracle would have to substitute request streams, so this unresolved draft-21 terminology requires clarification before a normative evaluator is assigned. SETUP has separate registration rules."
+      "rationale": "The sender role includes publishers, but the literal control stream wording conflicts with Sections 6.3 and 9: each endpoint has one unidirectional control stream, while ordinary authorization-bearing messages use request streams. A deterministic multi-stream oracle would have to substitute request streams, so this unresolved terminology (unchanged in draft 22) requires clarification before a normative evaluator is assigned. SETUP has separate registration rules."
     },
     {
       "id": "D22-8-9-MAY-292",
@@ -5757,7 +5757,7 @@
       "source": {
         "section": "9",
         "first_line": 3802,
-        "last_line": 3873,
+        "last_line": 3803,
         "occurrence": 1,
         "clause": 1
       },
@@ -5908,7 +5908,7 @@
       "evaluators": [
         "d22-setup-option-duplicates-only-when-permitted"
       ],
-      "rationale": "Decode publisher SETUP and compare option types with their draft-21 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
+      "rationale": "Decode publisher SETUP and compare option types with their draft 22 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
     },
     {
       "id": "D22-9-1-MUST-301",
@@ -6075,7 +6075,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The unambiguous isolated case is a native-QUIC publisher server receiving malformed client AUTHORITY, outside the listener-only harness. Injecting it from this server also mandates INVALID_AUTHORITY; draft 21 does not specify error precedence between malformed and forbidden-role options. Do not force one error as a client-side oracle."
+      "rationale": "The unambiguous isolated case is a native-QUIC publisher server receiving malformed client AUTHORITY, outside the listener-only harness. Injecting it from this server also mandates INVALID_AUTHORITY; draft 22 does not specify error precedence between malformed and forbidden-role options. Do not force one error as a client-side oracle."
     },
     {
       "id": "D22-9-1-2-MUST-NOT-309",
@@ -7399,7 +7399,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscription-state destruction is internal and cannot be inferred from lack of subsequent data. This publisher-initiated completion rule coexists with Section 3.1.1's explicit permission to remove state on receiving STOP_SENDING and after request failure; it must not require a PUBLISH_DONE after every cancellation. Stream state can outlive subscription state."
+      "rationale": "Subscription-state destruction is internal and cannot be inferred from lack of subsequent data. This publisher-initiated completion rule coexists with Section 3.1.2's explicit permission to remove state on receiving STOP_SENDING and after request failure; it must not require a PUBLISH_DONE after every cancellation. Stream state can outlive subscription state."
     },
     {
       "id": "D22-9-9-SHOULD-372",
@@ -7617,7 +7617,7 @@
       "evaluators": [
         "d22-notify-no-unsolicited-subscriber-value-change"
       ],
-      "rationale": "Track the listener subscriber's requested values and publisher notifications, using FORWARD from Section 9.20.19 as an explicitly permitted notification parameter. Omitted parameters remain unchanged; report only a value change without a matching subscriber request. Publisher-controlled updates and reporting the requested current value remain allowed."
+      "rationale": "Track the listener subscriber's requested values and publisher notifications, using FORWARD from Section 9.20.18 as an explicitly permitted notification parameter. Omitted parameters remain unchanged; report only a value change without a matching subscriber request. Publisher-controlled updates and reporting the requested current value remain allowed."
     },
     {
       "id": "D22-9-10-MUST-383",
@@ -7716,7 +7716,7 @@
       "evaluators": [
         "d22-parameter-type-order"
       ],
-      "rationale": "Decode publisher-originated messages using draft-21 vi64 Type Deltas and definition-specific values. Ascending order accommodates explicitly permitted repeated Types with zero delta; Section 9.20's duplicate rule remains independent. These are not Setup Options or generic Key-Value-Pair values."
+      "rationale": "Decode publisher-originated messages using vi64 Type Deltas and definition-specific values. Ascending order accommodates explicitly permitted repeated Types with zero delta; Section 9.20's duplicate rule remains independent. These are not Setup Options or generic Key-Value-Pair values."
     },
     {
       "id": "D22-9-20-MUST-388",
@@ -7760,7 +7760,7 @@
       "evaluators": [
         "d22-sent-parameters-defined-or-negotiated"
       ],
-      "rationale": "Capture exact draft-21 setup negotiation and subsequent publisher messages. A known draft-21 type or an explicitly negotiated extension type is allowed; an unnegotiated type from any other draft is not silently treated as compatible."
+      "rationale": "Capture exact draft 22 setup negotiation and subsequent publisher messages. A known draft 22 type or an explicitly negotiated extension type is allowed; an unnegotiated type from any other draft is not silently treated as compatible."
     },
     {
       "id": "D22-9-20-MUST-390",
@@ -7804,7 +7804,7 @@
       "evaluators": [
         "d22-sent-parameter-duplicates-permitted-only"
       ],
-      "rationale": "Inspect each publisher message against its parameter definitions. Section 3.3.2 permits certain repeated filter types and Section 9.20.16 gives nested fill an independent scope. Do not infer general duplicate AUTHORIZATION_TOKEN permission from the separate Setup Option definition."
+      "rationale": "Inspect each publisher message against its parameter definitions. Section 3.3.2 permits certain repeated filter types and Section 9.20.15 gives nested fill an independent scope. Do not infer general duplicate AUTHORIZATION_TOKEN permission from the separate Setup Option definition."
     },
     {
       "id": "D22-9-20-SHOULD-392",
@@ -8014,7 +8014,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener supplies subscriber timeout preferences. Section 9.18.1 also permits subscription parameters in SUBSCRIBE_TRACKS unless otherwise specified, while Section 9.20.16 does not list this parameter inside fill. None of these sender permissions are publisher enforcement obligations."
+      "rationale": "The listener supplies subscriber timeout preferences. Section 3.6.2 also permits subscription parameters in SUBSCRIBE_TRACKS unless otherwise specified, while Section 9.20.15 does not list this parameter inside fill. None of these sender permissions are publisher enforcement obligations."
     },
     {
       "id": "D22-9-20-3-SHOULD-NOT-402",
@@ -8072,7 +8072,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscriber parameter emission belongs to the listener, including inherited SUBSCRIBE_TRACKS permission under Section 9.18.1. Publisher timeout behavior comes from Section 5.2; the fill whitelist does not permit this parameter inside FILL_PARAMETERS."
+      "rationale": "Subscriber parameter emission belongs to the listener, including inherited SUBSCRIBE_TRACKS permission under Section 3.6.2. Publisher timeout behavior comes from Section 5.2; the fill whitelist does not permit this parameter inside FILL_PARAMETERS."
     },
     {
       "id": "D22-9-20-4-SHOULD-NOT-405",
@@ -8310,7 +8310,7 @@
       "evaluators": [
         "d22-publisher-subscriber-priority-capability"
       ],
-      "rationale": "Observe optional priority advertisement, including explicit initial parameters in PUBLISH resulting from SUBSCRIBE_TRACKS under Section 9.18.1. Lower values mean higher priority and omitted SUBSCRIBE or FETCH defaults to 128. Parameter carriage does not prove the private scheduling choices of Section 5.1."
+      "rationale": "Observe optional priority advertisement, including explicit initial parameters in PUBLISH resulting from SUBSCRIBE_TRACKS under Section 3.6.2. Lower values mean higher priority and omitted SUBSCRIBE or FETCH defaults to 128. Parameter carriage does not prove the private scheduling choices of Section 5.1."
     },
     {
       "id": "D22-9-20-7-MAY-418",
@@ -8328,7 +8328,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "These sender permissions belong to the listener. Section 9.18.1 extends subscription parameters to SUBSCRIBE_TRACKS, and the explicit fill whitelist in Section 9.20.16 also permits SUBSCRIBER_PRIORITY in the independent fill scope."
+      "rationale": "These sender permissions belong to the listener. Section 3.6.2 extends subscription parameters to SUBSCRIBE_TRACKS, and the explicit fill whitelist in Section 9.20.15 also permits SUBSCRIBER_PRIORITY in the independent fill scope."
     },
     {
       "id": "D22-9-20-8-MAY-419",
@@ -8576,7 +8576,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener sends the optional length-prefixed nested parameter sequence. Its presence requests fill subject to Section 3.4, including Forward State and empty-range exceptions. Section 9.18.1 also permits joining via SUBSCRIBE_TRACKS; this sender permission does not override those conditions."
+      "rationale": "The listener sends the optional length-prefixed nested parameter sequence. Its presence requests fill subject to Section 3.4, including Forward State and empty-range exceptions. Section 3.6.2 also permits joining via SUBSCRIBE_TRACKS; this sender permission does not override those conditions."
     },
     {
       "id": "D22-9-20-15-MAY-431",
@@ -8607,7 +8607,7 @@
         "clause": 1
       },
       "actor": "endpoint receiving a disallowed nested fill parameter",
-      "summary": "Close the session with PROTOCOL_VIOLATION if FILL_PARAMETERS contains a parameter not listed in Table 6.",
+      "summary": "Close the session with PROTOCOL_VIOLATION if FILL_PARAMETERS contains a parameter not listed in Table 7.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -8618,7 +8618,7 @@
       "evaluators": [
         "d22-fill-parameter-whitelist-protocol-violation"
       ],
-      "rationale": "Inject well-formed known but unlisted parameters inside a legal FILL_PARAMETERS field. AUTHORIZATION_TOKEN, TRACK_PROPERTY_FILTER and nested FILL_PARAMETERS are not in Table 6. Inherited authorization in Section 3.4 does not license a token inside the nested scope."
+      "rationale": "Inject well-formed known but unlisted parameters inside a legal FILL_PARAMETERS field. AUTHORIZATION_TOKEN, TRACK_PROPERTY_FILTER and nested FILL_PARAMETERS are not in Table 7. Inherited authorization in Section 3.4 does not license a token inside the nested scope."
     },
     {
       "id": "D22-9-20-15-MAY-433",
@@ -8797,7 +8797,7 @@
       "evaluators": [
         "d22-published-track-largest-object-present"
       ],
-      "rationale": "Use a known Track after an observed Object's first byte establishes publication under Section 3.1.3, then stimulate SUBSCRIBE_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, PUBLISH or PUBLISH_STATE_NOTIFY. Merely queued Objects do not establish the precondition. Absence of wire Objects alone cannot prove the publisher has never published elsewhere."
+      "rationale": "Use a known Track after an observed Object's first byte establishes publication under Section 3.1.4, then stimulate SUBSCRIBE_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, PUBLISH or PUBLISH_STATE_NOTIFY. Merely queued Objects do not establish the precondition. Absence of wire Objects alone cannot prove the publisher has never published elsewhere."
     },
     {
       "id": "D22-9-20-17-MUST-442",
@@ -8827,7 +8827,7 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher communicating Forwarding State",
+      "actor": "publisher communicating the paused state (FORWARD)",
       "summary": "Include FORWARD in PUBLISH, a legal subscription REQUEST_UPDATE or PUBLISH_STATE_NOTIFY.",
       "applicability": "Applicable",
       "testability": "Testable",
@@ -8849,13 +8849,13 @@
         "occurrence": 1,
         "clause": 2
       },
-      "actor": "subscriber setting Forwarding State",
+      "actor": "subscriber setting the paused state (FORWARD)",
       "summary": "Include FORWARD in SUBSCRIBE, SUBSCRIBE_TRACKS or REQUEST_UPDATE for a subscription or SUBSCRIBE_TRACKS request.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener sends these subscriber controls. For SUBSCRIBE_TRACKS updates, only future matching subscriptions receive the new Forwarding State; existing subscriptions are unaffected. The parameter is absent from Table 6, so FORWARD cannot be placed inside FILL_PARAMETERS."
+      "rationale": "The listener sends these subscriber controls. For SUBSCRIBE_TRACKS updates, only future matching subscriptions take the new paused state; existing subscriptions are unaffected. The parameter is absent from Table 7, so FORWARD cannot be placed inside FILL_PARAMETERS."
     },
     {
       "id": "D22-9-20-18-MUST-445",
@@ -9824,7 +9824,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 11.3.1 (lines 5979-5980) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 5835-5839) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5685-5687 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5678-5680)."
+      "rationale": "Section 11.3.1 (lines 6261-6262) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 6123-6127) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5973-5975 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5966-5968)."
     },
     {
       "id": "D22-11-1-2-MUST-493",
@@ -9896,7 +9896,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The original publisher emits Object datagrams rather than receiving them. This reserved-bit receiving rule is distinct from the publisher's zero-bit serialization obligation at line 5850."
+      "rationale": "The original publisher emits Object datagrams rather than receiving them. This reserved-bit receiving rule is distinct from the publisher's zero-bit serialization obligation at line 6138."
     },
     {
       "id": "D22-11-2-1-MUST-497",
@@ -9968,7 +9968,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The invalid-value list repeats the receiver condition from line 5798. Both lexical anchors remain classified, but neither becomes a publisher Object-reception duty."
+      "rationale": "The invalid-value list repeats the receiver condition from line 6086. Both lexical anchors remain classified, but neither becomes a publisher Object-reception duty."
     },
     {
       "id": "D22-11-2-1-MUST-501",
@@ -10116,7 +10116,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the data-receiver consequence; the independent sender encoding constraint is retained at line 5968."
+      "rationale": "This is the data-receiver consequence; the independent sender encoding constraint is retained at line 6250."
     },
     {
       "id": "D22-11-3-1-MUST-509",
@@ -10219,7 +10219,7 @@
       "evaluators": [
         "d22-incomplete-subgroup-reset"
       ],
-      "rationale": "Use a controlled Object set and cancellation, delivery timeout, publisher early termination, location changes or Forward State omission. A fully received FIN with known omitted Objects disproves completeness; absence after a reset does not prove what the sender had already handed to QUIC. After receiving all data and FIN, a subsequent reset may be ignored under lines 6053-6057."
+      "rationale": "Use a controlled Object set and cancellation, delivery timeout, publisher early termination, location changes or Forward State omission. A fully received FIN with known omitted Objects disproves completeness; absence after a reset does not prove what the sender had already handed to QUIC. After receiving all data and FIN, a subsequent reset may be ignored under lines 6341-6345."
     },
     {
       "id": "D22-11-3-2-SHOULD-514",
@@ -10610,7 +10610,7 @@
         "clause": 1
       },
       "actor": "publisher fetching a Datagram-preference Object",
-      "summary": "Set FETCH Serialization Flags bit 0x40 to 1 for an Object with Datagram forwarding preference.",
+      "summary": "Set FETCH Serialization Flags bit 0x40 to 1 for an Object with Datagram Delivery Mode.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -10619,7 +10619,7 @@
       "evaluators": [
         "d22-fetch-datagram-flag"
       ],
-      "rationale": "FETCH always uses a stream but preserves the Object's Datagram preference through this flag and has no Subgroup ID for that Object. The draft's Section 11.1.3 cross-reference is imprecise; Sections 11.1.1 and 11.4.1 define these fields in the same draft."
+      "rationale": "FETCH always uses a stream but preserves the Object's Datagram Delivery Mode through this flag and has no Subgroup ID for that Object. The draft's Section 11.1.2 (Object Properties) cross-reference is imprecise; Sections 2.1.1 and 11.4.1 define these fields in the same draft."
     },
     {
       "id": "D22-11-4-1-1-SHOULD-534",
@@ -11346,7 +11346,7 @@
         "d22-grease-publisher-context-handling",
         "d22-unknown-stop-sending-graceful-handling"
       ],
-      "rationale": "Exercise publisher-reachable Setup Options, REQUEST_ERROR, MOQT Auth Token Type and Stream Reset Error Code values with otherwise valid framing. Send an unknown error code in STOP_SENDING on an outgoing subgroup stream; Section 12.5 shares that code namespace with resets. Check ordinary subgroup cancellation handling and continued usability of another request or subgroup without upgrading the reset recommendation at line 6125 to a MUST or requiring a specific reset code. Auth Token Type greasing does not require accepting unauthorized requests. Unknown token Alias Types, Message Parameters, message types and stream types are different namespaces. The following rows retain separate Property and internal error-equivalence boundaries."
+      "rationale": "Exercise publisher-reachable Setup Options, REQUEST_ERROR, MOQT Auth Token Type and Stream Reset Error Code values with otherwise valid framing. Send an unknown error code in STOP_SENDING on an outgoing subgroup stream; Section 12.5 shares that code namespace with resets. Check ordinary subgroup cancellation handling and continued usability of another request or subgroup without upgrading the reset recommendation at line 6412 to a MUST or requiring a specific reset code. Auth Token Type greasing does not require accepting unauthorized requests. Unknown token Alias Types, Message Parameters, message types and stream types are different namespaces. The following rows retain separate Property and internal error-equivalence boundaries."
     },
     {
       "id": "D22-13-MUST-NOT-569",
@@ -11412,7 +11412,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 8.4 requires relays to preserve, forward and cache unsupported properties, subject to Mandatory Track Properties in Section 3.6. The original publisher does not receive upstream Tracks or Objects to relay. Section 9.3 requires empty properties in its PUBLISH_OK, REQUEST_UPDATE_OK and PUBLISH_NAMESPACE_OK responses; putting unknown properties there tests that placement error instead. This cross-reference neither waives mandatory-property handling nor creates publisher cache duties."
+      "rationale": "Section 8.4 requires relays to preserve, forward and cache unsupported properties, subject to Mandatory Track Properties in Section 3.7. The original publisher does not receive upstream Tracks or Objects to relay. Section 9.3 requires empty properties in its PUBLISH_OK, REQUEST_UPDATE_OK and PUBLISH_NAMESPACE_OK responses; putting unknown properties there tests that placement error instead. This cross-reference neither waives mandatory-property handling nor creates publisher cache duties."
     },
     {
       "id": "D22-13-MUST-572",
@@ -11448,7 +11448,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "REQUEST_ERROR can reject publisher-originated PUBLISH or PUBLISH_NAMESPACE. INTERNAL_ERROR in Section 12.3 is an implementation-specific or generic error, without a mandatory retry or distinct observable recovery. Session survival is separately testable at line 6758; it alone cannot establish internal error equivalence. No error echo or retry is invented here."
+      "rationale": "REQUEST_ERROR can reject publisher-originated PUBLISH or PUBLISH_NAMESPACE. INTERNAL_ERROR in Section 12.3 is an implementation-specific or generic error, without a mandatory retry or distinct observable recovery. Session survival is separately testable at line 7038; it alone cannot establish internal error equivalence. No error echo or retry is invented here."
     },
     {
       "id": "D22-13-MUST-574",
@@ -12071,7 +12071,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This IANA paragraph specifies endpoint parsing, not registration. In the contribution role the publisher sends Track and Object properties; Section 9.3 requires its publication and update OK responses to contain no Track Properties. Unsupported Mandatory Track Properties retain Section 3.6 handling, and relay forwarding and caching duties under Section 8.4 are not waived. Unknown types do not excuse malformed length framing."
+      "rationale": "This IANA paragraph specifies endpoint parsing, not registration. In the contribution role the publisher sends Track and Object properties; Section 9.3 requires its publication and update OK responses to contain no Track Properties. Unsupported Mandatory Track Properties retain Section 3.7 handling, and relay forwarding and caching duties under Section 8.4 are not waived. Unknown types do not excuse malformed length framing."
     },
     {
       "id": "D22-16-8-MUST-607",
@@ -12089,7 +12089,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is an endpoint receive obligation, but the original publisher has no incoming subscribed Track or Object property context. Section 9.3 makes nonempty properties in its publication OK responses a separate placement violation. Section 3.6 mandatory-property handling and Section 8.4 relay preservation still apply to their own actors; ignoring semantics does not permit ignoring malformed integer framing."
+      "rationale": "This is an endpoint receive obligation, but the original publisher has no incoming subscribed Track or Object property context. Section 9.3 makes nonempty properties in its publication OK responses a separate placement violation. Section 3.7 mandatory-property handling and Section 8.4 relay preservation still apply to their own actors; ignoring semantics does not permit ignoring malformed integer framing."
     },
     {
       "id": "D22-16-8-MUST-608",
@@ -12107,7 +12107,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The registry policy constrains new Property registrations, not a publisher's received or emitted messages. Section 3.6 separately defines runtime handling of Mandatory Track Properties; this registration row does not replace it."
+      "rationale": "The registry policy constrains new Property registrations, not a publisher's received or emitted messages. Section 3.7 separately defines runtime handling of Mandatory Track Properties; this registration row does not replace it."
     },
     {
       "id": "D22-16-8-MUST-NOT-609",
@@ -12125,7 +12125,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This prohibition concerns IANA registration in the Mandatory Track Property range. It is separate from the Section 3.6 rule that an Object carrying such a Property is malformed."
+      "rationale": "This prohibition concerns IANA registration in the Mandatory Track Property range. It is separate from the Section 3.7 rule that an Object carrying such a Property is malformed."
     },
     {
       "id": "D22-16-9-MUST-610",
@@ -12143,7 +12143,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This is the registrant's payload-permission declaration, not a new publisher payload rule. Section 11.1.2 consumes the registry permission for wire Objects; this row does not freeze all future nonzero status values to empty payloads."
+      "rationale": "This is the registrant's payload-permission declaration, not a new publisher payload rule. Section 11.1.1 consumes the registry permission for wire Objects; this row does not freeze all future nonzero status values to empty payloads."
     },
     {
       "id": "D22-A-3-MUST-611",
