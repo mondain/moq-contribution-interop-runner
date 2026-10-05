@@ -5,7 +5,7 @@ INSERT INTO schema_meta(version) VALUES (3);
 
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
-    draft INTEGER NOT NULL CHECK (draft IN (18, 21)),
+    draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22)),
     transport INTEGER NOT NULL CHECK (transport IN (0, 1)),
     mode INTEGER NOT NULL CHECK (mode IN (0, 1)),
     timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),

@@ -7,7 +7,7 @@
 
 namespace moq::interop::transport {
 
-enum class WebTransportProfile { Draft18Wt15, Draft21Wt16 };
+enum class WebTransportProfile { Draft18Wt15, Draft21Wt16, Draft22Wt16 };
 
 struct H3Request {
     std::string method;

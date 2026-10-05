@@ -347,6 +347,44 @@ TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
     EXPECT_EQ(loaded.build.dependencies, build.dependencies);
 }
 
+TEST(RunStoreTest, RoundTripsDraft22AndRejectsOutOfRangeStoredDrafts) {
+    // Draft 22 is known but not runnable; the store still has to represent it.
+    TemporaryDatabase database;
+    SqliteRunStore store(database.path(), sample_build());
+    auto config = sample_config();
+    config.draft = app::DraftVersion::Draft22;
+    const auto id = store.create_run(config);
+    EXPECT_EQ(store.load(id).config.draft, app::DraftVersion::Draft22);
+    ASSERT_FALSE(store.list({10, 0}).items.empty());
+    EXPECT_EQ(store.list({10, 0}).items.front().config.draft, app::DraftVersion::Draft22);
+}
+
+TEST(RunStoreTest, RejectsOutOfRangeStoredDraftOnLoad) {
+    for (const int bad : {17, 23, 0, -1}) {
+        TemporaryDatabase database;
+        SqliteRunStore store(database.path(), sample_build());
+        const auto id = store.create_run(sample_config());
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+        // The schema CHECK would refuse the value; drop it for this corruption test.
+        ASSERT_EQ(sqlite3_exec(raw, "PRAGMA ignore_check_constraints=ON", nullptr, nullptr,
+                               nullptr),
+                  SQLITE_OK);
+        const std::string sql = "UPDATE runs SET draft=" + std::to_string(bad) +
+                                " WHERE id='" + id + "'";
+        ASSERT_EQ(sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, nullptr), SQLITE_OK) << bad;
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+        try {
+            (void)store.load(id);
+            ADD_FAILURE() << "load accepted draft " << bad;
+        } catch (const std::runtime_error& error) {
+            EXPECT_NE(std::string(error.what()).find("invalid stored draft version"),
+                      std::string::npos)
+                << bad;
+        }
+    }
+}
+
 TEST(RunStoreTest, AllocatesUniqueRunIdsAcrossStoresOpenedAtTheSameDatabaseState) {
     TemporaryDatabase database;
     app::RunId seed_id;

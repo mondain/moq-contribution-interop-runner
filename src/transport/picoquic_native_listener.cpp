@@ -1,5 +1,6 @@
 #include "moq/interop/transport/native_quic_listener.h"
 
+#include "moq/interop/app/draft_traits.h"
 #include "picoquic_connection_internal.h"
 
 #include <picoquic_internal.h>
@@ -30,7 +31,7 @@ namespace {
 bool valid_alpn(std::span<const std::byte> offered) {
     const std::string_view value{reinterpret_cast<const char*>(offered.data()),
                                  offered.size()};
-    return value == "moqt-18" || value == "moqt-21";
+    return app::known_alpn(value);
 }
 
 bool regular_file(const std::filesystem::path& path) {
