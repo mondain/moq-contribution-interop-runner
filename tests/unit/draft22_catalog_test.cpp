@@ -79,7 +79,8 @@ TEST_F(Draft22CatalogTest, MergedCatalogIsThePartitionsInOrderAndIsIncomplete) {
     EXPECT_FALSE(merged.complete);
     std::vector<std::string> expected;
     for (const auto& file : partitions()) {
-        for (const auto& row : read_json(kRoot / "requirements/parts" / file.name).at("requirements")) {
+        const auto part = read_json(kRoot / "requirements/parts" / file.name);
+        for (const auto& row : part.at("requirements")) {
             expected.push_back(row.at("id").get<std::string>());
         }
     }
