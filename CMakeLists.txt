@@ -141,6 +141,12 @@ add_library(moq-interop-requirements
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
 
+# How a run executes by lineage (draft 22 on draft 21's family) and what it stores.
+add_library(moq-interop-lineage-run src/app/lineage_run.cpp)
+target_link_libraries(moq-interop-lineage-run PUBLIC moq-interop-app moq-interop-requirements)
+target_compile_options(moq-interop-lineage-run PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+
 add_library(moq-interop-storage src/storage/sqlite_run_store.cpp)
 target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/generated")
 target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
@@ -782,6 +788,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lineage-translate-tests tests/unit/lineage_translate_test.cpp)
     target_link_libraries(moq-interop-lineage-translate-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lineage-translate COMMAND moq-interop-lineage-translate-tests)
+
+    add_executable(moq-interop-lineage-run-tests tests/unit/lineage_run_test.cpp)
+    target_compile_definitions(moq-interop-lineage-run-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lineage-run-tests PRIVATE moq-interop-lineage-run GTest::gtest_main)
+    add_test(NAME lineage-run COMMAND moq-interop-lineage-run-tests)
 
     add_executable(moq-interop-draft-source-tests tests/unit/draft_source_test.cpp)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE
