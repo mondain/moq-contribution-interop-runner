@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <type_traits>
 #include <variant>
@@ -18,35 +19,52 @@ std::vector<std::byte> bytes(std::initializer_list<unsigned> values) {
 }
 
 // Every shared type is the draft 21 type, not a copy.
-#define EXPECT_SHARED_TYPE(name) \
+#define ASSERT_SHARED_TYPE(name) \
     static_assert(std::is_same_v<draft22::name, draft21::name>, #name " must be the draft 21 type")
 
-EXPECT_SHARED_TYPE(KeyValue);
-EXPECT_SHARED_TYPE(KeyValues);
-EXPECT_SHARED_TYPE(Token);
-EXPECT_SHARED_TYPE(TokenAliasType);
-EXPECT_SHARED_TYPE(StreamRole);
-EXPECT_SHARED_TYPE(MessageKind);
-EXPECT_SHARED_TYPE(MessageTypeInfo);
-EXPECT_SHARED_TYPE(RequestFrame);
-EXPECT_SHARED_TYPE(RedirectTarget);
-EXPECT_SHARED_TYPE(RequestErrorMessage);
-EXPECT_SHARED_TYPE(GoawayMessage);
-EXPECT_SHARED_TYPE(SetupOption);
-EXPECT_SHARED_TYPE(SetupMessage);
-EXPECT_SHARED_TYPE(ControlMessage);
-EXPECT_SHARED_TYPE(PublishDoneMessage);
-EXPECT_SHARED_TYPE(ResponseContext);
-EXPECT_SHARED_TYPE(ResponseParameter);
-EXPECT_SHARED_TYPE(SuccessfulResponse);
-EXPECT_SHARED_TYPE(Location);
-EXPECT_SHARED_TYPE(Limits);
-EXPECT_SHARED_TYPE(ObjectEvent);
-EXPECT_SHARED_TYPE(SubgroupHeader);
-EXPECT_SHARED_TYPE(SubgroupDecoder);
-EXPECT_SHARED_TYPE(FetchDecoder);
-EXPECT_SHARED_TYPE(FetchEvent);
-EXPECT_SHARED_TYPE(FetchHeader);
+ASSERT_SHARED_TYPE(KeyValue);
+ASSERT_SHARED_TYPE(KeyValues);
+ASSERT_SHARED_TYPE(Token);
+ASSERT_SHARED_TYPE(TokenAliasType);
+ASSERT_SHARED_TYPE(StreamRole);
+ASSERT_SHARED_TYPE(MessageKind);
+ASSERT_SHARED_TYPE(MessageTypeInfo);
+ASSERT_SHARED_TYPE(RequestFrame);
+ASSERT_SHARED_TYPE(RedirectTarget);
+ASSERT_SHARED_TYPE(RequestErrorMessage);
+ASSERT_SHARED_TYPE(GoawayMessage);
+ASSERT_SHARED_TYPE(SetupOption);
+ASSERT_SHARED_TYPE(SetupMessage);
+ASSERT_SHARED_TYPE(ControlMessage);
+ASSERT_SHARED_TYPE(PublishDoneMessage);
+ASSERT_SHARED_TYPE(ResponseContext);
+ASSERT_SHARED_TYPE(ResponseParameter);
+ASSERT_SHARED_TYPE(SuccessfulResponse);
+ASSERT_SHARED_TYPE(Location);
+ASSERT_SHARED_TYPE(Limits);
+ASSERT_SHARED_TYPE(ObjectEvent);
+ASSERT_SHARED_TYPE(SubgroupHeader);
+ASSERT_SHARED_TYPE(SubgroupDecoder);
+ASSERT_SHARED_TYPE(FetchDecoder);
+ASSERT_SHARED_TYPE(FetchEvent);
+ASSERT_SHARED_TYPE(FetchHeader);
+ASSERT_SHARED_TYPE(KeyValueEncodeError);
+ASSERT_SHARED_TYPE(TokenEncodeError);
+ASSERT_SHARED_TYPE(RequestErrorEncodeError);
+ASSERT_SHARED_TYPE(GoawayEncodeError);
+ASSERT_SHARED_TYPE(SetupEncodeError);
+ASSERT_SHARED_TYPE(ObjectForwardingPreference);
+ASSERT_SHARED_TYPE(DecoderObservationKind);
+ASSERT_SHARED_TYPE(SubgroupDecodePhase);
+ASSERT_SHARED_TYPE(DecoderObservation);
+ASSERT_SHARED_TYPE(SubgroupPushResult);
+ASSERT_SHARED_TYPE(FetchGroupOrder);
+ASSERT_SHARED_TYPE(FetchGroupOrderResolver);
+ASSERT_SHARED_TYPE(FetchRangeKind);
+ASSERT_SHARED_TYPE(FetchRangeEvent);
+ASSERT_SHARED_TYPE(FetchDecodePhase);
+ASSERT_SHARED_TYPE(FetchDecoderObservation);
+ASSERT_SHARED_TYPE(FetchPushResult);
 
 TEST(Draft22SharedSurface, SharedFunctionsAreTheDraft21Functions) {
     // draft-ietf-moq-transport-22 changes no figure these modules decode (see the audit test).
