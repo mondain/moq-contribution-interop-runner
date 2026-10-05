@@ -1,11 +1,17 @@
 #include "draft21_contribution_filter_testing.h"
 #include "draft21_gap_a_testing.h"
+#include "inline_filter_sites_testing.h"
+
+#include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 
 #include "moq/interop/scenarios/wire_draft.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -115,7 +121,6 @@ TEST(FilterSitePins, LocationFilterSeamDiffersBetweenDrafts) {
     }
 }
 
-
 // ---- contribution scenario sites (d21c) ------------------------------------------------------------
 // Each seam returns encode_params({parameter}): vi(delta from 0) then the value, so a LOCATION_FILTER
 // (0x21) starts "21". Wire 21: vi(len) + vi64 fields. Wire 22: Type + fields, no length.
@@ -165,6 +170,86 @@ TEST(FilterSitePins, Draft22ContributionSitesDifferFromDraft21) {
     EXPECT_EQ(hex(d21c::d21b_future_start_filter_for_test()), "21" "02" "cf4240" "00");
     // session: wire 21 length 0a; wire 22 Absolute (Type 2), the nine-byte vi64, then 00.
     EXPECT_EQ(hex(d21c::session_far_start_filter_for_test()), "21" "02" "ff" "4000000000000000" "00");
+}
+
+
+// ---- inline FETCH / SUBSCRIBE sites ------------------------------------------------------------------
+// FETCH (frame type 16) body = request id | T | parameter count | parameters. T = 01 01 6e 01 78.
+
+const char* const kFetchProbeWire21 = "16" "0014" "01" "01016e0178" "01" "21" "0b" "0000" "ff" "ffffffffffffffff";
+const char* const kFetchProbeWire22 = "16" "0014" "01" "01016e0178" "01" "21" "03" "0000" "ff" "ffffffffffffffff";
+const char* const kFetchFirstObject = "16" "000d" "01" "01016e0178" "01" "21" "04" "07090009";
+const char* const kGroupOrderDefault = "16" "000d" "01" "01016e0178" "01" "21" "04" "07000209";
+const char* const kGroupOrderAscending = "16" "000f" "01" "01016e0178" "02" "21" "04" "07000209" "0101";
+const char* const kGroupOrderDescending = "16" "000f" "01" "01016e0178" "02" "21" "04" "07000209" "0102";
+const char* const kImmutableRepeat = "16" "000f" "05" "01016e0178" "02" "21" "04" "07090009" "1401";
+// SUBSCRIBE: FORWARD=1 (10 01) then the filter (delta 0x11): 02 10 01 11 02 07 09.
+const char* const kObjectRepeat = "03" "000d" "01" "01" "016e" "0178" "02" "1001" "11" "02" "0709";
+
+TEST(FilterSitePins, Draft21BytesOfEveryInlineSite) {
+    EXPECT_EQ(hex(fetch_probe_fetch_for_test(kNamespace, kName)), kFetchProbeWire21);
+    EXPECT_EQ(hex(fetch_response_fetch_for_test(kNamespace, kName)), kFetchProbeWire21);
+    EXPECT_EQ(hex(fetch_first_object_fetch_for_test(kNamespace, kName)), kFetchFirstObject);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, false, false)), kGroupOrderDefault);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, true, false)), kGroupOrderAscending);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, true, true)), kGroupOrderDescending);
+    EXPECT_EQ(hex(immutable_repeat_fetch_for_test(kNamespace, kName, 5)), kImmutableRepeat);
+    EXPECT_EQ(hex(object_repeat_subscribe_for_test(kNamespace, kName)), kObjectRepeat);
+}
+
+// fetch_probe and fetch_response carry {0,0,u64max}: the nine-byte maximum makes the wire 21 length (0b)
+// differ from the wire 22 AbsoluteBounded Type (03), so this pair proves routing.
+TEST(FilterSitePins, Draft22InlineSiteWhereDraftsDiffer) {
+    ScopedWireDraft wire22(22);
+    EXPECT_EQ(hex(fetch_probe_fetch_for_test(kNamespace, kName)), kFetchProbeWire22);
+    EXPECT_EQ(hex(fetch_response_fetch_for_test(kNamespace, kName)), kFetchProbeWire22);
+    EXPECT_STRNE(kFetchProbeWire21, kFetchProbeWire22);
+}
+
+// fetch_first_object {7,9,0,9}, fetch_group_order {7,0,2,9}, immutable_repeat {7,9,0,9} and object_repeat
+// {7,9} have fixed values whose field count equals the draft 22 Type (4, 4, 4, 2) with one-byte varints, so
+// wire 22 bytes equal wire 21 bytes. This only guards framing; it does not prove routing, which Task 6's
+// static source guard covers.
+TEST(FilterSitePins, Draft22InlineSitesCoincidingWithDraft21) {
+    ScopedWireDraft wire22(22);
+    EXPECT_EQ(hex(fetch_first_object_fetch_for_test(kNamespace, kName)), kFetchFirstObject);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, false, false)), kGroupOrderDefault);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, true, false)), kGroupOrderAscending);
+    EXPECT_EQ(hex(fetch_group_order_fetch_for_test(kNamespace, kName, true, true)), kGroupOrderDescending);
+    EXPECT_EQ(hex(immutable_repeat_fetch_for_test(kNamespace, kName, 5)), kImmutableRepeat);
+    EXPECT_EQ(hex(object_repeat_subscribe_for_test(kNamespace, kName)), kObjectRepeat);
+}
+
+// ---- draft 21 close probes: the End Group overflow filter {u64max,0,1} ---------------------------------
+Bytes close_probe_write(const char* scenario_id) {
+    for (const auto& probe : draft21_close_probes())
+        if (probe.definition.id == scenario_id) return probe.definition.writes.front().bytes;
+    ADD_FAILURE() << "missing close probe " << scenario_id;
+    return {};
+}
+
+TEST(FilterSitePins, Draft21BytesOfTheOverflowFilterSites) {
+    // Top-level: 21, len 0b, ff + eight ff (u64max), 00, 01.
+    EXPECT_EQ(hex(close_probe_write("d21-location-filter-end-group-overflow")),
+              "03" "0012" "01000178" "01" "21" "0b" "ffffffffffffffffff" "0001");
+    // Nested in FILL_PARAMETERS: 23, len 0d, then the same filter.
+    EXPECT_EQ(hex(close_probe_write("d21-fill-location-filter-end-group-overflow")),
+              "03" "0014" "01000178" "01" "23" "0d" "21" "0b" "ffffffffffffffffff" "0001");
+}
+
+// Draft 22 cannot represent StartGroup u64max + EndGroupDelta 1 (the builder throws std::logic_error), so
+// under wire 22 the two overflow probes are omitted instead of emitting a wrong byte or failing the whole
+// list. These scenario ids stay `own` and are never run as shared; Task 10 supplies their replacements.
+TEST(FilterSitePins, Draft22OmitsTheOverflowFilterProbes) {
+    const auto count21 = draft21_close_probes().size();
+    ScopedWireDraft wire22(22);
+    const auto probes = draft21_close_probes();
+    EXPECT_EQ(probes.size() + 2, count21);
+    for (const auto& probe : probes) {
+        EXPECT_NE(probe.definition.id, "d21-location-filter-end-group-overflow");
+        EXPECT_NE(probe.definition.id, "d21-fill-location-filter-end-group-overflow");
+    }
+    EXPECT_THROW(filter_param_value({std::numeric_limits<std::uint64_t>::max(), 0, 1}), std::logic_error);
 }
 
 }  // namespace

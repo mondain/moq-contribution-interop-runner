@@ -1,4 +1,6 @@
 #include "moq/interop/scenarios/fetch_first_object.h"
+#include "inline_filter_sites_testing.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/wire/draft18/objects.h"
 #include "moq/interop/wire/draft21/objects.h"
@@ -73,12 +75,10 @@ Bytes encode_fetch(unsigned draft, const Fixture &fixture) {
     success =
         success && wire::write_length_prefixed_bytes(fixture.track_name, body);
     // Draft21 uses an inclusive end and an End Group delta of zero.
-    wire::ByteWriter filter(27);
-    success = success && wire::write_vi64(7, filter) &&
-              wire::write_vi64(9, filter) && wire::write_vi64(0, filter) &&
-              wire::write_vi64(9, filter) && wire::write_vi64(1, body) &&
+    const auto filter = filter_param_value({7, 9, 0, 9});
+    success = success && wire::write_vi64(1, body) &&
               wire::write_vi64(0x21, body) &&
-              wire::write_length_prefixed_bytes(filter.bytes(), body) &&
+              body.append_bytes(filter) &&
               wire::write_vi64(0x16, output) &&
               output.append_byte(static_cast<std::byte>(body.size() >> 8u)) &&
               output.append_byte(static_cast<std::byte>(body.size() & 255u)) &&
@@ -385,6 +385,10 @@ std::vector<FetchFirstObjectProbe> profiles(unsigned draft,
            FetchFirstObjectField::Object, definition}};
 }
 } // namespace
+
+SiteBytes fetch_first_object_fetch_for_test(const SiteNamespace& track_namespace, const SiteBytes& track_name) {
+    return encode_fetch(21, Fixture{track_namespace, track_name});
+}
 bool fetch_first_object_fixture_valid(const Namespace &track_namespace,
                                       const Bytes &track_name) {
   return valid_fixture_fields(track_namespace, track_name);

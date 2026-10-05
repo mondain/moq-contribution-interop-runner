@@ -13,7 +13,6 @@ namespace moq::interop::scenarios::d21c::residual {
 constexpr std::uint64_t kPublish = 0x1d;
 constexpr std::uint64_t kRequestUpdate = 0x2;
 
-Bytes location_pair(std::uint64_t group, std::uint64_t object);
 // PUBLISH_NAMESPACE announcements are acknowledged by base_definition().
 RawProbeDefinition residual_definition();
 
