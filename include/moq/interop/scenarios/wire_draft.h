@@ -2,6 +2,8 @@
 
 #include "moq/interop/wire/draft21/publish.h"
 
+#include <string_view>
+
 namespace moq::interop::scenarios {
 
 // The wire draft of the run on this thread (21 by default). The run manager sets it for the duration of
@@ -18,6 +20,10 @@ public:
 private:
     unsigned previous_;
 };
+
+// The DecodeError detail of the refusal below, so a run can tell the adapter's limit from a peer fault.
+inline constexpr std::string_view kUnrepresentableLocationFilterDetail =
+    "draft-22 Absolute {0,0} filter has no draft-21 form";
 
 // Drop-in for draft21::decode_publish. Wire draft 22 decodes with draft22::decode_publish and presents
 // the result in draft 21's form (LOCATION_FILTER becomes a length-prefixed byte parameter). An Absolute

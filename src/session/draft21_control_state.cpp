@@ -1,5 +1,7 @@
 #include "moq/interop/session/draft21_control_state.h"
 
+#include "moq/interop/scenarios/wire_draft.h"
+
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -12,6 +14,10 @@ constexpr std::uint64_t kProtocolViolation = 0x3;
 constexpr std::array<std::byte, 7> kAlpn{
     std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
     std::byte{'-'}, std::byte{'2'}, std::byte{'1'}};
+// A draft 22 lineage run (wire draft 22 on this thread) runs this draft 21 state on moqt-22.
+constexpr std::array<std::byte, 7> kLineageAlpn22{
+    std::byte{'m'}, std::byte{'o'}, std::byte{'q'}, std::byte{'t'},
+    std::byte{'-'}, std::byte{'2'}, std::byte{'2'}};
 
 }  // namespace
 
@@ -28,7 +34,7 @@ void ControlState::refresh_phase() {
 std::optional<std::uint64_t> ControlState::on_transport_established(
     std::span<const std::byte> alpn) {
     if (phase_ == ControlPhase::Closing) return kProtocolViolation;
-    if (!std::ranges::equal(alpn, kAlpn)) {
+    if (!std::ranges::equal(alpn, scenarios::current_wire_draft() == 22 ? kLineageAlpn22 : kAlpn)) {
         phase_ = ControlPhase::Closing;
         return kProtocolViolation;
     }

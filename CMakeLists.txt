@@ -295,7 +295,7 @@ add_library(moq-interop-runs src/app/native_run_manager.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-    moq-interop-storage)
+    moq-interop-storage moq-interop-lineage-run)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
@@ -436,7 +436,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-test-client nlohmann_json::nlohmann_json)
     add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
     target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
-        moq-interop-runs nlohmann_json::nlohmann_json GTest::gtest_main)
+        moq-interop-runs moq-interop-lineage-run moq-interop-test-client
+        nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"

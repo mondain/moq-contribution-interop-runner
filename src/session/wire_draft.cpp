@@ -11,7 +11,7 @@ namespace {
 thread_local unsigned t_wire_draft = 21;
 
 wire::DecodeError unrepresentable(std::size_t offset) {
-    return {wire::DecodeErrorCode::ProtocolViolation, offset, "draft-22 Absolute {0,0} filter has no draft-21 form"};
+    return {wire::DecodeErrorCode::ProtocolViolation, offset, std::string(kUnrepresentableLocationFilterDetail)};
 }
 
 // The varint fields of a draft 22 filter in draft 21's Length-delimited payload form.

@@ -1,4 +1,5 @@
 #include "moq/interop/session/draft21_control_state.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include <gtest/gtest.h>
 
@@ -80,6 +81,23 @@ TEST(Draft21ControlState, SeparatesHarnessBufferLimitFromPeerViolation) {
         2, bytes({0xaf, 0x00, 0x00, 0x00}), false);
     EXPECT_TRUE(result.harness_limit);
     EXPECT_FALSE(result.close_error.has_value());
+    EXPECT_EQ(state.phase(), ControlPhase::Closing);
+}
+
+TEST(Draft21ControlState, ADraft22LineageRunAcceptsOnlyTheDraft22Alpn) {
+    const auto alpn22 = bytes({'m', 'o', 'q', 't', '-', '2', '2'});
+    {
+        ControlState state;
+        EXPECT_TRUE(state.on_transport_established(alpn22).has_value()) << "draft 21 runs refuse moqt-22";
+    }
+    const scenarios::ScopedWireDraft wire(22);
+    {
+        ControlState state;
+        EXPECT_FALSE(state.on_transport_established(alpn22).has_value());
+        EXPECT_EQ(state.phase(), ControlPhase::AwaitingSetup);
+    }
+    ControlState state;
+    EXPECT_TRUE(state.on_transport_established(kAlpn).has_value()) << "a draft 22 run refuses moqt-21";
     EXPECT_EQ(state.phase(), ControlPhase::Closing);
 }
 
