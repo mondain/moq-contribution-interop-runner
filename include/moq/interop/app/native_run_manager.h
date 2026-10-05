@@ -94,6 +94,12 @@ public:
     static std::optional<scenarios::RawProbeDefinition> resolve_probe(
         const NativeRunManagerConfig& manager_config, const RunConfig& run_config,
         std::string_view id);
+    // The same definition built for a peer that speaks `wire_draft`, exactly as start() builds it: a
+    // draft 22 lineage run resolves its draft 21 `run_config` with draft 22 wire bytes (scenario writes
+    // such as LOCATION_FILTER depend on scenarios::current_wire_draft() when they are built).
+    static std::optional<scenarios::RawProbeDefinition> resolve_probe(
+        const NativeRunManagerConfig& manager_config, const RunConfig& run_config,
+        std::string_view id, DraftVersion wire_draft);
     [[nodiscard]] bool supports(DraftVersion draft) const noexcept;
     [[nodiscard]] bool supports_driven() const noexcept;
 

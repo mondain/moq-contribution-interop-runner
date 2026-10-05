@@ -1582,7 +1582,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         }
         if (raw_probe_scenario(draft, id)) {
             try {
-                auto definition = impl_->resolve_raw_probe(impl_->config, execution, id);
+                // start() runs on the caller's thread, outside the worker's ScopedWireDraft: build the
+                // writes for the wire draft the peer speaks.
+                auto definition = resolve_probe(impl_->config, execution, id, plan->wire_draft);
                 if (!definition || definition->id != id)
                     return {RunStartStatus::Unsupported, {}, {}};
                 definitions.push_back(std::move(*definition));
@@ -1719,6 +1721,13 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
 
 std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
     const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id) {
+    return Impl::resolve_raw_probe(manager_config, run_config, id);
+}
+
+std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
+    const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id,
+    DraftVersion wire_draft) {
+    const scenarios::ScopedWireDraft wire(draft_number(wire_draft));
     return Impl::resolve_raw_probe(manager_config, run_config, id);
 }
 

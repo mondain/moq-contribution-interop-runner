@@ -832,6 +832,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-filter-site-pins-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
     add_test(NAME filter-site-pins COMMAND moq-interop-filter-site-pins-tests)
 
+    add_executable(moq-interop-draft22-filter-guard-tests tests/integration/draft22_filter_guard_test.cpp)
+    target_link_libraries(moq-interop-draft22-filter-guard-tests PRIVATE
+        moq-interop-runs moq-interop-scenarios moq-interop-requirements moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-filter-guard COMMAND moq-interop-draft22-filter-guard-tests)
+
+    add_executable(moq-interop-filter-source-guard-tests tests/unit/filter_source_guard_test.cpp)
+    target_compile_definitions(moq-interop-filter-source-guard-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-filter-source-guard-tests PRIVATE GTest::gtest_main)
+    add_test(NAME filter-source-guard COMMAND moq-interop-filter-source-guard-tests)
+
     add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
     target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
