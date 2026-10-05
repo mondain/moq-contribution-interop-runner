@@ -5,6 +5,8 @@
 
 #include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
+#include "draft21_contribution_walk_testing.h"
+#include "moq/interop/scenarios/parameter_walk.h"
 #include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/draft21/publish.h"
@@ -443,41 +445,23 @@ struct Walk {
 Walk walk_parameters(wire::Cursor& body, std::uint64_t count) {
     Walk walk;
     walk.declared = static_cast<std::size_t>(count);
-    std::uint64_t previous = 0;
-    for (std::uint64_t index = 0; index < count; ++index) {
-        const auto delta = read_vi(body);
-        if (!delta) { walk.structure = false; return walk; }
-        if (*delta > std::numeric_limits<std::uint64_t>::max() - previous) {
-            walk.overflow = true;
-            return walk;
-        }
-        const auto type = previous + *delta;
-        if (index != 0 && *delta == 0 && !permits_repeat(type)) walk.forbidden_repeat = true;
+    // A zero delta after the first parameter repeats the previous type. The repeat is noted for the
+    // parameter the walk stopped at too, as it is seen before its value is read.
+    std::optional<std::uint64_t> previous;
+    const auto note = [&](std::uint64_t type) {
+        if (previous && *previous == type && !permits_repeat(type)) walk.forbidden_repeat = true;
         previous = type;
-        bool ok = true;
-        switch (type) {
-            case 0x10: case 0x20: case 0x22: case 0x35:
-                ok = read_n(body, 1).has_value();
-                break;
-            case 0x02: case 0x04: case 0x06: case 0x08: case 0x0a: case 0x32:
-                ok = read_vi(body).has_value();
-                break;
-            case 0x09:
-                ok = read_vi(body).has_value() && read_vi(body).has_value();
-                break;
-            case 0x03: case 0x21: case 0x23: case 0x25: case 0x26: case 0x27:
-            case 0x28: case 0x29: case 0x34: {
-                const auto length = read_vi(body);
-                ok = length && *length <= 65535 && read_n(body, static_cast<std::size_t>(*length));
-                break;
-            }
-            default:
-                // The value encoding of an unknown type cannot be skipped.
-                walk.unknown = true;
-                return walk;
-        }
-        if (!ok) { walk.structure = false; return walk; }
-        ++walk.parsed;
+    };
+    const auto result =
+        walk_message_parameters(body, count, [&note](const WalkedParameter& parameter) { note(parameter.type); });
+    if (result.failed_type) note(*result.failed_type);
+    walk.parsed = result.visited;
+    switch (result.status) {
+        case ParameterWalkStatus::Complete: break;
+        case ParameterWalkStatus::Malformed: walk.structure = false; break;
+        case ParameterWalkStatus::TypeOverflow: walk.overflow = true; break;
+        // The value encoding of an unknown type cannot be skipped.
+        case ParameterWalkStatus::UnknownType: walk.unknown = true; break;
     }
     return walk;
 }
@@ -573,6 +557,13 @@ Spec padding_spec(const char* scenario, const char* requirement, const char* eva
 }  // namespace
 
 Bytes session_far_start_filter_for_test() { return encode_params({far_start_filter()}); }
+
+SessionWalkForTest session_walk_parameters_for_test(std::span<const std::byte> body, std::uint64_t count) {
+    wire::Cursor cursor(body);
+    const auto walk = walk_parameters(cursor, count);
+    return {walk.declared, walk.parsed, walk.structure, walk.overflow, walk.unknown, walk.forbidden_repeat,
+            cursor.offset()};
+}
 
 std::vector<Spec> session_specs() {
     std::vector<Spec> result;

@@ -17,6 +17,8 @@
 
 #include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
+#include "draft21_contribution_walk_testing.h"
+#include "moq/interop/scenarios/parameter_walk.h"
 #include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/draft21/key_values.h"
@@ -61,48 +63,20 @@ Block parse_block(wire::Cursor& body) {
     Block block;
     const auto count = read_vi(body);
     if (!count || *count > 64) return block;
-    std::uint64_t previous = 0;
-    for (std::uint64_t index = 0; index < *count; ++index) {
-        const auto delta = read_vi(body);
-        if (!delta || *delta > std::numeric_limits<std::uint64_t>::max() - previous) return block;
+    const auto walk = walk_message_parameters(body, *count, [&block](const WalkedParameter& parameter) {
         Value value;
-        value.type = previous + *delta;
-        previous = value.type;
-        switch (value.type) {
-            case 0x10: case 0x20: case 0x22: case 0x35: {
-                const auto octet = read_n(body, 1);
-                if (!octet) return block;
-                value.number = std::to_integer<std::uint64_t>((*octet)[0]);
-                break;
-            }
-            case 0x02: case 0x04: case 0x06: case 0x08: case 0x0a: case 0x32: {
-                value.number = read_vi(body);
-                if (!value.number) return block;
-                break;
-            }
-            case 0x09: {
-                const auto group = read_vi(body);
-                const auto object = group ? read_vi(body) : std::nullopt;
-                if (!group || !object) return block;
-                value.location = {*group, *object};
-                break;
-            }
-            case 0x03: case 0x21: case 0x23: case 0x25: case 0x26: case 0x27:
-            case 0x28: case 0x29: case 0x34: {
-                const auto length = read_vi(body);
-                if (!length || *length > 65535) return block;
-                const auto bytes = read_n(body, static_cast<std::size_t>(*length));
-                if (!bytes) return block;
-                value.bytes.assign(bytes->begin(), bytes->end());
-                break;
-            }
-            default:
-                // An unknown parameter's value cannot be skipped.
-                return block;
-        }
+        value.type = parameter.type;
+        value.number = parameter.number;
+        value.location = parameter.location;
+        // A length-prefixed value keeps the bytes after its Length; a draft 22 LOCATION_FILTER keeps its
+        // Type and fields.
+        if (parameter.kind == ParameterValueKind::LengthPrefixed ||
+            parameter.kind == ParameterValueKind::LocationFilter)
+            value.bytes.assign(parameter.payload.begin(), parameter.payload.end());
         block.values.push_back(std::move(value));
-    }
-    block.ok = true;
+    });
+    // An unknown parameter's value cannot be skipped, so it fails the block like a truncation.
+    block.ok = walk.status == ParameterWalkStatus::Complete;
     return block;
 }
 
@@ -1037,6 +1011,17 @@ Spec goaway_replacement_uri() {
 }  // namespace
 
 Bytes d21b_future_start_filter_for_test() { return encode_params({future_start_filter()}); }
+
+BlockForTest d21b_parse_block_for_test(std::span<const std::byte> body) {
+    wire::Cursor cursor(body);
+    const auto block = parse_block(cursor);
+    BlockForTest result;
+    result.ok = block.ok;
+    for (const auto& value : block.values)
+        result.values.push_back({value.type, value.number, value.location, value.bytes});
+    result.consumed = cursor.offset();
+    return result;
+}
 
 std::vector<Spec> d21b_specs() {
     std::vector<Spec> result;

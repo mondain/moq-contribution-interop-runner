@@ -245,6 +245,7 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_gap_a.cpp
     src/scenarios/draft21_gap_a_token.cpp
     src/scenarios/location_filter_param.cpp
+    src/scenarios/parameter_walk.cpp
     src/scenarios/draft21_contribution.cpp
     src/scenarios/draft21_contribution_support.cpp
     src/scenarios/draft21_contribution_session.cpp
@@ -820,6 +821,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-location-filter-param-tests tests/unit/location_filter_param_test.cpp)
     target_link_libraries(moq-interop-location-filter-param-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
     add_test(NAME location-filter-param COMMAND moq-interop-location-filter-param-tests)
+
+    add_executable(moq-interop-parameter-walk-tests tests/unit/parameter_walk_test.cpp)
+    target_include_directories(moq-interop-parameter-walk-tests PRIVATE "${PROJECT_SOURCE_DIR}/src/scenarios")
+    target_link_libraries(moq-interop-parameter-walk-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME parameter-walk COMMAND moq-interop-parameter-walk-tests)
 
     add_executable(moq-interop-filter-site-pins-tests tests/unit/filter_site_pins_test.cpp)
     target_include_directories(moq-interop-filter-site-pins-tests PRIVATE "${PROJECT_SOURCE_DIR}/src/scenarios")
