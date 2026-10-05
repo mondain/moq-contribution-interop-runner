@@ -1341,13 +1341,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "They MAY also impose limits on the number of publishers in a namespace, by rejecting or closing namespace subscriptions with the error NAMESPACE_TOO_LARGE.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "Limit publishers in a namespace by rejecting or closing namespace subscriptions with NAMESPACE_TOO_LARGE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This permission is in Relay Resource Protection in Large Namespaces and addresses relay publisher-count limits, not a universal original-publisher error policy."
     },
     {
       "id": "D22-7-5-MAY-218",
@@ -1579,13 +1579,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the SUBSCRIBE is not paused and the upstream subscriptions are paused, the Relay MUST resume the upstream subscriptions with REQUEST_UPDATE to all publishers",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "For a downstream SUBSCRIBE that is not paused while upstream subscriptions are paused, resume the upstream subscriptions with REQUEST_UPDATE to all publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This resumes existing upstream subscriptions to satisfy downstream demand. The action and conditional upstream state belong to the relay."
     },
     {
       "id": "D22-7-6-MUST-231",
@@ -1615,13 +1615,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the SUBSCRIBE is not paused, then the Relay MUST NOT pause when subscribing upstream.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "Do not pause the upstream subscription when the triggering downstream SUBSCRIBE is not paused.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This propagates downstream demand when the relay creates an upstream subscription. The actor is the subscribing relay, not the receiving original publisher."
     },
     {
       "id": "D22-7-6-MUST-233",
@@ -1705,13 +1705,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If at least one downstream subscriber for the Track is not paused, the Relay MUST resume the upstream subscription with REQUEST_UPDATE, if paused.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "After an authorized PUBLISH for a Track with Established downstream subscriptions, resume the upstream subscription with REQUEST_UPDATE if it is paused and at least one downstream subscriber is not paused.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This relay demand-propagation action is conditional on the subscriptions described in the preceding sentence. It is not a request for the original publisher to originate a subscriber-side update."
     },
     {
       "id": "D22-7-6-MUST-238",
@@ -2193,13 +2193,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* 0x3800 to 0x3FFF (2-byte encoding): 2048 code points (including grease Section 13) for applications with moderate space constraints Applications MAY use code ",
+      "actor": "application",
+      "summary": "Use Property code points in 0x78-0x7F or 0x3800-0x3FFF without registration for format-specific metadata or other application-defined purposes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-application-specific-properties"
+      ],
+      "evaluators": [
+        "d22-private-property-code-point-capability"
+      ],
+      "rationale": "A driven publisher can emit application-configured Track or Object Properties in these ranges, observable at the relay boundary. The evaluator measures optional capability and encoding, not media semantics or an imagined universal meaning for these application-defined values."
     },
     {
       "id": "D22-8-4-MUST-264",

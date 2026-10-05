@@ -10,7 +10,7 @@
       "LOCATION_FILTER Parameter",
       "PUBLISH_NAMESPACE Message"
     ],
-    "conclusion": ""
+    "conclusion": "Two wire blocks differ between draft 21 and draft 22. LOCATION_FILTER Parameter is a real wire change (#1913, #1953): the draft 21 length-prefixed form (Parameter Type, Length (vi64), optional StartGroup, StartObject, EndGroupDelta, EndObject, with the field count inferred from Length) is replaced by Parameter Type followed by an explicit Location Filter Type (vi64) in place of the Length field, which selects the fields that follow: 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields; any other Location Filter Type is a PROTOCOL_VIOLATION, so encoders and decoders of 0x21 (top level and inside FILL_PARAMETERS) must change and sub-project B (the codec task) must cover it. PUBLISH_NAMESPACE Message is editorial: its field Track Namespace (..) is renamed Track Namespace Prefix (..) with the same Section 8.7 Track Namespace encoding and position, prefix matching was already the draft 21 behavior (Section 7.5 of draft 21), and the new statement that AUTHORIZATION_TOKEN is the only allowed parameter matches draft 21 Section 9.20.3, so the bytes on the wire are unchanged and no codec change is needed for it. No blocks were added or removed."
   },
   "entries": [
     {
@@ -443,8 +443,8 @@
       "draft22_id": "D22-3-1-3-1-MAY-054",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "consolidates the draft 21 datagram and Subgroup unknown-alias permissions (D21-11-2-MAY-514/515, D21-11-3-1-MAY-527/528) into Section 3.1.3.1; one row holds the drop and buffer options for both datagrams and streams",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -459,8 +459,8 @@
       "draft22_id": "D22-3-1-3-1-MUST-056",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "same obligation as D21-11-3-1-MUST-530, moved from Section 11.3.1 to Section 3.1.3.1 and joined into one sentence with its rationale",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -885,16 +885,16 @@
       "draft22_id": "D22-4-2-MUST-109",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "second clause of the Section 4.2 first-response sentence; same obligation as D21-9-15-MUST-384, which the carry tool paired with D22-3-6-MUST-082 (the SUBSCRIBE_TRACKS rule) instead; part 8b must re-pair the reworded rows",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-4-2-MUST-110",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "supersedes D21-4-2-MUST-089 (original publisher) and D21-4-2-MUST-090 (relay); one row holds both branches via the definition of a known namespace plus the update obligation as the set changes; carried d21 scenario and evaluator ids",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1749,8 +1749,8 @@
       "draft22_id": "D22-7-5-MAY-217",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "NAMESPACE_TOO_LARGE clause of D21-4-3-1-MAY-101, now its own sentence in Section 7.5; the carried D22-7-5-MAY-218 still repeats this summary and is for part 8b",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1853,8 +1853,8 @@
       "draft22_id": "D22-7-6-MUST-230",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "supersedes D21-7-5-MUST-212; Forward State=1/0 is now described as not paused/paused (#1940), same obligation",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1869,8 +1869,8 @@
       "draft22_id": "D22-7-6-MUST-NOT-232",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "supersedes D21-7-5-MUST-214; 'MUST use Forward=1' restated as 'MUST NOT pause' (#1940), same obligation",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1909,8 +1909,8 @@
       "draft22_id": "D22-7-6-MUST-237",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "supersedes D21-7-5-MUST-220; Forward State restated as paused (#1940), same obligation",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2117,8 +2117,8 @@
       "draft22_id": "D22-8-4-MAY-263",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "text identical to D21-8-4-MAY-245; the tool missed the match because a page break before the sentence joined it to the preceding bullet; carried classification and ids",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2213,8 +2213,8 @@
       "draft22_id": "D22-8-8-MUST-275",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "Section 8.8.1 was folded into Section 8.8; one row replaces the canonical-encoding rules D21-8-8-1-MUST-257..262; invalid-name handling is now application-defined",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2365,8 +2365,8 @@
       "draft22_id": "D22-9-MUST-294",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "text identical to D21-9-MUST-282/283; the tool missed the match because a page break after the sentence pulled Table 5 into it; one row holds both the publisher (testable) and subscriber (not applicable) halves",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3467,8 +3467,8 @@
       "draft22_id": "D22-9-20-15-MAY-431",
       "draft21_id": "",
       "change": "new",
-      "note": "",
-      "reviewed": false,
+      "note": "same list as D21-9-20-16-MAY-439..446 (section renumbered 9.20.16 to 9.20.15); one row holds the eight per-parameter permissions",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4931,296 +4931,296 @@
       "draft22_id": "",
       "draft21_id": "D21-4-1-MUST-082",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-4-2-MUST-108 (SUBSCRIBE_NAMESPACE first-response rule moved to Section 4.2 with SUBSCRIBE_NAMESPACE_OK/ERROR shorthand names; that row currently carries D21-9-18-MUST-392 and needs re-pairing in part 8b)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-4-1-MUST-083",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: SUBSCRIBE_TRACKS moved to Section 3.6, where the publisher response is stated non-normatively ('will respond'); only the subscriber PROTOCOL_VIOLATION check (D22-3-6-MUST-082) remains normative",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-4-2-MUST-089",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-4-2-MUST-110",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-4-2-MUST-090",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-4-2-MUST-110 (relay branch, via the definition of a known namespace)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-4-2-MAY-097",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the 'MAY send SUBSCRIBE or FETCH to any publisher' sentence was removed in the discovery restructure (#1946); the related permission survives as D22-4-1-MAY-101",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-7-5-MUST-208",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: a relay no longer forwards PUBLISH_NAMESPACE to subscribers; it advertises namespaces with NAMESPACE (Section 7.6, D22-4-2-MUST-110)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-7-5-MUST-209",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the generic forwarding sentence was removed; PUBLISH forwarding to SUBSCRIBE_TRACKS subscribers remains as D22-7-6-MUST-233",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-7-5-MUST-212",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-7-6-MUST-230",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-7-5-MUST-214",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-7-6-MUST-NOT-232",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-7-5-MUST-220",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-7-6-MUST-237",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-4-MAY-245",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-4-MAY-263 (identical text, unmatched because of a page break)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-257",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-258",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-259",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-260",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-NOT-261",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-MUST-262",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-8-8-1-SHOULD-263",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: Section 8.8 now says how an invalid name is handled is application-defined, with no SHOULD to treat it as an error",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-MUST-282",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-MUST-294 (identical text, unmatched because of a page break)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-MUST-283",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-MUST-294 (same sentence; one row holds both halves)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-11-MUST-374",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the Fetch semantics rewrite (#1895) has relays issue upstream FETCHes and report unknown or timed-out ranges (Section 3.2.3); no pause obligation remains",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-15-MUST-383",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the SUBSCRIBE_NAMESPACE field text no longer repeats the 32-field rule; the general Track Namespace rule D22-8-7-MUST-270 still applies",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-18-MUST-391",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the SUBSCRIBE_TRACKS field text no longer repeats the 32-field rule; the general Track Namespace rule D22-8-7-MUST-270 still applies",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-439",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-440",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-441",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-442",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-443",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-444",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-445",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-9-20-16-MAY-446",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-1-1-SHOULD-NOT-506",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "dropped in draft 22: the Object Payload field description (Section 2.1.1) no longer carries the SHOULD NOT; relay opaque-payload handling remains as D22-7-8-MUST-244",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-2-MAY-514",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-2-MAY-515",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-3-1-MAY-527",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-3-1-MAY-528",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "",
       "draft21_id": "D21-11-3-1-MUST-530",
       "change": "removed",
-      "note": "",
-      "reviewed": false,
+      "note": "superseded by D22-3-1-3-1-MUST-056",
+      "reviewed": true,
       "tags": []
     }
   ]

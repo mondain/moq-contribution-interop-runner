@@ -1071,13 +1071,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "When an endpoint receives a datagram or a new stream with a Track Alias that is not yet associated with an Established subscription, it MAY drop the data or buf",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber receiving data with an unknown Track Alias",
+      "summary": "Drop, or briefly buffer, a datagram or new stream whose Track Alias is not yet associated with an Established subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "Object datagrams and Subgroup streams carrying Track Aliases are received by the subscriber side of contribution. This optional receiver handling is not a contribution-publisher duty."
     },
     {
       "id": "D22-3-1-3-1-MAY-055",
@@ -1107,13 +1107,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "To prevent deadlocks, endpoints MUST allocate connection flow control to control streams before allocating it to any data streams; otherwise a receiver might wa",
+      "actor": "publisher endpoint allocating connection flow control",
+      "summary": "Allocate connection flow control to control streams before allocating it to any data streams.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "The general endpoint rule includes publishers, but allocation is private transport scheduling. Observing stream credit or lack of deadlock does not reveal reservation order; the runner cannot prove this internal policy from arrival order."
     },
     {
       "id": "D22-3-2-MUST-057",
@@ -2161,13 +2161,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher MUST send a single SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR as the first message on the response half of the stream; if the subscriber ",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber receiving the first SUBSCRIBE_NAMESPACE response",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first message on the SUBSCRIBE_NAMESPACE response stream is not SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR (REQUEST_OK or REQUEST_ERROR).",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This clause prescribes subscriber response validation. The publisher's first-response obligation is the preceding clause of the same sentence (D22-4-2-MUST-108); do not turn a subscriber close rule into another publisher response rule."
     },
     {
       "id": "D22-4-2-MUST-110",
@@ -2179,13 +2179,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "On success, the publisher MUST send a NAMESPACE message for each namespace it knows that matches the Track Namespace Prefix, and further NAMESPACE or NAMESPACE_",
+      "actor": "publisher answering SUBSCRIBE_NAMESPACE",
+      "summary": "After accepting SUBSCRIBE_NAMESPACE, send NAMESPACE for each known namespace matching the Track Namespace Prefix, and further NAMESPACE or NAMESPACE_DONE messages as that set changes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-discover-original-publisher-namespaces"
+      ],
+      "evaluators": [
+        "d22-original-publisher-matching-namespace-notification"
+      ],
+      "rationale": "An original publisher knows the namespaces of its own Tracks. Use known published namespaces and matching, nonmatching and empty prefixes, and verify NAMESPACE notifications on the SUBSCRIBE_NAMESPACE response stream under Namespace Prefix Matching (Section 2.4.2). The relay branch (namespaces learned from an authorized PUBLISH_NAMESPACE) is out of scope for a publisher-validating runner."
     },
     {
       "id": "D22-4-2-MUST-111",
@@ -4260,13 +4264,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "They MAY also impose limits on the number of publishers in a namespace, by rejecting or closing namespace subscriptions with the error NAMESPACE_TOO_LARGE.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "Limit publishers in a namespace by rejecting or closing namespace subscriptions with NAMESPACE_TOO_LARGE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This permission is in Relay Resource Protection in Large Namespaces and addresses relay publisher-count limits, not a universal original-publisher error policy."
     },
     {
       "id": "D22-7-5-MAY-218",
@@ -4498,13 +4502,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the SUBSCRIBE is not paused and the upstream subscriptions are paused, the Relay MUST resume the upstream subscriptions with REQUEST_UPDATE to all publishers",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "For a downstream SUBSCRIBE that is not paused while upstream subscriptions are paused, resume the upstream subscriptions with REQUEST_UPDATE to all publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This resumes existing upstream subscriptions to satisfy downstream demand. The action and conditional upstream state belong to the relay."
     },
     {
       "id": "D22-7-6-MUST-231",
@@ -4534,13 +4538,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the SUBSCRIBE is not paused, then the Relay MUST NOT pause when subscribing upstream.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "Do not pause the upstream subscription when the triggering downstream SUBSCRIBE is not paused.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This propagates downstream demand when the relay creates an upstream subscription. The actor is the subscribing relay, not the receiving original publisher."
     },
     {
       "id": "D22-7-6-MUST-233",
@@ -4624,13 +4628,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If at least one downstream subscriber for the Track is not paused, the Relay MUST resume the upstream subscription with REQUEST_UPDATE, if paused.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "After an authorized PUBLISH for a Track with Established downstream subscriptions, resume the upstream subscription with REQUEST_UPDATE if it is paused and at least one downstream subscriber is not paused.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This relay demand-propagation action is conditional on the subscriptions described in the preceding sentence. It is not a request for the original publisher to originate a subscriber-side update."
     },
     {
       "id": "D22-7-6-MUST-238",
@@ -5112,13 +5116,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* 0x3800 to 0x3FFF (2-byte encoding): 2048 code points (including grease Section 13) for applications with moderate space constraints Applications MAY use code ",
+      "actor": "application",
+      "summary": "Use Property code points in 0x78-0x7F or 0x3800-0x3FFF without registration for format-specific metadata or other application-defined purposes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-application-specific-properties"
+      ],
+      "evaluators": [
+        "d22-private-property-code-point-capability"
+      ],
+      "rationale": "A driven publisher can emit application-configured Track or Object Properties in these ranges, observable at the relay boundary. The evaluator measures optional capability and encoding, not media semantics or an imagined universal meaning for these application-defined values."
     },
     {
       "id": "D22-8-4-MUST-264",
@@ -5357,13 +5365,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "To maintain this property, an implementation parsing this format MUST reject a name that does not follow the encoding rules exactly, including a period not foll",
+      "actor": "implementation parsing serialized names",
+      "summary": "Reject a rendered name that does not follow the serialization rules exactly, including a period not followed by exactly two lowercase hexadecimal digits or a literal-safe byte that was hex-encoded.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This keeps the local name representation bijective. Publishers can use such a local parser, but incoming MOQT namespaces and Track Names are binary, so invalid rendered strings have no mandated wire-level response and the runner has no protocol operation that invokes the parser."
     },
     {
       "id": "D22-8-9-MUST-276",
@@ -5746,13 +5754,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Messages marked \"First\" MUST be the first message on a new request stream. +========+=====================================+==================+ | ID | Messages |",
+      "actor": "publisher initiating a request",
+      "summary": "Send PUBLISH and PUBLISH_NAMESPACE as the first message on a new request stream.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-stream-placement"
+      ],
+      "evaluators": [
+        "d22-publisher-first-message-placement"
+      ],
+      "rationale": "Table 5 marks these publisher-originated messages First. Observe the complete publisher-to-peer byte sequence on each bidirectional stream. The other First messages (SUBSCRIBE, FETCH, TRACK_STATUS, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) are runner stimuli and are not checked here; SETUP begins the control stream under Section 6.3."
     },
     {
       "id": "D22-9-MUST-295",
@@ -8569,13 +8581,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The following parameters MAY appear inside FILL_PARAMETERS:",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber supplying nested fill parameters",
+      "summary": "Include FILL_TIMEOUT, SUBSCRIBER_PRIORITY, LOCATION_FILTER, GROUP_ORDER, SUBGROUP_FILTER, OBJECTID_FILTER, PRIORITY_FILTER or OBJECT_PROPERTY_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "Table 7 lists the parameters a subscriber may nest in FILL_PARAMETERS. These are subscriber permissions; the publisher-side rejection of unlisted nested parameters is a separate requirement."
     },
     {
       "id": "D22-9-20-15-MUST-432",

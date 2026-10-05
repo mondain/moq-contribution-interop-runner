@@ -13,13 +13,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "To maintain this property, an implementation parsing this format MUST reject a name that does not follow the encoding rules exactly, including a period not foll",
+      "actor": "implementation parsing serialized names",
+      "summary": "Reject a rendered name that does not follow the serialization rules exactly, including a period not followed by exactly two lowercase hexadecimal digits or a literal-safe byte that was hex-encoded.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This keeps the local name representation bijective. Publishers can use such a local parser, but incoming MOQT namespaces and Track Names are binary, so invalid rendered strings have no mandated wire-level response and the runner has no protocol operation that invokes the parser."
     },
     {
       "id": "D22-8-9-MUST-276",
@@ -402,13 +402,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Messages marked \"First\" MUST be the first message on a new request stream. +========+=====================================+==================+ | ID | Messages |",
+      "actor": "publisher initiating a request",
+      "summary": "Send PUBLISH and PUBLISH_NAMESPACE as the first message on a new request stream.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-stream-placement"
+      ],
+      "evaluators": [
+        "d22-publisher-first-message-placement"
+      ],
+      "rationale": "Table 5 marks these publisher-originated messages First. Observe the complete publisher-to-peer byte sequence on each bidirectional stream. The other First messages (SUBSCRIBE, FETCH, TRACK_STATUS, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) are runner stimuli and are not checked here; SETUP begins the control stream under Section 6.3."
     },
     {
       "id": "D22-9-MUST-295",

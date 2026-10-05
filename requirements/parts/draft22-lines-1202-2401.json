@@ -71,13 +71,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "When an endpoint receives a datagram or a new stream with a Track Alias that is not yet associated with an Established subscription, it MAY drop the data or buf",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber receiving data with an unknown Track Alias",
+      "summary": "Drop, or briefly buffer, a datagram or new stream whose Track Alias is not yet associated with an Established subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "Object datagrams and Subgroup streams carrying Track Aliases are received by the subscriber side of contribution. This optional receiver handling is not a contribution-publisher duty."
     },
     {
       "id": "D22-3-1-3-1-MAY-055",
@@ -107,13 +107,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "To prevent deadlocks, endpoints MUST allocate connection flow control to control streams before allocating it to any data streams; otherwise a receiver might wa",
+      "actor": "publisher endpoint allocating connection flow control",
+      "summary": "Allocate connection flow control to control streams before allocating it to any data streams.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "The general endpoint rule includes publishers, but allocation is private transport scheduling. Observing stream credit or lack of deadlock does not reveal reservation order; the runner cannot prove this internal policy from arrival order."
     },
     {
       "id": "D22-3-2-MUST-057",
@@ -1161,13 +1161,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher MUST send a single SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR as the first message on the response half of the stream; if the subscriber ",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber receiving the first SUBSCRIBE_NAMESPACE response",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first message on the SUBSCRIBE_NAMESPACE response stream is not SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR (REQUEST_OK or REQUEST_ERROR).",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "This clause prescribes subscriber response validation. The publisher's first-response obligation is the preceding clause of the same sentence (D22-4-2-MUST-108); do not turn a subscriber close rule into another publisher response rule."
     },
     {
       "id": "D22-4-2-MUST-110",
@@ -1179,13 +1179,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "On success, the publisher MUST send a NAMESPACE message for each namespace it knows that matches the Track Namespace Prefix, and further NAMESPACE or NAMESPACE_",
+      "actor": "publisher answering SUBSCRIBE_NAMESPACE",
+      "summary": "After accepting SUBSCRIBE_NAMESPACE, send NAMESPACE for each known namespace matching the Track Namespace Prefix, and further NAMESPACE or NAMESPACE_DONE messages as that set changes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "testability": "Testable",
+      "scenarios": [
+        "d22-discover-original-publisher-namespaces"
+      ],
+      "evaluators": [
+        "d22-original-publisher-matching-namespace-notification"
+      ],
+      "rationale": "An original publisher knows the namespaces of its own Tracks. Use known published namespaces and matching, nonmatching and empty prefixes, and verify NAMESPACE notifications on the SUBSCRIBE_NAMESPACE response stream under Namespace Prefix Matching (Section 2.4.2). The relay branch (namespaces learned from an authorized PUBLISH_NAMESPACE) is out of scope for a publisher-validating runner."
     },
     {
       "id": "D22-4-2-MUST-111",

@@ -949,13 +949,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The following parameters MAY appear inside FILL_PARAMETERS:",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber supplying nested fill parameters",
+      "summary": "Include FILL_TIMEOUT, SUBSCRIBER_PRIORITY, LOCATION_FILTER, GROUP_ORDER, SUBGROUP_FILTER, OBJECTID_FILTER, PRIORITY_FILTER or OBJECT_PROPERTY_FILTER inside FILL_PARAMETERS.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+      "rationale": "Table 7 lists the parameters a subscriber may nest in FILL_PARAMETERS. These are subscriber permissions; the publisher-side rejection of unlisted nested parameters is a separate requirement."
     },
     {
       "id": "D22-9-20-15-MUST-432",
