@@ -22,6 +22,16 @@ constexpr unsigned draft_number(DraftVersion draft) {
     throw std::logic_error("unreachable DraftVersion");
 }
 
+// Scenario, session and evaluator code is shared by lineage: draft 22 runs on draft 21's family.
+constexpr DraftVersion family_draft(DraftVersion draft) {
+    switch (draft) {
+        case DraftVersion::Draft18: return DraftVersion::Draft18;
+        case DraftVersion::Draft21: return DraftVersion::Draft21;
+        case DraftVersion::Draft22: return DraftVersion::Draft21;
+    }
+    throw std::logic_error("unreachable DraftVersion");
+}
+
 constexpr std::string_view alpn(DraftVersion draft) {
     switch (draft) {
         case DraftVersion::Draft18: return "moqt-18";
