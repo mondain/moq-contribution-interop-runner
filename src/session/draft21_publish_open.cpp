@@ -1,4 +1,5 @@
 #include "moq/interop/session/draft21_publish_open.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/draft21/message_types.h"
 #include "moq/interop/wire/draft21/request_frame.h"
@@ -140,7 +141,7 @@ PublishOpenResult PublishOpenState::on_client_stream(
         return result;
     }
     wire::Cursor cursor(stream.pending);
-    const auto decoded = wire::draft21::decode_publish(cursor);
+    const auto decoded = scenarios::decode_publish_for_wire(cursor);
     if (std::holds_alternative<wire::NeedMore>(decoded)) {
         result.incomplete_request = fin;
         if (fin) stream.opening_processed = true;

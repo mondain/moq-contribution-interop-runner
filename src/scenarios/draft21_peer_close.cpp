@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/draft21_peer_close.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/publish.h"
 #include "moq/interop/wire/draft21/request_frame.h"
 #include "moq/interop/wire/draft21/setup.h"
@@ -38,7 +39,7 @@ bool setup_ready(std::span<const std::byte> input) {
 
 bool publish_ready(std::span<const std::byte> input) {
     wire::Cursor cursor(input);
-    const auto decoded = wire::draft21::decode_publish(cursor);
+    const auto decoded = decode_publish_for_wire(cursor);
     const auto* publish = std::get_if<wire::draft21::PublishMessage>(&decoded);
     return publish && publish->request_id % 2 == 0 && cursor.remaining() == 0;
 }
@@ -111,7 +112,7 @@ std::vector<Draft21PeerCloseProbe> draft21_peer_close_probes(
     update.definition.writes.front().bytes = frame(7, bytes({0}));
     update.definition.peer_request_ready = [](std::span<const std::byte> input) {
         wire::Cursor cursor(input);
-        const auto decoded = wire::draft21::decode_publish(cursor);
+        const auto decoded = decode_publish_for_wire(cursor);
         const auto* publish = std::get_if<wire::draft21::PublishMessage>(&decoded);
         return publish && publish->request_id == 0 && cursor.remaining() == 0;
     };

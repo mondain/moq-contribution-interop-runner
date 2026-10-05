@@ -75,5 +75,11 @@ TEST(DraftTraits, ByDraftSupportsReferenceReturns) {
     EXPECT_EQ(&chosen, &b);
 }
 
+TEST(DraftTraits, FamilyDraftMapsDraft22ToDraft21AndLeavesTheOthers) {
+    EXPECT_EQ(family_draft(DraftVersion::Draft18), DraftVersion::Draft18);
+    EXPECT_EQ(family_draft(DraftVersion::Draft21), DraftVersion::Draft21);
+    EXPECT_EQ(family_draft(DraftVersion::Draft22), DraftVersion::Draft21);
+}
+
 }  // namespace
 }  // namespace moq::interop::app

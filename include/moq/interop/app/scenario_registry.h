@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/app/draft18_gap_a_scenarios.h"
+#include "moq/interop/app/lineage.h"
 #include "moq/interop/app/scenario_registry_d21a.h"
 
 #include <algorithm>
@@ -345,6 +346,10 @@ inline constexpr std::string_view kDraft21ContributionScenarios[]{
 };
 
 inline bool draft21_contribution_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && draft21_contribution_scenario(21, *implementation);
+    }
     return draft == 21 &&
         std::find(std::begin(kDraft21ContributionScenarios), std::end(kDraft21ContributionScenarios),
                   scenario) != std::end(kDraft21ContributionScenarios);
@@ -366,6 +371,8 @@ static_assert(all_scenario_ids_set(kDraft18GapATrackScenarios));
 static_assert(all_scenario_ids_set(kDraft21GapAnnouncementScenarios));
 static_assert(all_scenario_ids_set(kDraft21GapRawScenarios));
 
+inline bool executable_scenario(unsigned draft, std::string_view scenario);
+
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     if (draft == 18) return kDraft18AllExecutableScenarios;
     if (draft == 21) {
@@ -382,43 +389,84 @@ inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
         }();
         return combined;
     }
+    if (draft == 22) {
+        // Lineage-shared ids whose draft 21 implementation exists; the catalog plans more scenarios
+        // than are implemented, so shared does not imply executable.
+        static const std::vector<std::string_view> runnable = [] {
+            std::vector<std::string_view> ids;
+            for (const auto d22 : shared_scenario_ids_22()) {
+                const auto implementation = implementation_scenario_id(d22);
+                if (implementation && executable_scenario(21, *implementation)) ids.push_back(d22);
+            }
+            return ids;
+        }();
+        return runnable;
+    }
     return {};
 }
 
 inline bool fetch_first_object_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && fetch_first_object_scenario(21, *implementation);
+    }
     return (draft == 18 && scenario == "fetch-known-first-object-with-nonzero-group-and-object-ids") ||
            (draft == 21 && scenario == "d21-fetch-first-object-flags");
 }
 
 inline bool immutable_repeat_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && immutable_repeat_scenario(21, *implementation);
+    }
     return (draft == 18 && (scenario == "publish-and-retrieve-same-object-and-track-immutable-properties" ||
                            scenario == "repeat-immutable-property-with-alternative-varint-encodings-available")) ||
            (draft == 21 && scenario == "d21-immutable-property-repeat");
 }
 
 inline bool object_repeat_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && object_repeat_scenario(21, *implementation);
+    }
     return (draft == 18 && scenario == "publish-object-with-immutable-properties") ||
            (draft == 21 && (scenario == "d21-repeat-object-retrieval" ||
                            scenario == "d21-object-immutable-property-singleton"));
 }
 
 inline bool subscriber_notify_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && subscriber_notify_scenario(21, *implementation);
+    }
     return draft == 21 && (scenario == "d21-subscriber-sends-publish-state-notify" ||
                           scenario == "d21-publish-established-subscriber-sends-publish-state-notify");
 }
 
 inline bool established_update_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && established_update_scenario(21, *implementation);
+    }
     return draft == 21 && (scenario == "d21-group-order-in-subscription-update" ||
                           scenario == "d21-duplicate-request-update-id");
 }
 
 inline bool request_goaway_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && request_goaway_scenario(21, *implementation);
+    }
     return (draft == 18 && scenario == "receive-two-goaways-on-same-request-stream") ||
         (draft == 21 && (scenario == "d21-duplicate-request-goaway" ||
                         scenario == "d21-goaway-on-distinct-request-streams"));
 }
 
 inline bool fetch_group_order_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && fetch_group_order_scenario(21, *implementation);
+    }
     return (draft == 18 && scenario == "fetch-multiple-published-groups-in-each-explicit-order") ||
         (draft == 21 && (scenario == "d21-fetch-ascending-groups" ||
                         scenario == "d21-fetch-descending-groups" ||
@@ -426,6 +474,10 @@ inline bool fetch_group_order_scenario(unsigned draft, std::string_view scenario
 }
 
 inline bool discovery_overlap_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && discovery_overlap_scenario(21, *implementation);
+    }
     const bool discovery_overlap =
         scenario == "update-namespace-subscription-prefix-to-overlap-active-namespace-subscription"
         || scenario == "update-track-subscription-prefix-to-overlap-active-track-subscription"
@@ -477,6 +529,10 @@ inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::st
 static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && scenario_requires_track(21, *implementation);
+    }
     if (draft == 18 && std::find(kDraft18GapATrackScenarios.begin(), kDraft18GapATrackScenarios.end(),
                                  scenario) != kDraft18GapATrackScenarios.end()) return true;
     if (draft == 18 && std::find(kDraft18ContributionTrackScenarios.begin(),
@@ -516,11 +572,19 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
 }
 
 inline bool executable_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && executable_scenario(21, *implementation);
+    }
     const auto known = executable_scenarios(draft);
     return std::find(known.begin(), known.end(), scenario) != known.end();
 }
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && raw_probe_scenario(21, *implementation);
+    }
     if (announcement_gap_scenario(draft, scenario)) return false;
     const auto known = executable_scenarios(draft);
     // The first five entries use the original typed controllers. All later
@@ -594,6 +658,10 @@ inline constexpr auto kDraft21FetchScenarios = std::to_array<std::string_view>({
 
 // The per-scenario `requires_fetch` flag (also exposed in /healthz executable_profiles).
 inline bool scenario_requires_fetch(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && scenario_requires_fetch(21, *implementation);
+    }
     const auto contains = [scenario](const auto& list) {
         return std::find(list.begin(), list.end(), scenario) != list.end();
     };
@@ -604,6 +672,11 @@ inline bool scenario_requires_fetch(unsigned draft, std::string_view scenario) {
 // Name of the capability a scenario needs that a publisher may decline, if any.
 inline std::optional<std::string_view> scenario_required_capability(unsigned draft,
                                                                     std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        if (!implementation) return std::nullopt;
+        return scenario_required_capability(21, *implementation);
+    }
     if (scenario_requires_fetch(draft, scenario)) return std::string_view{"fetch"};
     return std::nullopt;
 }

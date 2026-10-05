@@ -1,0 +1,55 @@
+#pragma once
+
+#include "moq/interop/app/draft_traits.h"
+#include "moq/interop/app/lineage.h"
+#include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/app/types.h"
+#include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/scoring.h"
+
+#include <optional>
+#include <span>
+#include <vector>
+
+namespace moq::interop::app {
+
+// What the scenario layer sees for a run, and the draft the run really is on the wire.
+// `execution` drives scenario behavior (family draft, implementation scenario ids); `wire_draft`
+// is the run's identity: its ALPN, its stored row and the catalog it is scored against.
+struct LineageRun {
+    RunConfig execution;
+    DraftVersion wire_draft;
+};
+
+// Drafts 18 and 21 come back unchanged. A draft 22 run executes on draft 21's family with each
+// shared scenario's draft 21 implementation; nothing if any selected id is not a shared draft 22
+// scenario whose implementation is executable.
+inline std::optional<LineageRun> lineage_run(const RunConfig& config) {
+    if (config.draft != DraftVersion::Draft22) return LineageRun{config, config.draft};
+    LineageRun run{config, DraftVersion::Draft22};
+    run.execution.draft = family_draft(config.draft);
+    run.execution.scenario_ids.clear();
+    for (const auto& id : config.scenario_ids) {
+        const auto implementation = implementation_scenario_id(id);
+        if (!implementation || !executable_scenario(21, *implementation)) return std::nullopt;
+        run.execution.scenario_ids.emplace_back(*implementation);
+    }
+    return run;
+}
+
+// The outcomes a draft 22 lineage run stores: the draft 21 evaluators' outcomes translated to draft 22
+// rows, plus one outcome for every draft 22 row the translation does not reach (an own row has no
+// evaluator yet: NotRun when scored, otherwise the row's own NotTestable/NotApplicable class). One
+// outcome per catalog row, in catalog order; a translated id the catalog lacks is kept at the end so
+// scoring fails loudly instead of losing it.
+std::vector<requirements::Outcome> lineage_outcomes(const requirements::RequirementCatalog& draft22,
+                                                    std::span<const requirements::Outcome> draft21_outcomes);
+
+// Scores lineage outcomes against the draft 22 catalog. requirements::score() refuses a catalog that
+// is not complete; the draft 22 catalog stays incomplete until its own rows have evaluators
+// (sub-projects D2/D3), so this scores the rows as they are and never reports a Pass for an
+// incomplete catalog (a Pass becomes Incomplete). A complete catalog is scored by score() unchanged.
+requirements::ScoreSummary score_lineage(const requirements::RequirementCatalog& draft22,
+                                         std::span<const requirements::Outcome> outcomes);
+
+}  // namespace moq::interop::app

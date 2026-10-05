@@ -1,7 +1,10 @@
+#include "moq/interop/app/lineage_run.h"
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/lineage_translate.h"
 #include "moq/interop/storage/run_store.h"
+#include "support/picoquic_client.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -439,6 +442,353 @@ TEST(NativeRunManagerDraftGate, Draft22IsKnownButNotSupported) {
     EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
     EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
     EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
+}
+
+// Draft 22 by lineage: shared scenarios run on draft 21's family, the run stays draft 22.
+
+using Client=transport::test::PicoquicTestClient;
+
+std::shared_ptr<const requirements::RequirementCatalog> catalog22() {
+    const auto root=std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source=requirements::load_draft_source(22,root/"docs",root/"requirements/draft-digests.json");
+    return std::make_shared<const requirements::RequirementCatalog>(requirements::RequirementCatalog::load(
+        source,root/"requirements/draft22.json",requirements::CatalogLoadMode::AllowIncomplete));
+}
+
+std::vector<std::byte> wire_bytes(std::initializer_list<unsigned> values) {
+    std::vector<std::byte> result;
+    for (const auto value : values) result.push_back(static_cast<std::byte>(value));
+    return result;
+}
+
+std::vector<std::byte> alpn_of(std::string_view value) {
+    std::vector<std::byte> result;
+    for (const char byte : value) result.push_back(static_cast<std::byte>(byte));
+    return result;
+}
+
+template <class Predicate>
+bool pump_until(Client& client,Predicate predicate,std::chrono::milliseconds limit=3s) {
+    const auto deadline=std::chrono::steady_clock::now()+limit;
+    while (std::chrono::steady_clock::now()<deadline) {
+        if (!client.pump()) return false;
+        if (predicate()) return true;
+        std::this_thread::sleep_for(1ms);
+    }
+    return false;
+}
+
+storage::RunRecord finalized(const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id) {
+    const auto deadline=std::chrono::steady_clock::now()+6s;
+    while (store->load(id).state!=storage::RunState::Finalized && std::chrono::steady_clock::now()<deadline)
+        std::this_thread::sleep_for(1ms);
+    return store->load(id);
+}
+
+app::NativeRunManager lineage_manager(const std::shared_ptr<storage::SqliteRunStore>& store,
+                                      std::shared_ptr<const requirements::RequirementCatalog> draft22) {
+    return app::NativeRunManager(catalog(18),catalog(21),store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",
+         .port_start=0,.port_end=0,.maximum_active_runs=2,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem"},
+        std::move(draft22));
+}
+
+// The publisher half of the two request-GOAWAY contexts (the family driver peer's script, observed
+// mode): `duplicate` is d21-duplicate-request-goaway, otherwise d21-goaway-on-distinct-request-streams.
+void goaway_publisher(std::uint16_t port,std::string_view alpn,bool duplicate) {
+    auto client=Client::create({.port=port,.alpn=alpn_of(alpn)});
+    ASSERT_NE(client,nullptr);
+    ASSERT_TRUE(pump_until(*client,[&] { const auto setup=client->stream(3); return setup && setup->data==wire_bytes({0xaf,0,0,0}); }));
+    ASSERT_TRUE(client->send_stream(2,wire_bytes({0xaf,0,0,0}),false));
+    const auto opening=[](unsigned id,unsigned field) { return wire_bytes({0x50,0,5,id,1,1,field,0}); };
+    const auto a=opening(1,'a');
+    const auto b=opening(3,'b');
+    ASSERT_TRUE(pump_until(*client,[&] { const auto stream=client->stream(1); return stream && stream->data==a; }));
+    if (!duplicate) {
+        ASSERT_TRUE(pump_until(*client,[&] { const auto stream=client->stream(5); return stream && stream->data==b; }));
+        ASSERT_TRUE(client->send_stream(5,wire_bytes({7,0,1,0}),false));
+    }
+    ASSERT_TRUE(client->send_stream(1,wire_bytes({7,0,1,0}),false));
+    const auto goaway=wire_bytes({0x10,0,3,0,0xa7,0x10});
+    auto expected=a;
+    expected.insert(expected.end(),goaway.begin(),goaway.end());
+    if (duplicate) expected.insert(expected.end(),goaway.begin(),goaway.end());
+    ASSERT_TRUE(pump_until(*client,[&] { const auto stream=client->stream(1); return stream && stream->data==expected && !stream->fin; }));
+    if (duplicate) {
+        ASSERT_TRUE(client->close(3,{}));
+    } else {
+        auto expected_b=b;
+        expected_b.insert(expected_b.end(),goaway.begin(),goaway.end());
+        ASSERT_TRUE(pump_until(*client,[&] { const auto stream=client->stream(5); return stream && stream->data==expected_b && !stream->fin; }));
+        ASSERT_TRUE(pump_until(*client,[&] { const auto stream=client->stream(9); return stream && stream->data==opening(5,'c'); }));
+        ASSERT_TRUE(client->send_stream(9,wire_bytes({7,0,1,0}),false));
+    }
+    (void)pump_until(*client,[] { return false; },100ms);
+}
+
+// Waits until the run's context `ordinal` is listening.
+bool context_ready(const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id,unsigned ordinal) {
+    const auto deadline=std::chrono::steady_clock::now()+3s;
+    const auto suffix=" ordinal="+std::to_string(ordinal);
+    while (std::chrono::steady_clock::now()<deadline) {
+        const auto run=store->load(id);
+        if (std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+                return event.kind=="context_ready" && event.detail.ends_with(suffix);
+            })) return true;
+        std::this_thread::sleep_for(1ms);
+    }
+    return false;
+}
+
+// Plays both GOAWAY contexts of a run, each on a fresh connection offering `alpn`.
+void goaway_publishers(const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunStartResult& started,
+                       std::string_view alpn) {
+    ASSERT_TRUE(context_ready(store,started.id,1));
+    goaway_publisher(started.endpoint.port,alpn,true);
+    ASSERT_TRUE(context_ready(store,started.id,2));
+    goaway_publisher(started.endpoint.port,alpn,false);
+}
+
+// The publisher half of the duplicate unknown SETUP option exchange (typed announcement path).
+void duplicate_setup_publisher(std::uint16_t port,std::string_view alpn,
+                               const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id) {
+    auto client=Client::create({.port=port,.alpn=alpn_of(alpn)});
+    ASSERT_NE(client,nullptr);
+    ASSERT_TRUE(pump_until(*client,[&] {
+        const auto setup=client->stream(3);
+        return setup && setup->data==wire_bytes({0xaf,0x00,0x00,0x07,0x80,0x9d,0x01,0xaa,0x00,0x01,0xbb});
+    })) << "established=" << client->established() << " setup bytes="
+        << (client->stream(3) ? client->stream(3)->data.size() : 0u);
+    ASSERT_TRUE(client->send_stream(2,wire_bytes({0xaf,0x00,0x00,0x00}),false));
+    ASSERT_TRUE(client->send_stream(0,wire_bytes({0x1d,0x00,0x0f,0x00,0x01,0x05,'m','e','d','i','a',
+                                                  0x04,'t','e','s','t',0x02,0x00}),false));
+    ASSERT_TRUE(pump_until(*client,[&] {
+        const auto response=client->stream(0);
+        return response && response->data==wire_bytes({0x07,0x00,0x01,0x00}) &&
+               store->load(id).state==storage::RunState::Finalized;
+    }));
+}
+
+// The score denominators the draft 22 catalog gives when every scored row stays in the run
+// (rows the publisher's declaration excludes leave them).
+requirements::ScoreSummary draft22_denominators(const requirements::RequirementCatalog& draft22,
+                                                const app::PublisherCapabilities& capabilities) {
+    requirements::ScoreSummary expected{requirements::RunVerdict::Incomplete,{0,0},{0,0},{0,0}};
+    for (const auto& row : draft22.requirements) {
+        if (row.applicability!=requirements::Applicability::Applicable ||
+            row.testability!=requirements::Testability::Testable ||
+            app::row_not_applicable_reason(22,row,capabilities)) continue;
+        const auto weight=requirements::score_weight(row.strength);
+        expected.weighted.possible+=weight;
+        expected.coverage.possible+=weight;
+        if (row.strength==requirements::Strength::Must || row.strength==requirements::Strength::MustNot)
+            expected.required.possible+=weight;
+    }
+    return expected;
+}
+
+void expect_draft22_outcomes(const storage::RunRecord& run,const requirements::RequirementCatalog& draft22) {
+    ASSERT_EQ(run.outcomes.size(),draft22.requirements.size());
+    std::set<std::string> rows;
+    for (const auto& row : draft22.requirements) rows.insert(row.id);
+    for (const auto& outcome : run.outcomes) {
+        EXPECT_EQ(outcome.requirement_id.rfind("D22-",0),0u) << outcome.requirement_id;
+        EXPECT_NE(outcome.requirement_id.rfind("D21-",0),0u) << outcome.requirement_id;
+        EXPECT_TRUE(rows.contains(outcome.requirement_id)) << outcome.requirement_id;
+    }
+}
+
+requirements::OutcomeState state_of(const storage::RunRecord& run,std::string_view id) {
+    const auto found=std::find_if(run.outcomes.begin(),run.outcomes.end(),[&](const auto& outcome) {
+        return outcome.requirement_id==id;
+    });
+    EXPECT_NE(found,run.outcomes.end()) << id;
+    return found==run.outcomes.end() ? requirements::OutcomeState::NotRun : found->state;
+}
+
+TEST(NativeRunManagerDraft22Lineage, SupportsDraft22OnlyWithTheDraft22Catalog) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    const auto without=lineage_manager(store,nullptr);
+    EXPECT_TRUE(without.supports(app::DraftVersion::Draft21));
+    EXPECT_FALSE(without.supports(app::DraftVersion::Draft22));
+    const auto with=lineage_manager(store,catalog22());
+    EXPECT_TRUE(with.supports(app::DraftVersion::Draft18));
+    EXPECT_TRUE(with.supports(app::DraftVersion::Draft21));
+    EXPECT_TRUE(with.supports(app::DraftVersion::Draft22));
+    // The draft 22 catalog runs on the draft 21 family: without a draft 21 catalog there is no draft 22.
+    const app::NativeRunManager no21(catalog(18),nullptr,store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",
+         .port_start=0,.port_end=0,.maximum_active_runs=1,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem"},catalog22());
+    EXPECT_FALSE(no21.supports(app::DraftVersion::Draft22));
+    // Only a draft 22 catalog is accepted in the draft 22 position.
+    EXPECT_THROW(lineage_manager(store,catalog(21)),std::invalid_argument);
+}
+
+TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const std::string shared(app::executable_scenarios(22).front());
+    for (const auto& ids : {std::vector<std::string>{"d22-location-filter-unknown-type"},
+                            std::vector<std::string>{"no-such-scenario"},
+                            std::vector<std::string>{"d21-duplicate-request-goaway"},
+                            std::vector<std::string>{shared,"no-such-scenario"}}) {
+        SCOPED_TRACE(::testing::PrintToString(ids));
+        const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+            app::RunMode::Observed,ids,1000ms,app::TrackFixture{{"n"},"t"}});
+        EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
+        EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    }
+    EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
+}
+
+TEST(NativeRunManagerDraft22Lineage, ListenerAcceptsOnlyTheDraft22Alpn) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{"d22-duplicate-request-goaway"},2000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    {
+        auto wrong=Client::create({.port=started.endpoint.port,.alpn=alpn_of("moqt-21")});
+        ASSERT_NE(wrong,nullptr);
+        EXPECT_FALSE(pump_until(*wrong,[&] { return wrong->established(); },300ms)) << "moqt-21 is refused";
+    }
+    auto right=Client::create({.port=started.endpoint.port,.alpn=alpn_of("moqt-22")});
+    ASSERT_NE(right,nullptr);
+    EXPECT_TRUE(pump_until(*right,[&] { return right->established(); })) << "moqt-22 is accepted";
+    EXPECT_TRUE(manager.stop(started.id));
+    // Over WebTransport the advertised application protocol is the draft 22 one.
+    const auto webtransport=manager.start({app::DraftVersion::Draft22,app::TransportKind::WebTransport,
+        app::RunMode::Observed,{"d22-duplicate-request-goaway"},2000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(webtransport.status,app::RunStartStatus::Started);
+    EXPECT_EQ(webtransport.protocol,"moqt-22");
+    EXPECT_TRUE(manager.stop(webtransport.id));
+}
+
+TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgainstTheDraft22Catalog) {
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,draft22);
+    // D21-9-2-MUST-328 (D22-9-2-MUST-339) needs both GOAWAY contexts, as in the driven tests above.
+    const std::vector<std::string> ids={"d22-duplicate-request-goaway","d22-goaway-on-distinct-request-streams"};
+    for (const auto& id : ids) {
+        ASSERT_TRUE(app::raw_probe_scenario(22,id));
+        ASSERT_TRUE(app::executable_scenario(22,id));
+    }
+    // The publisher declared no FETCH: capability exclusions work on draft 22 rows too.
+    const app::PublisherCapabilities capabilities{.fetch=false};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,ids,2000ms,app::TrackFixture{{"n"},"t"},capabilities});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    goaway_publishers(store,started,"moqt-22");
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    // The stored run is a draft 22 run with the draft 22 selection.
+    EXPECT_EQ(run.config.draft,app::DraftVersion::Draft22);
+    EXPECT_EQ(run.config.scenario_ids,ids);
+    // The listener negotiated moqt-22. Stored evidence carries the scenario layer's (draft 21
+    // implementation) id; how results present it is sub-project D4's.
+    EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="transport_established" &&
+               event.detail.find(" alpn=6d6f71742d3232 ")!=std::string::npos;
+    }));
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="harness_error";
+    }));
+    expect_draft22_outcomes(run,*draft22);
+    // The same evidence and evaluator as draft 21's D21-9-2-MUST-328.
+    EXPECT_EQ(state_of(run,"D22-9-2-MUST-339"),requirements::OutcomeState::Pass);
+    std::size_t excluded=0;
+    for (const auto& row : draft22->requirements)
+        excluded+=app::row_not_applicable_reason(22,row,capabilities).has_value() &&
+                  row.applicability==requirements::Applicability::Applicable &&
+                  row.testability==requirements::Testability::Testable;
+    // Every draft 22 FETCH scenario except one is own (it builds LOCATION_FILTER bytes) and is
+    // not known to need FETCH yet, so only rows whose scenarios are all shared FETCH ones leave.
+    EXPECT_GE(excluded,1u);
+    EXPECT_EQ(static_cast<std::size_t>(std::count_if(run.outcomes.begin(),run.outcomes.end(),[&](const auto& outcome) {
+        const auto row=std::find_if(draft22->requirements.begin(),draft22->requirements.end(),
+            [&](const auto& value) { return value.id==outcome.requirement_id; });
+        return outcome.state==requirements::OutcomeState::NotApplicable &&
+               row->applicability==requirements::Applicability::Applicable &&
+               row->testability==requirements::Testability::Testable;
+    })),excluded);
+    ASSERT_TRUE(run.score);
+    const auto expected=draft22_denominators(*draft22,capabilities);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Incomplete);
+    EXPECT_EQ(run.score->required.possible,expected.required.possible);
+    EXPECT_EQ(run.score->weighted.possible,expected.weighted.possible);
+    EXPECT_EQ(run.score->coverage.possible,expected.coverage.possible);
+    EXPECT_GT(run.score->required.earned,0u);
+    EXPECT_NE(run.score->coverage.possible,draft22_denominators(*draft22,{}).coverage.possible);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Lineage, TheSameRawScenarioUnderDraft21StillScoresDraft21Rows) {
+    const auto draft21=catalog(21);
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{"d21-duplicate-request-goaway","d21-goaway-on-distinct-request-streams"},2000ms,
+        app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    goaway_publishers(store,started,"moqt-21");
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.draft,app::DraftVersion::Draft21);
+    ASSERT_EQ(run.outcomes.size(),draft21->requirements.size());
+    for (std::size_t index=0; index<run.outcomes.size(); ++index)
+        EXPECT_EQ(run.outcomes[index].requirement_id,draft21->requirements[index].id);
+    EXPECT_EQ(state_of(run,"D21-9-2-MUST-328"),requirements::OutcomeState::Pass);
+    ASSERT_TRUE(run.score);
+    // Scored by the draft 21 catalog exactly as before (capabilities are the default, so nothing is excluded).
+    const auto rescored=requirements::score(*draft21,run.outcomes);
+    EXPECT_EQ(run.score->verdict,rescored.verdict);
+    EXPECT_EQ(run.score->required.possible,rescored.required.possible);
+    EXPECT_EQ(run.score->required.earned,rescored.required.earned);
+    EXPECT_EQ(run.score->coverage.possible,rescored.coverage.possible);
+    EXPECT_EQ(run.score->coverage.earned,rescored.coverage.earned);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Lineage, TypedAnnouncementScenarioOnDraft22MatchesItsDraft21Run) {
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,draft22);
+    const auto run_with=[&](app::DraftVersion draft,const std::string& scenario,std::string_view alpn) {
+        const auto started=manager.start({draft,app::TransportKind::NativeQuic,app::RunMode::Observed,
+            {scenario},1000ms,app::TrackFixture{{"media"},"test"}});
+        EXPECT_EQ(started.status,app::RunStartStatus::Started);
+        duplicate_setup_publisher(started.endpoint.port,alpn,store,started.id);
+        const auto run=finalized(store,started.id);
+        EXPECT_TRUE(manager.stop(started.id));
+        return run;
+    };
+    const auto run21=run_with(app::DraftVersion::Draft21,"d21-setup-duplicate-unknown-options","moqt-21");
+    const auto run22=run_with(app::DraftVersion::Draft22,"d22-setup-duplicate-unknown-options","moqt-22");
+    ASSERT_EQ(run22.state,storage::RunState::Finalized);
+    EXPECT_EQ(run22.config.draft,app::DraftVersion::Draft22);
+    EXPECT_EQ(run22.config.scenario_ids,std::vector<std::string>{"d22-setup-duplicate-unknown-options"});
+    expect_draft22_outcomes(run22,*draft22);
+    // Every shared row carries exactly the state its draft 21 run gave its counterpart(s).
+    const auto translated=requirements::translate_shared_outcomes(run21.outcomes);
+    ASSERT_FALSE(translated.empty());
+    std::size_t passed=0;
+    for (const auto& outcome : translated) {
+        EXPECT_EQ(state_of(run22,outcome.requirement_id),outcome.state) << outcome.requirement_id;
+        passed+=outcome.state==requirements::OutcomeState::Pass;
+    }
+    EXPECT_GT(passed,0u);
+    EXPECT_EQ(state_of(run22,"D22-9-1-MUST-298"),state_of(run21,"D21-9-1-MUST-287"));
+    ASSERT_TRUE(run22.score);
+    const auto expected=draft22_denominators(*draft22,{});
+    EXPECT_EQ(run22.score->verdict,requirements::RunVerdict::Incomplete);
+    EXPECT_EQ(run22.score->required.possible,expected.required.possible);
+    EXPECT_EQ(run22.score->coverage.possible,expected.coverage.possible);
+    EXPECT_GT(run22.score->coverage.earned,0u);
 }
 }
 }

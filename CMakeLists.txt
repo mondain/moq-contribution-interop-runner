@@ -134,9 +134,18 @@ add_library(moq-interop-requirements
     src/requirements/completeness.cpp
     src/requirements/scoring.cpp
     src/requirements/carry_forward.cpp
+    src/requirements/lineage.cpp
+    src/requirements/lineage_policy.cpp
+    src/requirements/lineage_translate.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
+
+# How a run executes by lineage (draft 22 on draft 21's family) and what it stores.
+add_library(moq-interop-lineage-run src/app/lineage_run.cpp)
+target_link_libraries(moq-interop-lineage-run PUBLIC moq-interop-app moq-interop-requirements)
+target_compile_options(moq-interop-lineage-run PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
 
 add_library(moq-interop-storage src/storage/sqlite_run_store.cpp)
 target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/generated")
@@ -187,6 +196,7 @@ add_library(moq-interop-session
     src/session/draft21_request_ids.cpp
     src/session/draft21_control_state.cpp
     src/session/draft21_publish_open.cpp
+    src/session/wire_draft.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -285,7 +295,7 @@ add_library(moq-interop-runs src/app/native_run_manager.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-    moq-interop-storage)
+    moq-interop-storage moq-interop-lineage-run)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
@@ -426,7 +436,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-test-client nlohmann_json::nlohmann_json)
     add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
     target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
-        moq-interop-runs nlohmann_json::nlohmann_json GTest::gtest_main)
+        moq-interop-runs moq-interop-lineage-run moq-interop-test-client
+        nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
@@ -771,6 +782,20 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-app GTest::gtest_main)
     add_test(NAME draft-traits COMMAND moq-interop-draft-traits-tests)
 
+    add_executable(moq-interop-lineage-registry-tests tests/unit/lineage_registry_test.cpp)
+    target_link_libraries(moq-interop-lineage-registry-tests PRIVATE moq-interop-app GTest::gtest_main)
+    add_test(NAME lineage-registry COMMAND moq-interop-lineage-registry-tests)
+
+    add_executable(moq-interop-lineage-translate-tests tests/unit/lineage_translate_test.cpp)
+    target_link_libraries(moq-interop-lineage-translate-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME lineage-translate COMMAND moq-interop-lineage-translate-tests)
+
+    add_executable(moq-interop-lineage-run-tests tests/unit/lineage_run_test.cpp)
+    target_compile_definitions(moq-interop-lineage-run-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lineage-run-tests PRIVATE moq-interop-lineage-run GTest::gtest_main)
+    add_test(NAME lineage-run COMMAND moq-interop-lineage-run-tests)
+
     add_executable(moq-interop-draft-source-tests tests/unit/draft_source_test.cpp)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -783,6 +808,19 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-carry-forward-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
+    add_executable(moq-interop-lineage-tests tests/unit/lineage_test.cpp)
+    target_link_libraries(moq-interop-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME lineage COMMAND moq-interop-lineage-tests)
+
+    add_executable(moq-interop-wire-draft-tests tests/unit/wire_draft_test.cpp)
+    target_link_libraries(moq-interop-wire-draft-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME wire-draft COMMAND moq-interop-wire-draft-tests)
+
+    add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
+    target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME draft22-lineage COMMAND moq-interop-draft22-lineage-tests)
 
     add_executable(moq-interop-draft22-catalog-tests tests/unit/draft22_catalog_test.cpp)
     target_compile_definitions(moq-interop-draft22-catalog-tests PRIVATE

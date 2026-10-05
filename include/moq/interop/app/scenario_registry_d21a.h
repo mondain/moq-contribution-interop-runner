@@ -3,6 +3,8 @@
 // Draft-21 completeness-gap scenarios (slice A). These are kept apart from the
 // original registry so the two lists can evolve independently.
 
+#include "moq/interop/app/lineage.h"
+
 #include <algorithm>
 #include <array>
 #include <string>
@@ -62,12 +64,20 @@ inline constexpr auto kDraft21GapRawScenarios = std::to_array<std::string_view>(
 });
 
 inline bool gap_raw_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && gap_raw_scenario(21, *implementation);
+    }
     return draft == 21 &&
         std::find(kDraft21GapRawScenarios.begin(), kDraft21GapRawScenarios.end(), scenario) !=
             kDraft21GapRawScenarios.end();
 }
 
 inline bool announcement_gap_scenario(unsigned draft, std::string_view scenario) {
+    if (draft == 22) {
+        const auto implementation = implementation_scenario_id(scenario);
+        return implementation && announcement_gap_scenario(21, *implementation);
+    }
     return draft == 21 &&
         std::find(kDraft21GapAnnouncementScenarios.begin(),
                   kDraft21GapAnnouncementScenarios.end(), scenario) !=

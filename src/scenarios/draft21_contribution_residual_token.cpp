@@ -33,6 +33,7 @@ struct AliasMessage {
 };
 
 // AUTHORIZATION TOKEN parameters (0x03) of a publisher request message.
+// Safe under draft 22: parameters are delta-encoded in ascending Type order, so AUTHORIZATION_TOKEN (0x03) is read before any LOCATION_FILTER (0x21); do not extend this walk to parameters above 0x21.
 std::vector<wire::draft21::Token> tokens_of(std::uint64_t type, const Bytes& body_bytes) {
     std::vector<wire::draft21::Token> result;
     wire::Cursor body(body_bytes);

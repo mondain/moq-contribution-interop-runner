@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/wire/draft21/setup.h"
@@ -118,7 +119,7 @@ std::optional<FetchTrack> request_track(std::span<const std::byte> input,
 
 std::optional<FetchTrack> publish_track(std::span<const std::byte> input) {
     wire::Cursor cursor(input);
-    const auto decoded = wire::draft21::decode_publish(cursor);
+    const auto decoded = decode_publish_for_wire(cursor);
     const auto* publish = std::get_if<wire::draft21::PublishMessage>(&decoded);
     if (!publish || publish->request_id != 0 || cursor.remaining() != 0 ||
         wire::draft21::validate_track_properties(publish->track_properties)) return std::nullopt;
