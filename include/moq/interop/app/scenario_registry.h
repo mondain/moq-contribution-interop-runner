@@ -2,6 +2,7 @@
 
 #include "moq/interop/app/draft18_gap_a_scenarios.h"
 #include "moq/interop/app/lineage.h"
+#include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/scenario_registry_d21a.h"
 
 #include <algorithm>
@@ -391,7 +392,7 @@ inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     }
     if (draft == 22) {
         // Lineage-shared ids whose draft 21 implementation exists; the catalog plans more scenarios
-        // than are implemented, so shared does not imply executable.
+        // than are implemented, so shared does not imply executable. Implemented own ids follow them.
         static const std::vector<std::string_view> runnable = [] {
             std::vector<std::string_view> ids;
             for (const auto d22 : shared_scenario_ids_22()) {
@@ -400,7 +401,7 @@ inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
             }
             return ids;
         }();
-        return runnable;
+        return OwnScenarioRegistry22::instance().with_own(runnable);
     }
     return {};
 }
@@ -530,6 +531,7 @@ static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
     if (draft == 22) {
+        if (const auto own = own_scenario_22(scenario)) return own->requires_track;
         const auto implementation = implementation_scenario_id(scenario);
         return implementation && scenario_requires_track(21, *implementation);
     }
@@ -573,6 +575,7 @@ inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
 
 inline bool executable_scenario(unsigned draft, std::string_view scenario) {
     if (draft == 22) {
+        if (own_scenario_22(scenario)) return true;
         const auto implementation = implementation_scenario_id(scenario);
         return implementation && executable_scenario(21, *implementation);
     }
@@ -582,6 +585,8 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario) {
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
     if (draft == 22) {
+        // Own draft 22 scenarios are always raw probes (src/app/own_scenario_dispatch_22.cpp).
+        if (own_scenario_22(scenario)) return true;
         const auto implementation = implementation_scenario_id(scenario);
         return implementation && raw_probe_scenario(21, *implementation);
     }
@@ -656,11 +661,21 @@ inline constexpr auto kDraft21FetchScenarios = std::to_array<std::string_view>({
     "d21-fetch-datagram-preference",
 });
 
+// Own draft 22 scenarios that send the publisher a FETCH. Shared draft 22 ids answer through their
+// draft 21 implementation instead. Known whether or not the scenario is implemented yet, so the rows
+// naming it are classified the same before and after its implementation lands.
+inline constexpr auto kDraft22OwnFetchScenarios = std::to_array<std::string_view>({
+    "d22-fetch-bounded-location-range",
+});
+
 // The per-scenario `requires_fetch` flag (also exposed in /healthz executable_profiles).
 inline bool scenario_requires_fetch(unsigned draft, std::string_view scenario) {
     if (draft == 22) {
         const auto implementation = implementation_scenario_id(scenario);
-        return implementation && scenario_requires_fetch(21, *implementation);
+        if (!implementation)
+            return std::find(kDraft22OwnFetchScenarios.begin(), kDraft22OwnFetchScenarios.end(), scenario) !=
+                   kDraft22OwnFetchScenarios.end();
+        return scenario_requires_fetch(21, *implementation);
     }
     const auto contains = [scenario](const auto& list) {
         return std::find(list.begin(), list.end(), scenario) != list.end();
@@ -674,8 +689,9 @@ inline std::optional<std::string_view> scenario_required_capability(unsigned dra
                                                                     std::string_view scenario) {
     if (draft == 22) {
         const auto implementation = implementation_scenario_id(scenario);
-        if (!implementation) return std::nullopt;
-        return scenario_required_capability(21, *implementation);
+        if (implementation) return scenario_required_capability(21, *implementation);
+        if (scenario_requires_fetch(22, scenario)) return std::string_view{"fetch"};
+        return std::nullopt;
     }
     if (scenario_requires_fetch(draft, scenario)) return std::string_view{"fetch"};
     return std::nullopt;

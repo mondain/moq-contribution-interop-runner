@@ -293,7 +293,7 @@ target_compile_options(moq-interop-draft21-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(moq-interop-runs src/app/native_run_manager.cpp)
+add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators

@@ -1,8 +1,11 @@
 #include "moq/interop/app/lineage_run.h"
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/lineage_translate.h"
+#include "moq/interop/scenarios/raw_probe.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/storage/run_store.h"
 #include "support/picoquic_client.h"
 
@@ -858,6 +861,120 @@ TEST(NativeRunManagerDraft22Lineage, TypedAnnouncementScenarioOnDraft22MatchesIt
     EXPECT_EQ(run22.score->required.possible,expected.required.possible);
     EXPECT_EQ(run22.score->coverage.possible,expected.coverage.possible);
     EXPECT_GT(run22.score->coverage.earned,0u);
+}
+
+// ---- Own draft 22 scenarios (Task 8 dispatch seam) ----------------------------------------------------
+// A test-only stub stands in for an own scenario: it drives the duplicate request-GOAWAY probe under an
+// own id, so the fake publisher harness above can play it. No production table is touched.
+
+constexpr std::string_view kStubOwnScenario="d22-request-stream-before-peer-setup";  // row D22-6-3-MAY-159
+constexpr std::string_view kStubOwnEvaluator="d22-pre-setup-request-stream-reset";
+
+struct StubObservations {
+    std::atomic<unsigned> probe_wire{0};
+    std::atomic<app::DraftVersion> probe_family{app::DraftVersion::Draft18};
+    std::atomic<unsigned> evaluator_wire{0};
+    std::atomic<unsigned> evaluated{0};
+};
+
+app::OwnScenario22 stub_own_scenario(StubObservations& seen,std::string_view id=kStubOwnScenario) {
+    return {{id,true},[&seen,id](const app::RunConfig& execution) {
+        seen.probe_wire=scenarios::current_wire_draft();
+        seen.probe_family=execution.draft;
+        auto definition=app::NativeRunManager::resolve_probe({},execution,"d21-duplicate-request-goaway");
+        if (!definition) throw std::logic_error("stub model probe missing");
+        definition->id=std::string(id);
+        return std::move(*definition);
+    }};
+}
+
+app::OwnEvaluator22 stub_own_evaluator(StubObservations& seen) {
+    return {kStubOwnEvaluator,[&seen](const scenarios::RawProbeTranscript& transcript) -> std::optional<bool> {
+        seen.evaluator_wire=scenarios::current_wire_draft();
+        ++seen.evaluated;
+        if (transcript.scenario_id!=kStubOwnScenario) return std::nullopt;
+        return transcript.complete && !transcript.harness_failed;
+    }};
+}
+
+TEST(NativeRunManagerDraft22Lineage, AnUnregisteredOwnScenarioIsRefused) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{std::string(kStubOwnScenario)},1000ms,app::TrackFixture{{"n"},"t"}});
+    EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
+    EXPECT_EQ(store->list({10,0}).total,0u);
+}
+
+TEST(NativeRunManagerDraft22Lineage, ARegisteredOwnScenarioRunsNativelyAndIsScoredByItsOwnEvaluator) {
+    StubObservations seen;
+    const app::ScopedOwnScenario22 scenario(stub_own_scenario(seen));
+    const app::ScopedOwnEvaluator22 evaluator(stub_own_evaluator(seen));
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,draft22);
+    // An own context next to a shared one: own ids bypass lineage_run, shared ids still go through it.
+    const std::vector<std::string> ids={std::string(kStubOwnScenario),"d22-goaway-on-distinct-request-streams"};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,ids,2000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    EXPECT_EQ(seen.probe_wire.load(),22u) << "the own probe is built on the draft 22 wire";
+    EXPECT_EQ(seen.probe_family.load(),app::DraftVersion::Draft21) << "on the run's execution (family) config";
+    goaway_publishers(store,started,"moqt-22");
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.draft,app::DraftVersion::Draft22);
+    EXPECT_EQ(run.config.scenario_ids,ids);
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="harness_error";
+    }));
+    // The own context is recorded under its draft 22 id; the shared one under its implementation id.
+    for (const std::string& id : {std::string(kStubOwnScenario),std::string("d21-goaway-on-distinct-request-streams")})
+        EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+            return event.kind=="context_complete" && event.scenario_id==id;
+        })) << id;
+    EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="transport_established" && event.detail.find(" alpn=6d6f71742d3232 ")!=std::string::npos;
+    }));
+    // Evaluated on the worker under the draft 22 wire, keyed by the draft 22 row, scored by the draft 22 catalog.
+    EXPECT_GT(seen.evaluated.load(),0u);
+    EXPECT_EQ(seen.evaluator_wire.load(),22u);
+    expect_draft22_outcomes(run,*draft22);
+    EXPECT_EQ(state_of(run,"D22-6-3-MAY-159"),requirements::OutcomeState::Pass);
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Incomplete);
+    const auto rescored=app::score_lineage(*draft22,run.outcomes);
+    EXPECT_EQ(run.score->coverage.possible,rescored.coverage.possible);
+    EXPECT_EQ(run.score->coverage.earned,rescored.coverage.earned);
+    EXPECT_EQ(run.score->weighted.earned,rescored.weighted.earned);
+    EXPECT_EQ(run.score->coverage.possible,draft22_denominators(*draft22,{}).coverage.possible);
+    // Without the own evaluator the same row would not be reached: the earned weight includes it.
+    auto unscored=run.outcomes;
+    for (auto& outcome : unscored)
+        if (outcome.requirement_id=="D22-6-3-MAY-159") outcome.state=requirements::OutcomeState::NotRun;
+    EXPECT_GT(run.score->coverage.earned,app::score_lineage(*draft22,unscored).coverage.earned);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Lineage, AnOwnFetchScenarioIsSkippedForAPublisherWithoutFetch) {
+    StubObservations seen;
+    constexpr std::string_view fetch="d22-fetch-bounded-location-range";
+    const app::ScopedOwnScenario22 scenario(stub_own_scenario(seen,fetch));
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{std::string(fetch)},1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}});
+    EXPECT_EQ(started.status,app::RunStartStatus::ScenarioRequiresCapability);
+    EXPECT_EQ(started.scenario,fetch);
+    EXPECT_EQ(started.capability,"fetch");
+    EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    EXPECT_EQ(seen.probe_wire.load(),0u) << "the probe of a skipped scenario is never built";
+    EXPECT_EQ(store->list({10,0}).total,0u);
+    // A capable publisher starts it.
+    const auto capable=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{std::string(fetch)},1000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(capable.status,app::RunStartStatus::Started);
+    EXPECT_TRUE(manager.stop(capable.id));
 }
 }
 }
