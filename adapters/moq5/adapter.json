@@ -1,0 +1,11 @@
+{
+  "adapter_id": "moq5",
+  "driver_contract_version": 1,
+  "entrypoint": "run.sh",
+  "publisher_binary_environment": "MOQ5_MEDIA_SEND_BIN",
+  "supported_drafts": [18, 21],
+  "supported_transports": ["native_quic", "webtransport"],
+  "supported_namespace_hex": "any printable fields without '/'",
+  "supported_track_name_hex": "any printable name",
+  "protocol_expectations": "none; logs and exit status are diagnostic only"
+}
