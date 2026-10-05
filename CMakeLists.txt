@@ -772,6 +772,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-carry-forward-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
 
+    add_executable(moq-interop-draft22-catalog-tests tests/unit/draft22_catalog_test.cpp)
+    target_compile_definitions(moq-interop-draft22-catalog-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-catalog-tests PRIVATE
+        moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME draft22-catalog COMMAND moq-interop-draft22-catalog-tests)
+
     add_executable(moq-interop-catalog-tests tests/unit/catalog_test.cpp tests/unit/catalog_audit_test.cpp)
     target_compile_definitions(moq-interop-catalog-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
