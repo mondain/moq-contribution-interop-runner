@@ -1,0 +1,1869 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-11-1-1-MUST-492",
+      "strength": "Must",
+      "source": {
+        "section": "11.1.1",
+        "first_line": 6003,
+        "last_line": 6005,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher serializing an Object",
+      "summary": "Use an empty Object payload unless its Object Status is registered as permitting a payload.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 11.3.1 (lines 6261-6262) sends the Object Status field in a Subgroup stream only when the Object Payload Length is zero, and Section 11.2.1 (lines 6123-6127) makes the datagram STATUS bit mean the Object Status field is present and there is no Object Payload. Lines 5973-5975 make Normal (0x0) implicit for any non-zero length Object. So every status the wire can carry, including a status registered later, travels with zero payload bytes, and any payload implies Normal: an Object with a non-Normal status and a payload has no byte sequence, even from a cooperating publisher. Bytes that follow a status are read as the next Object, so the violation cannot be attributed to this rule. FETCH has no Object Status field (lines 5966-5968)."
+    },
+    {
+      "id": "D22-11-1-2-MUST-493",
+      "strength": "Must",
+      "source": {
+        "section": "11.1.2",
+        "first_line": 6012,
+        "last_line": 6012,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving Object Properties",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a non-Normal Object carries properties.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a data-receiver reaction. The original contribution publisher does not receive subscription Objects, even though its own emitted Objects remain subject to the property's scope rules."
+    },
+    {
+      "id": "D22-11-1-2-SHOULD-494",
+      "strength": "Should",
+      "source": {
+        "section": "11.1.2",
+        "first_line": 6016,
+        "last_line": 6018,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher placing private Object metadata",
+      "summary": "Serialize metadata never intended for transport or relay access inside the Object payload rather than an Object Property.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Payload and properties are visible as bytes, but the application's intent about permitted readers is not observable at the MOQT boundary. The runner does not validate application media or metadata semantics."
+    },
+    {
+      "id": "D22-11-1-2-SHOULD-495",
+      "strength": "Should",
+      "source": {
+        "section": "11.1.2",
+        "first_line": 6021,
+        "last_line": 6023,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher placing relay-visible Object metadata",
+      "summary": "Place Object Properties intended to be visible to relays but not modified by them in Immutable Properties.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The application's visibility and mutability intent cannot be inferred from an emitted value. The container's encoding is externally checkable, but presence alone cannot establish this recommendation's precondition."
+    },
+    {
+      "id": "D22-11-2-1-MUST-496",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6086,
+        "last_line": 6087,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM Type Flags",
+      "summary": "Close the session with PROTOCOL_VIOLATION if OBJECT_DATAGRAM Type Flags have bit 4 set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The original publisher emits Object datagrams rather than receiving them. This reserved-bit receiving rule is distinct from the publisher's zero-bit serialization obligation at line 6138."
+    },
+    {
+      "id": "D22-11-2-1-MUST-497",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6086,
+        "last_line": 6087,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM Type Flags",
+      "summary": "Close the session with PROTOCOL_VIOLATION if OBJECT_DATAGRAM Type Flags set a bit whose meaning is unspecified.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This rule operates inside Object Datagram decoding. A genuinely unknown datagram type reaching the publisher's general dispatcher is separately covered by Section 11; do not import all Object-receiver validation into that scenario."
+    },
+    {
+      "id": "D22-11-2-1-MUST-498",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6096,
+        "last_line": 6097,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM properties",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a datagram sets PROPERTIES with Properties Length zero.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the subscriber's Object Datagram validation. Subgroup streams expressly allow zero Properties Length when the stream-wide PROPERTIES bit is set, so their semantics must not be substituted here."
+    },
+    {
+      "id": "D22-11-2-1-MUST-499",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6132,
+        "last_line": 6133,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM Type Flags",
+      "summary": "Close the session with PROTOCOL_VIOLATION when STATUS and END_OF_GROUP are both set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This independent invalid flag combination is a subscriber receive rule; STATUS and the separate END_OF_GROUP flag are not interchangeable encodings."
+    },
+    {
+      "id": "D22-11-2-1-MUST-500",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6132,
+        "last_line": 6133,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM Type Flags",
+      "summary": "Close the session with PROTOCOL_VIOLATION when reserved bit 4 is set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The invalid-value list repeats the receiver condition from line 6086. Both lexical anchors remain classified, but neither becomes a publisher Object-reception duty."
+    },
+    {
+      "id": "D22-11-2-1-MUST-501",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6132,
+        "last_line": 6133,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber decoding OBJECT_DATAGRAM Type Flags",
+      "summary": "Close the session with PROTOCOL_VIOLATION when any unspecified Type Flags bit is set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the third item in the receiver's invalid-value list, separately retained from the reserved-bit and conflicting-bit conditions."
+    },
+    {
+      "id": "D22-11-2-1-MUST-502",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6138,
+        "last_line": 6139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher serializing OBJECT_DATAGRAM",
+      "summary": "Set reserved bit 4 of OBJECT_DATAGRAM Type Flags to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-object-datagram-flags"
+      ],
+      "evaluators": [
+        "d22-object-datagram-reserved-bit-zero"
+      ],
+      "rationale": "Inspect the decoded Type Flags integer, not the integer encoding's length-prefix bits. The rule is a sender-visible wire constraint even though adjacent clauses describe receiver reactions."
+    },
+    {
+      "id": "D22-11-2-1-MUST-503",
+      "strength": "Must",
+      "source": {
+        "section": "11.2.1",
+        "first_line": 6144,
+        "last_line": 6146,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving an Object Datagram with STATUS and PROPERTIES",
+      "summary": "Close the session with PROTOCOL_VIOLATION when STATUS and PROPERTIES are set and Object Status is not Normal.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This subscriber-only check permits the combination for Normal status, subject to the separate nonzero properties-length rule. It is not a blanket prohibition on STATUS plus PROPERTIES."
+    },
+    {
+      "id": "D22-11-3-SHOULD-504",
+      "strength": "Should",
+      "source": {
+        "section": "11.3",
+        "first_line": 6154,
+        "last_line": 6154,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving a truncated Subgroup Object",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a Subgroup stream ends with FIN in the middle of a serialized Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The preceding paragraph covers Subgroup and Fetch Headers. This clause isolates Subgroup reception by the listener; a reset is not a graceful FIN truncation."
+    },
+    {
+      "id": "D22-11-3-SHOULD-505",
+      "strength": "Should",
+      "source": {
+        "section": "11.3",
+        "first_line": 6154,
+        "last_line": 6154,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber receiving a truncated Fetch Object",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a Fetch stream ends with FIN in the middle of a serialized Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The shared paragraph also applies to Fetch streams, which this publisher sends. A FETCH stream reset carries different semantics and is not this FIN error."
+    },
+    {
+      "id": "D22-11-3-SHOULD-NOT-506",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.3",
+        "first_line": 6165,
+        "last_line": 6166,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher opening Subgroup streams",
+      "summary": "Avoid opening more than one stream at a time with identical Subgroup Header field values.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "At-a-time refers to sender stream lifetimes. Cross-stream reordering can make a closed old stream appear open when the new header arrives; receiver overlap alone cannot prove simultaneous sender opens. The runner has no publisher stream-state instrumentation."
+    },
+    {
+      "id": "D22-11-3-1-MUST-507",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 6244,
+        "last_line": 6245,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding SUBGROUP_HEADER",
+      "summary": "Close the session with PROTOCOL_VIOLATION when SUBGROUP_ID_MODE is reserved value 0b11.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is Subgroup receiver validation. SUBGROUP_ID_MODE values 0b00, 0b01 and 0b10 respectively mean zero, first Object ID, and an explicit field."
+    },
+    {
+      "id": "D22-11-3-1-MUST-508",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 6244,
+        "last_line": 6245,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber decoding SUBGROUP_HEADER",
+      "summary": "Close the session with PROTOCOL_VIOLATION when SUBGROUP_HEADER bit 4 is not set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the data-receiver consequence; the independent sender encoding constraint is retained at line 6250."
+    },
+    {
+      "id": "D22-11-3-1-MUST-509",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 6244,
+        "last_line": 6245,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber decoding SUBGROUP_HEADER",
+      "summary": "Close the session with PROTOCOL_VIOLATION for a SUBGROUP_HEADER Type Flags value of 128 or greater.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This bound is on the decoded value, not a requirement to reject a longer legal integer encoding of a smaller value. The subscription listener is the receiver."
+    },
+    {
+      "id": "D22-11-3-1-MUST-510",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 6250,
+        "last_line": 6251,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher serializing SUBGROUP_HEADER",
+      "summary": "Set bit 4 of SUBGROUP_HEADER Type Flags to 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-header-flags"
+      ],
+      "evaluators": [
+        "d22-subgroup-header-bit-four"
+      ],
+      "rationale": "Inspect emitted Subgroup headers. This distinguishes Subgroup framing from Object Datagram flags, whose bit 4 must instead be zero."
+    },
+    {
+      "id": "D22-11-3-1-MUST-511",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.1",
+        "first_line": 6267,
+        "last_line": 6268,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber computing a Subgroup Object ID",
+      "summary": "Close the session with PROTOCOL_VIOLATION if adding Object ID Delta plus one to a preceding Object ID would exceed 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber performs this decode check. The first Object uses its Delta as the absolute ID; gaps do not alone prove nonexistence, and Fetch Object delta arithmetic is different."
+    },
+    {
+      "id": "D22-11-3-2-MUST-512",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6303,
+        "last_line": 6303,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher finishing delivery of a Subgroup",
+      "summary": "Close the stream with FIN after delivering all Subgroup Objects to QUIC, except Objects before the subscription Start Location.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-complete-subgroup-fin",
+        "d22-subgroup-start-location-fin"
+      ],
+      "evaluators": [
+        "d22-complete-subgroup-fin"
+      ],
+      "rationale": "Use a controlled completed Subgroup and observe full reliable delivery plus FIN. Start Location exclusions remain explicit. The draft sets no fixed closure deadline; an incomplete or stalled run cannot prove when the sender handed the final bytes to QUIC and remains NOT_RUN."
+    },
+    {
+      "id": "D22-11-3-2-MUST-513",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6306,
+        "last_line": 6306,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher closing a Subgroup before delivering all required Objects",
+      "summary": "Reset a Subgroup stream when closing it before delivering all Objects except those before Start Location.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-premature-close-reset"
+      ],
+      "evaluators": [
+        "d22-incomplete-subgroup-reset"
+      ],
+      "rationale": "Use a controlled Object set and cancellation, delivery timeout, publisher early termination, location changes or Forward State omission. A fully received FIN with known omitted Objects disproves completeness; absence after a reset does not prove what the sender had already handed to QUIC. After receiving all data and FIN, a subsequent reset may be ignored under lines 6341-6345."
+    },
+    {
+      "id": "D22-11-3-2-SHOULD-514",
+      "strength": "Should",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6333,
+        "last_line": 6336,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher resetting a Subgroup with RESET_STREAM_AT",
+      "summary": "Include the stream header in reliable_size when using RESET_STREAM_AT.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-reset-stream-at-header"
+      ],
+      "evaluators": [
+        "d22-reset-reliable-size-covers-header"
+      ],
+      "rationale": "Condition the evaluator on observed RESET_STREAM_AT support and compare reliable_size to the encoded header length. Header delivery alone does not reveal that size; transport evidence is required. This SHOULD neither mandates RESET_STREAM_AT nor requires reliable Object payload delivery."
+    },
+    {
+      "id": "D22-11-3-2-MAY-515",
+      "strength": "May",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6347,
+        "last_line": 6350,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher delivering no Objects from a Subgroup",
+      "summary": "Send a header-only Subgroup stream followed by RESET_STREAM_AT with reliable_size equal to the header length to signal an unsent Subgroup.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-unsent-subgroup-header-reset"
+      ],
+      "evaluators": [
+        "d22-unsent-subgroup-capability"
+      ],
+      "rationale": "Observe the header, no serialized Objects and the exact reliable_size through transport evidence. This is one compound optional signaling operation; omission of the operation is not a mandatory failure."
+    },
+    {
+      "id": "D22-11-3-2-MUST-NOT-516",
+      "strength": "MustNot",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6353,
+        "last_line": 6354,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay extending a downstream Subgroup stream",
+      "summary": "Do not forward an Object on an existing Subgroup stream unless it is known to be the next Object in that Subgroup.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This explicitly relay-specific rule permits knowledge from consecutive IDs, upstream adjacency excluding filtered Objects, or resolved intervening IDs. The original publisher has no upstream stream from which to infer continuity."
+    },
+    {
+      "id": "D22-11-3-2-MUST-517",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6370,
+        "last_line": 6371,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay unable to establish the next Subgroup Object",
+      "summary": "Reset the existing Subgroup stream if it is unknown whether an Object is the next Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the first action required of a relay with incomplete upstream knowledge; original publication is outside that role."
+    },
+    {
+      "id": "D22-11-3-2-MUST-518",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6370,
+        "last_line": 6371,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay unable to establish the next Subgroup Object",
+      "summary": "Open a new Subgroup stream to forward the Object whose adjacency was unknown.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Opening the replacement stream is separately evaluable from resetting the old stream, but both actions belong to relays."
+    },
+    {
+      "id": "D22-11-3-2-MUST-519",
+      "strength": "Must",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6376,
+        "last_line": 6376,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher terminating a Subgroup stream early",
+      "summary": "Reset a Subgroup stream terminated early for a reason other than clean completion on a Group boundary, including sender handoff.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-early-handoff-reset"
+      ],
+      "evaluators": [
+        "d22-early-subgroup-reset"
+      ],
+      "rationale": "Use a known incomplete Subgroup when the fixture can trigger early termination. Do not infer missing Objects merely from reset delivery loss; a known incomplete stream ending in received FIN contradicts the rule."
+    },
+    {
+      "id": "D22-11-3-2-SHOULD-520",
+      "strength": "Should",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6376,
+        "last_line": 6377,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "publisher choosing where to terminate a stream",
+      "summary": "Prefer terminating a stream on a Group boundary to avoid an early reset.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-planned-subgroup-termination"
+      ],
+      "evaluators": [
+        "d22-group-boundary-termination-advisory"
+      ],
+      "rationale": "A controlled planned termination exposes the chosen boundary against known Group contents. Emergency cancellation and timeouts still require resets when incomplete; this recommendation supplies neither a wait deadline nor a ban on those valid resets."
+    },
+    {
+      "id": "D22-11-3-2-MAY-521",
+      "strength": "May",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6392,
+        "last_line": 6395,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving End of Group or End of Track",
+      "summary": "Treat an End of Group or End of Track Object as a signal to close corresponding streams before upstream FIN arrives.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission concerns relays forwarding upstream completion information. It does not require or permit an original publisher to infer completion from incoming Objects."
+    },
+    {
+      "id": "D22-11-3-2-MAY-522",
+      "strength": "May",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6410,
+        "last_line": 6411,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber no longer interested in a Group or Subgroup",
+      "summary": "Send QUIC STOP_SENDING for the corresponding Subgroup stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The listener may use this as a stimulus. The contribution publisher is the stream sender, whose response has its own normative anchor."
+    },
+    {
+      "id": "D22-11-3-2-SHOULD-523",
+      "strength": "Should",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6412,
+        "last_line": 6412,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher receiving STOP_SENDING on a Subgroup",
+      "summary": "Respond to Subgroup STOP_SENDING with a reset.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-stop-sending"
+      ],
+      "evaluators": [
+        "d22-subgroup-stop-sending-reset"
+      ],
+      "rationale": "Send STOP_SENDING on a live publisher stream and record the reset. The text questions reliable_size beyond the header but does not forbid it or set a fixed response deadline. Other Subgroups remain independent under the following paragraph."
+    },
+    {
+      "id": "D22-11-3-2-SHOULD-NOT-524",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6421,
+        "last_line": 6423,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher after receiving Subgroup STOP_SENDING",
+      "summary": "Avoid opening another stream to deliver additional Objects in that Subgroup after STOP_SENDING.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The prohibition concerns attempting a new stream open after receiving STOP_SENDING. A stream observed later may have been preopened before that input, even if additional Objects are source-gated until after a reset response. The runner lacks sender stream-open timing evidence. The later Forward State 0-to-1 exception remains a separately observable optional delivery capability."
+    },
+    {
+      "id": "D22-11-3-2-MAY-525",
+      "strength": "May",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6424,
+        "last_line": 6426,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher receiving renewed forwarding interest",
+      "summary": "Reopen a stopped Subgroup stream after a later REQUEST_UPDATE resumes the paused subscription (Forward State 0 to 1).",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-stop-then-forward-resume"
+      ],
+      "evaluators": [
+        "d22-stopped-subgroup-resume-capability"
+      ],
+      "rationale": "Pause the subscription (Forward State 0) and send STOP_SENDING before sending the resuming update. This optional exception does not authorize unconditional immediate reopening or require any replay of previously sent Objects."
+    },
+    {
+      "id": "D22-11-3-2-SHOULD-526",
+      "strength": "Should",
+      "source": {
+        "section": "11.3.2",
+        "first_line": 6428,
+        "last_line": 6429,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher resetting a Subgroup stream",
+      "summary": "Use a relevant Section 12.5 error code when resetting a Subgroup stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subgroup-reset-error-code"
+      ],
+      "evaluators": [
+        "d22-subgroup-reset-code-relevance"
+      ],
+      "rationale": "Compare the observed code with a controlled cause such as cancellation or delivery timeout. This advisory selection does not make every listed code applicable or override a separately mandatory code."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-527",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6557,
+        "last_line": 6558,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher serializing the first FETCH Object",
+      "summary": "Include Group ID Delta in the first FETCH Object as its absolute Group ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-fetch-first-object-flags"
+      ],
+      "evaluators": [
+        "d22-fetch-first-group-id"
+      ],
+      "rationale": "Use a nonzero known initial Group ID and parse the first serialized Object. The absolute first value differs from later ascending or descending delta arithmetic."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-528",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6557,
+        "last_line": 6558,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher serializing the first FETCH Object",
+      "summary": "Include Object ID Delta in the first FETCH Object as its absolute Object ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-fetch-first-object-flags"
+      ],
+      "evaluators": [
+        "d22-fetch-first-object-id"
+      ],
+      "rationale": "Choose a nonzero initial Object ID independently of the Group ID. Do not infer it from a nonexistent previous Object or apply Subgroup-stream plus-one delta rules."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-529",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6560,
+        "last_line": 6561,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding the first FETCH Object",
+      "summary": "Close the session with PROTOCOL_VIOLATION when the first FETCH Object references a field in a prior Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The listener performs this validation, including absent prior priority or subgroup values. Publisher first-ID serialization requirements remain separately Applicable."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-530",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6569,
+        "last_line": 6570,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber computing a descending FETCH Group ID",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a computed FETCH Group ID is less than zero.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Descending Group ID is the prior ID minus Group ID Delta plus one as a parenthesized quantity. This subscriber arithmetic validation is not publisher input processing."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-531",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6569,
+        "last_line": 6570,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber computing an ascending FETCH Group ID",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a computed FETCH Group ID exceeds 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Ascending Group ID adds Group ID Delta plus one to the prior ID. Overflow is distinct from descending underflow, but both are subscriber-side decode checks."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-532",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6578,
+        "last_line": 6579,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber computing a FETCH Object ID",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a computed FETCH Object ID exceeds 2^64 - 1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "When both deltas are present Object ID Delta is absolute; without Group ID Delta it adds to the prior Object ID. With no Object ID Delta, use prior ID plus one regardless of Group. This is a subscriber receive rule."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-533",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6584,
+        "last_line": 6585,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher fetching a Datagram-preference Object",
+      "summary": "Set FETCH Serialization Flags bit 0x40 to 1 for an Object with Datagram Delivery Mode.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-fetch-datagram-preference"
+      ],
+      "evaluators": [
+        "d22-fetch-datagram-flag"
+      ],
+      "rationale": "FETCH always uses a stream but preserves the Object's Datagram Delivery Mode through this flag and has no Subgroup ID for that Object. The draft's Section 11.1.2 (Object Properties) cross-reference is imprecise; Sections 2.1.1 and 11.4.1 define these fields in the same draft."
+    },
+    {
+      "id": "D22-11-4-1-1-SHOULD-534",
+      "strength": "Should",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6585,
+        "last_line": 6586,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher setting the FETCH Datagram flag",
+      "summary": "Set the two least significant Serialization Flags bits to zero when 0x40 is set.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-fetch-datagram-preference"
+      ],
+      "evaluators": [
+        "d22-fetch-datagram-low-bits-advisory"
+      ],
+      "rationale": "Inspect the emitted flag value independently of mandatory 0x40. Nonzero low bits are an advisory deviation; subscribers must ignore them rather than parse a Subgroup ID."
+    },
+    {
+      "id": "D22-11-4-1-1-MUST-535",
+      "strength": "Must",
+      "source": {
+        "section": "11.4.1.1",
+        "first_line": 6586,
+        "last_line": 6586,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber decoding a FETCH Datagram-preference Object",
+      "summary": "Ignore the two least significant Serialization Flags bits when 0x40 is set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This explicit subscriber requirement prevents ignored bits from incorrectly selecting a Subgroup ID field. The original publisher is the FETCH sender."
+    },
+    {
+      "id": "D22-11-5-MAY-536",
+      "strength": "May",
+      "source": {
+        "section": "11.5",
+        "first_line": 6624,
+        "last_line": 6624,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher endpoint sending padding",
+      "summary": "Send padding on unidirectional streams without Objects or other application data.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-stream-emission"
+      ],
+      "evaluators": [
+        "d22-padding-stream-capability"
+      ],
+      "rationale": "Both endpoints can probe bandwidth with padding. Observe a padding stream if the publisher supports this optional capability; absence is not a conformance failure."
+    },
+    {
+      "id": "D22-11-5-MAY-537",
+      "strength": "May",
+      "source": {
+        "section": "11.5",
+        "first_line": 6624,
+        "last_line": 6624,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher endpoint sending padding",
+      "summary": "Send padding in datagrams without Objects or other application data.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-datagram-emission"
+      ],
+      "evaluators": [
+        "d22-padding-datagram-capability"
+      ],
+      "rationale": "Datagram padding is an independent optional capability from padding streams and does not establish a Track Alias or create an Object."
+    },
+    {
+      "id": "D22-11-5-SHOULD-538",
+      "strength": "Should",
+      "source": {
+        "section": "11.5",
+        "first_line": 6629,
+        "last_line": 6631,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher scheduling padding streams",
+      "summary": "Send padding streams at a lower priority than every control stream or Object data.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is internal transport scheduling priority, not an encoded MOQT Publisher Priority field on padding. Arrival order and bandwidth outcomes cannot establish the sender's priority assignment; the rule specifically names padding streams."
+    },
+    {
+      "id": "D22-11-5-1-MAY-539",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 6635,
+        "last_line": 6636,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher endpoint opening a padding stream",
+      "summary": "Open a unidirectional stream of type 0x132B3E28 to send padding.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-stream-emission"
+      ],
+      "evaluators": [
+        "d22-padding-stream-type-capability"
+      ],
+      "rationale": "Decode the stream type followed by zero or more padding bytes. A header-only padding stream is allowed, and use of this optional type is not required for conformance."
+    },
+    {
+      "id": "D22-11-5-1-MUST-540",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 6637,
+        "last_line": 6637,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher emitting padding stream data",
+      "summary": "Set every byte following a padding stream's type to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-stream-emission"
+      ],
+      "evaluators": [
+        "d22-padding-stream-zero-bytes"
+      ],
+      "rationale": "Inspect emitted payload after the complete variable-length stream type. Empty padding is valid. This sender constraint does not prescribe how a receiver must react to nonzero padding."
+    },
+    {
+      "id": "D22-11-5-1-MUST-541",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 6646,
+        "last_line": 6647,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher receiving a padding stream",
+      "summary": "Discard all data on a padding stream to prevent exhausting flow control.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-inbound-padding-stream"
+      ],
+      "evaluators": [
+        "d22-padding-stream-drained-without-application-effects"
+      ],
+      "rationale": "The listener may open padding streams to a publisher. Send bounded padding across flow-control windows and verify continued valid control processing and unchanged Track state; an allowed cancellation ends that stream's probe. Do not require a response message or impose Object parsing on padding."
+    },
+    {
+      "id": "D22-11-5-1-MAY-542",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 6649,
+        "last_line": 6650,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending a padding stream",
+      "summary": "Cancel its outgoing padding stream at any time without changing MOQT application state.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-outbound-padding-cancel"
+      ],
+      "evaluators": [
+        "d22-padding-sender-cancel-state"
+      ],
+      "rationale": "Observe an optional publisher reset and continue established requests and Object delivery. Padding cancellation is not subscription cancellation and requires no Object completeness signal."
+    },
+    {
+      "id": "D22-11-5-1-MAY-543",
+      "strength": "May",
+      "source": {
+        "section": "11.5.1",
+        "first_line": 6649,
+        "last_line": 6650,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher receiving a padding stream",
+      "summary": "Cancel an incoming padding stream at any time without changing MOQT application state.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-inbound-padding-cancel"
+      ],
+      "evaluators": [
+        "d22-padding-receiver-cancel-state"
+      ],
+      "rationale": "The publisher may send STOP_SENDING on listener-originated padding. Confirm existing MOQT requests survive; choosing to consume all padding instead is also permitted."
+    },
+    {
+      "id": "D22-11-5-2-MAY-544",
+      "strength": "May",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 6654,
+        "last_line": 6655,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending padding datagrams",
+      "summary": "Send padding in datagrams of type 0x132B3E29.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-datagram-emission"
+      ],
+      "evaluators": [
+        "d22-padding-datagram-type-capability"
+      ],
+      "rationale": "Decode the datagram type independently from OBJECT_DATAGRAM flag values. Zero bytes after the type are allowed, and optional non-use does not fail required behavior."
+    },
+    {
+      "id": "D22-11-5-2-MUST-545",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 6656,
+        "last_line": 6656,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher emitting padding datagram data",
+      "summary": "Set every byte following a padding datagram's type to zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-padding-datagram-emission"
+      ],
+      "evaluators": [
+        "d22-padding-datagram-zero-bytes"
+      ],
+      "rationale": "Inspect all bytes after the type to the datagram boundary. This mandatory constraint is conditional on sending padding and supplies no invented error response for received nonzero bytes."
+    },
+    {
+      "id": "D22-11-5-2-MUST-546",
+      "strength": "Must",
+      "source": {
+        "section": "11.5.2",
+        "first_line": 6676,
+        "last_line": 6676,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher receiving a padding datagram",
+      "summary": "Discard all data in a padding datagram.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-inbound-padding-datagram"
+      ],
+      "evaluators": [
+        "d22-padding-datagram-no-application-effects"
+      ],
+      "rationale": "Send listener-originated padding and check that established requests and controlled Track state retain their behavior. Padding never supplies Object or control-message data. Wire observations test application effects, not the implementation's memory disposal."
+    },
+    {
+      "id": "D22-12-1-MUST-547",
+      "strength": "Must",
+      "source": {
+        "section": "12.1",
+        "first_line": 6725,
+        "last_line": 6728,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber detecting a Malformed Track",
+      "summary": "Cancel all corresponding subscriptions for the Malformed Track from that publisher.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The listener is the subscriber detecting malformed contribution. Section 6.4.2.3 defines cancellation directions. This receiver reaction does not turn the original publisher into a subscriber of its own Track."
+    },
+    {
+      "id": "D22-12-1-MUST-548",
+      "strength": "Must",
+      "source": {
+        "section": "12.1",
+        "first_line": 6725,
+        "last_line": 6728,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber detecting a Malformed Track",
+      "summary": "Cancel all corresponding fetches for the Malformed Track from that publisher.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Fetch cancellation is independently required alongside subscription cancellation, but both belong to the receiving subscriber."
+    },
+    {
+      "id": "D22-12-1-SHOULD-549",
+      "strength": "Should",
+      "source": {
+        "section": "12.1",
+        "first_line": 6727,
+        "last_line": 6728,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber detecting a Malformed Track",
+      "summary": "Deliver an error to the application when a Malformed Track is detected.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This recommends a local application notification in the subscriber, not a publisher wire message or session close."
+    },
+    {
+      "id": "D22-12-1-MUST-550",
+      "strength": "Must",
+      "source": {
+        "section": "12.1",
+        "first_line": 6728,
+        "last_line": 6730,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay detecting a Malformed Track",
+      "summary": "Immediately terminate downstream subscriptions with PUBLISH_DONE carrying MALFORMED_TRACK.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Sections 12.1 and 12.4 describe a relay publisher propagating an upstream fault. The contribution original publisher has no downstream relay fan-out to test."
+    },
+    {
+      "id": "D22-12-1-MUST-551",
+      "strength": "Must",
+      "source": {
+        "section": "12.1",
+        "first_line": 6728,
+        "last_line": 6730,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay detecting a Malformed Track",
+      "summary": "Reset downstream fetch streams with MALFORMED_TRACK when detecting a Malformed Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This independent relay action addresses active fetch streams; Section 12.5 assigns the MALFORMED_TRACK reset code. It is not an original publisher's response to an arbitrary injected Object."
+    },
+    {
+      "id": "D22-12-1-MUST-NOT-552",
+      "strength": "MustNot",
+      "source": {
+        "section": "12.1",
+        "first_line": 6731,
+        "last_line": 6731,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver caching Objects from a Malformed Track",
+      "summary": "Do not cache Objects that trigger Malformed Track status.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The paragraph concerns subscribers and relays detecting received malformed data. The original publisher has no upstream Object cache; its emitted data constraints are catalogued separately."
+    },
+    {
+      "id": "D22-12-2-MAY-553",
+      "strength": "May",
+      "source": {
+        "section": "12.2",
+        "first_line": 6735,
+        "last_line": 6736,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher terminating a session",
+      "summary": "Use any error message when terminating the session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-session-close-diagnostics"
+      ],
+      "evaluators": [
+        "d22-session-close-message-capability"
+      ],
+      "rationale": "The diagnostic wording is implementation-selected and is not an exact-text oracle. This permission does not override transport framing or the separate code-selection recommendation."
+    },
+    {
+      "id": "D22-12-2-SHOULD-554",
+      "strength": "Should",
+      "source": {
+        "section": "12.2",
+        "first_line": 6736,
+        "last_line": 6736,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher terminating a session",
+      "summary": "Use a relevant session termination code from Section 12.2.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-session-close-code-relevance"
+      ],
+      "evaluators": [
+        "d22-session-close-code-advisory"
+      ],
+      "rationale": "Associate observable controlled causes with their codes, including PROTOCOL_VIOLATION and TOO_MANY_REQUEST_UPDATES. The general SHOULD does not weaken a specific MUST prescribing a code or invent timeout durations for implementation-defined errors."
+    },
+    {
+      "id": "D22-12-2-MAY-555",
+      "strength": "May",
+      "source": {
+        "section": "12.2",
+        "first_line": 6784,
+        "last_line": 6785,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber timing out while awaiting a new Subgroup Object header",
+      "summary": "Send STOP_SENDING on the timed-out Subgroup stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This DATA_STREAM_TIMEOUT alternative belongs to a subscriber waiting for Objects, not the original publisher sending them. The draft specifies no fixed timeout value."
+    },
+    {
+      "id": "D22-12-2-MAY-556",
+      "strength": "May",
+      "source": {
+        "section": "12.2",
+        "first_line": 6784,
+        "last_line": 6785,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber timing out while awaiting a new Subgroup Object header",
+      "summary": "Terminate the subscription after timing out waiting for a new Object header.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This subscriber action is an alternative to STOP_SENDING for one data stream. It does not mandate publisher subscription termination or a session close."
+    },
+    {
+      "id": "D22-12-3-SHOULD-557",
+      "strength": "Should",
+      "source": {
+        "section": "12.3",
+        "first_line": 6814,
+        "last_line": 6815,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending REQUEST_ERROR",
+      "summary": "Use a relevant REQUEST_ERROR code with its defined request-specific meaning.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-error-code-relevance"
+      ],
+      "evaluators": [
+        "d22-request-error-code-advisory"
+      ],
+      "rationale": "Use controlled publisher-facing requests and their outcomes. Codes such as UNINTERESTED belong to subscriber responses, and relay-only causes do not become original-publisher obligations. Specific mandatory rejection codes retain their strength."
+    },
+    {
+      "id": "D22-12-3-MAY-558",
+      "strength": "May",
+      "source": {
+        "section": "12.3",
+        "first_line": 6844,
+        "last_line": 6845,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher endpoint after receiving GOAWAY",
+      "summary": "Reject new requests after receiving GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-after-received-goaway"
+      ],
+      "evaluators": [
+        "d22-goaway-new-request-rejection-capability"
+      ],
+      "rationale": "Send GOAWAY then a valid new publisher-facing request. The GOING_AWAY code describes an allowed rejection; this permission does not require rejection of all new requests or termination of established subscriptions."
+    },
+    {
+      "id": "D22-12-3-SHOULD-559",
+      "strength": "Should",
+      "source": {
+        "section": "12.3",
+        "first_line": 6848,
+        "last_line": 6849,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending EXCESSIVE_LOAD REQUEST_ERROR",
+      "summary": "Use Retry Interval to indicate when an overloaded request can be retried.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-excessive-load-retry"
+      ],
+      "evaluators": [
+        "d22-excessive-load-retry-advice"
+      ],
+      "rationale": "Condition the check on an observed or controllably induced EXCESSIVE_LOAD response. Section 9.4.2 encodes minimum milliseconds plus one, with zero meaning no retry and one immediate retry; this recommendation does not promise actual recovery at that time."
+    },
+    {
+      "id": "D22-12-3-SHOULD-560",
+      "strength": "Should",
+      "source": {
+        "section": "12.3",
+        "first_line": 6856,
+        "last_line": 6857,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher requester receiving REDIRECT",
+      "summary": "Establish a new session to the supplied URI when a REDIRECT includes one.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-redirect-session"
+      ],
+      "evaluators": [
+        "d22-publish-redirect-target-session"
+      ],
+      "rationale": "A contribution client originates PUBLISH or PUBLISH_NAMESPACE, so requester behavior includes it. Return a Redirect to a second controlled listener and observe its connection; Section 9.4.1 constrains namespace targets and nonzero URI delivery to clients. No fixed reconnect deadline is invented."
+    },
+    {
+      "id": "D22-12-3-SHOULD-561",
+      "strength": "Should",
+      "source": {
+        "section": "12.3",
+        "first_line": 6856,
+        "last_line": 6857,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher requester receiving REDIRECT",
+      "summary": "Retry the request using the Redirect target.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-redirect-target",
+        "d22-publish-namespace-redirect-target"
+      ],
+      "evaluators": [
+        "d22-publish-redirect-request-target"
+      ],
+      "rationale": "Inspect the retried PUBLISH or PUBLISH_NAMESPACE at the controlled destination. A URI-only move and a changed namespace or Track target are distinct from retransmitting the original request as sent; namespace-scoped Redirect Track Name remains empty."
+    },
+    {
+      "id": "D22-12-3-SHOULD-NOT-562",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "12.3",
+        "first_line": 6858,
+        "last_line": 6860,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher requester receiving REDIRECT with Retry Interval zero",
+      "summary": "Do not retry the original request as sent when REDIRECT has Retry Interval 0; following a different URI or Redirect target remains allowed.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-redirect-zero-retry"
+      ],
+      "evaluators": [
+        "d22-redirect-zero-retry-original-suppressed"
+      ],
+      "rationale": "Exercise PUBLISH or PUBLISH_NAMESPACE and distinguish unchanged-request retries from target-following requests. The zero interval suppresses retry of the original request, not redirect following; bounded silence alone does not prove perpetual non-retry."
+    },
+    {
+      "id": "D22-12-3-MAY-563",
+      "strength": "May",
+      "source": {
+        "section": "12.3",
+        "first_line": 6863,
+        "last_line": 6864,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving an upstream REDIRECT",
+      "summary": "Forward an upstream REDIRECT response to matching downstream requests instead of following it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The exception explicitly concerns relay upstream and downstream request relationships, not an original publisher following a Redirect to its own publication."
+    },
+    {
+      "id": "D22-12-3-MAY-564",
+      "strength": "May",
+      "source": {
+        "section": "12.3",
+        "first_line": 6865,
+        "last_line": 6867,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay caching an upstream REDIRECT",
+      "summary": "Cache a REDIRECT for up to Retry Interval milliseconds to answer later matching requests without forwarding them upstream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an optional relay cache operation. The text says Retry Interval milliseconds here while Section 9.4.2 encodes retry minimum plus one; preserve the quoted cache bound rather than importing another draft's interpretation."
+    },
+    {
+      "id": "D22-12-4-SHOULD-565",
+      "strength": "Should",
+      "source": {
+        "section": "12.4",
+        "first_line": 6918,
+        "last_line": 6919,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending PUBLISH_DONE",
+      "summary": "Use a relevant PUBLISH_DONE status code from Section 12.4.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-done-code-relevance"
+      ],
+      "evaluators": [
+        "d22-publish-done-code-advisory"
+      ],
+      "rationale": "Compare observed completion with controlled causes such as Track end, expiry or failed update. MALFORMED_TRACK describes a relay publisher; do not induce incoming malformed Objects to require it from the original publisher."
+    },
+    {
+      "id": "D22-12-5-SHOULD-566",
+      "strength": "Should",
+      "source": {
+        "section": "12.5",
+        "first_line": 6957,
+        "last_line": 6958,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher resetting any stream",
+      "summary": "Use a relevant error code when sending a stream reset.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-stream-reset-code-relevance"
+      ],
+      "evaluators": [
+        "d22-stream-reset-code-advisory"
+      ],
+      "rationale": "Exercise publisher request or data stream resets with known causes and compare Section 12.5 codes. This is broader than the Subgroup-specific recommendation and does not override a mandatory code in another section."
+    },
+    {
+      "id": "D22-12-5-SHOULD-567",
+      "strength": "Should",
+      "source": {
+        "section": "12.5",
+        "first_line": 6957,
+        "last_line": 6958,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher sending STOP_SENDING on any stream",
+      "summary": "Use a relevant error code when sending STOP_SENDING.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-stop-sending-code-relevance"
+      ],
+      "evaluators": [
+        "d22-stop-sending-code-advisory"
+      ],
+      "rationale": "A publisher can cancel the receiving direction of its publication request or incoming padding stream; this does not require receiving subscription Objects. Evaluate observed causes using the distinct reset code namespace."
+    },
+    {
+      "id": "D22-13-MUST-568",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7025,
+        "last_line": 7025,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving unknown values in GREASE-enabled registries",
+      "summary": "Handle unknown values gracefully in the registries listed in Section 13 without requiring extension negotiation.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-grease-setup-options",
+        "d22-grease-request-error",
+        "d22-grease-auth-token-type",
+        "d22-grease-stop-sending"
+      ],
+      "evaluators": [
+        "d22-grease-publisher-context-handling",
+        "d22-unknown-stop-sending-graceful-handling"
+      ],
+      "rationale": "Exercise publisher-reachable Setup Options, REQUEST_ERROR, MOQT Auth Token Type and Stream Reset Error Code values with otherwise valid framing. Send an unknown error code in STOP_SENDING on an outgoing subgroup stream; Section 12.5 shares that code namespace with resets. Check ordinary subgroup cancellation handling and continued usability of another request or subgroup without upgrading the reset recommendation at line 6412 to a MUST or requiring a specific reset code. Auth Token Type greasing does not require accepting unauthorized requests. Unknown token Alias Types, Message Parameters, message types and stream types are different namespaces. The following rows retain separate Property and internal error-equivalence boundaries."
+    },
+    {
+      "id": "D22-13-MUST-NOT-569",
+      "strength": "MustNot",
+      "source": {
+        "section": "13",
+        "first_line": 7026,
+        "last_line": 7027,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving unknown values in GREASE-enabled registries",
+      "summary": "Do not close the session solely because a value from a registry listed in Section 13 is unknown.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-grease-setup-options",
+        "d22-grease-request-error",
+        "d22-grease-auth-token-type",
+        "d22-grease-stop-sending"
+      ],
+      "evaluators": [
+        "d22-grease-no-unknown-value-session-close",
+        "d22-unknown-stop-sending-preserves-session"
+      ],
+      "rationale": "Use valid encodings and an independent request to confirm continued session usability. In the stream-error scenario, send STOP_SENDING with an unknown error code on the publisher's outgoing subgroup stream, then exercise another request or unaffected subgroup on the same session. The affected stream may end; session closure solely for the unknown code is forbidden. Rejecting a request for an authorization failure is distinct from closing solely for an unknown Auth Token Type. Unknown Message Parameters, message types, stream types and malformed encodings retain their separate error rules, and a peer's actual Session Termination still ends the session."
+    },
+    {
+      "id": "D22-13-MUST-570",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7030,
+        "last_line": 7031,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving SETUP",
+      "summary": "Ignore unknown Setup Options, including reserved GREASE identifiers with arbitrary values, as specified in Section 9.1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-grease-setup-options"
+      ],
+      "evaluators": [
+        "d22-grease-setup-options-ignored"
+      ],
+      "rationale": "Send valid odd and even Key-Value-Pairs, including repeated unknown Options permitted by Section 9.1, alongside known Options. Verify setup and subsequent publishing remain usable. Arbitrary values still obey Key-Value-Pair framing and do not permit a length overrun or malformed integer."
+    },
+    {
+      "id": "D22-13-MUST-571",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7033,
+        "last_line": 7033,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "property receiver applying Section 8.4 relay handling",
+      "summary": "Handle unknown Properties according to Section 8.4, including its Mandatory Track Property exception.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 8.4 requires relays to preserve, forward and cache unsupported properties, subject to Mandatory Track Properties in Section 3.7. The original publisher does not receive upstream Tracks or Objects to relay. Section 9.3 requires empty properties in its PUBLISH_OK, REQUEST_UPDATE_OK and PUBLISH_NAMESPACE_OK responses; putting unknown properties there tests that placement error instead. This cross-reference neither waives mandatory-property handling nor creates publisher cache duties."
+    },
+    {
+      "id": "D22-13-MUST-572",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7036,
+        "last_line": 7037,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving Session Termination",
+      "summary": "Treat an unknown Session Termination error code as equivalent to INTERNAL_ERROR for Session Termination.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A peer can terminate a publisher's session with an unknown code, but Section 12.2 supplies only a generic error meaning and no distinguishing response. Observing transport closure does not prove the publisher internally classified the code as INTERNAL_ERROR. The no-close rule does not require an already terminated peer session to remain open."
+    },
+    {
+      "id": "D22-13-MUST-573",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7036,
+        "last_line": 7037,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher receiving REQUEST_ERROR",
+      "summary": "Treat an unknown REQUEST_ERROR code as equivalent to INTERNAL_ERROR for REQUEST_ERROR.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "REQUEST_ERROR can reject publisher-originated PUBLISH or PUBLISH_NAMESPACE. INTERNAL_ERROR in Section 12.3 is an implementation-specific or generic error, without a mandatory retry or distinct observable recovery. Session survival is separately testable at line 7038; it alone cannot establish internal error equivalence. No error echo or retry is invented here."
+    },
+    {
+      "id": "D22-13-MUST-574",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7036,
+        "last_line": 7037,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "subscriber receiving PUBLISH_DONE",
+      "summary": "Treat an unknown PUBLISH_DONE code as equivalent to INTERNAL_ERROR for PUBLISH_DONE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 9.9 sends PUBLISH_DONE from publisher to subscriber. The contribution publisher originates that message; sending one to it in a subscriber response direction is not a legal test of this receiver rule."
+    },
+    {
+      "id": "D22-13-MUST-575",
+      "strength": "Must",
+      "source": {
+        "section": "13",
+        "first_line": 7036,
+        "last_line": 7037,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "endpoint receiving a stream cancellation error",
+      "summary": "Treat an unknown stream reset error code as equivalent to INTERNAL_ERROR for the stream error context.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 12.5 uses the same code namespace for resetting streams and STOP_SENDING. A publisher receives cancellation of its outgoing data stream and may receive reset of peer-originated padding. The generic INTERNAL_ERROR meaning has no unique wire response: a reset after STOP_SENDING proves cancellation handling, not error reclassification. This does not assume the publisher receives subscribed Object streams or mandate echoing a replacement code."
+    },
+    {
+      "id": "D22-13-MUST-NOT-576",
+      "strength": "MustNot",
+      "source": {
+        "section": "13",
+        "first_line": 7038,
+        "last_line": 7039,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher receiving REQUEST_ERROR",
+      "summary": "Do not close the session because a REQUEST_ERROR contains an unknown error code.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-grease-request-error"
+      ],
+      "evaluators": [
+        "d22-unknown-request-error-preserves-session"
+      ],
+      "rationale": "Reject a publisher-originated PUBLISH or PUBLISH_NAMESPACE using an unknown code in an otherwise valid REQUEST_ERROR, then exercise another request on the same session. The affected request can end normally; no retry is required. Unrelated framing errors or independent closure causes are outside this prohibition."
+    },
+    {
+      "id": "D22-13-MUST-NOT-577",
+      "strength": "MustNot",
+      "source": {
+        "section": "13",
+        "first_line": 7038,
+        "last_line": 7039,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber receiving PUBLISH_DONE",
+      "summary": "Do not close the session because a PUBLISH_DONE contains an unknown error code.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The original contribution publisher sends PUBLISH_DONE and does not consume it as a subscriber. This is a separate receiver context from REQUEST_ERROR, not a rule to accept PUBLISH_DONE in an invalid message direction."
+    },
+    {
+      "id": "D22-15-MUST-578",
+      "strength": "Must",
+      "source": {
+        "section": "15",
+        "first_line": 7139,
+        "last_line": 7139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay aggregating downstream subscriptions",
+      "summary": "Ensure every subscriber is independently authorized when aggregating subscriptions from multiple downstream subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This duty belongs to a relay aggregating downstream subscribers. It does not require the original publisher to inspect identities hidden behind its immediate relay peer."
+    },
+    {
+      "id": "D22-15-1-SHOULD-579",
+      "strength": "Should",
+      "source": {
+        "section": "15.1",
+        "first_line": 7145,
+        "last_line": 7147,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving subscription requests",
+      "summary": "Implement rate limiting on subscription requests.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The recommendation explicitly names Relays. The following publisher recommendation concerns monitoring active subscriptions and enforcing limits, not this relay request-rate mechanism."
+    },
+    {
+      "id": "D22-15-1-MAY-580",
+      "strength": "May",
+      "source": {
+        "section": "15.1",
+        "first_line": 7146,
+        "last_line": 7147,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving excessive subscriptions",
+      "summary": "Reject excessive subscriptions with REQUEST_ERROR using EXCESSIVE_LOAD.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional rejection policy continues the sentence about Relays. The next sentence starts a distinct publisher recommendation and does not require publishers to use this error code or this particular limiting policy."
+    },
+    {
+      "id": "D22-15-1-SHOULD-581",
+      "strength": "Should",
+      "source": {
+        "section": "15.1",
+        "first_line": 7147,
+        "last_line": 7149,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher tracking subscription load",
+      "summary": "Monitor the number of active subscriptions to prevent resource exhaustion from a single subscriber or session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Counting requests at the harness does not expose the publisher's internal active-subscription monitoring. Rejection or cancellation can have unrelated causes. No monitoring metric or reporting interface is defined by this draft."
+    },
+    {
+      "id": "D22-15-1-SHOULD-582",
+      "strength": "Should",
+      "source": {
+        "section": "15.1",
+        "first_line": 7147,
+        "last_line": 7149,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher limiting subscription load",
+      "summary": "Enforce limits to prevent resource exhaustion from a single subscriber or session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The threshold, available resources and limit policy are implementation-specific and not signaled in MOQT. A bounded request burst cannot establish whether a limit was reached or prevented exhaustion. The preceding relay permission does not mandate REQUEST_ERROR or EXCESSIVE_LOAD for this publisher recommendation."
+    },
+    {
+      "id": "D22-15-2-SHOULD-583",
+      "strength": "Should",
+      "source": {
+        "section": "15.2",
+        "first_line": 7159,
+        "last_line": 7159,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation using QUIC or WebTransport",
+      "summary": "Follow best practices for TLS 1.3 and QUIC when providing communication security.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The checked-in draft states broad security guidance without enumerating a deterministic best-practices checklist. A successful secure handshake is not proof of every deployment and implementation practice. This record adds no imported TLS policy or transport requirement."
+    },
+    {
+      "id": "D22-15-2-MUST-584",
+      "strength": "Must",
+      "source": {
+        "section": "15.2",
+        "first_line": 7159,
+        "last_line": 7160,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay authenticating peers",
+      "summary": "Use authentication to prevent impersonation as described in Section 15.3.3.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This clause explicitly constrains Relays. The general secure-transport recommendation preceding it does not transfer relay impersonation checks to the original publisher."
+    },
+    {
+      "id": "D22-15-3-1-MAY-585",
+      "strength": "May",
+      "source": {
+        "section": "15.3.1",
+        "first_line": 7193,
+        "last_line": 7196,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "application authorizing an authenticated peer",
+      "summary": "Use attributes in the authenticated peer's certificate as input to authorization decisions.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can authorize its peer, but the draft explicitly leaves policy and granularity out of scope. An allow or deny result with a chosen certificate cannot demonstrate which certificate attributes the application consulted. The permission applies only after authentication and does not mandate mutual TLS or a particular authorization outcome."
+    }
+  ]
+}

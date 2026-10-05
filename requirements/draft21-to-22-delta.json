@@ -1,0 +1,5262 @@
+{
+  "from_draft": 21,
+  "to_draft": 22,
+  "from_sha256": "8c1d80849f46026b634fa19f8607ce983be2b1db9ae4ee1990878969c7b7e142",
+  "to_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "wire_delta": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      "LOCATION_FILTER Parameter",
+      "PUBLISH_NAMESPACE Message"
+    ],
+    "conclusion": "Two wire blocks differ between draft 21 and draft 22. LOCATION_FILTER Parameter is a real wire change (#1913, #1953): the draft 21 length-prefixed form (Parameter Type, Length (vi64), optional StartGroup, StartObject, EndGroupDelta, EndObject, with the field count inferred from Length) is replaced by Parameter Type followed by an explicit Location Filter Type (vi64) in place of the Length field, which selects the fields that follow: 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields; any other Location Filter Type is a PROTOCOL_VIOLATION, so encoders and decoders of 0x21 (top level and inside FILL_PARAMETERS) must change and sub-project B (the codec task) must cover it. PUBLISH_NAMESPACE Message is editorial: its field Track Namespace (..) is renamed Track Namespace Prefix (..) with the same Section 8.7 Track Namespace encoding and position, prefix matching was already the draft 21 behavior (Section 7.5 of draft 21), and the new statement that AUTHORIZATION_TOKEN is the only allowed parameter matches draft 21 Section 9.20.3, so the bytes on the wire are unchanged and no codec change is needed for it. No blocks were added or removed. The Next Object encoding also changed: draft 21 used StartGroup=0, StartObject=0 under the length-inferred form, while draft 22 uses Location Filter Type 0x05 and Type 0x02 with {0, 0} is now an absolute start."
+  },
+  "handoff": {
+    "for_wire_codecs_B": [
+      "LOCATION_FILTER (Parameter Type 0x21): Location Filter Type (vi64) replaces the draft 21 Length field; 0x00 no filter, 0x01 relative StartGroup, 0x02 StartGroup and StartObject, 0x03 adds EndGroupDelta, 0x04 adds EndObject, 0x05 Next Object with no fields, and any other type is a PROTOCOL_VIOLATION (draft 22 lines 5291-5311). The same encoding applies at top level and inside FILL_PARAMETERS.",
+      "Next Object is no longer encoded as StartGroup=0, StartObject=0: Type 0x02 with {0, 0} is an absolute start, so the draft 21 two-zero form must map to Type 0x05, not to 0x02.",
+      "PUBLISH_NAMESPACE Message: the field Track Namespace is renamed Track Namespace Prefix; the encoding and field position are unchanged.",
+      "extract_wire_blocks finds 41 wire blocks in each draft; 2 changed (LOCATION_FILTER Parameter, PUBLISH_NAMESPACE Message) and the other 39 are identical, with none added or removed.",
+      "Block names that repeat get a positional #N suffix in extract_wire_blocks (none occur in drafts 21 or 22), so a future re-diff cannot rely on those suffixes to pair blocks."
+    ],
+    "for_scenarios_D": [
+      "draft22.json has 267 Applicable/Testable rows whose d22- scenario and evaluator ids are planned and not yet registered; complete:false is what keeps the completeness gate off for draft 22.",
+      "Two planned ids have no draft 21 ancestor: d22-fetch-bounded-location-range and d22-fetch-objects-within-requested-location-range on D22-3-3-1-MUST-NOT-069, whose MUST NOT now also covers FETCH delivery.",
+      "Three draft 21 ids have no draft 22 successor because their anchor D21-4-1-MUST-083 became the non-normative 'will respond' at draft 22 line 1706: d21-subscribe-tracks-accepted, d21-subscribe-tracks-rejected, d21-subscribe-tracks-single-first-response; only the subscriber close rule D22-3-6-MUST-082 remains.",
+      "Four draft 21 ids have no draft 22 successor because their anchors D21-9-15-MUST-383 and D21-9-18-MUST-391 were dropped: d21-subscribe-namespace-prefix-too-many-fields, d21-namespace-discovery-prefix-bound, d21-subscribe-tracks-prefix-too-many-fields, d21-track-discovery-prefix-bound; the general rule D22-8-7-MUST-270 carries only d22-subscribe-33-namespace-fields and d22-too-many-namespace-fields-protocol-violation.",
+      "The unknown Location Filter Type rule (draft 22 line 5311) has no BCP 14 keyword and therefore no catalog row, yet it is publisher-observable; suggested negative-path scenario d22-location-filter-unknown-type with evaluator d22-location-filter-unknown-type-protocol-violation, attached to D22-9-20-9-MUST-424 or to a codec conformance check.",
+      "Location filter stimuli for D22-9-20-9-MAY-422, D22-9-20-9-MUST-424 and D22-3-3-1-MUST-NOT-069 must encode the explicit Location Filter Type; the StartGroup plus EndGroupDelta overflow of D22-9-20-9-MUST-424 arises only for Types 0x03 and 0x04.",
+      "D22-9-MUST-294 holds both a publisher half (testable: PUBLISH and PUBLISH_NAMESPACE first on a new request stream) and a subscriber half that is a runner stimulus.",
+      "D22-9-20-15-MAY-431 is one row for the whole 8-parameter FILL_PARAMETERS nesting list (Table 7), replacing 8 draft 21 rows.",
+      "D22-7-5-MAY-218 is a NotApplicable placeholder duplicate of D22-7-5-MAY-217 kept for positional ids; removing it would renumber every later row (D22-7-5-MAY-219 through D22-A-11-MUST-613), so do that only before D binds ids."
+    ],
+    "for_plumbing_C": [
+      "src/app/main.cpp loads catalogs by explicit draft number (18 and 21) and must learn draft 22.",
+      "install(DIRECTORY requirements/) already ships draft22.json and the delta file.",
+      "tests/unit/completeness_test.cpp loops over {18u, 21u} and must grow to 22 when the completeness gate is turned on for draft 22; tests/unit/catalog_audit_test.cpp pins real occurrence counts per draft (18, 21 and now 22: 495)."
+    ],
+    "for_ecosystem_E": [
+      "The README layout table and docs/scoring-and-audit.md describe only drafts 18 and 21 and should add draft 22.",
+      "The carry tool (moq-interop-catalog-carry) and its rule 'generate writes the unreviewed baseline only; after hand review use only merge' should be documented with the other audit tools."
+    ],
+    "tool_notes": [
+      "generate on a clean tree reproduces only the unreviewed baseline (commit bcaa02b); the reviewed catalog lives in requirements/parts and the delta notes, and generate --force over it discards every hand edit.",
+      "Known matcher issues: clean_lines joins paragraphs across a page break (misclassifying D22-8-4-MAY-263 and D22-9-MUST-294 as new); twin SUBSCRIBE_NAMESPACE/SUBSCRIBE_TRACKS sentences get cross-paired (first response, subscriber close and authorization were re-paired by hand); the greedy exact pass can label an identical match as moved.",
+      "D21-4-1-MUST-082 is double-accounted: it has a removed entry (superseded) and is also the reworded counterpart of D22-4-2-MUST-108.",
+      "LOCATION_FILTER: Next Object is Type 0x05 (Type 0x02 {0, 0} is an absolute start) and any Location Filter Type above 0x05 is a PROTOCOL_VIOLATION without a catalog row."
+    ]
+  },
+  "entries": [
+    {
+      "draft22_id": "D22-1-3-MUST-001",
+      "draft21_id": "D21-1-3-MUST-001",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MUST-NOT-002",
+      "draft21_id": "D21-1-3-MUST-NOT-002",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MUST-003",
+      "draft21_id": "D21-1-3-MUST-003",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MUST-004",
+      "draft21_id": "D21-1-3-MUST-004",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MUST-NOT-005",
+      "draft21_id": "D21-1-3-MUST-NOT-005",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-SHOULD-006",
+      "draft21_id": "D21-1-3-SHOULD-006",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-SHOULD-NOT-007",
+      "draft21_id": "D21-1-3-SHOULD-NOT-007",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-SHOULD-008",
+      "draft21_id": "D21-1-3-SHOULD-008",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-SHOULD-NOT-009",
+      "draft21_id": "D21-1-3-SHOULD-NOT-009",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MAY-010",
+      "draft21_id": "D21-1-3-MAY-010",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-3-MAY-011",
+      "draft21_id": "D21-1-3-MAY-011",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-6-MAY-012",
+      "draft21_id": "D21-1-5-MAY-012",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-6-SHOULD-013",
+      "draft21_id": "D21-1-5-SHOULD-013",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-6-MUST-014",
+      "draft21_id": "D21-1-5-MUST-014",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-1-6-MUST-015",
+      "draft21_id": "D21-1-5-MUST-015",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-1-MUST-NOT-016",
+      "draft21_id": "D21-2-1-MUST-NOT-016",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-1-MAY-017",
+      "draft21_id": "D21-11-MAY-504",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 11 to 2.1; the sentence no longer mentions the Object Forwarding Preference (renamed Delivery Mode)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-1-1-MUST-018",
+      "draft21_id": "D21-11-1-1-MUST-505",
+      "change": "reworded",
+      "note": "editorial rewording: Object Forwarding Preference renamed Delivery Mode; moved from Section 11.1.1 to 2.1.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-2-MUST-NOT-019",
+      "draft21_id": "D21-2-2-MUST-NOT-017",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-2-MUST-NOT-020",
+      "draft21_id": "D21-2-2-MUST-NOT-018",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-2-MAY-021",
+      "draft21_id": "D21-2-2-MAY-019",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-2-MUST-022",
+      "draft21_id": "D21-2-2-MUST-020",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-2-MUST-023",
+      "draft21_id": "D21-2-2-MUST-021",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-3-SHOULD-024",
+      "draft21_id": "D21-2-3-SHOULD-022",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-3-SHOULD-NOT-025",
+      "draft21_id": "D21-2-3-SHOULD-NOT-023",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-3-1-SHOULD-026",
+      "draft21_id": "D21-2-3-1-SHOULD-024",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-3-1-SHOULD-NOT-027",
+      "draft21_id": "D21-2-3-1-SHOULD-NOT-025",
+      "change": "identical",
+      "note": "explicit Location Filter Type: not a wire-encoding row; the subscriber recommendation text is unchanged and stays NotApplicable",
+      "reviewed": true,
+      "tags": [
+        "location_filter"
+      ]
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-NOT-028",
+      "draft21_id": "D21-2-4-2-MUST-NOT-026",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-029",
+      "draft21_id": "D21-2-4-2-MUST-027",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-NOT-030",
+      "draft21_id": "D21-2-4-2-MUST-NOT-028",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-NOT-031",
+      "draft21_id": "D21-2-4-2-MUST-NOT-029",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-NOT-032",
+      "draft21_id": "D21-2-4-2-MUST-NOT-030",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-4-3-MUST-033",
+      "draft21_id": "D21-2-4-2-MUST-031",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-2-5-MUST-034",
+      "draft21_id": "D21-2-5-MUST-032",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MUST-035",
+      "draft21_id": "D21-3-1-MUST-033",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_ERROR written as the SUBSCRIBE_ERROR shorthand (#1912)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MUST-036",
+      "draft21_id": "D21-3-1-MUST-034",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_ERROR written as the PUBLISH_ERROR shorthand (#1912)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-SHOULD-037",
+      "draft21_id": "D21-3-1-SHOULD-035",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MUST-NOT-038",
+      "draft21_id": "D21-3-1-MUST-NOT-036",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MAY-039",
+      "draft21_id": "D21-3-1-MAY-037",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MAY-040",
+      "draft21_id": "D21-3-1-MAY-038",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MAY-041",
+      "draft21_id": "D21-3-1-MAY-039",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MAY-042",
+      "draft21_id": "D21-3-1-MAY-040",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MUST-043",
+      "draft21_id": "D21-3-1-MUST-041",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-SHOULD-044",
+      "draft21_id": "D21-3-1-SHOULD-042",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-SHOULD-045",
+      "draft21_id": "D21-3-1-SHOULD-043",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-MAY-046",
+      "draft21_id": "D21-3-1-MAY-044",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-2-MUST-047",
+      "draft21_id": "D21-3-1-1-MUST-045",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-2-MUST-NOT-048",
+      "draft21_id": "D21-3-1-1-MUST-NOT-046",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-2-MUST-NOT-049",
+      "draft21_id": "D21-3-1-1-MUST-NOT-047",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-MUST-NOT-050",
+      "draft21_id": "D21-3-1-2-MUST-NOT-048",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-MUST-051",
+      "draft21_id": "D21-3-1-2-MUST-049",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-SHOULD-NOT-052",
+      "draft21_id": "D21-3-1-2-SHOULD-NOT-050",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-SHOULD-053",
+      "draft21_id": "D21-3-1-2-SHOULD-051",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-1-MAY-054",
+      "draft21_id": "",
+      "change": "new",
+      "note": "consolidates the draft 21 datagram and Subgroup unknown-alias permissions (D21-11-2-MAY-514/515, D21-11-3-1-MAY-527/528) into Section 3.1.3.1; one row holds the drop and buffer options for both datagrams and streams",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-1-MAY-055",
+      "draft21_id": "D21-11-3-1-MAY-529",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 11.3.1 to the Unknown Track Alias section 3.1.3.1; SUBGROUP_HEADER generalized to 'stream header'",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-1-3-1-MUST-056",
+      "draft21_id": "",
+      "change": "new",
+      "note": "same obligation as D21-11-3-1-MUST-530, moved from Section 11.3.1 to Section 3.1.3.1 and joined into one sentence with its rationale",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-MUST-057",
+      "draft21_id": "D21-3-2-1-MUST-052",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); moved from Section 3.2.1 to 3.2",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-MAY-058",
+      "draft21_id": "D21-9-12-MAY-378",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 9.12 to the Fetch section 3.2 (#1895)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-MUST-NOT-059",
+      "draft21_id": "D21-9-12-MUST-NOT-379",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 9.12 to 3.2 (#1895)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-MUST-060",
+      "draft21_id": "D21-9-11-MUST-375",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); moved from Section 9.11 to 3.2",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-MUST-061",
+      "draft21_id": "D21-9-11-MUST-376",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); Largest Object reference now Section 3.1.4",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-1-MUST-062",
+      "draft21_id": "D21-9-11-MUST-377",
+      "change": "reworded",
+      "note": "editorial rewording: 'either ascending or descending' replaced by a reference to Section 9.20.8; moved to Section 3.2.1 (#1895)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-2-SHOULD-NOT-063",
+      "draft21_id": "D21-11-4-1-2-SHOULD-NOT-560",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-3-MAY-064",
+      "draft21_id": "D21-9-11-MAY-373",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-4-MAY-065",
+      "draft21_id": "D21-3-2-1-MAY-053",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-4-MUST-066",
+      "draft21_id": "D21-3-2-1-MUST-054",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-4-MUST-067",
+      "draft21_id": "D21-3-2-1-MUST-055",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-2-4-MUST-068",
+      "draft21_id": "D21-3-2-1-MUST-056",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-1-MUST-NOT-069",
+      "draft21_id": "D21-3-3-1-MUST-NOT-057",
+      "change": "reworded",
+      "note": "obligation changed: 'subscription-delivered objects' became 'objects', so the MUST NOT now also covers FETCH delivery (added d22-fetch-bounded-location-range and d22-fetch-objects-within-requested-location-range); not itself a wire-encoding row, but its stimuli use the explicit Location Filter Type",
+      "reviewed": true,
+      "tags": [
+        "location_filter"
+      ]
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-070",
+      "draft21_id": "D21-3-3-2-MAY-058",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-071",
+      "draft21_id": "D21-3-3-2-MAY-059",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-072",
+      "draft21_id": "D21-3-3-2-MAY-060",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-073",
+      "draft21_id": "D21-3-3-2-MAY-061",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-074",
+      "draft21_id": "D21-3-3-2-MAY-062",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MAY-075",
+      "draft21_id": "D21-3-3-2-MAY-063",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MUST-076",
+      "draft21_id": "D21-3-3-2-MUST-064",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-2-MUST-077",
+      "draft21_id": "D21-3-3-2-MUST-065",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-3-3-MUST-078",
+      "draft21_id": "D21-3-3-3-MUST-066",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-4-1-MUST-079",
+      "draft21_id": "D21-3-4-1-MUST-067",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-4-1-MUST-080",
+      "draft21_id": "D21-3-4-1-MUST-068",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-4-1-MUST-081",
+      "draft21_id": "D21-3-4-1-MUST-069",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-MUST-082",
+      "draft21_id": "D21-9-18-MUST-392",
+      "change": "reworded",
+      "note": "re-paired by hand: the carry tool paired this SUBSCRIBE_TRACKS subscriber-close rule with D21-9-15-MUST-384 (the SUBSCRIBE_NAMESPACE version); its counterpart is D21-9-18-MUST-392; editorial rewording otherwise (SUBSCRIBE_TRACKS_OK/ERROR shorthand, moved to Section 3.6)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-MUST-083",
+      "draft21_id": "D21-9-18-MUST-393",
+      "change": "reworded",
+      "note": "editorial rewording: SUBSCRIBE_TRACKS_ERROR shorthand (#1912); moved to Section 3.6 (#1946); the independent-overlap-space sentence now lives in Section 12.3",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-MUST-084",
+      "draft21_id": "D21-9-18-MUST-394",
+      "change": "moved",
+      "note": "re-paired by hand: identical sentence; the carry tool matched it to the SUBSCRIBE_NAMESPACE copy D21-9-15-MUST-386 instead of the SUBSCRIBE_TRACKS copy D21-9-18-MUST-394; section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-MUST-NOT-085",
+      "draft21_id": "D21-4-1-MUST-NOT-086",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-3-MUST-NOT-086",
+      "draft21_id": "D21-4-1-MUST-NOT-084",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-6-3-MAY-087",
+      "draft21_id": "D21-4-1-MAY-085",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-088",
+      "draft21_id": "D21-3-6-MUST-070",
+      "change": "moved",
+      "note": "section moved; references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-NOT-089",
+      "draft21_id": "D21-3-6-MUST-NOT-071",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-NOT-090",
+      "draft21_id": "D21-3-6-MUST-NOT-072",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-091",
+      "draft21_id": "D21-3-6-MUST-073",
+      "change": "reworded",
+      "note": "editorial rewording: PUBLISH_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-092",
+      "draft21_id": "D21-3-6-MUST-074",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-093",
+      "draft21_id": "D21-3-6-MUST-075",
+      "change": "reworded",
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-094",
+      "draft21_id": "D21-3-6-MUST-076",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-095",
+      "draft21_id": "D21-3-6-MUST-077",
+      "change": "reworded",
+      "note": "editorial rewording: FETCH_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-MUST-096",
+      "draft21_id": "D21-3-6-MUST-078",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-SHOULD-097",
+      "draft21_id": "D21-3-6-SHOULD-079",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-SHOULD-098",
+      "draft21_id": "D21-3-6-SHOULD-080",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-3-7-SHOULD-099",
+      "draft21_id": "D21-3-6-SHOULD-081",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-MAY-100",
+      "draft21_id": "D21-4-2-MAY-087",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-MAY-101",
+      "draft21_id": "D21-4-2-MAY-088",
+      "change": "reworded",
+      "note": "obligation changed: the subscriber permission now also covers TRACK_STATUS; still a subscriber permission (NotApplicable); moved to Section 4.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-MUST-102",
+      "draft21_id": "D21-4-2-MUST-094",
+      "change": "reworded",
+      "note": "editorial rewording: PUBLISH_NAMESPACE_OK/ERROR shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-SHOULD-103",
+      "draft21_id": "D21-4-2-SHOULD-095",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-SHOULD-104",
+      "draft21_id": "D21-4-2-SHOULD-092",
+      "change": "reworded",
+      "note": "editorial rewording: PUBLISH_NAMESPACE_OK shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-SHOULD-105",
+      "draft21_id": "D21-4-2-SHOULD-093",
+      "change": "reworded",
+      "note": "editorial rewording: PUBLISH_NAMESPACE_ERROR shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-SHOULD-106",
+      "draft21_id": "D21-4-2-SHOULD-098",
+      "change": "reworded",
+      "note": "editorial rewording: 'request it from the senders' became 'request the Track from the sender(s)'; moved to Section 4.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-1-SHOULD-NOT-107",
+      "draft21_id": "D21-4-2-SHOULD-NOT-096",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-108",
+      "draft21_id": "D21-4-1-MUST-082",
+      "change": "reworded",
+      "note": "re-paired by hand: the carry tool paired this publisher first-response rule with D21-9-18-MUST-392 (SUBSCRIBE_TRACKS subscriber close); its counterpart is D21-4-1-MUST-082; editorial rewording otherwise (SUBSCRIBE_NAMESPACE_OK/ERROR shorthand, moved to Section 4.2)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-109",
+      "draft21_id": "D21-9-15-MUST-384",
+      "change": "reworded",
+      "note": "re-paired by hand: same obligation as D21-9-15-MUST-384, which the carry tool had paired with D22-3-6-MUST-082 (so 8a recorded this row as new); editorial rewording (SUBSCRIBE_NAMESPACE_OK/ERROR shorthand, moved to Section 4.2); row content as reviewed in 8a",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-110",
+      "draft21_id": "",
+      "change": "new",
+      "note": "supersedes D21-4-2-MUST-089 (original publisher) and D21-4-2-MUST-090 (relay); one row holds both branches via the definition of a known namespace plus the update obligation as the set changes; carried d21 scenario and evaluator ids",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-111",
+      "draft21_id": "D21-9-15-MUST-385",
+      "change": "reworded",
+      "note": "editorial rewording: SUBSCRIBE_NAMESPACE_ERROR shorthand (#1912); moved from Section 9.15 to 4.2 (#1946)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-NOT-112",
+      "draft21_id": "D21-9-15-MUST-NOT-387",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MUST-113",
+      "draft21_id": "D21-9-15-MUST-388",
+      "change": "moved",
+      "note": "section moved; references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-MAY-114",
+      "draft21_id": "D21-4-2-MAY-091",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-1-MUST-115",
+      "draft21_id": "D21-9-15-MUST-386",
+      "change": "reworded",
+      "note": "re-paired by hand: the carry tool paired this SUBSCRIBE_NAMESPACE authorization rule with D21-9-18-MUST-394 (SUBSCRIBE_TRACKS); its counterpart is D21-9-15-MUST-386; editorial rewording otherwise ('this' became 'a', moved to Section 4.2.1)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-2-MAY-116",
+      "draft21_id": "D21-9-15-MAY-389",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-4-2-2-SHOULD-117",
+      "draft21_id": "D21-9-15-SHOULD-390",
+      "change": "moved",
+      "note": "section moved",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-1-SHOULD-118",
+      "draft21_id": "D21-5-1-1-SHOULD-104",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-119",
+      "draft21_id": "D21-5-1-2-SHOULD-105",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-120",
+      "draft21_id": "D21-5-1-2-SHOULD-106",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-121",
+      "draft21_id": "D21-5-1-2-SHOULD-107",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-122",
+      "draft21_id": "D21-5-1-2-SHOULD-108",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-123",
+      "draft21_id": "D21-5-1-2-SHOULD-109",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-124",
+      "draft21_id": "D21-5-1-2-SHOULD-110",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-125",
+      "draft21_id": "D21-5-1-2-SHOULD-111",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-126",
+      "draft21_id": "D21-5-1-2-SHOULD-112",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-127",
+      "draft21_id": "D21-5-1-2-SHOULD-113",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-SHOULD-128",
+      "draft21_id": "D21-5-1-2-SHOULD-114",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-2-MAY-129",
+      "draft21_id": "D21-5-1-2-MAY-115",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-3-SHOULD-130",
+      "draft21_id": "D21-5-1-3-SHOULD-116",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-3-SHOULD-131",
+      "draft21_id": "D21-5-1-3-SHOULD-117",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-3-SHOULD-NOT-132",
+      "draft21_id": "D21-5-1-3-SHOULD-NOT-118",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-3-SHOULD-NOT-133",
+      "draft21_id": "D21-5-1-3-SHOULD-NOT-119",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-1-3-SHOULD-134",
+      "draft21_id": "D21-5-1-3-SHOULD-120",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-135",
+      "draft21_id": "D21-5-2-MUST-121",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-136",
+      "draft21_id": "D21-5-2-MUST-122",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-137",
+      "draft21_id": "D21-5-2-MUST-123",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-SHOULD-NOT-138",
+      "draft21_id": "D21-5-2-SHOULD-NOT-124",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-SHOULD-139",
+      "draft21_id": "D21-5-2-SHOULD-125",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-SHOULD-140",
+      "draft21_id": "D21-5-2-SHOULD-126",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-141",
+      "draft21_id": "D21-5-2-MUST-127",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-SHOULD-142",
+      "draft21_id": "D21-5-2-SHOULD-128",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-143",
+      "draft21_id": "D21-5-2-MUST-129",
+      "change": "reworded",
+      "note": "editorial rewording: identical obligation text; 'Object Forwarding Preference is Subgroup' became 'Object Delivery Mode is Subgroup' in the leading clause",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MUST-144",
+      "draft21_id": "D21-5-2-MUST-130",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-5-2-MAY-145",
+      "draft21_id": "D21-5-2-MAY-131",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-MUST-NOT-146",
+      "draft21_id": "D21-6-1-MUST-NOT-132",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-1-MAY-147",
+      "draft21_id": "D21-6-1-1-MAY-133",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-1-MUST-148",
+      "draft21_id": "D21-6-1-1-MUST-134",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-1-MUST-149",
+      "draft21_id": "D21-6-1-1-MUST-135",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-2-MAY-150",
+      "draft21_id": "D21-6-1-2-MAY-136",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-2-MAY-151",
+      "draft21_id": "D21-6-1-2-MAY-137",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-1-2-MAY-152",
+      "draft21_id": "D21-6-1-2-MAY-138",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-2-MUST-153",
+      "draft21_id": "D21-6-2-MUST-139",
+      "change": "reworded",
+      "note": "editorial rewording: the sentence now names both transports ('directly over QUIC or over WebTransport on HTTP/3'), the only two MOQT runs over",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-2-MUST-154",
+      "draft21_id": "D21-6-2-MUST-140",
+      "change": "reworded",
+      "note": "editorial rewording: the sentence now names both transports explicitly",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-MUST-NOT-155",
+      "draft21_id": "D21-6-3-MUST-NOT-141",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-MUST-156",
+      "draft21_id": "D21-6-3-MUST-142",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-SHOULD-157",
+      "draft21_id": "D21-6-3-SHOULD-143",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-SHOULD-158",
+      "draft21_id": "D21-6-3-SHOULD-144",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-MAY-159",
+      "draft21_id": "D21-6-3-MAY-145",
+      "change": "reworded",
+      "note": "obligation changed: 'such bidirectional streams' became 'such streams', extending the reset permission to early unidirectional Object streams; the publisher-observable request-stream case and its d22 ids are unchanged",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-MUST-NOT-160",
+      "draft21_id": "D21-6-3-MUST-NOT-146",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-SHOULD-NOT-161",
+      "draft21_id": "D21-6-3-SHOULD-NOT-147",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-1-MAY-162",
+      "draft21_id": "D21-6-3-1-MAY-148",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-1-MAY-163",
+      "draft21_id": "D21-6-3-1-MAY-149",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-2-MUST-164",
+      "draft21_id": "D21-6-3-2-MUST-150",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-2-MUST-165",
+      "draft21_id": "D21-6-3-2-MUST-151",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-3-2-MUST-166",
+      "draft21_id": "D21-6-3-2-MUST-152",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-1-MUST-167",
+      "draft21_id": "D21-6-4-1-MUST-153",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-1-MUST-168",
+      "draft21_id": "D21-6-4-2-1-MUST-154",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-1-MUST-169",
+      "draft21_id": "D21-6-4-2-1-MUST-155",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-MUST-NOT-170",
+      "draft21_id": "D21-6-4-2-2-MUST-NOT-156",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-MUST-171",
+      "draft21_id": "D21-6-4-2-2-MUST-157",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-MUST-172",
+      "draft21_id": "D21-6-4-2-2-MUST-158",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-SHOULD-173",
+      "draft21_id": "D21-6-4-2-2-SHOULD-159",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-SHOULD-174",
+      "draft21_id": "D21-6-4-2-2-SHOULD-160",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-2-MAY-175",
+      "draft21_id": "D21-6-4-2-2-MAY-161",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-3-MAY-176",
+      "draft21_id": "D21-6-4-2-3-MAY-162",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-3-MAY-177",
+      "draft21_id": "D21-6-4-2-3-MAY-163",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-3-SHOULD-178",
+      "draft21_id": "D21-6-4-2-3-SHOULD-164",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-4-2-3-SHOULD-179",
+      "draft21_id": "D21-6-4-2-3-SHOULD-165",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-NOT-180",
+      "draft21_id": "D21-6-5-MUST-NOT-166",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-NOT-181",
+      "draft21_id": "D21-6-5-MUST-NOT-167",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-NOT-182",
+      "draft21_id": "D21-6-5-MUST-NOT-168",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-NOT-183",
+      "draft21_id": "D21-6-5-MUST-NOT-169",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-184",
+      "draft21_id": "D21-6-5-MUST-170",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-185",
+      "draft21_id": "D21-6-5-MUST-171",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-186",
+      "draft21_id": "D21-6-5-MUST-172",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-187",
+      "draft21_id": "D21-6-5-MUST-173",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-5-MUST-188",
+      "draft21_id": "D21-6-5-MUST-174",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-6-MAY-189",
+      "draft21_id": "D21-6-6-MAY-175",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-6-1-SHOULD-190",
+      "draft21_id": "D21-6-6-1-SHOULD-176",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-6-1-SHOULD-191",
+      "draft21_id": "D21-6-6-1-SHOULD-177",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-6-6-1-SHOULD-192",
+      "draft21_id": "D21-6-6-1-SHOULD-178",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MAY-193",
+      "draft21_id": "D21-7-1-MAY-179",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MAY-194",
+      "draft21_id": "D21-7-1-MAY-180",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MAY-195",
+      "draft21_id": "D21-7-1-MAY-181",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MAY-196",
+      "draft21_id": "D21-7-1-MAY-182",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MUST-197",
+      "draft21_id": "D21-7-1-MUST-183",
+      "change": "reworded",
+      "note": "editorial rewording: Forwarding Preference renamed Delivery Mode (#1886)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MAY-198",
+      "draft21_id": "D21-7-1-MAY-184",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-SHOULD-NOT-199",
+      "draft21_id": "D21-7-1-SHOULD-NOT-185",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-SHOULD-NOT-200",
+      "draft21_id": "D21-7-1-SHOULD-NOT-186",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-1-MUST-201",
+      "draft21_id": "D21-7-1-MUST-187",
+      "change": "reworded",
+      "note": "editorial rewording: Object field list moved to Section 2.1.1 and Object Properties renumbered 11.1.2",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-2-MUST-202",
+      "draft21_id": "D21-7-2-MUST-188",
+      "change": "reworded",
+      "note": "editorial rewording: Forward State described as a subscription being paused (#1940); Forward=1 upstream became an unpaused upstream subscription",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-3-MUST-203",
+      "draft21_id": "D21-7-3-MUST-189",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-3-MUST-204",
+      "draft21_id": "D21-7-3-MUST-190",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-3-SHOULD-205",
+      "draft21_id": "D21-7-3-SHOULD-191",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-206",
+      "draft21_id": "D21-7-4-MUST-192",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-207",
+      "draft21_id": "D21-7-4-MUST-193",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-208",
+      "draft21_id": "D21-7-4-MUST-194",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-209",
+      "draft21_id": "D21-7-4-MUST-195",
+      "change": "reworded",
+      "note": "editorial rewording: LARGEST_OBJECT renumbered Section 9.20.17",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-NOT-210",
+      "draft21_id": "D21-7-4-MUST-NOT-196",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MUST-NOT-211",
+      "draft21_id": "D21-7-4-MUST-NOT-197",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MAY-212",
+      "draft21_id": "D21-7-4-MAY-198",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-MAY-213",
+      "draft21_id": "D21-7-4-MAY-199",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-4-1-MAY-214",
+      "draft21_id": "D21-7-4-1-MAY-200",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-SHOULD-215",
+      "draft21_id": "D21-4-3-1-SHOULD-099",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-SHOULD-216",
+      "draft21_id": "D21-4-3-1-SHOULD-100",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-MAY-217",
+      "draft21_id": "",
+      "change": "new",
+      "note": "NAMESPACE_TOO_LARGE clause of D21-4-3-1-MAY-101, now its own sentence in Section 7.5; the carried D22-7-5-MAY-218 still repeats this summary and is for part 8b",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-MAY-218",
+      "draft21_id": "D21-4-3-1-MAY-101",
+      "change": "reworded",
+      "note": "duplicate of D22-7-5-MAY-217",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-MAY-219",
+      "draft21_id": "D21-4-3-1-MAY-102",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 4.3.1 to 7.5; now its own 'Relays MAY likewise limit the load imposed by subscribers' sentence, clause 2 of the cited sentence",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-5-MAY-220",
+      "draft21_id": "D21-4-3-1-MAY-103",
+      "change": "reworded",
+      "note": "editorial rewording: moved from Section 4.3.1 to 7.5; second option of the 'Relays MAY likewise' sentence",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MAY-221",
+      "draft21_id": "D21-7-5-MAY-201",
+      "change": "reworded",
+      "note": "editorial rewording: 'in Forward State=0' became 'pause the Subscription' (#1940); section 7.5 renumbered 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-222",
+      "draft21_id": "D21-7-5-MUST-202",
+      "change": "reworded",
+      "note": "editorial rewording: 'the namespace in' became 'the Track Namespace Prefix in' (prefix matching was already draft 21 behaviour); section 7.5 renumbered 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-223",
+      "draft21_id": "D21-7-5-MUST-203",
+      "change": "reworded",
+      "note": "editorial rewording: only the PUBLISH_NAMESPACE clause of the shared sentence changed; section 7.5 renumbered 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-224",
+      "draft21_id": "D21-7-5-MUST-NOT-204",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-225",
+      "draft21_id": "D21-7-5-MUST-NOT-205",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-226",
+      "draft21_id": "D21-7-5-MUST-206",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-227",
+      "draft21_id": "D21-7-5-MUST-207",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-228",
+      "draft21_id": "D21-7-5-MUST-210",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-229",
+      "draft21_id": "D21-7-5-MUST-211",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-230",
+      "draft21_id": "",
+      "change": "new",
+      "note": "supersedes D21-7-5-MUST-212; Forward State=1/0 is now described as not paused/paused (#1940), same obligation",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-231",
+      "draft21_id": "D21-7-5-MUST-213",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-232",
+      "draft21_id": "",
+      "change": "new",
+      "note": "supersedes D21-7-5-MUST-214; 'MUST use Forward=1' restated as 'MUST NOT pause' (#1940), same obligation",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-233",
+      "draft21_id": "D21-7-5-MUST-215",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-234",
+      "draft21_id": "D21-7-5-MUST-216",
+      "change": "reworded",
+      "note": "editorial rewording: RENDEZVOUS_TIMEOUT renumbered Section 9.20.6; section 7.5 renumbered 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-235",
+      "draft21_id": "D21-7-5-MUST-NOT-217",
+      "change": "reworded",
+      "note": "editorial rewording: RENDEZVOUS_TIMEOUT renumbered Section 9.20.6; section 7.5 renumbered 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-236",
+      "draft21_id": "D21-7-5-MUST-219",
+      "change": "reworded",
+      "note": "editorial rewording: the sentence now starts 'When a relay receives' instead of 'When it receives'; section 7.5 renumbered 7.6; PUBLISH_OK is now a defined shorthand",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-237",
+      "draft21_id": "",
+      "change": "new",
+      "note": "supersedes D21-7-5-MUST-220; Forward State restated as paused (#1940), same obligation",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-238",
+      "draft21_id": "D21-7-5-MUST-218",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-239",
+      "draft21_id": "D21-7-5-MUST-NOT-221",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-MUST-NOT-240",
+      "draft21_id": "D21-7-5-MUST-NOT-222",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-6-1-MAY-241",
+      "draft21_id": "D21-7-5-1-MAY-223",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-7-MUST-242",
+      "draft21_id": "D21-7-6-MUST-224",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-8-MUST-NOT-243",
+      "draft21_id": "D21-7-7-MUST-NOT-225",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-8-MUST-244",
+      "draft21_id": "D21-7-7-MUST-226",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-8-MUST-NOT-245",
+      "draft21_id": "D21-7-7-MUST-NOT-227",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-8-MUST-NOT-246",
+      "draft21_id": "D21-7-7-MUST-NOT-228",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-7-8-MUST-NOT-247",
+      "draft21_id": "D21-7-7-MUST-NOT-229",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-3-MUST-NOT-248",
+      "draft21_id": "D21-8-3-MUST-NOT-230",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-3-MUST-249",
+      "draft21_id": "D21-8-3-MUST-231",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-3-MUST-250",
+      "draft21_id": "D21-8-3-MUST-232",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-3-MUST-251",
+      "draft21_id": "D21-8-3-MUST-233",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-252",
+      "draft21_id": "D21-8-4-MUST-NOT-234",
+      "change": "reworded",
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-253",
+      "draft21_id": "D21-8-4-MUST-235",
+      "change": "reworded",
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-254",
+      "draft21_id": "D21-8-4-MUST-236",
+      "change": "reworded",
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-SHOULD-255",
+      "draft21_id": "D21-8-4-SHOULD-237",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-256",
+      "draft21_id": "D21-8-4-MUST-NOT-238",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-257",
+      "draft21_id": "D21-8-4-MUST-239",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-258",
+      "draft21_id": "D21-8-4-MUST-NOT-240",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-259",
+      "draft21_id": "D21-8-4-MUST-NOT-241",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-260",
+      "draft21_id": "D21-8-4-MUST-NOT-242",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-261",
+      "draft21_id": "D21-8-4-MUST-243",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-262",
+      "draft21_id": "D21-8-4-MUST-244",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MAY-263",
+      "draft21_id": "",
+      "change": "new",
+      "note": "text identical to D21-8-4-MAY-245; the tool missed the match because a page break before the sentence joined it to the preceding bullet; carried classification and ids",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-264",
+      "draft21_id": "D21-8-4-MUST-246",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-4-MUST-NOT-265",
+      "draft21_id": "D21-8-4-MUST-NOT-247",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-5-MUST-266",
+      "draft21_id": "D21-8-5-MUST-248",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-6-MUST-267",
+      "draft21_id": "D21-8-6-MUST-249",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-7-MUST-268",
+      "draft21_id": "D21-8-7-MUST-250",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-7-MUST-269",
+      "draft21_id": "D21-8-7-MUST-251",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-7-MUST-270",
+      "draft21_id": "D21-8-7-MUST-252",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-7-MUST-271",
+      "draft21_id": "D21-8-7-MUST-253",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-7-MUST-272",
+      "draft21_id": "D21-8-7-MUST-254",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-8-SHOULD-273",
+      "draft21_id": "D21-8-8-SHOULD-255",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-8-SHOULD-274",
+      "draft21_id": "D21-8-8-SHOULD-256",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-8-MUST-275",
+      "draft21_id": "",
+      "change": "new",
+      "note": "Section 8.8.1 was folded into Section 8.8; one row replaces the canonical-encoding rules D21-8-8-1-MUST-257..262; invalid-name handling is now application-defined",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-276",
+      "draft21_id": "D21-8-9-MUST-264",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-277",
+      "draft21_id": "D21-8-9-MUST-265",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MAY-278",
+      "draft21_id": "D21-8-9-MAY-266",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-279",
+      "draft21_id": "D21-8-9-MUST-267",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-280",
+      "draft21_id": "D21-8-9-MUST-268",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-281",
+      "draft21_id": "D21-8-9-MUST-269",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-282",
+      "draft21_id": "D21-8-9-MUST-270",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-283",
+      "draft21_id": "D21-8-9-MUST-271",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MAY-284",
+      "draft21_id": "D21-8-9-MAY-272",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-285",
+      "draft21_id": "D21-8-9-MUST-273",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MAY-286",
+      "draft21_id": "D21-8-9-MAY-274",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-SHOULD-287",
+      "draft21_id": "D21-8-9-SHOULD-275",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-SHOULD-288",
+      "draft21_id": "D21-8-9-SHOULD-276",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-289",
+      "draft21_id": "D21-8-9-MUST-277",
+      "change": "reworded",
+      "note": "editorial rewording: the rule is now explicitly scoped to registrations outside SETUP (#1927), which matches the draft 21 reading already recorded in this row",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MAY-290",
+      "draft21_id": "D21-8-9-MAY-278",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-NOT-291",
+      "draft21_id": "D21-8-9-MUST-NOT-279",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MAY-292",
+      "draft21_id": "D21-8-9-MAY-280",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-8-9-MUST-NOT-293",
+      "draft21_id": "D21-8-9-MUST-NOT-281",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-MUST-294",
+      "draft21_id": "",
+      "change": "new",
+      "note": "text identical to D21-9-MUST-282/283; the tool missed the match because a page break after the sentence pulled Table 5 into it; one row holds both the publisher (testable) and subscriber (not applicable) halves",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-MUST-295",
+      "draft21_id": "D21-9-MUST-284",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-MUST-296",
+      "draft21_id": "D21-9-MUST-285",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-MAY-297",
+      "draft21_id": "D21-9-1-MAY-286",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-MUST-298",
+      "draft21_id": "D21-9-1-MUST-287",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-MUST-299",
+      "draft21_id": "D21-9-1-MUST-288",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-MUST-NOT-300",
+      "draft21_id": "D21-9-1-MUST-NOT-289",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-MUST-301",
+      "draft21_id": "D21-9-1-MUST-290",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-NOT-302",
+      "draft21_id": "D21-9-1-1-MUST-NOT-291",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-NOT-303",
+      "draft21_id": "D21-9-1-1-MUST-NOT-292",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-304",
+      "draft21_id": "D21-9-1-1-MUST-293",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-305",
+      "draft21_id": "D21-9-1-1-MUST-294",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-306",
+      "draft21_id": "D21-9-1-1-MUST-295",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-307",
+      "draft21_id": "D21-9-1-1-MUST-296",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-1-MUST-308",
+      "draft21_id": "D21-9-1-1-MUST-297",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-NOT-309",
+      "draft21_id": "D21-9-1-2-MUST-NOT-298",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-NOT-310",
+      "draft21_id": "D21-9-1-2-MUST-NOT-299",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-311",
+      "draft21_id": "D21-9-1-2-MUST-300",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-312",
+      "draft21_id": "D21-9-1-2-MUST-301",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-313",
+      "draft21_id": "D21-9-1-2-MUST-302",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-314",
+      "draft21_id": "D21-9-1-2-MUST-303",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-315",
+      "draft21_id": "D21-9-1-2-MUST-304",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-2-MUST-316",
+      "draft21_id": "D21-9-1-2-MUST-305",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-4-MUST-317",
+      "draft21_id": "D21-9-1-4-MUST-306",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-4-MUST-NOT-318",
+      "draft21_id": "D21-9-1-4-MUST-NOT-307",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-4-MUST-319",
+      "draft21_id": "D21-9-1-4-MUST-308",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-4-MUST-320",
+      "draft21_id": "D21-9-1-4-MUST-309",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-5-SHOULD-321",
+      "draft21_id": "D21-9-1-5-SHOULD-310",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-5-SHOULD-322",
+      "draft21_id": "D21-9-1-5-SHOULD-311",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-5-SHOULD-323",
+      "draft21_id": "D21-9-1-5-SHOULD-312",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-5-SHOULD-NOT-324",
+      "draft21_id": "D21-9-1-5-SHOULD-NOT-313",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-6-MUST-NOT-325",
+      "draft21_id": "D21-9-1-6-MUST-NOT-314",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-6-MUST-326",
+      "draft21_id": "D21-9-1-6-MUST-315",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-7-MUST-NOT-327",
+      "draft21_id": "D21-9-1-7-MUST-NOT-316",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-1-7-MUST-328",
+      "draft21_id": "D21-9-1-7-MUST-317",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-329",
+      "draft21_id": "D21-9-2-MUST-318",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MAY-330",
+      "draft21_id": "D21-9-2-MAY-319",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-331",
+      "draft21_id": "D21-9-2-SHOULD-320",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-332",
+      "draft21_id": "D21-9-2-SHOULD-321",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-333",
+      "draft21_id": "D21-9-2-SHOULD-322",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MAY-334",
+      "draft21_id": "D21-9-2-MAY-323",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-NOT-335",
+      "draft21_id": "D21-9-2-SHOULD-NOT-324",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-336",
+      "draft21_id": "D21-9-2-SHOULD-325",
+      "change": "reworded",
+      "note": "editorial rewording: Graceful Publisher Relay Switchover renumbered Section 7.6.1",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MAY-337",
+      "draft21_id": "D21-9-2-MAY-326",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-338",
+      "draft21_id": "D21-9-2-MUST-327",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-339",
+      "draft21_id": "D21-9-2-MUST-328",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-340",
+      "draft21_id": "D21-9-2-MUST-329",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-341",
+      "draft21_id": "D21-9-2-SHOULD-330",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-342",
+      "draft21_id": "D21-9-2-MUST-331",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MUST-343",
+      "draft21_id": "D21-9-2-MUST-332",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-344",
+      "draft21_id": "D21-9-2-SHOULD-333",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-SHOULD-345",
+      "draft21_id": "D21-9-2-SHOULD-334",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MAY-346",
+      "draft21_id": "D21-9-2-MAY-335",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-2-MAY-347",
+      "draft21_id": "D21-9-2-MAY-336",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-3-MUST-348",
+      "draft21_id": "D21-9-3-MUST-337",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-1-SHOULD-349",
+      "draft21_id": "D21-9-4-1-SHOULD-338",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-1-MUST-350",
+      "draft21_id": "D21-9-4-1-MUST-339",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-1-MUST-351",
+      "draft21_id": "D21-9-4-1-MUST-340",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-1-MUST-352",
+      "draft21_id": "D21-9-4-1-MUST-341",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-2-SHOULD-353",
+      "draft21_id": "D21-9-4-2-SHOULD-342",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-4-2-SHOULD-NOT-354",
+      "draft21_id": "D21-9-4-2-SHOULD-NOT-343",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-MUST-355",
+      "draft21_id": "D21-9-5-MUST-344",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-MUST-356",
+      "draft21_id": "D21-9-5-MUST-345",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_UPDATE_OK/ERROR shorthand (#1912)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-357",
+      "draft21_id": "D21-9-5-1-MUST-346",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-358",
+      "draft21_id": "D21-9-5-1-MUST-347",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-359",
+      "draft21_id": "D21-9-5-1-MUST-348",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-360",
+      "draft21_id": "D21-9-5-1-MUST-349",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-361",
+      "draft21_id": "D21-9-5-1-MUST-350",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MAY-362",
+      "draft21_id": "D21-9-5-1-MAY-351",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-1-MUST-363",
+      "draft21_id": "D21-9-5-1-MUST-352",
+      "change": "reworded",
+      "note": "editorial rewording: REQUEST_UPDATE_OK shorthand (#1912)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-5-2-MUST-NOT-364",
+      "draft21_id": "D21-9-5-2-MUST-NOT-353",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-6-MUST-365",
+      "draft21_id": "D21-9-6-MUST-354",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-6-MUST-366",
+      "draft21_id": "D21-9-6-MUST-355",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-8-SHOULD-367",
+      "draft21_id": "D21-9-8-SHOULD-356",
+      "change": "reworded",
+      "note": "editorial rewording: PUBLISH_ERROR shorthand (#1912)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-8-SHOULD-368",
+      "draft21_id": "D21-9-8-SHOULD-357",
+      "change": "reworded",
+      "note": "editorial rewording: only the PUBLISH_ERROR shorthand in the shared sentence changed",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MUST-NOT-369",
+      "draft21_id": "D21-9-9-MUST-NOT-358",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MUST-NOT-370",
+      "draft21_id": "D21-9-9-MUST-NOT-359",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MUST-NOT-371",
+      "draft21_id": "D21-9-9-MUST-NOT-360",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-SHOULD-372",
+      "draft21_id": "D21-9-9-SHOULD-361",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MAY-373",
+      "draft21_id": "D21-9-9-MAY-362",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MAY-374",
+      "draft21_id": "D21-9-9-MAY-363",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-SHOULD-375",
+      "draft21_id": "D21-9-9-SHOULD-364",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MUST-376",
+      "draft21_id": "D21-9-9-MUST-365",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MUST-377",
+      "draft21_id": "D21-9-9-MUST-366",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-SHOULD-378",
+      "draft21_id": "D21-9-9-SHOULD-367",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-9-MAY-379",
+      "draft21_id": "D21-9-9-MAY-368",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-10-MUST-380",
+      "draft21_id": "D21-9-10-MUST-369",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-10-MUST-381",
+      "draft21_id": "D21-9-10-MUST-370",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-10-MUST-NOT-382",
+      "draft21_id": "D21-9-10-MUST-NOT-371",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-10-MUST-383",
+      "draft21_id": "D21-9-10-MUST-372",
+      "change": "reworded",
+      "note": "editorial rewording: LARGEST_OBJECT renumbered Section 9.20.17",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-12-MUST-384",
+      "draft21_id": "D21-9-12-MUST-380",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-13-MAY-385",
+      "draft21_id": "D21-9-13-MAY-381",
+      "change": "reworded",
+      "note": "editorial rewording: Publisher Interactions renumbered Section 7.6 in the shared sentence",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-13-MAY-386",
+      "draft21_id": "D21-9-13-MAY-382",
+      "change": "reworded",
+      "note": "editorial rewording: Publisher Interactions renumbered Section 7.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-387",
+      "draft21_id": "D21-9-20-MUST-395",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-388",
+      "draft21_id": "D21-9-20-MUST-396",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-389",
+      "draft21_id": "D21-9-20-MUST-397",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-390",
+      "draft21_id": "D21-9-20-MUST-398",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-NOT-391",
+      "draft21_id": "D21-9-20-MUST-NOT-399",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-SHOULD-392",
+      "draft21_id": "D21-9-20-SHOULD-400",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-SHOULD-393",
+      "draft21_id": "D21-9-20-SHOULD-401",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-NOT-394",
+      "draft21_id": "D21-9-20-MUST-NOT-402",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-MUST-NOT-395",
+      "draft21_id": "D21-9-20-MUST-NOT-403",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-1-MUST-396",
+      "draft21_id": "D21-9-20-1-MUST-404",
+      "change": "reworded",
+      "note": "editorial rewording: scope is now stated by both the parameter definition and the message's allowed-parameter list (#1916); same receiver obligation",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-2-MAY-397",
+      "draft21_id": "D21-9-20-3-MAY-405",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-2-MAY-398",
+      "draft21_id": "D21-9-20-3-MAY-406",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-2-MUST-NOT-399",
+      "draft21_id": "D21-9-20-3-MUST-NOT-407",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-3-MAY-400",
+      "draft21_id": "D21-9-20-4-MAY-408",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-3-MAY-401",
+      "draft21_id": "D21-9-20-4-MAY-409",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-3-SHOULD-NOT-402",
+      "draft21_id": "D21-9-20-4-SHOULD-NOT-410",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-4-MAY-403",
+      "draft21_id": "D21-9-20-5-MAY-411",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-4-MAY-404",
+      "draft21_id": "D21-9-20-5-MAY-412",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-4-SHOULD-NOT-405",
+      "draft21_id": "D21-9-20-5-SHOULD-NOT-413",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-MAY-406",
+      "draft21_id": "D21-9-20-6-MAY-414",
+      "change": "reworded",
+      "note": "editorial rewording: FILL_TIMEOUT renumbered Section 9.20.5 and FILL_PARAMETERS 9.20.15",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-MAY-407",
+      "draft21_id": "D21-9-20-6-MAY-415",
+      "change": "reworded",
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-SHOULD-408",
+      "draft21_id": "D21-9-20-6-SHOULD-416",
+      "change": "reworded",
+      "note": "editorial rewording: the total-budget explanation moved to Section 3.2.3 (#1895); FILL_TIMEOUT renumbered Section 9.20.5",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-MUST-NOT-409",
+      "draft21_id": "D21-9-20-6-MUST-NOT-417",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-MUST-410",
+      "draft21_id": "D21-9-20-6-MUST-418",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-5-MAY-411",
+      "draft21_id": "D21-9-20-6-MAY-419",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-6-MAY-412",
+      "draft21_id": "D21-9-20-7-MAY-420",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-6-SHOULD-413",
+      "draft21_id": "D21-9-20-7-SHOULD-421",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-6-SHOULD-414",
+      "draft21_id": "D21-9-20-7-SHOULD-422",
+      "change": "reworded",
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); RENDEZVOUS_TIMEOUT renumbered Section 9.20.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-6-MAY-415",
+      "draft21_id": "D21-9-20-7-MAY-423",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-6-MUST-416",
+      "draft21_id": "D21-9-20-7-MUST-424",
+      "change": "reworded",
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); RENDEZVOUS_TIMEOUT renumbered Section 9.20.6",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-7-MAY-417",
+      "draft21_id": "D21-9-20-8-MAY-425",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-7-MAY-418",
+      "draft21_id": "D21-9-20-8-MAY-426",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-8-MAY-419",
+      "draft21_id": "D21-9-20-9-MAY-427",
+      "change": "reworded",
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15; GROUP_ORDER renumbered 9.20.8",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-8-MAY-420",
+      "draft21_id": "D21-9-20-9-MAY-428",
+      "change": "reworded",
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15; GROUP_ORDER renumbered 9.20.8",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-8-MUST-421",
+      "draft21_id": "D21-9-20-9-MUST-429",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-9-MAY-422",
+      "draft21_id": "D21-9-20-10-MAY-430",
+      "change": "identical",
+      "note": "explicit Location Filter Type: same permission text, but the evaluator must decode Type 0x00-0x05 (other values are a PROTOCOL_VIOLATION) instead of the length-inferred encoding",
+      "reviewed": true,
+      "tags": [
+        "location_filter"
+      ]
+    },
+    {
+      "draft22_id": "D22-9-20-9-MAY-423",
+      "draft21_id": "D21-9-20-10-MAY-431",
+      "change": "identical",
+      "note": "explicit Location Filter Type: sender permission text unchanged and NotApplicable; the listener's own stimuli must use the explicit type; section references updated",
+      "reviewed": true,
+      "tags": [
+        "location_filter"
+      ]
+    },
+    {
+      "draft22_id": "D22-9-20-9-MUST-424",
+      "draft21_id": "D21-9-20-10-MUST-432",
+      "change": "identical",
+      "note": "explicit Location Filter Type: same MUST, but the overflow now arises only in Types 0x03/0x04 and the scenarios must encode the explicit type instead of a 3- or 4-field Length",
+      "reviewed": true,
+      "tags": [
+        "location_filter"
+      ]
+    },
+    {
+      "draft22_id": "D22-9-20-12-MUST-425",
+      "draft21_id": "D21-9-20-13-MUST-433",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-13-MUST-426",
+      "draft21_id": "D21-9-20-14-MUST-434",
+      "change": "reworded",
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; OBJECT_PROPERTY_FILTER renumbered Section 9.20.13",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-13-MUST-427",
+      "draft21_id": "D21-9-20-14-MUST-435",
+      "change": "reworded",
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; OBJECT_PROPERTY_FILTER renumbered Section 9.20.13",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-14-MUST-428",
+      "draft21_id": "D21-9-20-15-MUST-436",
+      "change": "reworded",
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; TRACK_PROPERTY_FILTER renumbered Section 9.20.14",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-14-MUST-429",
+      "draft21_id": "D21-9-20-15-MUST-437",
+      "change": "reworded",
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; TRACK_PROPERTY_FILTER renumbered Section 9.20.14",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-15-MAY-430",
+      "draft21_id": "D21-9-20-16-MAY-438",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-15-MAY-431",
+      "draft21_id": "",
+      "change": "new",
+      "note": "same list as D21-9-20-16-MAY-439..446 (section renumbered 9.20.16 to 9.20.15); one row holds the eight per-parameter permissions",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-15-MUST-432",
+      "draft21_id": "D21-9-20-16-MUST-447",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-15-MAY-433",
+      "draft21_id": "D21-9-20-16-MAY-448",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-MAY-434",
+      "draft21_id": "D21-9-20-17-MAY-449",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-MAY-435",
+      "draft21_id": "D21-9-20-17-MAY-450",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-SHOULD-436",
+      "draft21_id": "D21-9-20-17-SHOULD-451",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-SHOULD-437",
+      "draft21_id": "D21-9-20-17-SHOULD-452",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-MAY-438",
+      "draft21_id": "D21-9-20-17-MAY-453",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-16-MAY-439",
+      "draft21_id": "D21-9-20-17-MAY-454",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-17-MAY-440",
+      "draft21_id": "D21-9-20-18-MAY-455",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-17-MUST-441",
+      "draft21_id": "D21-9-20-18-MUST-456",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-17-MUST-442",
+      "draft21_id": "D21-9-20-18-MUST-457",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-18-MAY-443",
+      "draft21_id": "D21-9-20-19-MAY-458",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-18-MAY-444",
+      "draft21_id": "D21-9-20-19-MAY-459",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-18-MUST-445",
+      "draft21_id": "D21-9-20-19-MUST-460",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MAY-446",
+      "draft21_id": "D21-9-20-20-MAY-461",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MUST-NOT-447",
+      "draft21_id": "D21-9-20-20-MUST-NOT-462",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MAY-448",
+      "draft21_id": "D21-9-20-20-MAY-463",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-SHOULD-449",
+      "draft21_id": "D21-9-20-20-SHOULD-464",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-SHOULD-450",
+      "draft21_id": "D21-9-20-20-SHOULD-465",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MAY-451",
+      "draft21_id": "D21-9-20-20-MAY-466",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MUST-452",
+      "draft21_id": "D21-9-20-20-MUST-467",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-19-MUST-453",
+      "draft21_id": "D21-9-20-20-MUST-468",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-20-MAY-454",
+      "draft21_id": "D21-9-20-21-MAY-469",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-20-MUST-455",
+      "draft21_id": "D21-9-20-21-MUST-470",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-20-MUST-456",
+      "draft21_id": "D21-9-20-21-MUST-471",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-21-MAY-457",
+      "draft21_id": "D21-9-20-22-MAY-472",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-21-SHOULD-458",
+      "draft21_id": "D21-9-20-22-SHOULD-473",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-21-SHOULD-459",
+      "draft21_id": "D21-9-20-22-SHOULD-474",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-9-20-21-MUST-460",
+      "draft21_id": "D21-9-20-22-MUST-475",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-3-MUST-NOT-461",
+      "draft21_id": "D21-10-3-MUST-NOT-476",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-5-MUST-462",
+      "draft21_id": "D21-10-5-MUST-477",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-6-MUST-463",
+      "draft21_id": "D21-10-6-MUST-478",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-NOT-464",
+      "draft21_id": "D21-10-7-MUST-NOT-479",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-NOT-465",
+      "draft21_id": "D21-10-7-MUST-NOT-480",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-NOT-466",
+      "draft21_id": "D21-10-7-MUST-NOT-481",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-NOT-467",
+      "draft21_id": "D21-10-7-MUST-NOT-482",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-468",
+      "draft21_id": "D21-10-7-MUST-483",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-469",
+      "draft21_id": "D21-10-7-MUST-484",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-470",
+      "draft21_id": "D21-10-7-MUST-485",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MAY-471",
+      "draft21_id": "D21-10-7-MAY-486",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MAY-472",
+      "draft21_id": "D21-10-7-MAY-487",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MAY-473",
+      "draft21_id": "D21-10-7-MAY-488",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-474",
+      "draft21_id": "D21-10-7-MUST-489",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-475",
+      "draft21_id": "D21-10-7-MUST-490",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MAY-476",
+      "draft21_id": "D21-10-7-MAY-491",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-7-MUST-NOT-477",
+      "draft21_id": "D21-10-7-MUST-NOT-492",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-8-MUST-NOT-478",
+      "draft21_id": "D21-10-8-MUST-NOT-493",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-8-MAY-479",
+      "draft21_id": "D21-10-8-MAY-494",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-8-MUST-NOT-480",
+      "draft21_id": "D21-10-8-MUST-NOT-495",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-8-MUST-NOT-481",
+      "draft21_id": "D21-10-8-MUST-NOT-496",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-8-MUST-NOT-482",
+      "draft21_id": "D21-10-8-MUST-NOT-497",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-9-MUST-NOT-483",
+      "draft21_id": "D21-10-9-MUST-NOT-498",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-9-MAY-484",
+      "draft21_id": "D21-10-9-MAY-499",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-9-MUST-NOT-485",
+      "draft21_id": "D21-10-9-MUST-NOT-500",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-9-MUST-NOT-486",
+      "draft21_id": "D21-10-9-MUST-NOT-501",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-10-9-MUST-NOT-487",
+      "draft21_id": "D21-10-9-MUST-NOT-502",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-MUST-488",
+      "draft21_id": "D21-11-MUST-503",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-1-SHOULD-489",
+      "draft21_id": "D21-11-1-2-SHOULD-507",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-1-SHOULD-490",
+      "draft21_id": "D21-11-1-2-SHOULD-508",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-1-SHOULD-491",
+      "draft21_id": "D21-11-1-2-SHOULD-509",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-1-MUST-492",
+      "draft21_id": "D21-11-1-2-MUST-510",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-2-MUST-493",
+      "draft21_id": "D21-11-1-3-MUST-511",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-2-SHOULD-494",
+      "draft21_id": "D21-11-1-3-SHOULD-512",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-1-2-SHOULD-495",
+      "draft21_id": "D21-11-1-3-SHOULD-513",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-496",
+      "draft21_id": "D21-11-2-1-MUST-516",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-497",
+      "draft21_id": "D21-11-2-1-MUST-517",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-498",
+      "draft21_id": "D21-11-2-1-MUST-518",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-499",
+      "draft21_id": "D21-11-2-1-MUST-519",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-500",
+      "draft21_id": "D21-11-2-1-MUST-520",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-501",
+      "draft21_id": "D21-11-2-1-MUST-521",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-502",
+      "draft21_id": "D21-11-2-1-MUST-522",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-2-1-MUST-503",
+      "draft21_id": "D21-11-2-1-MUST-523",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-SHOULD-504",
+      "draft21_id": "D21-11-3-SHOULD-524",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-SHOULD-505",
+      "draft21_id": "D21-11-3-SHOULD-525",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-SHOULD-NOT-506",
+      "draft21_id": "D21-11-3-SHOULD-NOT-526",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-1-MUST-507",
+      "draft21_id": "D21-11-3-1-MUST-531",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-1-MUST-508",
+      "draft21_id": "D21-11-3-1-MUST-532",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-1-MUST-509",
+      "draft21_id": "D21-11-3-1-MUST-533",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-1-MUST-510",
+      "draft21_id": "D21-11-3-1-MUST-534",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-1-MUST-511",
+      "draft21_id": "D21-11-3-1-MUST-535",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-512",
+      "draft21_id": "D21-11-3-2-MUST-536",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-513",
+      "draft21_id": "D21-11-3-2-MUST-537",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-SHOULD-514",
+      "draft21_id": "D21-11-3-2-SHOULD-538",
+      "change": "reworded",
+      "note": "editorial rewording: identical obligation sentence; draft 21 citation also spanned the following sentence",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MAY-515",
+      "draft21_id": "D21-11-3-2-MAY-539",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-NOT-516",
+      "draft21_id": "D21-11-3-2-MUST-NOT-540",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-517",
+      "draft21_id": "D21-11-3-2-MUST-541",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-518",
+      "draft21_id": "D21-11-3-2-MUST-542",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MUST-519",
+      "draft21_id": "D21-11-3-2-MUST-543",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-SHOULD-520",
+      "draft21_id": "D21-11-3-2-SHOULD-544",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MAY-521",
+      "draft21_id": "D21-11-3-2-MAY-545",
+      "change": "reworded",
+      "note": "editorial rewording: EndOfGroup/EndOfTrack spelled End of Group/End of Track",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MAY-522",
+      "draft21_id": "D21-11-3-2-MAY-546",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-SHOULD-523",
+      "draft21_id": "D21-11-3-2-SHOULD-547",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-SHOULD-NOT-524",
+      "draft21_id": "D21-11-3-2-SHOULD-NOT-548",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-MAY-525",
+      "draft21_id": "D21-11-3-2-MAY-549",
+      "change": "reworded",
+      "note": "editorial rewording: 'changes the Forward State from 0 to 1' became 'resumes the subscription' (#1940)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-3-2-SHOULD-526",
+      "draft21_id": "D21-11-3-2-SHOULD-550",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-527",
+      "draft21_id": "D21-11-4-1-1-MUST-551",
+      "change": "reworded",
+      "note": "editorial rewording: identical obligation sentence; the carry tool saw a different neighbouring sentence boundary",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-528",
+      "draft21_id": "D21-11-4-1-1-MUST-552",
+      "change": "reworded",
+      "note": "editorial rewording: identical obligation sentence; the carry tool saw a different neighbouring sentence boundary",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-529",
+      "draft21_id": "D21-11-4-1-1-MUST-553",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-530",
+      "draft21_id": "D21-11-4-1-1-MUST-554",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-531",
+      "draft21_id": "D21-11-4-1-1-MUST-555",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-532",
+      "draft21_id": "D21-11-4-1-1-MUST-556",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-533",
+      "draft21_id": "D21-11-4-1-1-MUST-557",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-SHOULD-534",
+      "draft21_id": "D21-11-4-1-1-SHOULD-558",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-4-1-1-MUST-535",
+      "draft21_id": "D21-11-4-1-1-MUST-559",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-MAY-536",
+      "draft21_id": "D21-11-5-MAY-561",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-MAY-537",
+      "draft21_id": "D21-11-5-MAY-562",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-SHOULD-538",
+      "draft21_id": "D21-11-5-SHOULD-563",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-1-MAY-539",
+      "draft21_id": "D21-11-5-1-MAY-564",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-1-MUST-540",
+      "draft21_id": "D21-11-5-1-MUST-565",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-1-MUST-541",
+      "draft21_id": "D21-11-5-1-MUST-566",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-1-MAY-542",
+      "draft21_id": "D21-11-5-1-MAY-567",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-1-MAY-543",
+      "draft21_id": "D21-11-5-1-MAY-568",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-2-MAY-544",
+      "draft21_id": "D21-11-5-2-MAY-569",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-2-MUST-545",
+      "draft21_id": "D21-11-5-2-MUST-570",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-11-5-2-MUST-546",
+      "draft21_id": "D21-11-5-2-MUST-571",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-MUST-547",
+      "draft21_id": "D21-12-1-MUST-572",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-MUST-548",
+      "draft21_id": "D21-12-1-MUST-573",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-SHOULD-549",
+      "draft21_id": "D21-12-1-SHOULD-574",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-MUST-550",
+      "draft21_id": "D21-12-1-MUST-575",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-MUST-551",
+      "draft21_id": "D21-12-1-MUST-576",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-1-MUST-NOT-552",
+      "draft21_id": "D21-12-1-MUST-NOT-577",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-2-MAY-553",
+      "draft21_id": "D21-12-2-MAY-578",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-2-SHOULD-554",
+      "draft21_id": "D21-12-2-SHOULD-579",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-2-MAY-555",
+      "draft21_id": "D21-12-2-MAY-580",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-2-MAY-556",
+      "draft21_id": "D21-12-2-MAY-581",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-SHOULD-557",
+      "draft21_id": "D21-12-3-SHOULD-582",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-MAY-558",
+      "draft21_id": "D21-12-3-MAY-583",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-SHOULD-559",
+      "draft21_id": "D21-12-3-SHOULD-584",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-SHOULD-560",
+      "draft21_id": "D21-12-3-SHOULD-585",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-SHOULD-561",
+      "draft21_id": "D21-12-3-SHOULD-586",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-SHOULD-NOT-562",
+      "draft21_id": "D21-12-3-SHOULD-NOT-587",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-MAY-563",
+      "draft21_id": "D21-12-3-MAY-588",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-3-MAY-564",
+      "draft21_id": "D21-12-3-MAY-589",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-4-SHOULD-565",
+      "draft21_id": "D21-12-4-SHOULD-590",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-5-SHOULD-566",
+      "draft21_id": "D21-12-5-SHOULD-591",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-12-5-SHOULD-567",
+      "draft21_id": "D21-12-5-SHOULD-592",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-568",
+      "draft21_id": "D21-13-MUST-593",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-NOT-569",
+      "draft21_id": "D21-13-MUST-NOT-594",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-570",
+      "draft21_id": "D21-13-MUST-595",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-571",
+      "draft21_id": "D21-13-MUST-596",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-572",
+      "draft21_id": "D21-13-MUST-597",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-573",
+      "draft21_id": "D21-13-MUST-598",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-574",
+      "draft21_id": "D21-13-MUST-599",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-575",
+      "draft21_id": "D21-13-MUST-600",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-NOT-576",
+      "draft21_id": "D21-13-MUST-NOT-601",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-13-MUST-NOT-577",
+      "draft21_id": "D21-13-MUST-NOT-602",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-MUST-578",
+      "draft21_id": "D21-15-MUST-603",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-1-SHOULD-579",
+      "draft21_id": "D21-15-1-SHOULD-604",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-1-MAY-580",
+      "draft21_id": "D21-15-1-MAY-605",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-1-SHOULD-581",
+      "draft21_id": "D21-15-1-SHOULD-606",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-1-SHOULD-582",
+      "draft21_id": "D21-15-1-SHOULD-607",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-2-SHOULD-583",
+      "draft21_id": "D21-15-2-SHOULD-608",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-2-MUST-584",
+      "draft21_id": "D21-15-2-MUST-609",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-3-1-MAY-585",
+      "draft21_id": "D21-15-3-1-MAY-610",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-3-3-MUST-586",
+      "draft21_id": "D21-15-3-3-MUST-611",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-3-3-MUST-587",
+      "draft21_id": "D21-15-3-3-MUST-612",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-3-3-MUST-588",
+      "draft21_id": "D21-15-3-3-MUST-613",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-5-SHOULD-589",
+      "draft21_id": "D21-15-5-SHOULD-614",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-5-MAY-590",
+      "draft21_id": "D21-15-5-MAY-615",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-5-MUST-591",
+      "draft21_id": "D21-15-5-MUST-616",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-5-MUST-592",
+      "draft21_id": "D21-15-5-MUST-617",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-7-1-SHOULD-593",
+      "draft21_id": "D21-15-7-1-SHOULD-618",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-SHOULD-594",
+      "draft21_id": "D21-15-8-SHOULD-619",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-SHOULD-NOT-595",
+      "draft21_id": "D21-15-8-SHOULD-NOT-620",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-SHOULD-NOT-596",
+      "draft21_id": "D21-15-8-SHOULD-NOT-621",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-SHOULD-NOT-597",
+      "draft21_id": "D21-15-8-SHOULD-NOT-622",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-MAY-598",
+      "draft21_id": "D21-15-8-MAY-623",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-MAY-599",
+      "draft21_id": "D21-15-8-MAY-624",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-MAY-600",
+      "draft21_id": "D21-15-8-MAY-625",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-8-MAY-601",
+      "draft21_id": "D21-15-8-MAY-626",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-9-SHOULD-602",
+      "draft21_id": "D21-15-9-SHOULD-627",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-15-9-SHOULD-603",
+      "draft21_id": "D21-15-9-SHOULD-628",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-4-MUST-604",
+      "draft21_id": "D21-16-4-MUST-629",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-4-SHOULD-605",
+      "draft21_id": "D21-16-4-SHOULD-630",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-8-MUST-606",
+      "draft21_id": "D21-16-8-MUST-631",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-8-MUST-607",
+      "draft21_id": "D21-16-8-MUST-632",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-8-MUST-608",
+      "draft21_id": "D21-16-8-MUST-633",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-8-MUST-NOT-609",
+      "draft21_id": "D21-16-8-MUST-NOT-634",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-16-9-MUST-610",
+      "draft21_id": "D21-16-9-MUST-635",
+      "change": "identical",
+      "note": "references updated to draft 22 numbering",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-A-3-MUST-611",
+      "draft21_id": "D21-A-2-MUST-636",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-A-9-MUST-612",
+      "draft21_id": "D21-A-8-MUST-637",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "D22-A-11-MUST-613",
+      "draft21_id": "D21-A-10-MUST-638",
+      "change": "identical",
+      "note": "",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-4-1-MUST-082",
+      "change": "removed",
+      "note": "superseded by D22-4-2-MUST-108 (SUBSCRIBE_NAMESPACE first-response rule moved to Section 4.2 with SUBSCRIBE_NAMESPACE_OK/ERROR shorthand names); part 8b re-paired D22-4-2-MUST-108 to this row as reworded, and this removed entry is kept because delta entries are not deleted",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-4-1-MUST-083",
+      "change": "removed",
+      "note": "dropped in draft 22: SUBSCRIBE_TRACKS moved to Section 3.6, where the publisher response is stated non-normatively ('will respond'); only the subscriber PROTOCOL_VIOLATION check (D22-3-6-MUST-082) remains normative",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-4-2-MUST-089",
+      "change": "removed",
+      "note": "superseded by D22-4-2-MUST-110",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-4-2-MUST-090",
+      "change": "removed",
+      "note": "superseded by D22-4-2-MUST-110 (relay branch, via the definition of a known namespace)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-4-2-MAY-097",
+      "change": "removed",
+      "note": "dropped in draft 22: the 'MAY send SUBSCRIBE or FETCH to any publisher' sentence was removed in the discovery restructure (#1946); the related permission survives as D22-4-1-MAY-101",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-7-5-MUST-208",
+      "change": "removed",
+      "note": "dropped in draft 22: a relay no longer forwards PUBLISH_NAMESPACE to subscribers; it advertises namespaces with NAMESPACE (Section 7.6, D22-4-2-MUST-110)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-7-5-MUST-209",
+      "change": "removed",
+      "note": "dropped in draft 22: the generic forwarding sentence was removed; PUBLISH forwarding to SUBSCRIBE_TRACKS subscribers remains as D22-7-6-MUST-233",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-7-5-MUST-212",
+      "change": "removed",
+      "note": "superseded by D22-7-6-MUST-230",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-7-5-MUST-214",
+      "change": "removed",
+      "note": "superseded by D22-7-6-MUST-NOT-232",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-7-5-MUST-220",
+      "change": "removed",
+      "note": "superseded by D22-7-6-MUST-237",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-4-MAY-245",
+      "change": "removed",
+      "note": "superseded by D22-8-4-MAY-263 (identical text, unmatched because of a page break)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-257",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-258",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-259",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-260",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-NOT-261",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-MUST-262",
+      "change": "removed",
+      "note": "superseded by D22-8-8-MUST-275",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-8-8-1-SHOULD-263",
+      "change": "removed",
+      "note": "dropped in draft 22: Section 8.8 now says how an invalid name is handled is application-defined, with no SHOULD to treat it as an error",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-MUST-282",
+      "change": "removed",
+      "note": "superseded by D22-9-MUST-294 (identical text, unmatched because of a page break)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-MUST-283",
+      "change": "removed",
+      "note": "superseded by D22-9-MUST-294 (same sentence; one row holds both halves)",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-11-MUST-374",
+      "change": "removed",
+      "note": "dropped in draft 22: the Fetch semantics rewrite (#1895) has relays issue upstream FETCHes and report unknown or timed-out ranges (Section 3.2.3); no pause obligation remains",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-15-MUST-383",
+      "change": "removed",
+      "note": "dropped in draft 22: the SUBSCRIBE_NAMESPACE field text no longer repeats the 32-field rule; the general Track Namespace rule D22-8-7-MUST-270 still applies",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-18-MUST-391",
+      "change": "removed",
+      "note": "dropped in draft 22: the SUBSCRIBE_TRACKS field text no longer repeats the 32-field rule; the general Track Namespace rule D22-8-7-MUST-270 still applies",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-439",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-440",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-441",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-442",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-443",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-444",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-445",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-9-20-16-MAY-446",
+      "change": "removed",
+      "note": "superseded by D22-9-20-15-MAY-431",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-1-1-SHOULD-NOT-506",
+      "change": "removed",
+      "note": "dropped in draft 22: the Object Payload field description (Section 2.1.1) no longer carries the SHOULD NOT; relay opaque-payload handling remains as D22-7-8-MUST-244",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-2-MAY-514",
+      "change": "removed",
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-2-MAY-515",
+      "change": "removed",
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-3-1-MAY-527",
+      "change": "removed",
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-3-1-MAY-528",
+      "change": "removed",
+      "note": "superseded by D22-3-1-3-1-MAY-054",
+      "reviewed": true,
+      "tags": []
+    },
+    {
+      "draft22_id": "",
+      "draft21_id": "D21-11-3-1-MUST-530",
+      "change": "removed",
+      "note": "superseded by D22-3-1-3-1-MUST-056",
+      "reviewed": true,
+      "tags": []
+    }
+  ]
+}

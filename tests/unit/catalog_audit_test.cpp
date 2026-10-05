@@ -141,7 +141,7 @@ TEST(CatalogAuditTest, IncompleteCatalogCannotPassAuditEvenWithEveryAnchorPresen
 TEST(CatalogAuditTest, RealDraftOccurrenceCountsStayPinned) {
     const std::filesystem::path root = MOQ_INTEROP_PROJECT_SOURCE_DIR;
     for (const auto& [number, count] : std::vector<std::pair<unsigned, std::size_t>>{
-             {18, 471}, {21, 507}}) {
+             {18, 471}, {21, 507}, {22, 495}}) {
         const auto source = load_draft_source(number, root / "docs",
                                                root / "requirements/draft-digests.json");
         EXPECT_EQ(scan_normative_occurrences(source).size(), count) << number;

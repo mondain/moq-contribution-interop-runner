@@ -1,0 +1,1007 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-1-3-MUST-001",
+      "strength": "Must",
+      "source": {
+        "section": "1.3",
+        "first_line": 524,
+        "last_line": 528,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define the uppercase keyword MUST as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
+    },
+    {
+      "id": "D22-1-3-MUST-NOT-002",
+      "strength": "MustNot",
+      "source": {
+        "section": "1.3",
+        "first_line": 524,
+        "last_line": 528,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define the uppercase keyword MUST NOT as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The quoted prohibition is vocabulary, not a prohibition on publisher behavior."
+    },
+    {
+      "id": "D22-1-3-MUST-003",
+      "strength": "Must",
+      "source": {
+        "section": "1.3",
+        "first_line": 524,
+        "last_line": 528,
+        "occurrence": 3,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define REQUIRED as BCP 14 vocabulary normalized to Must.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The quoted synonym is part of the terminology declaration, not a protocol obligation."
+    },
+    {
+      "id": "D22-1-3-MUST-004",
+      "strength": "Must",
+      "source": {
+        "section": "1.3",
+        "first_line": 524,
+        "last_line": 528,
+        "occurrence": 4,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define SHALL as BCP 14 vocabulary normalized to Must.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This quoted synonym defines terminology and has no independently observable publisher outcome."
+    },
+    {
+      "id": "D22-1-3-MUST-NOT-005",
+      "strength": "MustNot",
+      "source": {
+        "section": "1.3",
+        "first_line": 524,
+        "last_line": 528,
+        "occurrence": 5,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define SHALL NOT as BCP 14 vocabulary normalized to MustNot.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The quoted synonym is an informative lexical occurrence in the BCP 14 declaration."
+    },
+    {
+      "id": "D22-1-3-SHOULD-006",
+      "strength": "Should",
+      "source": {
+        "section": "1.3",
+        "first_line": 525,
+        "last_line": 528,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHOULD as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "No recommended publisher action is stated by this quoted vocabulary item."
+    },
+    {
+      "id": "D22-1-3-SHOULD-NOT-007",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "1.3",
+        "first_line": 525,
+        "last_line": 528,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHOULD NOT as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This quotation explains terminology rather than discouraging any endpoint action."
+    },
+    {
+      "id": "D22-1-3-SHOULD-008",
+      "strength": "Should",
+      "source": {
+        "section": "1.3",
+        "first_line": 525,
+        "last_line": 528,
+        "occurrence": 3,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define RECOMMENDED as BCP 14 vocabulary normalized to Should.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The quoted synonym is not an implementation recommendation."
+    },
+    {
+      "id": "D22-1-3-SHOULD-NOT-009",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "1.3",
+        "first_line": 525,
+        "last_line": 528,
+        "occurrence": 4,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define NOT RECOMMENDED as BCP 14 vocabulary normalized to ShouldNot.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Both words comprise one quoted BCP 14 phrase, not two requirements."
+    },
+    {
+      "id": "D22-1-3-MAY-010",
+      "strength": "May",
+      "source": {
+        "section": "1.3",
+        "first_line": 525,
+        "last_line": 528,
+        "occurrence": 5,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define the uppercase keyword MAY as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The quoted word identifies optional normative language without granting a concrete capability."
+    },
+    {
+      "id": "D22-1-3-MAY-011",
+      "strength": "May",
+      "source": {
+        "section": "1.3",
+        "first_line": 526,
+        "last_line": 528,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "document",
+      "summary": "Define OPTIONAL as BCP 14 vocabulary normalized to May.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The final quoted synonym completes the terminology paragraph; it is not a publisher feature."
+    },
+    {
+      "id": "D22-1-6-MAY-012",
+      "strength": "May",
+      "source": {
+        "section": "1.6",
+        "first_line": 638,
+        "last_line": 639,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "non-relay endpoint",
+      "summary": "Implement only the subset of functionality needed for the endpoint's tasks.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher can be a limited non-relay endpoint. Which tasks its application needs and which internal functionality it implements are not established by wire observations; unsupported-message handling is separately observable."
+    },
+    {
+      "id": "D22-1-6-SHOULD-013",
+      "strength": "Should",
+      "source": {
+        "section": "1.6",
+        "first_line": 641,
+        "last_line": 642,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "limited endpoint",
+      "summary": "Respond to unsupported messages with the appropriate NOT_SUPPORTED error instead of ignoring them.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-send-known-unsupported-request"
+      ],
+      "evaluators": [
+        "d22-unsupported-request-not-supported"
+      ],
+      "rationale": "With a configured limited publisher and a syntactically valid request for an unsupported operation, observe REQUEST_ERROR NOT_SUPPORTED under Sections 9.4 and 12.3. This does not require support for every message or assign this response to unknown wire encodings."
+    },
+    {
+      "id": "D22-1-6-MUST-014",
+      "strength": "Must",
+      "source": {
+        "section": "1.6",
+        "first_line": 644,
+        "last_line": 645,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Implement every MOQT message defined by this draft.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The universal message-support obligation is specifically for relays, not original contribution publishers."
+    },
+    {
+      "id": "D22-1-6-MUST-015",
+      "strength": "Must",
+      "source": {
+        "section": "1.6",
+        "first_line": 644,
+        "last_line": 645,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Implement the relay processing rules in Section 7.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Relay processing is a distinct obligation from recognizing all messages and is outside the contribution-publisher role."
+    },
+    {
+      "id": "D22-2-1-MUST-NOT-016",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.1",
+        "first_line": 685,
+        "last_line": 686,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Never change the contents of an Object over time, although it may become unavailable.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-repeat-object-retrieval"
+      ],
+      "evaluators": [
+        "d22-object-payload-stable-for-full-identity"
+      ],
+      "rationale": "Compare bytes retrieved at different times for the same namespace, track name, Group ID and Object ID, using subscription and FETCH delivery. Unavailability is permitted and is not evidence of changed contents; Section 12.1 also identifies inconsistent payloads as malformed."
+    },
+    {
+      "id": "D22-2-1-MAY-017",
+      "strength": "May",
+      "source": {
+        "section": "2.1",
+        "first_line": 689,
+        "last_line": 690,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher choosing per-Object Delivery Modes",
+      "summary": "Use both Subgroups and Datagrams within the same Group or Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-mixed-object-forwarding"
+      ],
+      "evaluators": [
+        "d22-mixed-forwarding-capability"
+      ],
+      "rationale": "Observe distinct Objects in a controlled mixed-Delivery-Mode Track. This permission does not allow the same Object's Delivery Mode to change across deliveries, nor require mixed-mode support for conformance."
+    },
+    {
+      "id": "D22-2-1-1-MUST-018",
+      "strength": "Must",
+      "source": {
+        "section": "2.1.1",
+        "first_line": 717,
+        "last_line": 717,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher delivering an Object through a subscription",
+      "summary": "Send a subscription Object according to its Delivery Mode.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscription-forwarding-preference"
+      ],
+      "evaluators": [
+        "d22-object-forwarding-preference-preserved"
+      ],
+      "rationale": "Compare a controlled Object's known or previously observed Delivery Mode with subscription delivery. FETCH uses a stream even for Datagram Delivery Mode Objects (Section 3.2.1: the Object Delivery Mode does not apply) and is explicitly outside this subscription-only obligation."
+    },
+    {
+      "id": "D22-2-2-MUST-NOT-019",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.2",
+        "first_line": 795,
+        "last_line": 798,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send Objects from two Subgroups on the same subscription stream.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 11.3.1 (lines 6170-6172, with the SUBGROUP_HEADER of lines 6177-6183) makes every Object on a Subgroup stream belong to the one Subgroup named by that stream's single SUBGROUP_HEADER Group ID and Subgroup ID, and the Subgroup Object fields (lines 6283-6289) carry only an Object ID Delta, properties, payload length, status and payload, never a Subgroup field. Objects of two distinct Subgroups on one stream therefore have no wire representation: a receiver can only read them as one Subgroup, so the violation is decided inside the publisher before serialization and no byte sequence, even from a cooperating publisher, exhibits it. The separate rule that one Subgroup must not span streams (lines 795-798, second clause) is a different statement."
+    },
+    {
+      "id": "D22-2-2-MUST-NOT-020",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.2",
+        "first_line": 796,
+        "last_line": 798,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not split one subscription's Subgroup across streams unless a stream was reset prematurely or upstream conditions force Objects out of Object ID order.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-single-subgroup",
+        "d22-subgroup-restart-after-reset"
+      ],
+      "evaluators": [
+        "d22-subgroup-stream-splitting-respects-exceptions"
+      ],
+      "rationale": "Group and Subgroup IDs identify streams within one subscription. Exercise normal ordered production and an observed premature reset separately; do not prohibit a restart covered by the text's reset or upstream-order exception. Distinct concurrent subscriptions require separate delivery under Section 3.1."
+    },
+    {
+      "id": "D22-2-2-MAY-021",
+      "strength": "May",
+      "source": {
+        "section": "2.2",
+        "first_line": 802,
+        "last_line": 803,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher",
+      "summary": "Reuse a Subgroup ID in different Groups without implying a relationship between those Subgroups.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-same-subgroup-id-in-distinct-groups"
+      ],
+      "evaluators": [
+        "d22-subgroup-id-reused-across-groups"
+      ],
+      "rationale": "For a publisher configured to use this optional capability, observe the same Subgroup ID under different Group IDs. Section 2.2 scopes the identifier to a Group; reuse is not an alias collision or evidence of shared dependencies."
+    },
+    {
+      "id": "D22-2-2-MUST-022",
+      "strength": "Must",
+      "source": {
+        "section": "2.2",
+        "first_line": 819,
+        "last_line": 822,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher",
+      "summary": "Set FIRST_OBJECT when opening a new Subgroup to indicate the stream begins with that Subgroup's first-ever published Object.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-original-publisher-opens-new-subgroup"
+      ],
+      "evaluators": [
+        "d22-new-subgroup-first-object-bit"
+      ],
+      "rationale": "Publish a controlled new Subgroup beginning at its first-ever Object and inspect FIRST_OBJECT (0x40) in SUBGROUP_HEADER, as defined in Section 11.3.1. The bit refers to first publication in that Subgroup, not every newly opened transport stream."
+    },
+    {
+      "id": "D22-2-2-MUST-023",
+      "strength": "Must",
+      "source": {
+        "section": "2.2",
+        "first_line": 823,
+        "last_line": 823,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Set FIRST_OBJECT when forwarding a Subgroup beginning with its first-ever published Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The immediately preceding sentence separately covers original publishers. This occurrence imposes the forwarding duty on relays."
+    },
+    {
+      "id": "D22-2-3-SHOULD-024",
+      "strength": "Should",
+      "source": {
+        "section": "2.3",
+        "first_line": 828,
+        "last_line": 829,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher",
+      "summary": "Make Groups independently useful as join points.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The usefulness of opaque payloads requires application or media semantics that this protocol-only harness does not inspect."
+    },
+    {
+      "id": "D22-2-3-SHOULD-NOT-025",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "2.3",
+        "first_line": 829,
+        "last_line": 829,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher",
+      "summary": "Avoid dependencies from Objects in one Group onto Objects in another Group.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Cross-Group media or application dependencies are not encoded as a complete wire-visible dependency graph; payload validation is outside the runner's scope."
+    },
+    {
+      "id": "D22-2-3-1-SHOULD-026",
+      "strength": "Should",
+      "source": {
+        "section": "2.3.1",
+        "first_line": 847,
+        "last_line": 849,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "original publisher",
+      "summary": "Publish Group IDs that increase with time measured by the media's internal clock.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Wire arrival order can differ because of Group Order, prioritization, partial reliability and reordering. The internal media clock is not observable when payloads are opaque, so arrival-order monotonicity is not a valid evaluator."
+    },
+    {
+      "id": "D22-2-3-1-SHOULD-NOT-027",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "2.3.1",
+        "first_line": 862,
+        "last_line": 863,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Avoid multi-Group Location filters in FETCH or SUBSCRIBE for Tracks whose Group IDs do not increase with time.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber chooses this filter. This occurrence does not require a contribution publisher to reject such requests."
+    },
+    {
+      "id": "D22-2-4-3-MUST-NOT-028",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 930,
+        "last_line": 931,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not use a namespace whose first tuple field begins with a period unless IANA registration defines its meaning.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-attempt-unregistered-period-namespace-publication"
+      ],
+      "evaluators": [
+        "d22-no-unregistered-reserved-namespace-publication"
+      ],
+      "rationale": "Drive publication using a fixture whose first namespace field begins with 0x2e and has no registered meaning; observe that no Track or namespace is advertised under it. Registered meanings and the stricter single-period prohibition are distinct cases; the draft does not require rejecting every inbound unknown reserved namespace."
+    },
+    {
+      "id": "D22-2-4-3-MUST-029",
+      "strength": "Must",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 933,
+        "last_line": 935,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Pass requests for unrecognized reserved namespaces to the Application unless otherwise specified.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher receiving a request has this endpoint duty, but dispatch to its Application is internal and the Application's response is unspecified. The exception includes Section 6.5's .session handling; a single-period first field has its own mandatory rejection."
+    },
+    {
+      "id": "D22-2-4-3-MUST-NOT-030",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 938,
+        "last_line": 940,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not use a namespace whose first field is exactly the single byte period for any purpose.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-attempt-single-period-namespace-use"
+      ],
+      "evaluators": [
+        "d22-no-originated-use-of-single-period-namespace"
+      ],
+      "rationale": "Inspect publisher-originated namespace-bearing requests and publications for the forbidden first field 0x2e. This broad ban is a separate lexical occurrence from the following publication bans and required inbound rejection. Receiving and rejecting a prohibited request is not originating use of that namespace."
+    },
+    {
+      "id": "D22-2-4-3-MUST-NOT-031",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 939,
+        "last_line": 940,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not publish Tracks under a namespace whose first field is exactly a single period.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-attempt-single-period-track-publication"
+      ],
+      "evaluators": [
+        "d22-no-tracks-under-single-period"
+      ],
+      "rationale": "Drive a Track publication with first namespace field 0x2e and inspect PUBLISH output. Track publication and namespace advertisement are independently observable clauses of this occurrence."
+    },
+    {
+      "id": "D22-2-4-3-MUST-NOT-032",
+      "strength": "MustNot",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 939,
+        "last_line": 940,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Do not publish namespaces whose first field is exactly a single period.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-attempt-single-period-namespace-publication"
+      ],
+      "evaluators": [
+        "d22-no-namespaces-under-single-period"
+      ],
+      "rationale": "Drive namespace publication with first field 0x2e and inspect PUBLISH_NAMESPACE and any NAMESPACE announcements. Unlike an unknown longer reserved first field, a single period has no permitted registration exception here."
+    },
+    {
+      "id": "D22-2-4-3-MUST-033",
+      "strength": "Must",
+      "source": {
+        "section": "2.4.3",
+        "first_line": 939,
+        "last_line": 940,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Reject requests referencing a namespace whose first field is exactly a single period with DOES_NOT_EXIST.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-single-period-namespace"
+      ],
+      "evaluators": [
+        "d22-single-period-request-does-not-exist"
+      ],
+      "rationale": "Send otherwise valid SUBSCRIBE, FETCH, SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS requests with first field 0x2e to the publisher; the observable result is REQUEST_ERROR DOES_NOT_EXIST. This prohibition overrides normal Application dispatch for unknown reserved namespaces."
+    },
+    {
+      "id": "D22-2-5-MUST-034",
+      "strength": "Must",
+      "source": {
+        "section": "2.5",
+        "first_line": 982,
+        "last_line": 983,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Give simultaneously different Track contents different Track Names or Track Namespaces within one MOQT scope.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-distinct-tracks-in-one-scope"
+      ],
+      "evaluators": [
+        "d22-different-track-content-has-distinct-full-track-name"
+      ],
+      "rationale": "Use controlled Tracks known to contain different data in the same authority and path-abempty scope and compare their Full Track Names. Delivery parameters and URI query differences do not create a different content identity; identity across unobserved deployments cannot be inferred."
+    },
+    {
+      "id": "D22-3-1-MUST-035",
+      "strength": "Must",
+      "source": {
+        "section": "3.1",
+        "first_line": 1096,
+        "last_line": 1097,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send exactly one SUBSCRIBE_OK or SUBSCRIBE_ERROR (a REQUEST_ERROR on the SUBSCRIBE request stream) in response to each SUBSCRIBE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-accepted",
+        "d22-subscribe-rejected"
+      ],
+      "evaluators": [
+        "d22-one-subscribe-ok-or-request-error"
+      ],
+      "rationale": "Correlate each bidirectional request stream with one acceptance or rejection response, including conflicting duplicate responses. SUBSCRIBE_OK remains a distinct response in Section 9.7, while SUBSCRIBE_ERROR is the Section 1.5 shorthand for REQUEST_ERROR; no additional response is allowed merely because object delivery begins."
+    },
+    {
+      "id": "D22-3-1-MUST-036",
+      "strength": "Must",
+      "source": {
+        "section": "3.1",
+        "first_line": 1097,
+        "last_line": 1098,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Send exactly one PUBLISH_OK or PUBLISH_ERROR in response to each PUBLISH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Responding to PUBLISH is the subscriber's role. In draft 22, Section 1.5 defines PUBLISH_OK and PUBLISH_ERROR as shorthand for REQUEST_OK and REQUEST_ERROR (Sections 9.3 and 9.4) on the PUBLISH request stream, not independently encoded messages."
+    },
+    {
+      "id": "D22-3-1-SHOULD-037",
+      "strength": "Should",
+      "source": {
+        "section": "3.1",
+        "first_line": 1099,
+        "last_line": 1100,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "peer",
+      "summary": "Close the session with a protocol error upon receiving more than one response to a subscription request.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-duplicate-publish-responses"
+      ],
+      "evaluators": [
+        "d22-duplicate-publish-response-session-protocol-error"
+      ],
+      "rationale": "A contribution publisher is the receiving peer for a PUBLISH response. Send duplicate REQUEST_OK responses or REQUEST_OK followed by REQUEST_ERROR on that stream and observe session closure with PROTOCOL_VIOLATION. Section 9.3 defines the PUBLISH_OK shorthand; SUBSCRIBE_OK response reception is a subscriber-role variant."
+    },
+    {
+      "id": "D22-3-1-MUST-NOT-038",
+      "strength": "MustNot",
+      "source": {
+        "section": "3.1",
+        "first_line": 1103,
+        "last_line": 1105,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not send PUBLISH without knowing the client is interested in and authorized for the content.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The paragraph explicitly restricts relays. It permits either endpoint to initiate a subscription after SETUP and does not impose this relay prerequisite on an original publisher."
+    },
+    {
+      "id": "D22-3-1-MAY-039",
+      "strength": "May",
+      "source": {
+        "section": "3.1",
+        "first_line": 1109,
+        "last_line": 1110,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint acting as subscriber",
+      "summary": "SUBSCRIBE to a Track that the endpoint itself publishes.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This optional action originates SUBSCRIBE and receives the returned Objects, a subscriber function outside contribution publishing. Only relays are required to handle the resulting self-subscription; publisher support is not inferred."
+    },
+    {
+      "id": "D22-3-1-MAY-040",
+      "strength": "May",
+      "source": {
+        "section": "3.1",
+        "first_line": 1125,
+        "last_line": 1126,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Have multiple concurrent subscriptions to the same Track, each with a unique Request ID.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-concurrent-subscriptions-same-track"
+      ],
+      "evaluators": [
+        "d22-concurrent-same-track-subscriptions-with-distinct-request-ids"
+      ],
+      "rationale": "The publisher-side capability is observable by accepting or initiating concurrent subscriptions to its Track on distinct request streams with distinct Request IDs. Absence of this optional capability is not itself a required-conformance failure; accepted subscriptions still have mandatory per-subscription delivery duties."
+    },
+    {
+      "id": "D22-3-1-MAY-041",
+      "strength": "May",
+      "source": {
+        "section": "3.1",
+        "first_line": 1126,
+        "last_line": 1127,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Assign the same Track Alias to concurrent subscriptions to the same Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-concurrent-subscriptions-shared-alias"
+      ],
+      "evaluators": [
+        "d22-concurrent-same-track-shared-alias"
+      ],
+      "rationale": "Observe PUBLISH or SUBSCRIBE_OK aliases for accepted concurrent subscriptions. Sharing an alias for one Track is permitted, but does not remove Section 3.1's obligation to send each matching Object once per subscription."
+    },
+    {
+      "id": "D22-3-1-MAY-042",
+      "strength": "May",
+      "source": {
+        "section": "3.1",
+        "first_line": 1126,
+        "last_line": 1127,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher",
+      "summary": "Assign different Track Aliases to concurrent subscriptions to the same Track.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-concurrent-subscriptions-distinct-aliases"
+      ],
+      "evaluators": [
+        "d22-concurrent-same-track-distinct-aliases"
+      ],
+      "rationale": "Distinct aliases are a separately observable optional assignment strategy. The prohibition in Section 3.1.3 is one alias identifying two different Tracks simultaneously, not one Track having several aliases."
+    },
+    {
+      "id": "D22-3-1-MUST-043",
+      "strength": "Must",
+      "source": {
+        "section": "3.1",
+        "first_line": 1130,
+        "last_line": 1132,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send an Object once for each matching concurrent subscription to the same Track, even when subscriptions share the same Track Alias.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-overlapping-subscriptions-shared-alias",
+        "d22-overlapping-subscriptions-distinct-aliases"
+      ],
+      "evaluators": [
+        "d22-object-per-matching-subscription"
+      ],
+      "rationale": "Establish concurrent subscriptions with known overlapping and non-overlapping filter regions, then produce controlled Objects. Count deliveries according to all matching subscriptions independently of alias assignment; there is no same-alias deduplication exemption in this draft."
+    },
+    {
+      "id": "D22-3-1-SHOULD-044",
+      "strength": "Should",
+      "source": {
+        "section": "3.1",
+        "first_line": 1134,
+        "last_line": 1136,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Avoid overlapping filters among subscriptions to the same Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber chooses its filters and deduplicates resulting duplicate Objects. A publisher must still deliver per matching subscription when filters overlap."
+    },
+    {
+      "id": "D22-3-1-SHOULD-045",
+      "strength": "Should",
+      "source": {
+        "section": "3.1",
+        "first_line": 1138,
+        "last_line": 1139,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Begin sending incomplete Objects when they become available to avoid additional latency.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-produce-object-prefix-before-remainder"
+      ],
+      "evaluators": [
+        "d22-object-prefix-sent-before-production-completes"
+      ],
+      "rationale": "A driven source exposes a known-length Object prefix while withholding its remaining payload; observe prefix transmission before releasing the remainder on a subgroup stream. Availability must be established by the source fixture, not guessed from network arrival; the draft supplies no fixed latency threshold."
+    },
+    {
+      "id": "D22-3-1-MAY-046",
+      "strength": "May",
+      "source": {
+        "section": "3.1",
+        "first_line": 1141,
+        "last_line": 1143,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Start Object transmission for a PUBLISH-initiated subscription before receiving PUBLISH_OK.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-delay-publish-acceptance"
+      ],
+      "evaluators": [
+        "d22-publish-objects-before-request-ok"
+      ],
+      "rationale": "Delay REQUEST_OK for an otherwise valid Forward=1 PUBLISH, observe optional early Objects, then accept it. Section 9.3 defines PUBLISH_OK as REQUEST_OK. This paragraph expressly contemplates later rejection; Section 3.1.2's blanket ban on Objects for requests ending in error creates an ambiguity for pre-rejection delivery, so that conflicting case is not assigned a normative verdict here."
+    },
+    {
+      "id": "D22-3-1-2-MUST-047",
+      "strength": "Must",
+      "source": {
+        "section": "3.1.2",
+        "first_line": 1182,
+        "last_line": 1183,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Reset every open stream associated with a SUBSCRIBE after receiving its STOP_SENDING cancellation.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-cancel-subscribe-with-open-streams"
+      ],
+      "evaluators": [
+        "d22-subscribe-stop-sending-resets-open-streams"
+      ],
+      "rationale": "Keep subgroup streams open, cancel the bidirectional SUBSCRIBE request using STOP_SENDING and observe resets of the open associated streams, including the publisher's open sending direction under Section 6.4.2.3. Deleting private subscription state is permitted, not itself observable."
+    },
+    {
+      "id": "D22-3-1-2-MUST-NOT-048",
+      "strength": "MustNot",
+      "source": {
+        "section": "3.1.2",
+        "first_line": 1186,
+        "last_line": 1187,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send PUBLISH_DONE until all related streams have been closed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This ordering concerns the publisher's local stream closure before sending PUBLISH_DONE. Section 9.9 explicitly permits late arriving Objects and late opening streams at the receiver, so arrival order cannot prove the sender's local closure order. Without publisher-side instrumentation this exact obligation is not externally testable. The request stream itself carries PUBLISH_DONE before its final closure."
+    },
+    {
+      "id": "D22-3-1-2-MUST-NOT-049",
+      "strength": "MustNot",
+      "source": {
+        "section": "3.1.2",
+        "first_line": 1190,
+        "last_line": 1191,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not send Objects for subscription requests that end with an error.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-rejected-subscribe-no-delivery",
+        "d22-reject-publish-before-object-production"
+      ],
+      "evaluators": [
+        "d22-error-subscription-has-no-object-delivery"
+      ],
+      "rationale": "Exercise rejection before producing any Objects and verify that production after the rejection causes no delivery. There is a draft ambiguity: Section 3.1 explicitly allows early PUBLISH Objects even when a subscriber later rejects, while this sentence bans Objects for requests ending in error. Do not retrospectively fail pre-rejection early delivery under this mapping. FETCH is separate and Section 3.2.4 expressly permits cached delivery before a fetch error."
+    },
+    {
+      "id": "D22-3-1-3-MUST-NOT-050",
+      "strength": "MustNot",
+      "source": {
+        "section": "3.1.3",
+        "first_line": 1200,
+        "last_line": 1201,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Do not use one Track Alias for two different Tracks simultaneously within a session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-concurrent-distinct-track-subscriptions"
+      ],
+      "evaluators": [
+        "d22-distinct-active-tracks-have-distinct-aliases"
+      ],
+      "rationale": "Establish concurrent subscriptions for different Full Track Names and compare aliases supplied in PUBLISH or SUBSCRIBE_OK. Reuse across sessions and alias sharing for concurrent subscriptions to the same Track are outside this prohibition."
+    }
+  ]
+}
