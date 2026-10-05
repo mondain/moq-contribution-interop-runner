@@ -50,6 +50,16 @@ TEST(WebTransportListener, RejectsInvalidProtocolAndMissingOriginPolicy) {
     EXPECT_EQ(no_origin.error, NativeQuicListenerError::InvalidConfiguration);
 }
 
+TEST(WebTransportListener, AcceptsDraft22ProtocolAndRejectsMoqt23) {
+    auto settings = config();
+    settings.application_protocol = "moqt-22";
+    EXPECT_EQ(WebTransportListener::create(std::move(settings)).error, std::nullopt);
+    settings = config();
+    settings.application_protocol = "moqt-23";
+    EXPECT_EQ(WebTransportListener::create(std::move(settings)).error,
+              NativeQuicListenerError::InvalidConfiguration);
+}
+
 TEST(WebTransportListener, BindsAndReleasesUdpPortWithoutAdmittingSession) {
     auto created = WebTransportListener::create(config());
     ASSERT_EQ(created.error, std::nullopt);

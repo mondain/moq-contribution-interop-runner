@@ -426,5 +426,19 @@ TEST(PublisherCapabilityRun, CapableSelectionRecordsTheDeclarationAndSkipsNothin
         return event.kind=="context_skipped";
     }));
 }
+
+TEST(NativeRunManagerDraftGate, Draft22IsKnownButNotSupported) {
+    DriverLogs logs;
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=capability_manager(store,logs);
+    EXPECT_TRUE(manager.supports(app::DraftVersion::Draft18));
+    EXPECT_TRUE(manager.supports(app::DraftVersion::Draft21));
+    EXPECT_FALSE(manager.supports(app::DraftVersion::Draft22));
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{"anything"},1000ms,std::nullopt,{}});
+    EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
+    EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
+}
 }
 }

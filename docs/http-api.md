@@ -15,8 +15,8 @@ The examples below assume the runner listens on `127.0.0.1:8080`.
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | Database readiness and the list of executable profiles |
-| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts |
-| `GET /api/v1/requirements?draft=18\|21` | Requirement catalog rows with draft line citations (paginated) |
+| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as an optional third entry (`complete: false`, `runnable: false`) when the service loaded its catalog |
+| `GET /api/v1/requirements?draft=18\|21\|22` | Requirement catalog rows with draft line citations (paginated) |
 | `POST /api/v1/runs` | Create a run |
 | `GET /api/v1/runs` | List runs, newest first (paginated) |
 | `GET /api/v1/runs/{id}` | One run with its score and per-requirement outcomes |
@@ -54,7 +54,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18` or `21`. Drafts are scored independently. |
+| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created: draft 22 has a requirement catalog but no executable scenarios yet. Any other number is `400 invalid_run_config`. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
@@ -123,8 +123,8 @@ A successful create returns HTTP 201:
 
 For `webtransport` the endpoint also carries `url` (for example
 `https://127.0.0.1:19901/moq`), `path` (`/moq`) and `protocol` (`moqt-18` or
-`moqt-21`), and `alpn` is `h3`. For native QUIC the publisher connects to
-`address:port` with ALPN `moqt-18` or `moqt-21`, using the URI
+`moqt-21`; `moqt-22` is reserved for draft 22 and is never offered while draft 22 is not runnable), and `alpn` is `h3`. For native QUIC the publisher connects to
+`address:port` with ALPN `moqt-18` or `moqt-21` (`moqt-22` once draft 22 is runnable), using the URI
 `moqt://address:port/moq`.
 
 ## Run lifecycle
@@ -247,11 +247,11 @@ lists them per requirement in `evidence_sequences`.
 
 ## Requirements and the completeness endpoint
 
-`GET /api/v1/requirements?draft=18` lists catalog rows with `id`, `strength`,
+`GET /api/v1/requirements?draft=18` (or `21`, or `22` when the service loaded the draft 22 catalog) lists catalog rows with `id`, `strength`,
 `source` (`section`, `first_line`, `last_line` in the checked-in draft text),
 `actor`, `summary`, `applicability`, `testability`, `scenarios`, `evaluators`
 and `rationale`. The line numbers refer to `docs/draft-ietf-moq-transport-18.txt`
-or `-21.txt`.
+`-21.txt` or `-22.txt`.
 
 `GET /results/completeness.json` returns `schema_version`, `source_revision` and
 `drafts`. Each draft entry has `source_sha256`, `catalog_rows`,
@@ -265,7 +265,8 @@ evidence-backed pass or fail), `not_run_count` with the `not_run` rows,
 stored in the current database. A pass or fail observation is not proof of
 conformance; inspect the run's evidence.
 
-`GET /healthz` returns `status`, `database.ready`, `supported_drafts`, the
+`GET /healthz` returns `status`, `database.ready`, `supported_drafts` (only runnable drafts, so `[18, 21]`; draft 22 is never listed there or in
+`executable_profiles`), the
 `validator` build identity, `publisher_capability_defaults` and
 `executable_profiles`: one entry per `draft`, `transport`, `mode` and `scenario`
 with a `configured` flag that is true only when the TLS material (and, for
@@ -280,13 +281,14 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 | 400 | `invalid_json` | Body is not valid JSON |
 | 400 | `invalid_run_config` | Missing or invalid field, bad hex, out-of-range `timeout_ms`, scenario needs `track`, driven without `track`, or a track the scenario cannot use |
 | 400 | `invalid_publisher_capabilities` | `publisher_capabilities` is not an object, names an unknown capability, or gives a non-boolean value |
-| 400 | `missing_draft`, `unsupported_draft` | `draft` query parameter absent or not 18 or 21 |
+| 400 | `missing_draft`, `unsupported_draft` | `draft` query parameter absent, or not 18 or 21 (or 22 when the draft 22 catalog is loaded; the message says which) |
 | 400 | `invalid_pagination` | `limit` or `offset` invalid |
 | 400 | `invalid_report_filter` | HTML report filter invalid |
 | 404 | `run_not_found`, `not_found` | Unknown run or path |
 | 409 | `run_finalized` | Stop requested for a finalized run |
 | 409 | `run_not_active` | The run is not active in this process |
 | 422 | `scenario_requires_publisher_capability` | Every selected scenario needs a capability the run declares the publisher does not implement (today only FETCH); the message names the first scenario and the capability |
+| 422 | `draft_not_runnable` | The run request names draft 22. The draft is known and has a requirement catalog, but there are no executable scenarios yet. Returned before scenario validation; no run is created |
 | 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. The message names the offending scenario and the reason. Unsupported scenarios are never silently scored |
 | 500 | `internal_error` | Unexpected failure |
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |

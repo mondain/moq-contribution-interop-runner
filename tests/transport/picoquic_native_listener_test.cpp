@@ -143,6 +143,34 @@ TEST(PicoquicNativeListener, RejectsWrongDraftAlpn) {
     }
 }
 
+TEST(PicoquicNativeListener, AcceptsDraft22AlpnAndRejectsMoqt19) {
+    auto result = NativeQuicListener::create(config_for("moqt-22"));
+    ASSERT_NE(result.listener, nullptr);
+    PeerProcess peer(result.listener->bound_endpoint().port, "moqt-22");
+    ASSERT_TRUE(peer.valid());
+    std::vector<TransportEvent> events;
+    ASSERT_TRUE(pump_until_established(*result.listener, peer, events));
+    std::size_t established = 0;
+    for (const auto& event : events) {
+        if (const auto* ready = std::get_if<ConnectionEstablishedEvent>(&event)) {
+            ++established;
+            EXPECT_EQ(ready->alpn, alpn("moqt-22"));
+        }
+    }
+    EXPECT_EQ(established, 1U);
+
+    auto wrong = NativeQuicListener::create(config_for("moqt-22"));
+    ASSERT_NE(wrong.listener, nullptr);
+    PeerProcess wrong_peer(wrong.listener->bound_endpoint().port, "moqt-19");
+    ASSERT_TRUE(wrong_peer.valid());
+    std::vector<TransportEvent> wrong_events;
+    EXPECT_FALSE(pump_until_established(*wrong.listener, wrong_peer, wrong_events));
+    for (const auto& event : wrong_events)
+        EXPECT_FALSE(std::holds_alternative<ConnectionEstablishedEvent>(event));
+
+    EXPECT_EQ(NativeQuicListener::create(config_for("moqt-19")).listener, nullptr);
+}
+
 TEST(PicoquicNativeListener, RejectsMissingDatagramAsLocalProtocolClose) {
     auto result = NativeQuicListener::create(config_for("moqt-21"));
     ASSERT_NE(result.listener, nullptr);

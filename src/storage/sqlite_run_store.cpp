@@ -1,5 +1,6 @@
 #include "moq/interop/storage/run_store.h"
 
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/storage/schema_sql.h"
 
 #include <sqlite3.h>
@@ -183,8 +184,9 @@ int enum_value(Enum value) {
 }
 
 app::DraftVersion draft_version(int value) {
-    if (value == 18) return app::DraftVersion::Draft18;
-    if (value == 21) return app::DraftVersion::Draft21;
+    if (value >= 0) {
+        if (const auto draft = app::parse_draft(static_cast<unsigned>(value))) return *draft;
+    }
     throw std::runtime_error("load run: invalid stored draft version");
 }
 

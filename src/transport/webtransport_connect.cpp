@@ -1,6 +1,9 @@
 #include "transport/webtransport_connect.h"
 
+#include "moq/interop/app/draft_traits.h"
+
 #include <algorithm>
+#include <stdexcept>
 #include <string_view>
 
 namespace moq::interop::transport {
@@ -126,14 +129,22 @@ ConnectDecision reject(int status, std::string_view reason) {
     return {status, {}, std::string(reason)};
 }
 
+std::string_view required_protocol_for(WebTransportProfile profile) {
+    switch (profile) {
+        case WebTransportProfile::Draft18Wt15: return app::alpn(app::DraftVersion::Draft18);
+        case WebTransportProfile::Draft21Wt16: return app::alpn(app::DraftVersion::Draft21);
+        case WebTransportProfile::Draft22Wt16: return app::alpn(app::DraftVersion::Draft22);
+    }
+    throw std::logic_error("unreachable WebTransportProfile");
+}
+
 }  // namespace
 
 ConnectDecision validate_connect(const H3Request& request,
                                  const PeerCapabilities& caps,
                                  const RunEndpoint& endpoint,
                                  WebTransportProfile profile) {
-    const std::string_view required_protocol =
-        profile == WebTransportProfile::Draft18Wt15 ? "moqt-18" : "moqt-21";
+    const std::string_view required_protocol = required_protocol_for(profile);
     if (endpoint.moqt_protocol != required_protocol)
         return reject(500, "run endpoint draft mismatch");
     if (!caps.settings_received || caps.wt_enabled_value != 1 ||

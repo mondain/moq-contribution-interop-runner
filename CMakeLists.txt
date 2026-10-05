@@ -142,6 +142,7 @@ add_library(moq-interop-storage src/storage/sqlite_run_store.cpp)
 target_include_directories(moq-interop-storage PRIVATE "${PROJECT_BINARY_DIR}/generated")
 target_link_libraries(moq-interop-storage PUBLIC moq-interop-app moq-interop-requirements
                       SQLite::SQLite3)
+target_compile_options(moq-interop-storage PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
 add_library(moq-interop-execution-audit
     src/requirements/execution_audit.cpp)
@@ -162,6 +163,7 @@ add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
                       moq-interop-storage moq-interop-execution-audit)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
+target_compile_options(moq-interop-http PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
 add_library(moq-interop-transport
     src/transport/picoquic_connection.cpp
@@ -176,6 +178,7 @@ target_link_libraries(moq-interop-transport PUBLIC
     moq-interop-app moq-interop-picoquic)
 target_compile_options(moq-interop-transport PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>
 )
 
 add_library(moq-interop-session
@@ -284,7 +287,8 @@ target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
     moq-interop-storage)
 target_compile_options(moq-interop-runs PRIVATE
-    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
 add_executable(moq-interop-runner src/app/main.cpp)
 target_compile_definitions(moq-interop-runner PRIVATE
@@ -761,6 +765,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
     add_test(NAME version COMMAND moq-interop-unit-tests)
+
+    add_executable(moq-interop-draft-traits-tests tests/unit/draft_traits_test.cpp)
+    target_link_libraries(moq-interop-draft-traits-tests PRIVATE
+                          moq-interop-app GTest::gtest_main)
+    add_test(NAME draft-traits COMMAND moq-interop-draft-traits-tests)
 
     add_executable(moq-interop-draft-source-tests tests/unit/draft_source_test.cpp)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE

@@ -17,6 +17,9 @@ struct ServerConfig {
     // What a run declares about the publisher when its request does not say. A value in
     // the run request ("publisher_capabilities") always wins over this default.
     app::PublisherCapabilities default_publisher_capabilities{};
+    // Optional: draft 22's (incomplete) catalog. When set, the drafts listing and the
+    // requirements endpoint expose draft 22 as known but not runnable.
+    std::shared_ptr<const requirements::RequirementCatalog> draft22_catalog;
 };
 
 struct ApiError {

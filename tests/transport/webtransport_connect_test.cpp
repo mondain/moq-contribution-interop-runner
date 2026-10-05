@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+#include <string>
+#include <vector>
+
 using namespace moq::interop::transport;
 
 namespace {
@@ -119,6 +123,98 @@ TEST(WebTransportConnect, OriginIsOptionalForNonBrowserClientButCheckedIfPresent
     policy.require_origin = true;
     EXPECT_FALSE(validate_connect(req, capabilities(), policy,
                                   profile(21)).accepted());
+}
+
+TEST(WebTransportConnect, Draft22ProfileRequiresMoqt22Endpoint) {
+    auto req = request(21);
+    req.headers[1].second = "\"moqt-22\"";
+    RunEndpoint ep22 = endpoint(21);
+    ep22.moqt_protocol = "moqt-22";
+    const auto ok = validate_connect(req, capabilities(), ep22, WebTransportProfile::Draft22Wt16);
+    EXPECT_TRUE(ok.accepted()) << ok.evidence;
+    EXPECT_EQ(ok.selected_protocol, "moqt-22");
+    for (const char* other : {"moqt-21", "moqt-18"}) {
+        RunEndpoint ep = endpoint(21);
+        ep.moqt_protocol = other;
+        const auto result = validate_connect(req, capabilities(), ep,
+                                             WebTransportProfile::Draft22Wt16);
+        EXPECT_EQ(result.http_status, 500) << other;
+        EXPECT_EQ(result.evidence, "run endpoint draft mismatch") << other;
+    }
+    for (auto other : {WebTransportProfile::Draft18Wt15, WebTransportProfile::Draft21Wt16}) {
+        const auto result = validate_connect(req, capabilities(), ep22, other);
+        EXPECT_EQ(result.http_status, 500);
+        EXPECT_EQ(result.evidence, "run endpoint draft mismatch");
+    }
+}
+
+TEST(WebTransportConnect, Draft22ProfileDecidesLikeDraft21ForEveryOtherInput) {
+    const auto compare = [](const H3Request& req, const PeerCapabilities& caps,
+                            RunEndpoint ep) {
+        ep.moqt_protocol = "moqt-21";
+        const auto a = validate_connect(req, caps, ep, WebTransportProfile::Draft21Wt16);
+        ep.moqt_protocol = "moqt-22";
+        auto req22 = req;
+        for (auto& header : req22.headers) {
+            if (header.first != "wt-available-protocols") continue;
+            const auto pos = header.second.find("moqt-21");
+            if (pos != std::string::npos) header.second.replace(pos, 7, "moqt-22");
+        }
+        const auto b = validate_connect(req22, caps, ep, WebTransportProfile::Draft22Wt16);
+        EXPECT_EQ(a.http_status, b.http_status) << a.evidence << " / " << b.evidence;
+        EXPECT_EQ(a.accepted(), b.accepted());
+        if (a.accepted()) EXPECT_EQ(b.selected_protocol, "moqt-22");
+        else EXPECT_EQ(a.evidence, b.evidence);
+    };
+    const auto good = request(21);
+    const auto caps = capabilities();
+    const auto ep = endpoint(21);
+    compare(good, caps, ep);
+    auto req = good;
+    req.headers[1].second = "\"other\";q=1, \"moqt-21\";v=?1";
+    compare(req, caps, ep);
+    const std::vector<std::function<void(H3Request&)>> changes = {
+        [](H3Request& r) { r.method = "GET"; },
+        [](H3Request& r) { r.protocol = "webtransport"; },
+        [](H3Request& r) { r.scheme = "http"; },
+        [](H3Request& r) { r.authority = "other.test"; },
+        [](H3Request& r) { r.path = "/other"; },
+        [](H3Request& r) { r.headers[0].second = "https://other.test"; },
+        [](H3Request& r) { r.headers[1].second = "\"moqt-17\""; },
+        [](H3Request& r) { r.headers[1].second = "\"moqt-18\""; },
+        [](H3Request& r) { r.headers.clear(); },
+        [](H3Request& r) { r.headers.push_back(r.headers[1]); },
+        [](H3Request& r) { r.headers.push_back(r.headers[0]); },
+        [](H3Request& r) { r.headers[1].second += " trailing"; },
+        [](H3Request& r) { r.headers[1].second = "moqt-21"; },
+        [](H3Request& r) { r.headers[1].second = "\"moqt-21\", 9"; },
+        [](H3Request& r) { r.headers[1].second = "\"moqt-21\";p=@"; },
+        [](H3Request& r) { r.headers.erase(r.headers.begin()); },
+        [](H3Request& r) { r.headers.push_back({"wt-protocol", "x"}); },
+    };
+    for (const auto& change : changes) {
+        auto r = good;
+        change(r);
+        compare(r, caps, ep);
+    }
+    auto policy = ep;
+    policy.require_origin = true;
+    auto no_origin = good;
+    no_origin.headers.erase(no_origin.headers.begin());
+    compare(no_origin, caps, policy);
+    const std::vector<std::function<void(PeerCapabilities&)>> cap_changes = {
+        [](PeerCapabilities& c) { c.settings_received = false; },
+        [](PeerCapabilities& c) { c.wt_enabled_value = 0; },
+        [](PeerCapabilities& c) { c.wt_enabled_value = 2; },
+        [](PeerCapabilities& c) { c.h3_datagram = false; },
+        [](PeerCapabilities& c) { c.quic_datagram = false; },
+        [](PeerCapabilities& c) { c.reset_stream_at = false; },
+    };
+    for (const auto& change : cap_changes) {
+        auto c = caps;
+        change(c);
+        compare(good, c, ep);
+    }
 }
 
 }  // namespace
