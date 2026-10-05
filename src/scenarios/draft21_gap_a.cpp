@@ -85,8 +85,8 @@ void forward(Bytes& params, std::uint64_t previous, std::uint64_t value) {
 
 // Section 9.20.10: LOCATION_FILTER (0x21) carrying only the listed vi64 fields.
 void location_filter(Bytes& params, std::uint64_t previous,
-                     std::initializer_list<std::uint64_t> fields) {
-    const auto value = filter_param_value(FilterFields(fields));
+                     const FilterFields& fields) {
+    const auto value = filter_param_value(fields);
     integer(params, 0x21 - previous);
     params.insert(params.end(), value.begin(), value.end());
 }
@@ -884,6 +884,13 @@ std::vector<std::byte> gap_a_subscribe_for_test(const std::vector<std::vector<st
     case GapASubscribeFilter::None: break;
     }
     return subscribe({track_namespace, track_name}, forwarding, inner);
+}
+
+std::vector<std::byte> gap_a_location_filter_for_test(std::uint64_t previous,
+                                                      const std::vector<std::uint64_t>& fields) {
+    Bytes params;
+    location_filter(params, previous, fields);
+    return params;
 }
 
 std::vector<std::byte> gap_a_bounded_update_for_test() { return bounded_update(); }

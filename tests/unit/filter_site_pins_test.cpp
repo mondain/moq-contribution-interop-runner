@@ -32,10 +32,10 @@ std::string hex(const Bytes& bytes) {
 //   frame = vi(type) + u16 length + body; params = vi(count) then per parameter vi(delta from the previous
 //   type) + value. FORWARD is 0x10 (value one vi64). LOCATION_FILTER is 0x21: delta, then vi(len) and
 //   the vi64 fields (wire 21) or Type plus the fields with no length (wire 22).
-// For {7,9}: wire 21 is 02 07 09; wire 22 Absolute is Type 02 then 07 09: the same bytes, because the field
-// count equals the Type value for Absolute (2), AbsoluteBounded (3) and AbsoluteRange (4). So these builders'
-// wire 22 output equals their wire 21 output; the wire 22 test asserts that, and that a length byte of a
-// different value would not be there (see the type-vs-length note in the task report).
+// For the fixed gap_a values ({7,9}, {7,0,0}, {7,9,0,9}) the field count equals the draft 22 Type value
+// (Absolute 2, AbsoluteBounded 3, AbsoluteRange 4) and every value is a single byte, so wire 21 (length
+// byte) and wire 22 (Type byte) coincide. The wire 22 pin test below therefore only guards framing; the
+// discriminating cases are the location_filter seam tests, whose inputs make the two drafts differ.
 struct Pins {
     // SUBSCRIBE (frame type 03), Request ID 1: body = 01 | T | count | params.
     const char* open_fwd1 = "03000d01" "01016e0178" "02" "1001" "11020709";
@@ -70,11 +70,46 @@ TEST(FilterSitePins, Draft22CarriesTypeAndFieldsWithoutLength) {
     EXPECT_EQ(hex(gap_a_subscribe_for_test(kNamespace, kName, false, GapASubscribeFilter::BoundedObject)), p.bounded_fwd0);
     EXPECT_EQ(hex(gap_a_subscribe_for_test(kNamespace, kName, true, GapASubscribeFilter::WholeGroup)), p.whole_fwd1);
     EXPECT_EQ(hex(gap_a_subscribe_for_test(kNamespace, kName, true, GapASubscribeFilter::None)), p.none_fwd1);
+    EXPECT_EQ(hex(gap_a_subscribe_for_test(kNamespace, kName, false, GapASubscribeFilter::None)), p.none_fwd0);
     // bounded_update: ... 0x10 01, 0x21-0x10 = 0x11, Type 4, 7, 9, 0, 9.
     EXPECT_EQ(hex(gap_a_bounded_update_for_test()), p.bounded_update);
     // raise_start: delta 0x21, Type 2 (Absolute), 7, 10.
     EXPECT_EQ(hex(gap_a_raise_start_update_for_test()), p.raise_start);
     EXPECT_EQ(hex(gap_a_fetch_for_test(kNamespace, kName)), p.fetch);
+}
+
+// Discriminating cases. vi64 widths: 0..127 one byte; 200 = 0x00c8 -> 80 c8; 300 = 0x012c -> 81 2c.
+// Delta from previous 0x10 to 0x21 is 0x11; from previous 0 it is 0x21.
+struct Case {
+    std::uint64_t previous;
+    std::vector<std::uint64_t> fields;
+    const char* wire21;
+    const char* wire22;
+};
+
+const Case kCases[] = {
+    // {0,0}: wire 21 = 21, len 02, 00 00. Wire 22 NextObject = 21, Type 05 and nothing else.
+    {0, {0, 0}, "21020000", "2105"},
+    // {200,300}: wire 21 = 11, len 04 (four value bytes), 80c8 812c. Wire 22 Absolute = 11, Type 02, 80c8 812c.
+    {0x10, {200, 300}, "1104" "80c8812c", "1102" "80c8812c"},
+    // {200,300,0,9}: wire 21 len 06 (80c8 812c 00 09). Wire 22 AbsoluteRange Type 04.
+    {0x10, {200, 300, 0, 9}, "1106" "80c8812c0009", "1104" "80c8812c0009"},
+    // {200,0,0}: values 80c8 00 00 are four bytes, so wire 21 len is 04 while wire 22 AbsoluteBounded is Type 03.
+    {0x10, {200, 0, 0}, "1104" "80c80000", "1103" "80c80000"},
+};
+
+TEST(FilterSitePins, LocationFilterSeamDiffersBetweenDrafts) {
+    for (const auto& c : kCases) {
+        {
+            ScopedWireDraft wire21(21);
+            EXPECT_EQ(hex(gap_a_location_filter_for_test(c.previous, c.fields)), c.wire21);
+        }
+        {
+            ScopedWireDraft wire22(22);
+            EXPECT_EQ(hex(gap_a_location_filter_for_test(c.previous, c.fields)), c.wire22);
+        }
+        EXPECT_STRNE(c.wire21, c.wire22);
+    }
 }
 
 }  // namespace
