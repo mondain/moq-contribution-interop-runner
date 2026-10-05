@@ -54,7 +54,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created (draft 22 has a requirement catalog but no executable scenarios yet). Any other number is `400 invalid_run_config`. |
+| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created (draft 22 is not runnable through the API yet). Any other number is `400 invalid_run_config`. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
@@ -289,7 +289,7 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 | 409 | `run_finalized` | Stop requested for a finalized run |
 | 409 | `run_not_active` | The run is not active in this process |
 | 422 | `scenario_requires_publisher_capability` | Every selected scenario needs a capability the run declares the publisher does not implement (today only FETCH); the message names the first scenario and the capability |
-| 422 | `draft_not_runnable` | The run request names draft 22. The draft is known and has a requirement catalog, but there are no executable scenarios yet. Returned before scenario validation; no run is created |
+| 422 | `draft_not_runnable` | The run request names draft 22. The draft is known and has a requirement catalog, but is not runnable through the API yet. Returned before scenario validation; no run is created |
 | 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. The message names the offending scenario and the reason. Unsupported scenarios are never silently scored |
 | 500 | `internal_error` | Unexpected failure |
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |

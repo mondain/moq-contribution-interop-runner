@@ -407,7 +407,7 @@ TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
     EXPECT_EQ(response->status, 422);
     const auto error = Json::parse(response->body).at("error");
     EXPECT_EQ(error.at("code"), "draft_not_runnable");
-    EXPECT_EQ(error.at("message"), "Draft 22 has a requirement catalog but no executable scenarios yet.");
+    EXPECT_EQ(error.at("message"), "Draft 22 is not runnable through the API yet.");
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
     // Draft 23 is still a malformed run configuration.
     const auto invalid = post({{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},

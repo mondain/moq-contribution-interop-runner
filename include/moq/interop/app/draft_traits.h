@@ -41,7 +41,8 @@ constexpr std::string_view alpn(DraftVersion draft) {
     throw std::logic_error("unreachable DraftVersion");
 }
 
-// Draft 22 has a requirement catalog (and wire codecs) but no executable scenarios yet.
+// Draft 22 is not runnable through the API yet: the run manager can execute its shared scenarios by lineage,
+// but the API gate stays closed until its own scenarios, bindings and storage land.
 constexpr bool runnable(DraftVersion draft) {
     switch (draft) {
         case DraftVersion::Draft18: return true;

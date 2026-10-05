@@ -120,6 +120,32 @@ TEST(LineageRunOutcomes, OneDraft22OutcomePerCatalogRowInCatalogOrder) {
     EXPECT_EQ(passed->state, requirements::OutcomeState::Pass);
 }
 
+TEST(LineageRunOutcomes, ATranslatedNotApplicableNeverDropsAnApplicableTestableRow) {
+    const auto d21 = catalog(21);
+    const auto d22 = catalog(22);
+    const requirements::Requirement* target = nullptr;
+    std::string d21_id;
+    for (const auto& pair : requirements::lineage_data::kSharedRows) {
+        const auto row = std::find_if(d22->requirements.begin(), d22->requirements.end(),
+                                      [&](const auto& r) { return r.id == pair.d22; });
+        if (row != d22->requirements.end() && row->applicability == requirements::Applicability::Applicable &&
+            row->testability != requirements::Testability::NotTestable) {
+            target = &*row;
+            d21_id = pair.d21;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr);
+    auto source = unobserved(*d21);
+    for (auto& outcome : source)
+        if (outcome.requirement_id == d21_id) outcome.state = requirements::OutcomeState::NotApplicable;
+    const auto outcomes = lineage_outcomes(*d22, source);
+    const auto found = std::find_if(outcomes.begin(), outcomes.end(),
+                                    [&](const auto& o) { return o.requirement_id == target->id; });
+    ASSERT_NE(found, outcomes.end());
+    EXPECT_EQ(found->state, requirements::OutcomeState::NotRun);
+}
+
 TEST(LineageRunOutcomes, ScoresAgainstTheDraft22CatalogWithoutEverClaimingAPass) {
     const auto d21 = catalog(21);
     const auto d22 = catalog(22);

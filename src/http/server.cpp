@@ -751,7 +751,7 @@ public:
                 if (!app::runnable(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
                         "Draft " + std::to_string(app::draft_number(requested.draft)) +
-                        " has a requirement catalog but no executable scenarios yet."};
+                        " is not runnable through the API yet."};
                 {
                     // Say which part of the selection is unsupported, and why, so the caller
                     // does not have to bisect a long scenario list.

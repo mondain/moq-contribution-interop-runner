@@ -18,7 +18,13 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
     for (const auto& row : draft22.requirements) {
         const auto found = by_id.find(row.id);
         if (found != by_id.end()) {
-            outcomes.push_back(translated[found->second]);
+            auto outcome = translated[found->second];
+            // A draft 21 NotApplicable must not drop a draft 22 row that applies and is testable.
+            if (outcome.state == requirements::OutcomeState::NotApplicable &&
+                row.applicability == requirements::Applicability::Applicable &&
+                row.testability != requirements::Testability::NotTestable)
+                outcome.state = requirements::OutcomeState::NotRun;
+            outcomes.push_back(outcome);
             by_id.erase(found);
             continue;
         }
