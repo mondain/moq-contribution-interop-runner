@@ -14,7 +14,8 @@ int main(int argc, char** argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     const bool force = argc > 2 && std::string(argv[2]) == "--force";
     if (mode != "generate" && mode != "merge") {
-        std::cerr << "usage: moq-interop-catalog-carry generate [--force] | merge\n";
+        std::cerr << "usage: moq-interop-catalog-carry generate [--force] | merge"
+                     "   (generate writes an unreviewed baseline for a fresh draft; after hand review use only merge)\n";
         return 2;
     }
     try {
@@ -33,9 +34,9 @@ int main(int argc, char** argv) {
         for (const auto& match : result.matches) {
             ++counts[static_cast<std::size_t>(match.change)];
         }
-        std::cout << "identical=" << counts[0] << " moved=" << counts[1]
+        std::cout << "occurrences: identical=" << counts[0] << " moved=" << counts[1]
                   << " reworded=" << counts[2] << " new=" << counts[3]
-                  << " removed=" << result.removed.size() << "\n";
+                  << "; draft 21 rows removed=" << result.removed.size() << "\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << "\n";
         return 1;
