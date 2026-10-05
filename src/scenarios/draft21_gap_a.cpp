@@ -1,6 +1,9 @@
 #include "moq/interop/scenarios/draft21_gap_a.h"
 
+#include "draft21_gap_a_testing.h"
+
 #include "moq/interop/scenarios/fetch_first_object.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/wire/draft21/key_values.h"
 #include "moq/interop/wire/draft21/publish_done.h"
 #include "moq/interop/wire/draft21/request_frame.h"
@@ -83,10 +86,8 @@ void forward(Bytes& params, std::uint64_t previous, std::uint64_t value) {
 // Section 9.20.10: LOCATION_FILTER (0x21) carrying only the listed vi64 fields.
 void location_filter(Bytes& params, std::uint64_t previous,
                      std::initializer_list<std::uint64_t> fields) {
-    Bytes value;
-    for (const auto field : fields) integer(value, field);
+    const auto value = filter_param_value(FilterFields(fields));
     integer(params, 0x21 - previous);
-    integer(params, value.size());
     params.insert(params.end(), value.begin(), value.end());
 }
 
@@ -871,6 +872,28 @@ std::optional<Fixture> recover_fixture(std::span<const std::byte> input) {
 }
 
 }  // namespace
+
+std::vector<std::byte> gap_a_subscribe_for_test(const std::vector<std::vector<std::byte>>& track_namespace,
+                                                const std::vector<std::byte>& track_name, bool forwarding,
+                                                GapASubscribeFilter filter) {
+    Filter inner = Filter::None;
+    switch (filter) {
+    case GapASubscribeFilter::OpenFromObject: inner = Filter::OpenFromObject; break;
+    case GapASubscribeFilter::BoundedObject: inner = Filter::BoundedObject; break;
+    case GapASubscribeFilter::WholeGroup: inner = Filter::WholeGroup; break;
+    case GapASubscribeFilter::None: break;
+    }
+    return subscribe({track_namespace, track_name}, forwarding, inner);
+}
+
+std::vector<std::byte> gap_a_bounded_update_for_test() { return bounded_update(); }
+
+std::vector<std::byte> gap_a_raise_start_update_for_test() { return raise_start_update(); }
+
+std::vector<std::byte> gap_a_fetch_for_test(const std::vector<std::vector<std::byte>>& track_namespace,
+                                            const std::vector<std::byte>& track_name) {
+    return fetch({track_namespace, track_name});
+}
 
 std::vector<Draft21GapProbe> draft21_gap_a_probes(std::chrono::milliseconds deadline, Namespace ns, Bytes name) {
     return profiles(deadline, {std::move(ns), std::move(name)});

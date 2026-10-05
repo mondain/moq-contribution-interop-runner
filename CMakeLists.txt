@@ -821,6 +821,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-location-filter-param-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
     add_test(NAME location-filter-param COMMAND moq-interop-location-filter-param-tests)
 
+    add_executable(moq-interop-filter-site-pins-tests tests/unit/filter_site_pins_test.cpp)
+    target_include_directories(moq-interop-filter-site-pins-tests PRIVATE "${PROJECT_SOURCE_DIR}/src/scenarios")
+    target_link_libraries(moq-interop-filter-site-pins-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME filter-site-pins COMMAND moq-interop-filter-site-pins-tests)
+
     add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
     target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

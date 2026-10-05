@@ -4,7 +4,6 @@
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft22/location_filter.h"
 
-#include <span>
 #include <stdexcept>
 #include <string>
 
