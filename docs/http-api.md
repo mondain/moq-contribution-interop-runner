@@ -54,7 +54,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created: draft 22 has a requirement catalog but no executable scenarios yet. Any other number is `400 invalid_run_config`. |
+| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created (draft 22 has a requirement catalog but no executable scenarios yet). Any other number is `400 invalid_run_config`. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
@@ -123,9 +123,10 @@ A successful create returns HTTP 201:
 
 For `webtransport` the endpoint also carries `url` (for example
 `https://127.0.0.1:19901/moq`), `path` (`/moq`) and `protocol` (`moqt-18` or
-`moqt-21`; `moqt-22` is reserved for draft 22 and is never offered while draft 22 is not runnable), and `alpn` is `h3`. For native QUIC the publisher connects to
-`address:port` with ALPN `moqt-18` or `moqt-21` (`moqt-22` once draft 22 is runnable), using the URI
-`moqt://address:port/moq`.
+`moqt-21`; `moqt-22` is reserved for draft 22 and is never offered while draft 22 is
+not runnable), and `alpn` is `h3`. For native QUIC the publisher connects to
+`address:port` with ALPN `moqt-18` or `moqt-21` (`moqt-22` once draft 22 is runnable),
+using the URI `moqt://address:port/moq`.
 
 ## Run lifecycle
 

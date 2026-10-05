@@ -451,6 +451,9 @@ public:
         if (draft18->draft != 18 || draft21->draft != 21) {
             throw std::invalid_argument("HTTP server catalogs must be draft 18 and draft 21");
         }
+        if (config.draft22_catalog && config.draft22_catalog->draft != 22) {
+            throw std::invalid_argument("HTTP server draft 22 catalog must be draft 22");
+        }
         register_routes();
     }
 

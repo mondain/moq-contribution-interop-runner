@@ -95,7 +95,7 @@ have the runner launch your publisher for you, follow the
 | [docs/scenario-reference.md](docs/scenario-reference.md) | Per-family fixture contracts, operator credentials, port and transport requirements, what `NOT_RUN` means |
 | [docs/interop-notes.md](docs/interop-notes.md) | Publisher compatibility notes: the bundled moqxr adapter, observed results, the standing rule on expected behavior |
 | [docs/moq-contribution-interop-runner-design.md](docs/moq-contribution-interop-runner-design.md) | Design: goals, architecture, requirement catalog, scoring model, verification strategy |
-| [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
+| [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt), [-22.txt](docs/draft-ietf-moq-transport-22.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
 | [docs/plans/](docs/plans/) | Historical implementation plans |
 
 ## Repository layout
@@ -103,7 +103,7 @@ have the runner launch your publisher for you, follow the
 | Path | Contents |
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
-| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`), schema and draft digests |
+| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, and `draft22.json`, which is incomplete: draft 22 is known but not runnable yet), the draft 21 to 22 delta audit, schema and draft digests |
 | `adapters/` | Driver contract schema and the bundled `moqxr` adapter |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
 | `docs/` | Documentation and the two draft texts |

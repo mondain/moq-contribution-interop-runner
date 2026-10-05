@@ -370,6 +370,8 @@ public:
             transaction.commit();
             version = 3;
         }
+        // New databases get schema.sql (draft CHECK accepts 22); databases migrated up to
+        // here keep CHECK (draft IN (18, 21)) until a version 4 rebuild of `runs` exists.
         if (version != 3) {
             throw std::runtime_error("open SQLite run store: unsupported schema version " +
                                      std::to_string(version));

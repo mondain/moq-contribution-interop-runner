@@ -383,6 +383,17 @@ TEST_F(HttpApiDraft22Test, ServesDraft22RequirementsAndStillRejectsOtherDrafts) 
     EXPECT_EQ(error.at("error").at("message"), "draft must be 18, 21 or 22.");
 }
 
+TEST(HttpServerConfigTest, RejectsADraft22CatalogThatIsNotDraft22) {
+    // The optional catalog is trusted by the listing and requirements routes, so a wrong one
+    // (a duplicate of draft 21, say) must fail at construction, not list draft 21 twice.
+    TemporaryDatabase database;
+    auto store = std::make_shared<storage::SqliteRunStore>(database.path(), test_build());
+    ServerConfig config{.port = 0};
+    config.draft22_catalog = catalog(21);
+    EXPECT_THROW(HttpServer(catalog(18), catalog(21), store, test_build(), config),
+                 std::invalid_argument);
+}
+
 TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
     const auto post = [&](const Json& request) {
         auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");

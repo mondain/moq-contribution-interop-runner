@@ -2,6 +2,12 @@
 
 **Date:** 2026-09-27
 
+> Note (2026-10): this document describes the two-draft design (drafts 18 and 21). Draft 22 has since
+> been added as a known draft that is not runnable yet: its requirement catalog
+> (`requirements/draft22.json`), delta audit (`requirements/draft21-to-22-delta.json`), wire
+> codecs (`wire/draft22`) and application plumbing (`app/draft_traits.h`) exist; its scenarios,
+> evaluators and sessions do not. Statements below about "two drafts" predate that.
+
 ## Purpose
 
 The project validates Media over QUIC Transport contribution publishers against

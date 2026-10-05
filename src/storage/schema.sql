@@ -3,6 +3,10 @@ CREATE TABLE schema_meta (
 );
 INSERT INTO schema_meta(version) VALUES (3);
 
+-- Draft 22 is accepted below for NEW databases only. Databases migrated from schema
+-- version 1 or 2 keep CHECK (draft IN (18, 21)) until the version 4 rebuild of `runs`
+-- planned for the sub-project that makes draft 22 runnable.
+
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
     draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22)),
