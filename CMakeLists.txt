@@ -118,6 +118,7 @@ add_library(moq-interop-wire
     src/wire/draft21/successful_response.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
+    src/wire/draft22/location_filter.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -970,6 +971,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft22-wire-audit
              COMMAND moq-interop-draft22-wire-audit-tests)
+
+    add_executable(moq-interop-draft22-location-filter-tests
+                   tests/golden/draft22_location_filter_test.cpp)
+    target_link_libraries(moq-interop-draft22-location-filter-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-location-filter
+             COMMAND moq-interop-draft22-location-filter-tests)
 
     add_executable(moq-interop-draft21-request-ids-tests
                    tests/protocol/draft21_request_ids_test.cpp)
