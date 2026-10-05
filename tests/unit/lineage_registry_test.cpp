@@ -29,6 +29,13 @@ TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21Impl
     }
 }
 
+// Pinned so a lineage change that moves executable scenarios is a visible event: 167 before D2 shared the
+// 46 draft 21 LOCATION_FILTER scenarios, all of which have an executable draft 21 implementation.
+TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
+    EXPECT_EQ(shared_scenario_ids_22().size(), 307u);
+    EXPECT_EQ(executable_scenarios(22).size(), 213u);
+}
+
 TEST(LineageRegistry, OwnAndUnknownIdsAreNotExecutableForDraft22) {
     for (const char* id : {"", "no-such-scenario", "d21-setup-unknown-options", "d22-no-such-scenario",
                            "d22-location-filter-unknown-type"}) {

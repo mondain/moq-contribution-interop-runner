@@ -706,8 +706,8 @@ TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgai
         excluded+=app::row_not_applicable_reason(22,row,capabilities).has_value() &&
                   row.applicability==requirements::Applicability::Applicable &&
                   row.testability==requirements::Testability::Testable;
-    // Every draft 22 FETCH scenario except one is own (it builds LOCATION_FILTER bytes) and is
-    // not known to need FETCH yet, so only rows whose scenarios are all shared FETCH ones leave.
+    // Only rows whose scenarios are all shared FETCH ones leave; an own FETCH scenario (e.g.
+    // d22-fetch-bounded-location-range) is not known to need FETCH yet.
     EXPECT_GE(excluded,1u);
     EXPECT_EQ(static_cast<std::size_t>(std::count_if(run.outcomes.begin(),run.outcomes.end(),[&](const auto& outcome) {
         const auto row=std::find_if(draft22->requirements.begin(),draft22->requirements.end(),
@@ -724,6 +724,75 @@ TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgai
     EXPECT_EQ(run.score->coverage.possible,expected.coverage.possible);
     EXPECT_GT(run.score->required.earned,0u);
     EXPECT_NE(run.score->coverage.possible,draft22_denominators(*draft22,{}).coverage.possible);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+// The publisher half of one FETCH response context: returns the FETCH the runner wrote on stream 1 and
+// answers it with `reply` and FIN.
+std::vector<std::byte> fetch_publisher(std::uint16_t port,std::string_view alpn,
+                                       const std::vector<std::byte>& expected,
+                                       const std::vector<std::byte>& reply) {
+    auto client=Client::create({.port=port,.alpn=alpn_of(alpn)});
+    EXPECT_NE(client,nullptr);
+    if (!client) return {};
+    EXPECT_TRUE(pump_until(*client,[&] { const auto setup=client->stream(3); return setup && setup->data==wire_bytes({0xaf,0,0,0}); }));
+    EXPECT_TRUE(client->send_stream(2,wire_bytes({0xaf,0,0,0}),false));
+    EXPECT_TRUE(pump_until(*client,[&] {
+        const auto request=client->stream(1);
+        return request && request->fin && request->data.size()>=expected.size();
+    }));
+    const auto request=client->stream(1);
+    if (!request) return {};
+    const auto written=request->data;
+    EXPECT_TRUE(client->send_stream(1,reply,true));
+    (void)pump_until(*client,[] { return false; },100ms);
+    return written;
+}
+
+TEST(NativeRunManagerDraft22Lineage, SharedFetchProbeWritesTheDraft22FilterOnTheWire) {
+    // d21-fetch-accepted / -rejected build LOCATION_FILTER {0,0,u64max}, where the two drafts differ:
+    // draft 21 writes `21 0b 00 00 ff..` (Length 11), draft 22 writes `21 03 00 00 ff..` (Type 0x03,
+    // AbsoluteBounded). A draft 22 run must put the draft 22 form on the wire, which needs
+    // NativeRunManager::start() to resolve the probes under the run's wire draft.
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,draft22);
+    const std::vector<std::string> ids={"d22-fetch-accepted","d22-fetch-rejected"};
+    for (const auto& id : ids) ASSERT_TRUE(app::executable_scenario(22,id)) << id;
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,ids,2000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    // FETCH: Request ID 1, namespace {"n"}, name "t", one parameter: LOCATION_FILTER.
+    auto draft22_fetch=wire_bytes({0x16,0,20,1,1,1,'n',1,'t',1,0x21,0x03,0,0});
+    auto draft21_fetch=wire_bytes({0x16,0,20,1,1,1,'n',1,'t',1,0x21,0x0b,0,0});
+    for (unsigned index=0; index<9; ++index) {
+        draft22_fetch.push_back(std::byte{0xff});
+        draft21_fetch.push_back(std::byte{0xff});
+    }
+    const std::vector<std::vector<std::byte>> replies={wire_bytes({0x18,0,4,0,0,1,0}),wire_bytes({5,0,3,1,0,0})};
+    for (unsigned context=0; context<2; ++context) {
+        SCOPED_TRACE(ids[context]);
+        ASSERT_TRUE(context_ready(store,started.id,context+1));
+        const auto written=fetch_publisher(started.endpoint.port,"moqt-22",draft22_fetch,replies[context]);
+        EXPECT_EQ(written,draft22_fetch) << "the runner must write the draft 22 LOCATION_FILTER form";
+        EXPECT_NE(written,draft21_fetch);
+    }
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.draft,app::DraftVersion::Draft22);
+    // The stored stimulus carries the same bytes.
+    const auto stimuli=std::count_if(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="raw_probe_stimulus" &&
+               event.detail.find(" bytes=1600140101016e01740121030000ffffffffffffffffff ")!=std::string::npos;
+    });
+    EXPECT_EQ(stimuli,2);
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="harness_error";
+    }));
+    expect_draft22_outcomes(run,*draft22);
+    // The evaluator rebuilds the expected FETCH under the same wire draft and recognises the stimulus:
+    // one accepted and one rejected context pass the draft 22 counterpart of D21-3-2-1-MUST-052.
+    EXPECT_EQ(state_of(run,"D22-3-2-MUST-057"),requirements::OutcomeState::Pass);
     EXPECT_TRUE(manager.stop(started.id));
 }
 

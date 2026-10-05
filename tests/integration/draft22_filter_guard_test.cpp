@@ -1,20 +1,22 @@
 // Guard: a draft 22 run writes draft 22 LOCATION_FILTER parameters.
 //
-// Every scenario in requirements::draft22_filter_building_scenarios() that builds a filter is resolved
+// Every scenario in requirements::draft21_location_filter_scenarios() that builds a filter is resolved
 // exactly as NativeRunManager::start() resolves a draft 22 lineage run (the draft 21 implementation,
 // built for a draft 22 peer), and every request message it writes is read back with the shared
 // wire-aware parameter walk under wire draft 22. Each filter must decode as a draft 22 Location Filter
 // (Type + fields, no Length), and every scenario must write at least one filter.
 //
-// Resolving is where a run builds these bytes. The scenarios are still `own` in the draft 22 lineage, so
-// NativeRunManager refuses them as draft 22 runs for now and the live fake-publisher harness
-// (raw_family_driver_test.cpp) cannot drive them. Writes prepared at run time from the publisher's
-// replies (RawProbeWrite::prepare_bytes) are not seen here; filter_source_guard_test.cpp covers their
-// builders.
+// Resolving is where a run builds these bytes, so this covers every listed scenario without a session.
+// All but the residual overflow pair are shared in the draft 22 lineage and run as draft 22 runs; one of
+// them is driven live through the fake-publisher harness in raw_family_driver_test.cpp
+// (NativeRunManagerDraft22Lineage.SharedFetchProbeWritesTheDraft22FilterOnTheWire). Writes prepared at run
+// time from the publisher's replies (RawProbeWrite::prepare_bytes) are not seen here;
+// filter_source_guard_test.cpp covers their builders.
 //
 // Where the draft 21 and draft 22 bytes coincide (a field count that equals a draft 22 Type and
 // single-byte fields) this cannot tell the two forms apart; tests/unit/filter_source_guard_test.cpp
 // guards those sites statically.
+#include "moq/interop/app/lineage.h"
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/requirements/lineage_policy.h"
@@ -26,6 +28,7 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -46,7 +49,8 @@ constexpr std::uint64_t kLocationFilter = 0x21;
 constexpr std::uint64_t kFillParameters = 0x23;
 
 // draft21_close.cpp leaves these out of the probe list under wire 22: {u64max,0,1} overflows
-// StartGroup + EndGroupDelta, which the draft 22 form cannot carry (own by row; Task 10 replaces them).
+// StartGroup + EndGroupDelta, which the draft 22 form cannot carry. They are the lineage residual
+// (draft22_filter_building_scenarios()) and own by row D22-9-20-9-MUST-424; draft 22 probes replace them.
 const std::set<std::string> kUnrepresentable{
     "d21-location-filter-end-group-overflow",
     "d21-fill-location-filter-end-group-overflow",
@@ -222,8 +226,27 @@ TEST(Draft22FilterGuard, ResolvingForAWireDraftBuildsItsFilterForm) {
     EXPECT_EQ(scenarios::current_wire_draft(), 21u) << "the resolve restores the caller's wire draft";
 }
 
+TEST(Draft22FilterGuard, OnlyTheUnrepresentableOverflowProbesStayOwnByFilter) {
+    // The residual set is exactly the overflow pair, and every other listed scenario is shared: its draft
+    // 22 id runs the draft 21 implementation, which this file shows writes draft 22 filters.
+    const auto residual = requirements::draft22_filter_building_scenarios();
+    EXPECT_EQ(residual, kUnrepresentable);
+    const auto listed = requirements::draft21_location_filter_scenarios();
+    EXPECT_EQ(listed.size(), 50u);
+    for (const auto& id : residual) EXPECT_TRUE(listed.contains(id)) << id;
+    // Own by row D22-3-3-1-MUST-NOT-069 (their rows changed their obligation), not by filter.
+    const std::set<std::string> own_by_row{"d21-subscribe-bounded-location-range",
+                                           "d21-update-subscription-location-range"};
+    for (const auto& id : listed) {
+        const auto d22 = "d22-" + id.substr(4);
+        const bool own = residual.contains(id) || own_by_row.contains(id);
+        EXPECT_EQ(executable_scenario(22, d22), !own) << d22;
+        if (!own) EXPECT_EQ(implementation_scenario_id(d22), std::optional<std::string_view>(id)) << d22;
+    }
+}
+
 TEST(Draft22FilterGuard, EveryFilterBuildingScenarioWritesDraft22Filters) {
-    const auto listed = requirements::draft22_filter_building_scenarios();
+    const auto listed = requirements::draft21_location_filter_scenarios();
     for (const auto& id : kUnrepresentable) EXPECT_TRUE(listed.contains(id)) << id << " is no longer listed";
     for (const auto& id : kReadersOnly) EXPECT_TRUE(listed.contains(id)) << id << " is no longer listed";
     for (const auto& id : listed) {

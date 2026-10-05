@@ -78,11 +78,25 @@ TEST(Draft22Lineage, EveryDraft21SourceRowAndNameExistsAndEveryNameIsClassifiedO
 }
 
 // Pinned so a change in the delta file is a visible event. Update only with a reviewed delta change.
+//
+// The 8 own scenarios and why:
+//   row-driven (a row naming them changed its obligation):
+//     d22-fetch-bounded-location-range, d22-subscribe-bounded-location-range,
+//     d22-update-subscription-location-range                    D22-3-3-1-MUST-NOT-069
+//     d22-discover-original-publisher-namespaces                D22-4-2-MUST-110
+//     d22-request-stream-before-peer-setup                      D22-6-3-MAY-159
+//     d22-publisher-location-filter-parameter                   D22-9-20-9-MAY-422
+//     d22-location-filter-end-group-overflow,
+//     d22-fill-location-filter-end-group-overflow               D22-9-20-9-MUST-424
+//   residual (draft22_filter_building_scenarios(), own whatever their rows): the two overflow scenarios,
+//     whose {u64max,0,1} the draft 22 form cannot carry. They are own by row 424 as well.
+// The other 46 draft 21 LOCATION_FILTER scenarios (draft21_location_filter_scenarios()) are shared: they
+// build and read the filter in the run's wire draft.
 TEST(Draft22Lineage, CountsArePinned) {
     EXPECT_EQ(lineage_data::kSharedRows.size(), 597);
     EXPECT_EQ(lineage_data::kOwnRows22.size(), 17);
-    EXPECT_EQ(lineage_data::kSharedScenarios.size(), 261);
-    EXPECT_EQ(lineage_data::kOwnScenarios22.size(), 54);
+    EXPECT_EQ(lineage_data::kSharedScenarios.size(), 307);
+    EXPECT_EQ(lineage_data::kOwnScenarios22.size(), 8);
     EXPECT_EQ(lineage_data::kSharedEvaluators.size(), 262);
     EXPECT_EQ(lineage_data::kOwnEvaluators22.size(), 6);
 }
