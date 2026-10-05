@@ -168,7 +168,11 @@ std::vector<OccurrenceContext> extract_contexts(const DraftSource& source) {
             context.occurrence_on_line = ++per_line[line];
             context.sentence = normalize_text(paragraph.text.substr(begin, end - begin));
             context.ordinal_in_sentence = ++per_sentence[sentence_index];
-            context.sentence_last_line = paragraph.line_of_char[end - 1];
+            auto last = end;
+            while (last > begin + 1 && paragraph.text[last - 1] == ' ') {
+                --last;
+            }
+            context.sentence_last_line = paragraph.line_of_char[last - 1];
             found.emplace(Anchor{line, context.occurrence_on_line}, std::move(context));
         }
     }

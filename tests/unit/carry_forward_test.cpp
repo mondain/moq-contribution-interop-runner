@@ -67,6 +67,21 @@ TEST(CarryForwardContextTest, JoinsASentenceAcrossAPageBreak) {
     EXPECT_EQ(contexts[0].sentence_last_line, 11u);
 }
 
+TEST(CarryForwardContextTest, SentenceEndingAtALineEndKeepsItsOwnLastLine) {
+    const auto source = source_from_text(22,
+        "1.  Introduction\n"
+        "\n"
+        "   An endpoint MUST send HELLO.\n"
+        "   A peer MAY ignore it\n"
+        "   completely.\n");
+    const auto contexts = extract_contexts(source);
+    ASSERT_EQ(contexts.size(), 2u);
+    EXPECT_EQ(contexts[0].sentence, "An endpoint MUST send HELLO.");
+    EXPECT_EQ(contexts[0].sentence_last_line, 3u);
+    EXPECT_EQ(contexts[1].sentence, "A peer MAY ignore it completely.");
+    EXPECT_EQ(contexts[1].sentence_last_line, 5u);
+}
+
 TEST(CarryForwardContextTest, GivesEachKeywordInOneSentenceItsOwnOrdinal) {
     const auto source = source_from_text(22,
         "1.  Introduction\n"
