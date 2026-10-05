@@ -118,6 +118,9 @@ add_library(moq-interop-wire
     src/wire/draft21/successful_response.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
+    src/wire/draft22/location_filter.cpp
+    src/wire/draft22/publish.cpp
+    src/wire/draft22/publisher_request.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -961,6 +964,41 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft21-publisher-request
              COMMAND moq-interop-draft21-publisher-request-tests)
+
+    add_executable(moq-interop-draft22-wire-audit-tests
+                   tests/golden/draft22_wire_audit_test.cpp)
+    target_compile_definitions(moq-interop-draft22-wire-audit-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-wire-audit-tests PRIVATE
+                          moq-interop-wire moq-interop-requirements GTest::gtest_main)
+    add_test(NAME draft22-wire-audit
+             COMMAND moq-interop-draft22-wire-audit-tests)
+
+    add_executable(moq-interop-draft22-location-filter-tests
+                   tests/golden/draft22_location_filter_test.cpp)
+    target_link_libraries(moq-interop-draft22-location-filter-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-location-filter
+             COMMAND moq-interop-draft22-location-filter-tests)
+
+    add_executable(moq-interop-draft22-shared-tests
+                   tests/golden/draft22_shared_test.cpp)
+    target_link_libraries(moq-interop-draft22-shared-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-shared COMMAND moq-interop-draft22-shared-tests)
+
+    add_executable(moq-interop-draft22-publish-tests
+                   tests/golden/draft22_publish_test.cpp)
+    target_link_libraries(moq-interop-draft22-publish-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-publish COMMAND moq-interop-draft22-publish-tests)
+
+    add_executable(moq-interop-draft22-publisher-request-tests
+                   tests/golden/draft22_publisher_request_test.cpp)
+    target_link_libraries(moq-interop-draft22-publisher-request-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-publisher-request
+             COMMAND moq-interop-draft22-publisher-request-tests)
 
     add_executable(moq-interop-draft21-request-ids-tests
                    tests/protocol/draft21_request_ids_test.cpp)
