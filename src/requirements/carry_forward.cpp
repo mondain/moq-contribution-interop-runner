@@ -510,8 +510,30 @@ void write_catalog_outputs(const CarryResult& result, const RequirementCatalog& 
                            const EmitOptions& options) {
     const auto merged_path =
         options.requirements_dir / ("draft" + std::to_string(new_source.number) + ".json");
-    if (std::filesystem::exists(merged_path) && !options.force) {
-        throw std::runtime_error(merged_path.string() + " exists; pass --force to overwrite reviewed output");
+    const auto delta_path = options.requirements_dir /
+        ("draft" + std::to_string(old_catalog.draft) + "-to-" + std::to_string(new_source.number) +
+         "-delta.json");
+    if (!options.force) {
+        const auto refuse = [](const std::filesystem::path& path) {
+            throw std::runtime_error(path.string() +
+                                     " exists; pass --force to overwrite reviewed output");
+        };
+        if (std::filesystem::exists(merged_path)) {
+            refuse(merged_path);
+        }
+        if (std::filesystem::exists(delta_path)) {
+            refuse(delta_path);
+        }
+        const auto parts_dir = options.requirements_dir / "parts";
+        const auto part_prefix = "draft" + std::to_string(new_source.number) + "-lines-";
+        if (std::filesystem::is_directory(parts_dir)) {
+            for (const auto& item : std::filesystem::directory_iterator(parts_dir)) {
+                const auto name = item.path().filename().string();
+                if (name.starts_with(part_prefix) && name.ends_with(".json")) {
+                    refuse(item.path());
+                }
+            }
+        }
     }
 
     Json rows = Json::array();
@@ -611,9 +633,7 @@ void write_catalog_outputs(const CarryResult& result, const RequirementCatalog& 
     }
 
     write_json(merged_path, catalog_json(new_source, rows));
-    write_json(options.requirements_dir /
-                   ("draft" + std::to_string(old_catalog.draft) + "-to-" +
-                    std::to_string(new_source.number) + "-delta.json"),
+    write_json(delta_path,
                Json{{"from_draft", old_catalog.draft},
                     {"to_draft", new_source.number},
                     {"from_sha256", old_catalog.source_sha256},

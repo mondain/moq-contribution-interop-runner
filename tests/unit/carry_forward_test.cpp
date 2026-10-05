@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
 #include <utility>
@@ -378,6 +379,56 @@ TEST_F(CarryEmitTest, PartitionCutsNeverFallInsideACitation) {
             EXPECT_LE(row.source.last_line, last) << name << " " << row.id;
         }
     }
+}
+
+static std::string slurp(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+TEST_F(CarryEmitTest, RefusesWhenOnlyPartsOrDeltaRemainWithoutForce) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    EmitOptions options{dir_, 6, false};
+    write_catalog_outputs(result, old_catalog, new_source, {}, options);
+    std::filesystem::remove(dir_ / "draft22.json");
+
+    std::map<std::filesystem::path, std::string> before;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir_)) {
+        if (entry.is_regular_file()) {
+            before[entry.path()] = slurp(entry.path());
+        }
+    }
+    EXPECT_THROW(write_catalog_outputs(result, old_catalog, new_source, {}, options),
+                 std::runtime_error);
+    std::map<std::filesystem::path, std::string> after;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir_)) {
+        if (entry.is_regular_file()) {
+            after[entry.path()] = slurp(entry.path());
+        }
+    }
+    EXPECT_EQ(before, after);
+
+    std::filesystem::remove_all(dir_ / "parts");
+    std::filesystem::create_directories(dir_ / "parts");
+    EXPECT_THROW(write_catalog_outputs(result, old_catalog, new_source, {}, options),
+                 std::runtime_error);
+}
+
+TEST_F(CarryEmitTest, ForceRegeneratesOverExistingOutput) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    write_catalog_outputs(result, old_catalog, new_source, {}, EmitOptions{dir_, 6, false});
+    std::ofstream(dir_ / "draft22.json", std::ios::trunc) << "{}";
+    EXPECT_NO_THROW(write_catalog_outputs(result, old_catalog, new_source, {},
+                                          EmitOptions{dir_, 6, true}));
+    const auto merged = RequirementCatalog::load(new_source, dir_ / "draft22.json",
+                                                 CatalogLoadMode::AllowIncomplete);
+    EXPECT_EQ(merged.requirements.size(), 5u);
 }
 
 }  // namespace
