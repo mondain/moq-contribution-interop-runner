@@ -1,0 +1,61 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-A-3-MUST-611",
+      "strength": "Must",
+      "source": {
+        "section": "A.3",
+        "first_line": 8469,
+        "last_line": 8470,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "change-log entry",
+      "summary": "Record the change requiring a relay to send an upstream FETCH to at least one publisher.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Appendix A.2 is a historical change-log entry for changes since draft 19 and is marked for removal before final publication. Its keyword occurrence is inventoried without creating another current relay obligation or publisher score. Current FETCH rules are classified at their body-text anchors."
+    },
+    {
+      "id": "D22-A-9-MUST-612",
+      "strength": "Must",
+      "source": {
+        "section": "A.9",
+        "first_line": 9056,
+        "last_line": 9056,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "change-log entry",
+      "summary": "Record the historical MUST-strength change for multi-publisher relay handling.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This historical keyword mention in Appendix A.8 summarizes issue 1115, not an independent normative instruction. No behavior is inferred from the referenced issue or an earlier draft."
+    },
+    {
+      "id": "D22-A-11-MUST-613",
+      "strength": "Must",
+      "source": {
+        "section": "A.11",
+        "first_line": 9112,
+        "last_line": 9113,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "change-log entry",
+      "summary": "Record the change requiring relays to have an upstream subscription before sending SUBSCRIBE_OK.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Appendix A.10 summarizes a historical change since draft 11. This keyword is classified as informative rather than duplicating current relay duties or importing the historical draft's rules into publisher scoring."
+    }
+  ]
+}

@@ -1,0 +1,2432 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-6-1-2-MAY-150",
+      "strength": "May",
+      "source": {
+        "section": "6.1.2",
+        "first_line": 2430,
+        "last_line": 2431,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client endpoint",
+      "summary": "When SVCB-compatible records are published for the authority, optionally use them to learn server endpoints and supported ALPN protocols before connecting.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher client can use this discovery mechanism, but the chosen endpoint and ALPN do not reveal whether DNS records, cache or configuration supplied them. DNS resolver instrumentation is outside this relay-side protocol boundary. The text separately describes HTTPS records for WebTransport and retains a TODO for the moqt SVCB draft."
+    },
+    {
+      "id": "D22-6-1-2-MAY-151",
+      "strength": "May",
+      "source": {
+        "section": "6.1.2",
+        "first_line": 2438,
+        "last_line": 2438,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client endpoint",
+      "summary": "Optionally establish a native QUIC MOQT session when the server selects a supported MOQT ALPN from the client's TLS ClientHello offer.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-quic-session-establishment"
+      ],
+      "evaluators": [
+        "d22-native-quic-session-capability"
+      ],
+      "rationale": "The runner can observe successful native QUIC negotiation and MOQT initialization for draft 21. Section 6.2 defines draft ALPNs using the draft number, and Section 6.2.2 specifies the native session path. This MAY permits a transport choice rather than requiring both transports."
+    },
+    {
+      "id": "D22-6-1-2-MAY-152",
+      "strength": "May",
+      "source": {
+        "section": "6.1.2",
+        "first_line": 2438,
+        "last_line": 2438,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "client endpoint",
+      "summary": "Optionally establish MOQT over WebTransport, using the h3 selection on QUIC or the h2 offer on TCP+TLS described here and the WebTransport establishment procedure in Section 6.2.1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-webtransport-h3-session-establishment"
+      ],
+      "evaluators": [
+        "d22-webtransport-session-capability"
+      ],
+      "rationale": "An HTTP/3 extended CONNECT and WT-Available-Protocols negotiation followed by MOQT setup provide observable optional capability. Section 6.1.2 also describes TCP+TLS/h2, while Section 6.2 says the protocol is not defined over other transports such as TCP; preserve this wording tension and do not infer a native TCP MOQT protocol or require an HTTP/2 runner. The draft does not impose a separate WebTransport reliability-mode prohibition in this range."
+    },
+    {
+      "id": "D22-6-2-MUST-153",
+      "strength": "Must",
+      "source": {
+        "section": "6.2",
+        "first_line": 2456,
+        "last_line": 2458,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Support the QUIC DATAGRAM extension on the QUIC connection used for MOQT.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-quic-datagram-support",
+        "d22-webtransport-h3-datagram-support"
+      ],
+      "evaluators": [
+        "d22-quic-datagram-extension-supported"
+      ],
+      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
+    },
+    {
+      "id": "D22-6-2-MUST-154",
+      "strength": "Must",
+      "source": {
+        "section": "6.2",
+        "first_line": 2456,
+        "last_line": 2458,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Negotiate the QUIC DATAGRAM extension in the QUIC connection used for MOQT.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-quic-without-datagram-negotiation",
+        "d22-webtransport-h3-without-datagram-negotiation"
+      ],
+      "evaluators": [
+        "d22-no-moqt-session-without-quic-datagram-negotiation"
+      ],
+      "rationale": "Transport negotiation is visible independently of compiled-in support: a connection on which the extension was not negotiated must not proceed as a valid MOQT session. The clause covers native QUIC and WebTransport over HTTP/3; it names neither a MOQT error code for negotiation failure nor a reliability-mode value."
+    },
+    {
+      "id": "D22-6-3-MUST-NOT-155",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.3",
+        "first_line": 2539,
+        "last_line": 2540,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not begin a bidirectional request stream with a message other than TRACK_STATUS, SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS unless that other message type was negotiated.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-stream-placement",
+        "d22-publisher-request-stream-openers"
+      ],
+      "evaluators": [
+        "d22-request-stream-first-message-allowed"
+      ],
+      "rationale": "Inspect each publisher-opened bidirectional stream's first message with the negotiated extension set. SETUP belongs on each peer's unidirectional control stream and Objects on unidirectional data streams; neither is silently added to the seven default request openers."
+    },
+    {
+      "id": "D22-6-3-MUST-156",
+      "strength": "Must",
+      "source": {
+        "section": "6.3",
+        "first_line": 2540,
+        "last_line": 2541,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a bidirectional stream begins with a message other than the seven permitted request types or a negotiated alternative.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-invalid-bidirectional-request-stream-opener"
+      ],
+      "evaluators": [
+        "d22-invalid-request-stream-opener-protocol-violation"
+      ],
+      "rationale": "The runner opens a bidirectional stream with an unnegotiated invalid initial message and observes the publisher endpoint's session close and specified error. This receiver duty is distinct from the sender's placement prohibition."
+    },
+    {
+      "id": "D22-6-3-SHOULD-157",
+      "strength": "Should",
+      "source": {
+        "section": "6.3",
+        "first_line": 2551,
+        "last_line": 2552,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Buffer Object data arriving on unidirectional streams before the control streams until both control streams arrive and setup is complete.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Receiving Objects is the subscriber side of this combined sentence. The contribution publisher sends Objects and is not evaluated as an Object-consuming subscriber."
+    },
+    {
+      "id": "D22-6-3-SHOULD-158",
+      "strength": "Should",
+      "source": {
+        "section": "6.3",
+        "first_line": 2551,
+        "last_line": 2552,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "receiving endpoint",
+      "summary": "Buffer data arriving on bidirectional streams beginning with request messages before the control streams until both control streams arrive and setup is complete.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can receive early requests, but internal buffering is not established by a later successful response. The next paragraph explicitly permits resets when buffering is unwanted or the message type is unsupported, so there is no unconditional bounded response proving this storage policy."
+    },
+    {
+      "id": "D22-6-3-MAY-159",
+      "strength": "May",
+      "source": {
+        "section": "6.3",
+        "first_line": 2553,
+        "last_line": 2554,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream if buffering is unwanted or its message type is unsupported.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-stream-before-peer-setup"
+      ],
+      "evaluators": [
+        "d22-pre-setup-request-stream-reset"
+      ],
+      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. The permission applies to bidirectional request streams, not an invented reset rule for every early unidirectional Object stream; buffering instead is also permitted."
+    },
+    {
+      "id": "D22-6-3-MUST-NOT-160",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.3",
+        "first_line": 2556,
+        "last_line": 2557,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not close a control stream at the underlying transport layer during the session's lifetime; such closure results in session closure as PROTOCOL_VIOLATION.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-control-stream-lifetime"
+      ],
+      "evaluators": [
+        "d22-control-stream-open-during-session"
+      ],
+      "rationale": "Track the publisher's unidirectional control stream for a FIN or reset while the MOQT session is active. The prohibition does not prevent session termination itself; the next sentence states the consequence of premature control closure."
+    },
+    {
+      "id": "D22-6-3-SHOULD-NOT-161",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "6.3",
+        "first_line": 2562,
+        "last_line": 2564,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Avoid using Message Parameters requiring negotiation before receiving the peer SETUP, unless the application requires the extension or the endpoint knows the peer supports it.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-fresh-peer-parameters-before-setup"
+      ],
+      "evaluators": [
+        "d22-no-unrequired-unknown-peer-extension-before-setup"
+      ],
+      "rationale": "A driven fresh-client fixture with no preconfigured peer support and no required application extension can inspect parameters sent before delivery of peer SETUP. Without those declared preconditions, early use cannot be scored as a violation. Section 9.20 distinguishes base-version parameters from negotiated extensions and explains the unknown-parameter termination consequence."
+    },
+    {
+      "id": "D22-6-3-1-MAY-162",
+      "strength": "May",
+      "source": {
+        "section": "6.3.1",
+        "first_line": 2637,
+        "last_line": 2639,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Optionally defer upstream subscription initiation until handshake completion to mitigate resource exhaustion from replayed packets.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The permission concerns a relay opening upstream subscriptions on behalf of replayed requests, not the original contribution publisher's own publication."
+    },
+    {
+      "id": "D22-6-3-1-MAY-163",
+      "strength": "May",
+      "source": {
+        "section": "6.3.1",
+        "first_line": 2637,
+        "last_line": 2639,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Optionally reject 0-RTT entirely to mitigate resource exhaustion from replayed packets.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Rejecting 0-RTT is the second independent relay mitigation. Section 6.3.1 does not require a contribution client to implement or accept 0-RTT."
+    },
+    {
+      "id": "D22-6-3-2-MUST-164",
+      "strength": "Must",
+      "source": {
+        "section": "6.3.2",
+        "first_line": 2648,
+        "last_line": 2649,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client and server endpoints",
+      "summary": "Include in SETUP all Setup Options required by Section 9.1 for the negotiated MOQT version.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-quic-required-setup-options",
+        "d22-webtransport-required-setup-options"
+      ],
+      "evaluators": [
+        "d22-required-version-setup-options"
+      ],
+      "rationale": "Decode the publisher's SETUP against the negotiated draft and transport. Sections 9.1.1 and 9.1.2 require AUTHORITY and PATH for a native client using a moqt URI but prohibit them for servers and WebTransport; optional/defaulted options are not promoted to universally required fields. SETUP exchange determines extensions after both messages have been sent and received."
+    },
+    {
+      "id": "D22-6-3-2-MUST-165",
+      "strength": "Must",
+      "source": {
+        "section": "6.3.2",
+        "first_line": 2666,
+        "last_line": 2667,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "MOQT version specification author",
+      "summary": "In a new MOQT version, specify which existing extensions can be used with that version.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a normative specification-author obligation, not an endpoint implementation action or quoted informative vocabulary."
+    },
+    {
+      "id": "D22-6-3-2-MUST-166",
+      "strength": "Must",
+      "source": {
+        "section": "6.3.2",
+        "first_line": 2667,
+        "last_line": 2668,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "MOQT extension specification author",
+      "summary": "In a new extension, specify the existing MOQT versions with which the extension can be used.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Compatibility declarations belong to authors of extension specifications. A contribution publisher cannot satisfy or violate this document-authoring requirement through a wire interaction."
+    },
+    {
+      "id": "D22-6-4-1-MUST-167",
+      "strength": "Must",
+      "source": {
+        "section": "6.4.1",
+        "first_line": 2707,
+        "last_line": 2708,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Close the session upon receiving an unknown unidirectional stream type.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-unknown-unidirectional-stream-type"
+      ],
+      "evaluators": [
+        "d22-unknown-stream-type-session-close"
+      ],
+      "rationale": "Inject a stream type outside Table 2 and all negotiated extensions, then observe session termination. This clause does not name an error code; do not borrow PROTOCOL_VIOLATION from the distinct bidirectional first-message rule or from another draft."
+    },
+    {
+      "id": "D22-6-4-2-1-MUST-168",
+      "strength": "Must",
+      "source": {
+        "section": "6.4.2.1",
+        "first_line": 2733,
+        "last_line": 2734,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Close the session with INVALID_REQUEST_ID when a received Request ID has the wrong least significant bit for its sender: clients use even IDs and servers use odd IDs.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-id-wrong-sender-parity"
+      ],
+      "evaluators": [
+        "d22-wrong-parity-invalid-request-id"
+      ],
+      "rationale": "The runner sends an otherwise valid request with parity inconsistent with its client/server role and observes the specific session error. Sender role, not publisher/subscriber role, determines parity."
+    },
+    {
+      "id": "D22-6-4-2-1-MUST-169",
+      "strength": "Must",
+      "source": {
+        "section": "6.4.2.1",
+        "first_line": 2733,
+        "last_line": 2734,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "receiving endpoint",
+      "summary": "Close the session with INVALID_REQUEST_ID when a duplicate Request ID is received.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-duplicate-request-id-across-streams",
+        "d22-duplicate-request-update-id"
+      ],
+      "evaluators": [
+        "d22-duplicate-invalid-request-id"
+      ],
+      "rationale": "Request IDs are session-wide across SUBSCRIBE, PUBLISH, FETCH, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS, PUBLISH_NAMESPACE, REQUEST_UPDATE and TRACK_STATUS. Reuse a prior ID with valid parity to isolate duplicate rejection; response messages carry no Request ID in this draft."
+    },
+    {
+      "id": "D22-6-4-2-2-MUST-NOT-170",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2751,
+        "last_line": 2752,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Do not send FIN on a request-stream direction until all messages required for that request type on that direction have been sent.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-stream-terminal-message-order"
+      ],
+      "evaluators": [
+        "d22-all-required-request-messages-before-fin"
+      ],
+      "rationale": "A bidirectional stream is ordered separately in each direction, so the peer can decode every message before FIN and compare with that request type's requirements. FIN means no further messages, not request cancellation; an abrupt reset is a different operation."
+    },
+    {
+      "id": "D22-6-4-2-2-MUST-171",
+      "strength": "Must",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2753,
+        "last_line": 2756,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "responding endpoint",
+      "summary": "Send the corresponding response message before sending FIN on the response direction of a request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-response-before-fin"
+      ],
+      "evaluators": [
+        "d22-request-response-before-fin"
+      ],
+      "rationale": "The publisher responds to relay requests. Stream ordering provides direct evidence of a response preceding FIN, independently of the more general all-required-messages rule and the Established-subscription PUBLISH_DONE rule."
+    },
+    {
+      "id": "D22-6-4-2-2-MUST-172",
+      "strength": "Must",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2755,
+        "last_line": 2756,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "For an Established subscription, send PUBLISH_DONE before sending FIN on the request-stream direction.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-established-subscription-publisher-fin"
+      ],
+      "evaluators": [
+        "d22-publish-done-before-request-fin"
+      ],
+      "rationale": "The publisher obligation holds for Established subscriptions initiated through either PUBLISH or SUBSCRIBE. Inspect the same request-stream direction for PUBLISH_DONE before graceful FIN; the clause does not require PUBLISH_DONE for a never-established rejected request or turn a reset into a FIN."
+    },
+    {
+      "id": "D22-6-4-2-2-SHOULD-173",
+      "strength": "Should",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2758,
+        "last_line": 2759,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requesting endpoint",
+      "summary": "After the responder sends its response, any subsequent required messages and FIN to signal completion, send FIN on the requester's direction if it has not already done so.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-originated-request-responder-fin"
+      ],
+      "evaluators": [
+        "d22-requester-fin-after-responder-completion"
+      ],
+      "rationale": "For a completed publisher-originated request, the runner supplies the valid terminal responder messages and FIN, then observes reciprocal graceful closure in a bounded run. The draft gives no numeric latency bound; an observation deadline records inconclusive non-completion rather than inventing an exact timing requirement."
+    },
+    {
+      "id": "D22-6-4-2-2-SHOULD-174",
+      "strength": "Should",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2763,
+        "last_line": 2765,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Send FIN promptly after a message when nothing further will be sent on that direction and no response to a future REQUEST_UPDATE will be needed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The peer cannot establish the endpoint's future-message intentions, and promptly has no specified deadline. The concrete response-before-FIN and PUBLISH_DONE-before-FIN wire rules remain independently testable."
+    },
+    {
+      "id": "D22-6-4-2-2-MAY-175",
+      "strength": "May",
+      "source": {
+        "section": "6.4.2.2",
+        "first_line": 2766,
+        "last_line": 2767,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requesting endpoint",
+      "summary": "A requester, except a sender of PUBLISH, may send FIN immediately after a message if it will not send REQUEST_UPDATE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-namespace-requester-immediate-fin"
+      ],
+      "evaluators": [
+        "d22-non-publish-requester-immediate-fin-capability"
+      ],
+      "rationale": "A contribution publisher can originate PUBLISH_NAMESPACE, so the permission is applicable even though PUBLISH itself is excluded. With an update-free driven request, observe FIN immediately after the request on that direction; the stream remains open in the responder's direction and the FIN does not cancel the request."
+    },
+    {
+      "id": "D22-6-4-2-3-MAY-176",
+      "strength": "May",
+      "source": {
+        "section": "6.4.2.3",
+        "first_line": 2771,
+        "last_line": 2772,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Optionally cancel an opened request, as either requester or responder, using RESET_STREAM for its sending direction when that direction is still open.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-cancels-open-request"
+      ],
+      "evaluators": [
+        "d22-cancel-request-reset-open-send-direction"
+      ],
+      "rationale": "Cancellation is optional, but its transport mechanism is explicit. A driven publisher withdrawal or rejection can expose RESET_STREAM on the still-open send direction; the separate receive direction requires its own action and FIN is not a cancellation substitute."
+    },
+    {
+      "id": "D22-6-4-2-3-MAY-177",
+      "strength": "May",
+      "source": {
+        "section": "6.4.2.3",
+        "first_line": 2771,
+        "last_line": 2772,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint",
+      "summary": "Optionally cancel an opened request using STOP_SENDING for its receiving direction when that direction is still open, including when the endpoint has already sent FIN on its sending direction.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-cancels-open-request",
+        "d22-publisher-cancels-after-own-fin"
+      ],
+      "evaluators": [
+        "d22-cancel-request-stop-open-receive-direction"
+      ],
+      "rationale": "A requester or responder can cancel; STOP_SENDING independently terminates the receive direction. A prior local FIN cannot cancel the still-open remote direction, so include a cancellation-after-FIN scenario rather than treating half-closure as full cancellation."
+    },
+    {
+      "id": "D22-6-4-2-3-SHOULD-178",
+      "strength": "Should",
+      "source": {
+        "section": "6.4.2.3",
+        "first_line": 2782,
+        "last_line": 2782,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "rejecting endpoint",
+      "summary": "When rejecting a request without any application processing, send REQUEST_ERROR.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-unprocessed-request-rejection"
+      ],
+      "evaluators": [
+        "d22-unprocessed-rejection-request-error"
+      ],
+      "rationale": "Under a declared pre-application rejection condition, such as a configured unsupported request, observe the publisher's error response. The scenario must establish that condition independently; the wire response alone cannot prove whether application processing occurred. The clause does not prescribe one universal error code."
+    },
+    {
+      "id": "D22-6-4-2-3-SHOULD-179",
+      "strength": "Should",
+      "source": {
+        "section": "6.4.2.3",
+        "first_line": 2782,
+        "last_line": 2782,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "rejecting endpoint",
+      "summary": "When rejecting a request without any application processing, gracefully close its sending direction with FIN after REQUEST_ERROR.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-unprocessed-request-rejection"
+      ],
+      "evaluators": [
+        "d22-unprocessed-rejection-fin"
+      ],
+      "rationale": "The error response and FIN are independently observable requirements under the same declared rejection precondition. Section 6.4.2.2 requires the response before FIN; bidirectional directions close independently, so this does not require an endpoint to send FIN for its peer."
+    },
+    {
+      "id": "D22-6-5-MUST-NOT-180",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.5",
+        "first_line": 2794,
+        "last_line": 2795,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher application",
+      "summary": "Do not publish application Tracks whose Track Namespace first field is .session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-application-track-publication-under-session"
+      ],
+      "evaluators": [
+        "d22-no-application-track-publication-under-session"
+      ],
+      "rationale": "A driven application fixture identifies its attempted Track publication so the runner can detect forbidden PUBLISH or resulting Track delivery. Session-level Tracks managed by the MOQT implementation for an extension are distinct and must not be rejected merely because their first field is .session."
+    },
+    {
+      "id": "D22-6-5-MUST-NOT-181",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.5",
+        "first_line": 2794,
+        "last_line": 2795,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher application",
+      "summary": "Do not publish application namespaces whose first field is .session.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-application-namespace-publication-under-session"
+      ],
+      "evaluators": [
+        "d22-no-application-namespace-publication-under-session"
+      ],
+      "rationale": "Namespace publication is independently observable from Track publication when the driven application tries to advertise a known namespace. The restriction targets the first namespace field and the application actor, preserving MOQT-managed extension namespaces."
+    },
+    {
+      "id": "D22-6-5-MUST-NOT-182",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.5",
+        "first_line": 2795,
+        "last_line": 2796,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not forward requests for session-level Tracks to other sessions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a cross-session forwarding prohibition on relays. The contribution-publisher harness does not serve downstream subscribers or test relay forwarding."
+    },
+    {
+      "id": "D22-6-5-MUST-NOT-183",
+      "strength": "MustNot",
+      "source": {
+        "section": "6.5",
+        "first_line": 2795,
+        "last_line": 2796,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not forward requests for session-level namespaces to other sessions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Namespace request forwarding is independently prohibited but remains relay-only. It is not a ban on a publisher processing session-level requests locally."
+    },
+    {
+      "id": "D22-6-5-MUST-184",
+      "strength": "Must",
+      "source": {
+        "section": "6.5",
+        "first_line": 2807,
+        "last_line": 2808,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Reject with DOES_NOT_EXIST a request whose Track Namespace first field is .session and whose Track Name is empty.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-session-namespace-empty-track-request"
+      ],
+      "evaluators": [
+        "d22-session-empty-track-does-not-exist"
+      ],
+      "rationale": "Send a Track request with the reserved first field and an empty Track Name, including a multi-field namespace case, and observe the defined rejection. The normative sentence tests the first field, rather than only an exact one-field .session tuple."
+    },
+    {
+      "id": "D22-6-5-MUST-185",
+      "strength": "Must",
+      "source": {
+        "section": "6.5",
+        "first_line": 2811,
+        "last_line": 2812,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiving endpoint",
+      "summary": "Reject a request for an unrecognized session-level Track with REQUEST_ERROR using DOES_NOT_EXIST.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-session-namespace-unknown-track-request"
+      ],
+      "evaluators": [
+        "d22-session-unknown-track-does-not-exist"
+      ],
+      "rationale": "Use a nonempty Track Name under .session that is unrecognized by the declared extension set and inspect the publisher endpoint's error. Section 16.10 defines registration of session-level names; no arbitrary extension Track is assumed supported. Application dispatch is classified separately."
+    },
+    {
+      "id": "D22-6-5-MUST-186",
+      "strength": "Must",
+      "source": {
+        "section": "6.5",
+        "first_line": 2811,
+        "last_line": 2812,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "receiving endpoint",
+      "summary": "Reject a request for an unrecognized session-level namespace with REQUEST_ERROR using DOES_NOT_EXIST.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-session-namespace-unknown-namespace-request"
+      ],
+      "evaluators": [
+        "d22-session-unknown-namespace-does-not-exist"
+      ],
+      "rationale": "A namespace request has a different target from a Track request; submit an unrecognized namespace beneath the reserved first field and observe the specified request error. The condition is unrecognized session-level names, not every unknown application namespace."
+    },
+    {
+      "id": "D22-6-5-MUST-187",
+      "strength": "Must",
+      "source": {
+        "section": "6.5",
+        "first_line": 2811,
+        "last_line": 2812,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "receiving endpoint",
+      "summary": "Handle an unrecognized session-level Track request by rejecting it within MOQT rather than passing it to the Application.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The same normative clause also constrains internal dispatch: a wire REQUEST_ERROR cannot prove that no Application callback ran. Keep the local handling duty separate from the externally testable rejection instead of claiming the error establishes both."
+    },
+    {
+      "id": "D22-6-5-MUST-188",
+      "strength": "Must",
+      "source": {
+        "section": "6.5",
+        "first_line": 2811,
+        "last_line": 2812,
+        "occurrence": 1,
+        "clause": 4
+      },
+      "actor": "receiving endpoint",
+      "summary": "Handle an unrecognized session-level namespace request by rejecting it within MOQT rather than passing it to the Application.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Namespace dispatch can differ from Track dispatch. This application-boundary prohibition is applicable to a publisher endpoint, but the runner cannot observe callbacks and does not equate a correct error response with proof of internal routing."
+    },
+    {
+      "id": "D22-6-6-MAY-189",
+      "strength": "May",
+      "source": {
+        "section": "6.6",
+        "first_line": 2829,
+        "last_line": 2832,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Optionally treat a subscription- or request-specific error as a session error and close the entire session in selected circumstances, considering the impact on other outstanding subscriptions.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher endpoint can choose this policy, but the circumstances and consideration of other subscriptions are unspecified internal decisions. A generic close does not establish why it happened and no deterministic error stimulus must select escalation under this permission."
+    },
+    {
+      "id": "D22-6-6-1-SHOULD-190",
+      "strength": "Should",
+      "source": {
+        "section": "6.6.1",
+        "first_line": 2861,
+        "last_line": 2863,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "GOAWAY sender",
+      "summary": "After the timeout indicated by a session-level GOAWAY, close the session with GOAWAY_TIMEOUT if subscriptions or fetches remain open.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-goaway-timeout-with-open-subscription"
+      ],
+      "evaluators": [
+        "d22-goaway-timeout-session-close"
+      ],
+      "rationale": "Section 9.2 allows either endpoint to send control-stream GOAWAY, so a client publisher is included. Use a declared nonzero timeout and keep a subscription open to observe GOAWAY_TIMEOUT. Section 9.2 treats zero as no specific timeout and permits early closure; no evaluator may demand that the sender wait at least the hint. This paragraph names subscriptions or fetches, Section 9.2 says open requests, and line 2428 says a peer that has not closed; preserve those differing conditions rather than broadening this anchor."
+    },
+    {
+      "id": "D22-6-6-1-SHOULD-191",
+      "strength": "Should",
+      "source": {
+        "section": "6.6.1",
+        "first_line": 2865,
+        "last_line": 2867,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server acting as subscriber and relay",
+      "summary": "When the server is a subscriber, send GOAWAY to downstream subscribers before unsubscribing from upstream publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The stated topology has downstream subscribers and upstream publishers, so this is a relay/server-subscriber migration ordering rule. It does not require an original contribution publisher to invent downstream subscriber sessions."
+    },
+    {
+      "id": "D22-6-6-1-SHOULD-192",
+      "strength": "Should",
+      "source": {
+        "section": "6.6.1",
+        "first_line": 2869,
+        "last_line": 2871,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client endpoint",
+      "summary": "After receiving GOAWAY, wait until no Established subscriptions remain before closing the session with NO_ERROR.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-client-publisher-goaway-subscription-drain"
+      ],
+      "evaluators": [
+        "d22-goaway-client-drain-before-no-error-close"
+      ],
+      "rationale": "RECOMMENDED normalizes to Should. A client contribution publisher owns Established subscriptions as their publisher; send a control-stream GOAWAY and track subscription completion relative to its NO_ERROR close. The surrounding text allows delayed closure for more Objects and describes migration of subscriptions and published namespaces as ideal, not separate mandatory actions under this keyword. A sender's GOAWAY_TIMEOUT closure is a distinct outcome."
+    },
+    {
+      "id": "D22-7-1-MAY-193",
+      "strength": "May",
+      "source": {
+        "section": "7.1",
+        "first_line": 2897,
+        "last_line": 2897,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Optionally cache Objects; a relay is not required to provide a cache.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This grants an intermediary a caching capability. An original contribution publisher's retention of its own Objects is not the relay cache described here."
+    },
+    {
+      "id": "D22-7-1-MAY-194",
+      "strength": "May",
+      "source": {
+        "section": "7.1",
+        "first_line": 2902,
+        "last_line": 2903,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "caching relay",
+      "summary": "Ignore subsequently received Objects with the same Full Track Name, Group ID and Object ID as a cached Object.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Deduplicating received Objects in an intermediary cache does not apply to the original publisher role. The alternative update permission is classified separately at occurrence 2."
+    },
+    {
+      "id": "D22-7-1-MAY-195",
+      "strength": "May",
+      "source": {
+        "section": "7.1",
+        "first_line": 2902,
+        "last_line": 2903,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "caching relay",
+      "summary": "Use a duplicate Object to update its cached existence state from existing to not existing when the Object is no longer available.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the first permitted cache-field update, constrained to the one-way state transition in Section 2.1.1. Cache poisoning protection concerns the relay, not the contribution publisher."
+    },
+    {
+      "id": "D22-7-1-MAY-196",
+      "strength": "May",
+      "source": {
+        "section": "7.1",
+        "first_line": 2902,
+        "last_line": 2903,
+        "occurrence": 2,
+        "clause": 2
+      },
+      "actor": "caching relay",
+      "summary": "Use a duplicate Object to add, remove or update cached Object Properties, subject to the constraints of each property.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The second permitted category of cache update is independent of the existence-state update. It does not permit changes to immutable Object fields or impose relay cache behavior on a publisher."
+    },
+    {
+      "id": "D22-7-1-MUST-197",
+      "strength": "Must",
+      "source": {
+        "section": "7.1",
+        "first_line": 2921,
+        "last_line": 2922,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving Objects",
+      "summary": "Treat a Track as Malformed after receiving a duplicate Object with a different Forwarding Preference, Subgroup ID, Priority or Payload.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Although the actor is an endpoint rather than only a relay, receiving track Objects is a subscriber role. An original contribution publisher sends Objects; its own field-stability duties are separate requirements and do not make this receiver reaction applicable."
+    },
+    {
+      "id": "D22-7-1-MAY-198",
+      "strength": "May",
+      "source": {
+        "section": "7.1",
+        "first_line": 2924,
+        "last_line": 2925,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Change the representation of a range of nonexistent Objects to a semantically equivalent representation.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay permission includes equivalent End-of-Group signaling and removing a redundant Prior Group ID Gap in FETCH. It is not permission for the publisher to change which Objects exist."
+    },
+    {
+      "id": "D22-7-1-SHOULD-NOT-199",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "7.1",
+        "first_line": 2932,
+        "last_line": 2932,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "caching relay",
+      "summary": "Do not cache a received Object after recording that the Object does not exist.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This concerns relay cache admission. Section 2.1 explicitly allows late receipt after a nonexistence indication without making the Track malformed; it does not create a publisher error rule."
+    },
+    {
+      "id": "D22-7-1-SHOULD-NOT-200",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "7.1",
+        "first_line": 2932,
+        "last_line": 2932,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "caching relay",
+      "summary": "Do not forward a received Object after recording that the Object does not exist.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Forwarding is independently observable from caching but belongs to the same caching-relay actor. The runner does not forward to downstream subscribers or score publisher behavior as relay forwarding."
+    },
+    {
+      "id": "D22-7-1-MUST-201",
+      "strength": "Must",
+      "source": {
+        "section": "7.1",
+        "first_line": 2934,
+        "last_line": 2936,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "Object cache",
+      "summary": "Store every Object field defined in Section 11.1.1, except Object Properties whose definitions specify otherwise.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "In this Caching Relays section, the cache retains received Object identity, priority, forwarding, subgroup, status, property and payload fields. The publisher's original content store is not this relay cache."
+    },
+    {
+      "id": "D22-7-2-MUST-202",
+      "strength": "Must",
+      "source": {
+        "section": "7.2",
+        "first_line": 2941,
+        "last_line": 2942,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Set Forward=1 upstream when at least one downstream subscriber to the Track has Forward=1.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This aggregates downstream demand into an upstream relay subscription. When all downstream Forward values are zero, the relay has discretion; neither case creates an upstream-subscription duty for an original publisher."
+    },
+    {
+      "id": "D22-7-3-MUST-203",
+      "strength": "Must",
+      "source": {
+        "section": "7.3",
+        "first_line": 2981,
+        "last_line": 2982,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Handle Objects for the same Track received from multiple publishers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay merges multiple publication sources. The preceding paragraph allows rejection of additional publishers due to implementation constraints; this is not an unlimited-capacity requirement and not an original-publisher duty."
+    },
+    {
+      "id": "D22-7-3-MUST-204",
+      "strength": "Must",
+      "source": {
+        "section": "7.3",
+        "first_line": 2981,
+        "last_line": 2982,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Forward Objects received from multiple publishers of the same Track to matching Established subscriptions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Downstream forwarding is separate from accepting multiple upstream sources. Both operations require a relay topology outside original contribution publishing."
+    },
+    {
+      "id": "D22-7-3-SHOULD-205",
+      "strength": "Should",
+      "source": {
+        "section": "7.3",
+        "first_line": 2983,
+        "last_line": 2984,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Attempt to deduplicate Objects before forwarding, subject to implementation constraints.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The advice addresses relay forwarding of Objects from multiple publishers. It does not impose perfect deduplication or apply to an original publisher."
+    },
+    {
+      "id": "D22-7-4-MUST-206",
+      "strength": "Must",
+      "source": {
+        "section": "7.4",
+        "first_line": 2990,
+        "last_line": 2991,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Ensure subscribers are authorized to access the content associated with the requested Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The named actor is the relay handling SUBSCRIBE or FETCH. Authorization may be supplied by the request or session and its mechanism is out of scope; the sentence does not impose a relay authorization service on the publisher."
+    },
+    {
+      "id": "D22-7-4-MUST-207",
+      "strength": "Must",
+      "source": {
+        "section": "7.4",
+        "first_line": 2996,
+        "last_line": 2997,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Have an Established upstream subscription before sending SUBSCRIBE_OK for a downstream SUBSCRIBE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The upstream-before-downstream dependency is specific to relays. An original publisher owns the Track rather than subscribing to an upstream source."
+    },
+    {
+      "id": "D22-7-4-MUST-208",
+      "strength": "Must",
+      "source": {
+        "section": "7.4",
+        "first_line": 2999,
+        "last_line": 3000,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Withhold FETCH_OK until sufficient information is available to send it when that information is not available immediately upon FETCH receipt.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a relay information-availability guard; the actor is not every FETCH responder. Original-publisher FETCH response requirements are inventoried in their own sections."
+    },
+    {
+      "id": "D22-7-4-MUST-209",
+      "strength": "Must",
+      "source": {
+        "section": "7.4",
+        "first_line": 3000,
+        "last_line": 3001,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Follow Section 9.20.18 LARGEST_OBJECT constraints, including selecting the maximum upstream advertised or received Object Location.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The referenced section combines LARGEST_OBJECT received in upstream SUBSCRIBE_OK, PUBLISH or REQUEST_UPDATE_OK with received Object Locations. That relay aggregation rule remains separate from the original publisher's own LARGEST_OBJECT duties."
+    },
+    {
+      "id": "D22-7-4-MUST-NOT-210",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.4",
+        "first_line": 3011,
+        "last_line": 3012,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not reorder Objects received on a multi-object stream when forwarding them to subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Preservation of received stream order is an intermediary duty. It is not a general cross-stream ordering rule or an original-publisher scheduling rule."
+    },
+    {
+      "id": "D22-7-4-MUST-NOT-211",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.4",
+        "first_line": 3011,
+        "last_line": 3012,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not drop Objects received on a multi-object stream when forwarding them to subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Dropping and reordering are distinct forbidden forwarding actions. The preceding paragraph describes subscription filters and delivery constraints; this row preserves the multi-object-stream context without converting it into a publisher-wide loss prohibition."
+    },
+    {
+      "id": "D22-7-4-MAY-212",
+      "strength": "May",
+      "source": {
+        "section": "7.4",
+        "first_line": 3014,
+        "last_line": 3015,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Aggregate authorized subscriptions for a Track requested by multiple subscribers into a shared upstream subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Sharing upstream content among multiple downstream requests is an optional relay capability. The original publisher does not own this aggregation topology."
+    },
+    {
+      "id": "D22-7-4-MAY-213",
+      "strength": "May",
+      "source": {
+        "section": "7.4",
+        "first_line": 3019,
+        "last_line": 3029,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "aggregating relay",
+      "summary": "Combine downstream subscriber filters on an upstream subscription, up to the peer's MAX_FILTER_RANGES.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The range-count limit constrains relay aggregation; the following discussion permits removing filters or opening more upstream subscriptions if addition is impossible. None of this is an original-publisher duty."
+    },
+    {
+      "id": "D22-7-4-1-MAY-214",
+      "strength": "May",
+      "source": {
+        "section": "7.4.1",
+        "first_line": 3048,
+        "last_line": 3051,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber",
+      "summary": "Optionally migrate Established subscriptions to a new relay after GOAWAY or a network switch without QUIC Connection Migration, cancelling old subscriptions after successful new ones.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is explicitly subscriber-side relay switchover. Publisher-side migration has a separate permission in Section 7.5.1."
+    },
+    {
+      "id": "D22-7-5-SHOULD-215",
+      "strength": "Should",
+      "source": {
+        "section": "7.5",
+        "first_line": 3062,
+        "last_line": 3064,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Aggregate filters on subscriptions, especially namespace subscriptions, to conserve resources.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Aggregation combines downstream subscriber demands in a relay. An original contribution publisher has no upstream aggregation role."
+    },
+    {
+      "id": "D22-7-5-SHOULD-216",
+      "strength": "Should",
+      "source": {
+        "section": "7.5",
+        "first_line": 3062,
+        "last_line": 3064,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Propagate subscription filters upstream, especially for namespace subscriptions, to protect resources from excessive load.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Forwarding aggregated filtering needs toward upstream publishers is a relay duty independent of locally aggregating them."
+    },
+    {
+      "id": "D22-7-5-MAY-217",
+      "strength": "May",
+      "source": {
+        "section": "7.5",
+        "first_line": 3064,
+        "last_line": 3066,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "They MAY also impose limits on the number of publishers in a namespace, by rejecting or closing namespace subscriptions with the error NAMESPACE_TOO_LARGE.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-7-5-MAY-218",
+      "strength": "May",
+      "source": {
+        "section": "7.5",
+        "first_line": 3067,
+        "last_line": 3072,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Limit publishers in a namespace by rejecting or closing namespace subscriptions with NAMESPACE_TOO_LARGE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission is in Relay Resource Protection in Large Namespaces and addresses relay publisher-count limits, not a universal original-publisher error policy."
+    },
+    {
+      "id": "D22-7-5-MAY-219",
+      "strength": "May",
+      "source": {
+        "section": "7.5",
+        "first_line": 3067,
+        "last_line": 3072,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Reject or close namespace subscriptions with CONFLICTING_FILTERS when too many disjoint downstream filters are requested across subscribers.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The optional rejection addresses the relay's aggregation burden from many downstream subscribers; it does not override per-request INVALID_FILTER validation."
+    },
+    {
+      "id": "D22-7-5-MAY-220",
+      "strength": "May",
+      "source": {
+        "section": "7.5",
+        "first_line": 3067,
+        "last_line": 3072,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "relay",
+      "summary": "Reject or close namespace subscriptions with PREFIX_OVERLAP when different subscribers force an aggregated upstream subscription to overlap.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the relay's optional response to upstream aggregation constraints caused by different downstream subscribers, not a prohibition on original publishers accepting overlapping requests."
+    },
+    {
+      "id": "D22-7-6-MAY-221",
+      "strength": "May",
+      "source": {
+        "section": "7.6",
+        "first_line": 3090,
+        "last_line": 3091,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Pause a PUBLISH-initiated subscription using REQUEST_UPDATE with Forward State=0 until subscribers for the new Track are known.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay chooses whether to pause pending downstream interest. Publisher handling of a received Forward update is independently applicable elsewhere, but does not change the actor of this permission."
+    },
+    {
+      "id": "D22-7-6-MUST-222",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3098,
+        "last_line": 3100,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Verify that a publisher is authorized to publish the Tracks whose namespace matches its PUBLISH_NAMESPACE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This authorization check belongs to the relay receiving the namespace publication. The checked set of Tracks differs from the individual-track check in the next clause."
+    },
+    {
+      "id": "D22-7-6-MUST-223",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3098,
+        "last_line": 3100,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Verify that a publisher is authorized to publish the Full Track Name in a PUBLISH message.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay verifies an individual Track publication. The contribution publisher is the subject of that authorization decision, not the actor required to perform this relay check."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-224",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3100,
+        "last_line": 3103,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not assume authorization to publish a single Track implicitly authorizes the publisher to publish other Tracks.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay authorization boundary has a line-split MUST NOT and a sentence continuing across the page break. It does not prescribe the original publisher's authorization policy."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-225",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3100,
+        "last_line": 3103,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not assume authorization to publish a single Track implicitly authorizes the publisher to publish Track Namespaces.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Namespace publication authorization is distinct from permission to publish additional individual Tracks. Both prohibitions address relay policy enforcement."
+    },
+    {
+      "id": "D22-7-6-MUST-226",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3104,
+        "last_line": 3104,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Send an explicit PUBLISH_NAMESPACE when requesting that subscriptions in a Namespace be routed to the publisher.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-namespace-routing-announcement"
+      ],
+      "evaluators": [
+        "d22-explicit-namespace-publication-for-routing"
+      ],
+      "rationale": "A driven publisher can be configured to request namespace routing, and the receiving relay can observe the explicit announcement. A PUBLISH for one Track alone does not satisfy the conditional namespace-announcement duty; authorization details remain application-specific."
+    },
+    {
+      "id": "D22-7-6-MUST-227",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3123,
+        "last_line": 3123,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Send SUBSCRIBE to all publishers matching either an Established subscription's Full Track Name or the namespace-prefix rules for published Namespaces.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Matching requires exact ordered namespace fields, not string-prefix matching, as shown by the foo/bar versus foobar example. Selecting and contacting upstream publishers is a relay duty."
+    },
+    {
+      "id": "D22-7-6-MUST-228",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3129,
+        "last_line": 3130,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "When making an upstream FETCH with multiple available matching publishers, send the FETCH to at least one of them.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The preceding sentence applies SUBSCRIBE matching rules to available FETCH sources; unlike SUBSCRIBE fan-out, this rule requires at least one source, not all. Original publishers do not choose upstream sources."
+    },
+    {
+      "id": "D22-7-6-MUST-229",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3146,
+        "last_line": 3147,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Reply with SUBSCRIBE_OK to an authorized SUBSCRIBE for a Track that has at least one Established upstream subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The success precondition is relay upstream state, not original-publisher state. It must not be copied as a prerequisite for an original publisher to accept SUBSCRIBE."
+    },
+    {
+      "id": "D22-7-6-MUST-230",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3148,
+        "last_line": 3149,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "If the SUBSCRIBE is not paused and the upstream subscriptions are paused, the Relay MUST resume the upstream subscriptions with REQUEST_UPDATE to all publishers",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-7-6-MUST-231",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3151,
+        "last_line": 3152,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "If no Established upstream subscription exists for a requested Track, send SUBSCRIBE to each publisher that published its namespace or a prefix thereof.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay rule creates upstream subscriptions rather than resuming existing ones. It does not require original publishers to become subscribers."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-232",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3153,
+        "last_line": 3153,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "If the SUBSCRIBE is not paused, then the Relay MUST NOT pause when subscribing upstream.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-7-6-MUST-233",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3155,
+        "last_line": 3157,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "On receiving PUBLISH, send PUBLISH to each subscriber with a matching SUBSCRIBE_TRACKS namespace prefix, except one whose SUBSCRIBE is already awaiting a publisher for that Track.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This relay fan-out rule has an explicit pending-SUBSCRIBE exception in the same paragraph. It is not an unqualified requirement to duplicate publication to a waiting subscriber."
+    },
+    {
+      "id": "D22-7-6-MUST-234",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3159,
+        "last_line": 3160,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "When an incoming PUBLISH supplies a Track for which a downstream SUBSCRIBE is waiting, proceed with that SUBSCRIBE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 9.20.7 describes the relay's RENDEZVOUS_TIMEOUT wait. Completing that pending downstream request is a relay duty separate from the prohibition on also forwarding PUBLISH."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-235",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3159,
+        "last_line": 3160,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not also forward an incoming PUBLISH to a subscriber whose pending SUBSCRIBE for that Track is being fulfilled.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This prevents duplicate downstream publication during relay rendezvous resolution. It does not constrain a publisher's independent PUBLISH and SUBSCRIBE processing without that relay condition."
+    },
+    {
+      "id": "D22-7-6-MUST-236",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3163,
+        "last_line": 3164,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Respond with PUBLISH_OK to an authorized PUBLISH for a Track that has Established downstream subscriptions.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay-only source sentence literally names PUBLISH_OK. Draft-21 Table 5 marks the legacy 0x1E type reserved and Section 9.3 defines REQUEST_OK aliases; this catalog preserves the source wording and does not invent a PUBLISH_OK wire message or import another draft's type."
+    },
+    {
+      "id": "D22-7-6-MUST-237",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3165,
+        "last_line": 3166,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "If at least one downstream subscriber for the Track is not paused, the Relay MUST resume the upstream subscription with REQUEST_UPDATE, if paused.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-7-6-MUST-238",
+      "strength": "Must",
+      "source": {
+        "section": "7.6",
+        "first_line": 3170,
+        "last_line": 3171,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "On an authorized PUBLISH_NAMESPACE matching subscriptions to other upstream sessions, send its publisher a SUBSCRIBE for every matching subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay attaches an additional upstream publisher to its existing subscriptions. No such upstream session graph exists in the original-publisher role."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-239",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3177,
+        "last_line": 3180,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not propagate to another Session an unknown or invalid control message that caused the receiving Session to close.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The rule isolates relay sessions so one erroneous control message cannot tear down an unrelated session. Original contribution publishing does not forward peer control messages between sessions."
+    },
+    {
+      "id": "D22-7-6-MUST-NOT-240",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.6",
+        "first_line": 3177,
+        "last_line": 3180,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not propagate to another Session an unknown or invalid Object that caused the receiving Session to close.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Isolating invalid received Objects is distinct from isolating control messages, but still requires an intermediary forwarding role outside this publisher target."
+    },
+    {
+      "id": "D22-7-6-1-MAY-241",
+      "strength": "May",
+      "source": {
+        "section": "7.6.1",
+        "first_line": 3184,
+        "last_line": 3187,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher",
+      "summary": "Optionally establish a new Session and republish via PUBLISH_NAMESPACE and/or PUBLISH after relay GOAWAY or a network switch without QUIC Connection Migration; continue publishing on the old Session until subscriptions have migrated.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-graceful-relay-switchover"
+      ],
+      "evaluators": [
+        "d22-publisher-overlapping-relay-migration"
+      ],
+      "rationale": "Two controlled relay endpoints can observe new-session publication and continued old-session delivery while subscriptions move. Use the new URI if GOAWAY supplies one. This is an optional compound migration capability, not mandatory reconnection or a guarantee about the relay's downstream deduplication."
+    },
+    {
+      "id": "D22-7-7-MUST-242",
+      "strength": "Must",
+      "source": {
+        "section": "7.7",
+        "first_line": 3210,
+        "last_line": 3212,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Include all associated Track Properties when sending PUBLISH, SUBSCRIBE_OK, TRACK_STATUS_OK or FETCH_OK unless the property's specification permits omission.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 8.4 supplies property processing exceptions, but this preservation requirement explicitly names the relay. It is not a generic requirement that an original publisher invent or forward properties received from another publisher."
+    },
+    {
+      "id": "D22-7-8-MUST-NOT-243",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.8",
+        "first_line": 3217,
+        "last_line": 3218,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not modify Object fields when forwarding, except Object Properties as permitted by Section 8.4.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The Section 11.1.1 Object header is the relay-visible representation being preserved. This is an intermediary nonmodification duty, distinct from the publisher's original Object construction."
+    },
+    {
+      "id": "D22-7-8-MUST-244",
+      "strength": "Must",
+      "source": {
+        "section": "7.8",
+        "first_line": 3220,
+        "last_line": 3220,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Treat Object payloads as opaque.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Only the original publisher and end subscriber interpret the payload in this architecture. The relay opacity rule must not prohibit the publisher from creating or interpreting its own payloads."
+    },
+    {
+      "id": "D22-7-8-MUST-NOT-245",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.8",
+        "first_line": 3220,
+        "last_line": 3221,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not combine Object payloads.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Combining upstream Object payloads is one independently prohibited relay transformation. Original-publisher payload generation is outside this rule's actor."
+    },
+    {
+      "id": "D22-7-8-MUST-NOT-246",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.8",
+        "first_line": 3220,
+        "last_line": 3221,
+        "occurrence": 2,
+        "clause": 2
+      },
+      "actor": "relay",
+      "summary": "Do not split Object payloads.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Splitting a received Object is a separate prohibited relay transformation. It does not constrain how the original publisher initially chooses Object boundaries."
+    },
+    {
+      "id": "D22-7-8-MUST-NOT-247",
+      "strength": "MustNot",
+      "source": {
+        "section": "7.8",
+        "first_line": 3220,
+        "last_line": 3221,
+        "occurrence": 2,
+        "clause": 3
+      },
+      "actor": "relay",
+      "summary": "Do not otherwise modify Object payloads.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The remaining relay payload-mutation prohibition includes transformations other than combining or splitting. The original publisher's immutable-content obligation is separately defined in Section 2.1."
+    },
+    {
+      "id": "D22-8-3-MUST-NOT-248",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.3",
+        "first_line": 3377,
+        "last_line": 3377,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint encoding Key-Value-Pairs",
+      "summary": "Do not encode a Delta Type whose sum with the previous Type exceeds 2^64 - 1; the initial previous Type is zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-key-value-type-deltas"
+      ],
+      "evaluators": [
+        "d22-emitted-key-value-types-within-uint64"
+      ],
+      "rationale": "A publisher emits Key-Value-Pairs in SETUP and Track/Object Properties. Decode the draft-21 1-to-9-byte integer form with checked arithmetic at the peer; this is not QUIC's 62-bit integer encoding. Receiver rejection is a separate anchor."
+    },
+    {
+      "id": "D22-8-3-MUST-249",
+      "strength": "Must",
+      "source": {
+        "section": "8.3",
+        "first_line": 3378,
+        "last_line": 3379,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving Key-Value-Pairs",
+      "summary": "Close the Session with PROTOCOL_VIOLATION when a received Delta Type would make the previous Type plus Delta Type exceed 2^64 - 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-key-value-type-overflow"
+      ],
+      "evaluators": [
+        "d22-key-value-type-overflow-protocol-violation"
+      ],
+      "rationale": "Section 9.1 makes SETUP Options Key-Value-Pairs, so a contribution publisher receives this structure even though it is not an Object subscriber. Unknown SETUP Options are ignored semantically only after their common structure is valid."
+    },
+    {
+      "id": "D22-8-3-MUST-250",
+      "strength": "Must",
+      "source": {
+        "section": "8.3",
+        "first_line": 3400,
+        "last_line": 3400,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving Key-Value-Pairs",
+      "summary": "Close the session with PROTOCOL_VIOLATION when an odd-Type Key-Value-Pair declares a Value length exceeding 2^16 - 1 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-key-value-declared-length-overflow"
+      ],
+      "evaluators": [
+        "d22-key-value-length-overflow-protocol-violation"
+      ],
+      "rationale": "SETUP provides a publisher-receivable Key-Value-Pair context. Stimulate the oversized declared length without allocating that payload; control-message length is also bounded, and an invalid enclosing frame must not be mistaken for proof of this specific length check. The same PROTOCOL_VIOLATION can have multiple causes."
+    },
+    {
+      "id": "D22-8-3-MUST-251",
+      "strength": "Must",
+      "source": {
+        "section": "8.3",
+        "first_line": 3407,
+        "last_line": 3408,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a known Key-Value-Pair Type",
+      "summary": "Close the session with KEY_VALUE_FORMATTING_ERROR when an understood Type's Value or Length/Value does not match that Type's defined serialization.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-known-key-value-malformed-value"
+      ],
+      "evaluators": [
+        "d22-known-key-value-formatting-error"
+      ],
+      "rationale": "A known SETUP Option with malformed serialization exercises this rule on a publisher receiver. The understood-Type condition distinguishes it from unknown-option handling, and the prescribed error differs from numeric delta or length overflow."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-252",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3433,
+        "last_line": 3435,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving an unsupported Property",
+      "summary": "Do not modify an unsupported Property, except that an unsupported Mandatory Track Property follows Section 3.6 instead.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay preserves unknown properties without needing semantic understanding. Section 3.6 prevents processing or forwarding an unsupported mandatory Track property; it is not a general exception permitting mutation. An original publisher does not relay these properties."
+    },
+    {
+      "id": "D22-8-4-MUST-253",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3433,
+        "last_line": 3435,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay receiving an unsupported Property",
+      "summary": "Forward an unsupported Property unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unknown-property forwarding belongs to the relay. Preserving the mandatory-property exception avoids requiring forwarding of a Track whose extension is not understood."
+    },
+    {
+      "id": "D22-8-4-MUST-254",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3434,
+        "last_line": 3435,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay receiving an unsupported Property",
+      "summary": "Cache an unsupported Property with its Track or Object unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This specifies what accompanies a relay's cached Track or Object; Section 7.1 does not require relays to cache in the first place. Neither cache support nor this preservation rule is an original-publisher obligation."
+    },
+    {
+      "id": "D22-8-4-SHOULD-255",
+      "strength": "Should",
+      "source": {
+        "section": "8.4",
+        "first_line": 3437,
+        "last_line": 3438,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "caching relay",
+      "summary": "When a Track or Object arrives with a different unknown-property set, replace cached unknown values with the most recent set, removing values absent from that new set.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Replacement includes removal as part of one set-replacement operation. This is relay cache management, not an original-publisher property creation rule."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-256",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3439,
+        "last_line": 3440,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay",
+      "summary": "Do not attempt to merge unknown-property sets received in different messages.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The relay lacks the property semantics needed to merge sets safely. The prohibition applies even though replacement of a cached set is a separate recommendation."
+    },
+    {
+      "id": "D22-8-4-MUST-257",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3442,
+        "last_line": 3443,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Follow the processing rules in the definition of every supported Property.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This directs the relay to each property's specified processing rules, which can authorize exceptions to the defaults below. It does not transfer relay-specific processing into original-publisher scope."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-258",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3444,
+        "last_line": 3446,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Do not modify a supported Property unless its definition permits modification.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Modification is a distinct relay operation from adding or removing the Property. The default preserves a received value but allows exceptions in its definition."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-259",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3444,
+        "last_line": 3446,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Do not add a supported Property unless its definition permits addition.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This constrains relay insertion of properties, not the original publisher's creation of its own metadata. Property-specific exceptions remain permitted."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-260",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3444,
+        "last_line": 3446,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Do not remove a supported Property unless its definition permits removal.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Relay removal is independently constrained by the property's definition. It is not a requirement that an original publisher retain all metadata it could have produced."
+    },
+    {
+      "id": "D22-8-4-MUST-261",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3444,
+        "last_line": 3446,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Forward a supported Property to downstream subscribers unless its definition permits otherwise.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The default is preservation across a relay hop, subject to the property's explicit rules. Downstream property forwarding is outside the original-publisher role."
+    },
+    {
+      "id": "D22-8-4-MUST-262",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3445,
+        "last_line": 3446,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay supporting a Property",
+      "summary": "Cache a supported Property with its Track or Object when that Track or Object is cached, unless the property's definition permits otherwise.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The conditional explicitly depends on whether the relay caches the Track or Object. It neither requires relay caching nor applies to original-publisher content retention."
+    },
+    {
+      "id": "D22-8-4-MAY-263",
+      "strength": "May",
+      "source": {
+        "section": "8.4",
+        "first_line": 3477,
+        "last_line": 3478,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "* 0x3800 to 0x3FFF (2-byte encoding): 2048 code points (including grease Section 13) for applications with moderate space constraints Applications MAY use code ",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-8-4-MUST-264",
+      "strength": "Must",
+      "source": {
+        "section": "8.4",
+        "first_line": 3479,
+        "last_line": 3481,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay not understanding the application format",
+      "summary": "Forward application-specific Properties unchanged when the application format is not understood.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Opaque preservation concerns the intermediary relay. The original publisher may know and assign the format-specific meaning, so the relay's lack-of-understanding condition cannot be imposed on it."
+    },
+    {
+      "id": "D22-8-4-MUST-NOT-265",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.4",
+        "first_line": 3480,
+        "last_line": 3481,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay not understanding the application format",
+      "summary": "Do not attempt to interpret the semantic meaning of application-specific Properties when the application format is not understood.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Code points can mean different things for different applications. This is a relay interpretation prohibition, while publishers and subscribers may use their shared Track or application context."
+    },
+    {
+      "id": "D22-8-5-MUST-266",
+      "strength": "Must",
+      "source": {
+        "section": "8.5",
+        "first_line": 3499,
+        "last_line": 3500,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a Reason Phrase",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a received Reason Phrase length exceeds 1024 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-request-error-oversized-reason"
+      ],
+      "evaluators": [
+        "d22-oversized-reason-phrase-protocol-violation"
+      ],
+      "rationale": "The relay can reject a publisher-originated request with REQUEST_ERROR carrying a Reason Phrase, so this common receiver check is reachable in publisher scope. Use a valid enclosing frame and a 1025-byte phrase to isolate the bound."
+    },
+    {
+      "id": "D22-8-6-MUST-267",
+      "strength": "Must",
+      "source": {
+        "section": "8.6",
+        "first_line": 3535,
+        "last_line": 3536,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a Range Filter request",
+      "summary": "Reject the request with INVALID_FILTER if adding a Range Start delta to the previous End, or an End delta to its Start, would exceed 2^64 - 1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-range-filter-start-delta-overflow",
+        "d22-range-filter-end-delta-overflow"
+      ],
+      "evaluators": [
+        "d22-range-delta-overflow-invalid-filter"
+      ],
+      "rationale": "A publisher receives Range Filters in SUBSCRIBE, FETCH or updates where permitted. Exercise a supported filter form with valid scope and an otherwise valid request, checking a request error rather than session closure. Zero length removes a filter, and an absent final End is an open range, not overflow."
+    },
+    {
+      "id": "D22-8-7-MUST-268",
+      "strength": "Must",
+      "source": {
+        "section": "8.7",
+        "first_line": 3565,
+        "last_line": 3565,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint encoding a Track Namespace",
+      "summary": "Encode at least one byte in every Track Namespace Field Value.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-emitted-namespace-fields"
+      ],
+      "evaluators": [
+        "d22-emitted-namespace-fields-nonempty"
+      ],
+      "rationale": "Inspect namespace fields in publisher-originated PUBLISH_NAMESPACE or PUBLISH. This forbids zero-byte fields, not a zero-field namespace tuple: Section 2.4.1 (lines 818-819) permits between 0 and 32 namespace fields. Receiver rejection is a separate anchor."
+    },
+    {
+      "id": "D22-8-7-MUST-269",
+      "strength": "Must",
+      "source": {
+        "section": "8.7",
+        "first_line": 3567,
+        "last_line": 3568,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a Track Namespace",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a received Track Namespace Field has length zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-empty-namespace-field"
+      ],
+      "evaluators": [
+        "d22-empty-namespace-field-protocol-violation"
+      ],
+      "rationale": "A relay-originated SUBSCRIBE includes a namespace that the publisher parses. Send a nonzero field count containing a zero-byte field, which is distinct from the valid zero-field namespace tuple permitted by Section 2.4.1 (lines 818-819)."
+    },
+    {
+      "id": "D22-8-7-MUST-270",
+      "strength": "Must",
+      "source": {
+        "section": "8.7",
+        "first_line": 3571,
+        "last_line": 3572,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a Track Namespace",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a received Track Namespace contains more than 32 fields.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-33-namespace-fields"
+      ],
+      "evaluators": [
+        "d22-too-many-namespace-fields-protocol-violation"
+      ],
+      "rationale": "The publisher receives namespaces in SUBSCRIBE and FETCH. Use 33 nonempty small fields to isolate the field-count bound from empty-field and total-length violations."
+    },
+    {
+      "id": "D22-8-7-MUST-271",
+      "strength": "Must",
+      "source": {
+        "section": "8.7",
+        "first_line": 3579,
+        "last_line": 3580,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a Track Namespace",
+      "summary": "Close the session with PROTOCOL_VIOLATION when the sum of received Track Namespace Field Length values exceeds 4096 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-tracks-oversized-namespace"
+      ],
+      "evaluators": [
+        "d22-oversized-namespace-protocol-violation"
+      ],
+      "rationale": "SUBSCRIBE_TRACKS carries a namespace prefix to the publisher without a Track Name. The bound sums namespace field payload lengths, excluding the byte widths of the encoded length-prefix fields and field-count integer; use valid field count and nonempty fields."
+    },
+    {
+      "id": "D22-8-7-MUST-272",
+      "strength": "Must",
+      "source": {
+        "section": "8.7",
+        "first_line": 3579,
+        "last_line": 3580,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving a Full Track Name",
+      "summary": "Close the session with PROTOCOL_VIOLATION when the sum of namespace field lengths and Track Name length exceeds 4096 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-oversized-full-track-name"
+      ],
+      "evaluators": [
+        "d22-oversized-full-track-name-protocol-violation"
+      ],
+      "rationale": "SUBSCRIBE and FETCH carry Full Track Names to the publisher. Keep the namespace within its own limit and exceed the combined bound using Track Name bytes, excluding length-prefix encoding overhead, to distinguish this from the namespace-only check."
+    },
+    {
+      "id": "D22-8-8-SHOULD-273",
+      "strength": "Should",
+      "source": {
+        "section": "8.8",
+        "first_line": 3596,
+        "last_line": 3596,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation rendering namespace and Track Names",
+      "summary": "Render namespace tuple elements in order separated by a hyphen, and separate the final namespace element from the Track Name with a double hyphen (--).",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "RECOMMENDED normalizes to Should. Publishers may render names for logs, filenames or authorization, but MOQT carries binary names; the protocol boundary does not expose this local representation. Diagnostic adapter text is not a normative wire oracle."
+    },
+    {
+      "id": "D22-8-8-SHOULD-274",
+      "strength": "Should",
+      "source": {
+        "section": "8.8",
+        "first_line": 3596,
+        "last_line": 3596,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "implementation rendering namespace and Track Names",
+      "summary": "Render a-z, A-Z, 0-9 and underscore bytes literally, and every other byte as a period followed by exactly two lowercase hexadecimal digits.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Escaping is independent of tuple delimiters but shares the recommendation. It applies conditionally to a publisher's local name rendering, which is not visible through the binary MOQT wire format."
+    }
+  ]
+}

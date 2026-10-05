@@ -1,0 +1,482 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-15-3-3-MUST-586",
+      "strength": "Must",
+      "source": {
+        "section": "15.3.3",
+        "first_line": 7231,
+        "last_line": 7232,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay accepting namespace publication",
+      "summary": "Ensure a client cannot publish to namespaces belonging to another identity.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a relay authorization duty protecting namespace ownership. The contribution publisher is the publishing client, not the enforcing relay."
+    },
+    {
+      "id": "D22-15-3-3-MUST-587",
+      "strength": "Must",
+      "source": {
+        "section": "15.3.3",
+        "first_line": 7231,
+        "last_line": 7232,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "relay accepting track publication",
+      "summary": "Ensure a client cannot publish to tracks belonging to another identity.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Track ownership is protected independently of namespace publication by the named relay actor. This harness does not score its target publisher as a relay receiving another publisher's tracks."
+    },
+    {
+      "id": "D22-15-3-3-MUST-588",
+      "strength": "Must",
+      "source": {
+        "section": "15.3.3",
+        "first_line": 7237,
+        "last_line": 7238,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay authorizing publication",
+      "summary": "Verify that the authenticated identity or token scope permits publishing to the specific namespace.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The authorization framework defines the namespace mapping, and the relay verifies it. Identity-based and token-based checks are alternative authorization mechanisms; the text does not require both mechanisms or prescribe an error code."
+    },
+    {
+      "id": "D22-15-5-SHOULD-589",
+      "strength": "Should",
+      "source": {
+        "section": "15.5",
+        "first_line": 7304,
+        "last_line": 7305,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint setting flow control limits",
+      "summary": "Set flow control limits based on the anticipated bitrate.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Advertised transport credit is observable, but the endpoint's anticipated bitrate and how it influenced credit selection are not. The draft supplies no required ratio or algorithm, so a particular flow-control value cannot independently prove this recommendation."
+    },
+    {
+      "id": "D22-15-5-MAY-590",
+      "strength": "May",
+      "source": {
+        "section": "15.5",
+        "first_line": 7307,
+        "last_line": 7309,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint limiting concurrent streams",
+      "summary": "Impose a MAX STREAM count limit to restrict concurrent streams in flight.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-stream-count-limit"
+      ],
+      "evaluators": [
+        "d22-stream-count-limit-capability"
+      ],
+      "rationale": "Observe the publisher's advertised transport stream credit and subsequent limit updates while opening bounded concurrent requests within granted credit. This optional capability has no mandated numeric threshold, error response or requirement to reject requests that remain within the allowed stream count."
+    },
+    {
+      "id": "D22-15-5-MUST-591",
+      "strength": "Must",
+      "source": {
+        "section": "15.5",
+        "first_line": 7313,
+        "last_line": 7314,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher that has reached a resource limit",
+      "summary": "Cancel a stream after reaching a resource limit, preferably the stream with the lowest priority.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher's resource threshold and whether it has been reached are not exposed at this protocol boundary. Starvation or congestion alone does not establish that precondition. The word preferably does not mandate selection of the lowest-priority stream, and no specific cancellation code is prescribed by this sentence."
+    },
+    {
+      "id": "D22-15-5-MUST-592",
+      "strength": "Must",
+      "source": {
+        "section": "15.5",
+        "first_line": 7313,
+        "last_line": 7314,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber that has reached a resource limit",
+      "summary": "Cancel a stream after reaching a resource limit, preferably the stream with the lowest priority.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the distinct subscriber obligation in the same sentence. Receiving-side cancellation by the relay harness is not behavior of the target contribution publisher."
+    },
+    {
+      "id": "D22-15-7-1-SHOULD-593",
+      "strength": "Should",
+      "source": {
+        "section": "15.7.1",
+        "first_line": 7359,
+        "last_line": 7361,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "relay maintaining request state",
+      "summary": "Provide mechanisms to prevent PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS floods from bloating data structures.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The named actor is a Relay. Stream limits and application rejection policies are illustrative mechanisms, not additional prescribed wire behaviors for an original publisher."
+    },
+    {
+      "id": "D22-15-8-SHOULD-594",
+      "strength": "Should",
+      "source": {
+        "section": "15.8",
+        "first_line": 7399,
+        "last_line": 7400,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation sending MOQT_IMPLEMENTATION",
+      "summary": "Send only the minimum implementation information necessary for interoperability debugging.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The option's bytes are visible, but necessity for debugging has no objective protocol oracle or required grammar. A short name and major version are described as typically sufficient, not as a mandatory exact format."
+    },
+    {
+      "id": "D22-15-8-SHOULD-NOT-595",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "15.8",
+        "first_line": 7403,
+        "last_line": 7405,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation sending MOQT_IMPLEMENTATION",
+      "summary": "Do not include detailed system information in implementation identification.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Determining whether free-form text describes detailed system information requires implementation and deployment context. The draft defines no deterministic identifier grammar or privacy classifier; examining raw option bytes alone is insufficient."
+    },
+    {
+      "id": "D22-15-8-SHOULD-NOT-596",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "15.8",
+        "first_line": 7403,
+        "last_line": 7405,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "implementation sending MOQT_IMPLEMENTATION",
+      "summary": "Do not include build numbers in implementation identification.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A numeric string could be an allowed major version or a build number; the wire option does not label these fields. External knowledge of the implementation's version scheme is needed to judge this recommendation."
+    },
+    {
+      "id": "D22-15-8-SHOULD-NOT-597",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "15.8",
+        "first_line": 7403,
+        "last_line": 7405,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "implementation sending MOQT_IMPLEMENTATION",
+      "summary": "Do not include other attributes that could uniquely identify a specific instance or user.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Uniqueness and user correlation depend on deployment populations and information outside this session. The recommendation cannot be reduced to a length limit, numeric-character ban or exact wire string comparison."
+    },
+    {
+      "id": "D22-15-8-MAY-598",
+      "strength": "May",
+      "source": {
+        "section": "15.8",
+        "first_line": 7407,
+        "last_line": 7408,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "privacy-conscious deployment",
+      "summary": "Omit the MOQT_IMPLEMENTATION option entirely.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-identity-disabled"
+      ],
+      "evaluators": [
+        "d22-privacy-identity-omission-capability"
+      ],
+      "rationale": "A driven publisher configured for identity omission can demonstrate the capability through an absent option in SETUP. This permission qualifies the Section 9.1.5 recommendation; omission is not a conformance failure, and lack of configurable omission is only an optional-capability limitation."
+    },
+    {
+      "id": "D22-15-8-MAY-599",
+      "strength": "May",
+      "source": {
+        "section": "15.8",
+        "first_line": 7407,
+        "last_line": 7408,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "privacy-conscious deployment",
+      "summary": "Send a generic value in the MOQT_IMPLEMENTATION option.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-generic-identity"
+      ],
+      "evaluators": [
+        "d22-privacy-generic-identity-capability"
+      ],
+      "rationale": "Use a known generic value selected by a driven privacy configuration and inspect SETUP. This tests the alternative capability to omission, not whether arbitrary observed text is sufficiently anonymous or uniquely identifying. No exact generic string is mandated by the draft."
+    },
+    {
+      "id": "D22-15-8-MAY-600",
+      "strength": "May",
+      "source": {
+        "section": "15.8",
+        "first_line": 7410,
+        "last_line": 7411,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation exposing identity configuration",
+      "summary": "Provide users with the ability to configure MOQT_IMPLEMENTATION.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-configured-identity"
+      ],
+      "evaluators": [
+        "d22-user-identity-configuration-capability"
+      ],
+      "rationale": "The driven adapter applies the target's exposed user configuration and compares the resulting option across sessions. This is an optional user capability, not a new MOQT configuration message; absence of the feature does not fail required conformance."
+    },
+    {
+      "id": "D22-15-8-MAY-601",
+      "strength": "May",
+      "source": {
+        "section": "15.8",
+        "first_line": 7410,
+        "last_line": 7411,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "implementation exposing identity configuration",
+      "summary": "Provide users with the ability to disable MOQT_IMPLEMENTATION.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-identity-enabled",
+        "d22-publisher-identity-disabled"
+      ],
+      "evaluators": [
+        "d22-user-identity-disable-capability"
+      ],
+      "rationale": "Toggle an exposed user setting through the driven adapter and observe option presence or absence in successive SETUP messages. This is distinct from a deployment that always omits identification without any user control. The optional setting is not required of every publisher."
+    },
+    {
+      "id": "D22-15-9-SHOULD-602",
+      "strength": "Should",
+      "source": {
+        "section": "15.9",
+        "first_line": 7422,
+        "last_line": 7425,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint that logs or renders a peer Reason Phrase",
+      "summary": "Sanitize a peer's Reason Phrase before an endpoint logs or renders it.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can receive an untrusted Reason Phrase in REQUEST_ERROR, but its local logging and rendering are not protocol output. Publisher logs are optional diagnostics, not a complete view of every sink. Escaping bytes outside printable ASCII is an example, not a mandated wire encoding or sanitizer; the recommendation applies only when text is logged or rendered."
+    },
+    {
+      "id": "D22-15-9-SHOULD-603",
+      "strength": "Should",
+      "source": {
+        "section": "15.9",
+        "first_line": 7422,
+        "last_line": 7425,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint that logs or renders a peer MOQT_IMPLEMENTATION option",
+      "summary": "Sanitize a peer's MOQT_IMPLEMENTATION value before an endpoint logs or renders it.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher can receive the relay's sender-controlled option during SETUP. Local log or display sanitation is not observable from the subsequent MOQT exchange. Printable-ASCII escaping is only an example: UTF-8 validity alone is not sanitation, and this guidance does not require the sender to rewrite its wire string."
+    },
+    {
+      "id": "D22-16-4-MUST-604",
+      "strength": "Must",
+      "source": {
+        "section": "16.4",
+        "first_line": 7553,
+        "last_line": 7554,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving SETUP",
+      "summary": "Ignore unknown Setup Options as specified in Section 9.1.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-grease-setup-options"
+      ],
+      "evaluators": [
+        "d22-grease-setup-options-ignored"
+      ],
+      "rationale": "Although embedded in the IANA section, this is an endpoint receive rule, including a contribution publisher receiving relay SETUP. Valid unknown options are skipped using their encoding; unknown Message Parameters and malformed Key-Value-Pairs retain their separate error rules."
+    },
+    {
+      "id": "D22-16-4-SHOULD-605",
+      "strength": "Should",
+      "source": {
+        "section": "16.4",
+        "first_line": 7570,
+        "last_line": 7570,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "Setup Option registrant needing custom types",
+      "summary": "Request a provisional registration for custom Setup Options.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an implementer or extension registrant's coordination duty because Setup Options have no private or application-specific range. It is not a requirement to reject an unregistered unknown option, and does not copy the distinct Property registry's application-specific ranges."
+    },
+    {
+      "id": "D22-16-8-MUST-606",
+      "strength": "Must",
+      "source": {
+        "section": "16.8",
+        "first_line": 7758,
+        "last_line": 7760,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving unknown odd Property types",
+      "summary": "Ignore unknown odd Property types by skipping their values using the Key-Value-Pair length field.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This IANA paragraph specifies endpoint parsing, not registration. In the contribution role the publisher sends Track and Object properties; Section 9.3 requires its publication and update OK responses to contain no Track Properties. Unsupported Mandatory Track Properties retain Section 3.6 handling, and relay forwarding and caching duties under Section 8.4 are not waived. Unknown types do not excuse malformed length framing."
+    },
+    {
+      "id": "D22-16-8-MUST-607",
+      "strength": "Must",
+      "source": {
+        "section": "16.8",
+        "first_line": 7758,
+        "last_line": 7760,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving unknown even Property types",
+      "summary": "Ignore unknown even Property types by skipping their values through parsing a variable-length integer.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is an endpoint receive obligation, but the original publisher has no incoming subscribed Track or Object property context. Section 9.3 makes nonempty properties in its publication OK responses a separate placement violation. Section 3.6 mandatory-property handling and Section 8.4 relay preservation still apply to their own actors; ignoring semantics does not permit ignoring malformed integer framing."
+    },
+    {
+      "id": "D22-16-8-MUST-608",
+      "strength": "Must",
+      "source": {
+        "section": "16.8",
+        "first_line": 7777,
+        "last_line": 7789,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "Property registrant for the mandatory range",
+      "summary": "Give Properties registered in 0x4000-0x7FFF Track scope.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The registry policy constrains new Property registrations, not a publisher's received or emitted messages. Section 3.6 separately defines runtime handling of Mandatory Track Properties; this registration row does not replace it."
+    },
+    {
+      "id": "D22-16-8-MUST-NOT-609",
+      "strength": "MustNot",
+      "source": {
+        "section": "16.8",
+        "first_line": 7778,
+        "last_line": 7789,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "Property registrant for the mandatory range",
+      "summary": "Do not register Object scope Properties in 0x4000-0x7FFF.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This prohibition concerns IANA registration in the Mandatory Track Property range. It is separate from the Section 3.6 rule that an Object carrying such a Property is malformed."
+    },
+    {
+      "id": "D22-16-9-MUST-610",
+      "strength": "Must",
+      "source": {
+        "section": "16.9",
+        "first_line": 7816,
+        "last_line": 7817,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "Object Status registrant",
+      "summary": "Indicate in each Object Status registration whether that status permits a payload.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is the registrant's payload-permission declaration, not a new publisher payload rule. Section 11.1.2 consumes the registry permission for wire Objects; this row does not freeze all future nonzero status values to empty payloads."
+    }
+  ]
+}

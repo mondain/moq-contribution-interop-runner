@@ -1,0 +1,2283 @@
+{
+  "draft": 22,
+  "source_sha256": "1a725f10db526d94f915b30db9004821d86e57afcdde10789c54fee64b3056b5",
+  "complete": false,
+  "requirements": [
+    {
+      "id": "D22-8-8-MUST-275",
+      "strength": "Must",
+      "source": {
+        "section": "8.8",
+        "first_line": 3616,
+        "last_line": 3619,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "To maintain this property, an implementation parsing this format MUST reject a name that does not follow the encoding rules exactly, including a period not foll",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-8-9-MUST-276",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3664,
+        "last_line": 3665,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a DELETE token",
+      "summary": "Retire the indicated Alias and its associated Token Value from actively registered tokens when processing Alias Type DELETE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-token-delete-and-reuse"
+      ],
+      "evaluators": [
+        "d22-delete-retires-token-alias"
+      ],
+      "rationale": "Send authorization parameters in allowed publisher-receivable requests under Section 9.20.3. After DELETE, USE_ALIAS is unknown and the same alias can be registered anew; retirement does not retroactively revoke previously authorized operations or forbid re-registering the same Token Type/Value. This does not require physical memory erasure."
+    },
+    {
+      "id": "D22-8-9-MUST-277",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3669,
+        "last_line": 3670,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a REGISTER token",
+      "summary": "Associate a registered Alias with its Token Value for the remainder of the Session or until deletion.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-token-register-alias-lifetime"
+      ],
+      "evaluators": [
+        "d22-register-preserves-token-association"
+      ],
+      "rationale": "A publisher receives REGISTER in authorized request parameters and later resolves USE_ALIAS to the registered Token Type/Value. Observe equivalent request authorization after registration, deletion and a new Session, with separate client/server alias spaces. Section 9.1.4 has a SETUP overflow fallback to USE_VALUE, so a nonregistered fallback alias is excluded."
+    },
+    {
+      "id": "D22-8-9-MAY-278",
+      "strength": "May",
+      "source": {
+        "section": "8.9",
+        "first_line": 3677,
+        "last_line": 3678,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a USE_VALUE token",
+      "summary": "Discard a USE_VALUE Token Value after processing it.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher can receive USE_VALUE but whether it retains the value after processing is internal memory policy. The wire behavior of permitted retention and discard is indistinguishable; this permission does not authorize skipping token processing."
+    },
+    {
+      "id": "D22-8-9-MUST-279",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3704,
+        "last_line": 3705,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of an undecodable Token",
+      "summary": "If the Token structure cannot be decoded, close the Session with KEY_VALUE_FORMATTING_ERROR.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-undecodable-authorization-token"
+      ],
+      "evaluators": [
+        "d22-token-decode-key-value-formatting-error"
+      ],
+      "rationale": "A publisher receives Token structures in SUBSCRIBE, FETCH and other allowed request parameters. Use a correctly framed parameter whose internal required alias/type/value fields cannot be decoded; this distinguishes structural failure from a well-formed but invalid credential."
+    },
+    {
+      "id": "D22-8-9-MUST-280",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3706,
+        "last_line": 3707,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a duplicate REGISTER",
+      "summary": "On an attempt to register an Alias already registered by that peer in the Session, close the Session with DUPLICATE_AUTH_TOKEN_ALIAS.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-token-duplicate-registration"
+      ],
+      "evaluators": [
+        "d22-duplicate-token-alias-session-error"
+      ],
+      "rationale": "Wait for the initial registration response before the duplicate so stream order cannot mask the condition. Client and server alias spaces are separate; reuse after DELETE is permitted and is not a duplicate-registration failure."
+    },
+    {
+      "id": "D22-8-9-MUST-281",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3708,
+        "last_line": 3709,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of an unregistered Token Alias reference",
+      "summary": "For a reference to a Token Alias not currently registered, reject the message with UNKNOWN_AUTH_TOKEN_ALIAS.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-unknown-token-alias",
+        "d22-request-deleted-token-alias"
+      ],
+      "evaluators": [
+        "d22-unknown-token-alias-message-error"
+      ],
+      "rationale": "Use allowed authorization-bearing request messages to observe message rejection. The rule says message error, not automatic Session closure, and expiration does not make a registered alias unknown. SETUP has separate alias restrictions in Section 9.1.4."
+    },
+    {
+      "id": "D22-8-9-MUST-282",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3712,
+        "last_line": 3713,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a well-formed but invalid Token",
+      "summary": "When a well-formed Token structure is otherwise invalid, reject the message with MALFORMED_AUTH_TOKEN.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-well-formed-invalid-token"
+      ],
+      "evaluators": [
+        "d22-invalid-token-message-error"
+      ],
+      "rationale": "Use a configured, understood Token Type with an invalid credential value while keeping the Token envelope decodable. That precondition avoids conflating invalid token content, ordinary unauthorized access and the Session-level structural formatting error."
+    },
+    {
+      "id": "D22-8-9-MUST-283",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3716,
+        "last_line": 3718,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of a REGISTER authorization parameter",
+      "summary": "Register the Token Alias if processing its REGISTER message does not cause a Session error, even when the message fails for another reason including Unauthorized.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-register-token-on-unauthorized-request",
+        "d22-register-token-on-other-request-error"
+      ],
+      "evaluators": [
+        "d22-register-on-nonsession-message-error"
+      ],
+      "rationale": "After a controlled request error, reference the alias in a later request to distinguish retained registration from UNKNOWN_AUTH_TOKEN_ALIAS. Section 9.1.4 explicitly treats an oversized REGISTER in SETUP as USE_VALUE, so that exception does not become a demanded registration here. No internal representation is prescribed."
+    },
+    {
+      "id": "D22-8-9-MAY-284",
+      "strength": "May",
+      "source": {
+        "section": "8.9",
+        "first_line": 3720,
+        "last_line": 3723,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver caching a registered token",
+      "summary": "Store an error code in place of token details only if any future message referencing the Alias will produce that error; do not use this shortcut if validity can change.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher may choose this internal cache representation, but identical future errors do not prove whether it stored an error or revalidated the token. The source says Token Type and Token Alias where Token Value might be expected; this row does not resolve that wording by inventing a representation. The entry size still includes Token Value length."
+    },
+    {
+      "id": "D22-8-9-MUST-285",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3730,
+        "last_line": 3732,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver detecting token expiration",
+      "summary": "Retain a registered Alias after detecting token expiration until the sender deletes it.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-expired-token-alias-lifetime"
+      ],
+      "evaluators": [
+        "d22-expired-token-alias-retained-until-delete"
+      ],
+      "rationale": "Use an understood, expiring test credential with controlled timing: USE_ALIAS yields EXPIRED_AUTH_TOKEN rather than UNKNOWN_AUTH_TOKEN_ALIAS, and re-registering before deletion remains a duplicate. Expiration does not reduce occupied cache size. These observable consequences test alias retention without inspecting storage."
+    },
+    {
+      "id": "D22-8-9-MAY-286",
+      "strength": "May",
+      "source": {
+        "section": "8.9",
+        "first_line": 3731,
+        "last_line": 3732,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver detecting token expiration",
+      "summary": "Discard other state associated with an expired token when that state is no longer needed, while retaining the registered Alias.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Releasing unneeded internal token state is not externally observable. It cannot release the Alias or reduce the token's accounted cache size; USE_ALIAS still fails with EXPIRED_AUTH_TOKEN rather than becoming an unknown reference."
+    },
+    {
+      "id": "D22-8-9-SHOULD-287",
+      "strength": "Should",
+      "source": {
+        "section": "8.9",
+        "first_line": 3743,
+        "last_line": 3745,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of tokens",
+      "summary": "Only register tokens that the sender intends to reuse during the Session.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Publishers send authorization tokens, but intended future use is internal application state. A registration never reused in a finite trace does not prove that reuse was never intended."
+    },
+    {
+      "id": "D22-8-9-SHOULD-288",
+      "strength": "Should",
+      "source": {
+        "section": "8.9",
+        "first_line": 3744,
+        "last_line": 3745,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of tokens",
+      "summary": "Retire previously registered tokens once their utility has passed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Although DELETE is visible, the relay boundary cannot know when a token ceased to have utility for the publisher. No finite lifetime or retirement deadline is specified, so inactivity cannot be treated as a violation."
+    },
+    {
+      "id": "D22-8-9-MUST-289",
+      "strength": "Must",
+      "source": {
+        "section": "8.9",
+        "first_line": 3763,
+        "last_line": 3764,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of an over-limit token registration",
+      "summary": "Terminate the Session with AUTH_TOKEN_CACHE_OVERFLOW if a registration would exceed MAX_AUTH_TOKEN_CACHE_SIZE, subject to the SETUP-specific exception in Section 9.1.4.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-token-cache-overflow",
+        "d22-request-alias-registration-with-default-zero-cache"
+      ],
+      "evaluators": [
+        "d22-token-cache-overflow-session-error"
+      ],
+      "rationale": "Section 9.1.3 counts each registered entry as 16 bytes plus Token Value length, subtracts deleted entries and defaults the limit to zero. Expired and error-cached tokens retain that charge. Exercise request parameters after SETUP: Section 9.1.4 expressly changes oversized SETUP REGISTER to USE_VALUE instead of closing with AUTH_TOKEN_CACHE_OVERFLOW."
+    },
+    {
+      "id": "D22-8-9-MAY-290",
+      "strength": "May",
+      "source": {
+        "section": "8.9",
+        "first_line": 3767,
+        "last_line": 3769,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of Authorization Tokens",
+      "summary": "Repeat Authorization Tokens within a message provided every combination of Token Type and Token Value is unique after resolving aliases.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-repeated-distinct-authorization-tokens"
+      ],
+      "evaluators": [
+        "d22-repeated-token-resolved-pair-uniqueness"
+      ],
+      "rationale": "The peer can resolve publisher-sent aliases and compare resulting Type/Value pairs across repeated tokens. Distinct alias numbers alone do not establish uniqueness. This is optional multiplicity, not a requirement to repeat tokens or a specified error response to duplicates."
+    },
+    {
+      "id": "D22-8-9-MUST-NOT-291",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.9",
+        "first_line": 3776,
+        "last_line": 3778,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of a USE_ALIAS token",
+      "summary": "Do not send USE_ALIAS on a different control stream from the Alias's REGISTER until a response to the REGISTER-bearing message has been received.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sender role includes publishers, but the literal control stream wording conflicts with Sections 6.3 and 9: each endpoint has one unidirectional control stream, while ordinary authorization-bearing messages use request streams. A deterministic multi-stream oracle would have to substitute request streams, so this unresolved draft-21 terminology requires clarification before a normative evaluator is assigned. SETUP has separate registration rules."
+    },
+    {
+      "id": "D22-8-9-MAY-292",
+      "strength": "May",
+      "source": {
+        "section": "8.9",
+        "first_line": 3778,
+        "last_line": 3780,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of a USE_ALIAS token",
+      "summary": "Send USE_ALIAS on the same control stream as its REGISTER without waiting for a response.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This permission preserves the source's control stream terminology. Section 9 puts ordinary authorization-bearing messages on request streams, and Section 9.1.4 constrains SETUP aliases; applying the permission to same-request-stream pipelining needs draft clarification. It cannot override other message placement rules or be imported from another draft."
+    },
+    {
+      "id": "D22-8-9-MUST-NOT-293",
+      "strength": "MustNot",
+      "source": {
+        "section": "8.9",
+        "first_line": 3782,
+        "last_line": 3783,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of a DELETE token",
+      "summary": "Do not send DELETE for an Alias while any message using USE_ALIAS for that Alias has not received a response.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-delete-with-pending-alias-uses"
+      ],
+      "evaluators": [
+        "d22-no-delete-with-unanswered-alias-use"
+      ],
+      "rationale": "Track all publisher-sent USE_ALIAS messages and withhold selected responses while a driven publisher attempts token retirement. DELETE cannot precede responses to every outstanding use, not merely the original REGISTER or the latest use. This sentence says any message and has no control-stream ambiguity."
+    },
+    {
+      "id": "D22-9-MUST-294",
+      "strength": "Must",
+      "source": {
+        "section": "9",
+        "first_line": 3802,
+        "last_line": 3873,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint",
+      "summary": "Messages marked \"First\" MUST be the first message on a new request stream. +========+=====================================+==================+ | ID | Messages |",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Unreviewed new draft 22 obligation; classification pending review."
+    },
+    {
+      "id": "D22-9-MUST-295",
+      "strength": "Must",
+      "source": {
+        "section": "9",
+        "first_line": 3877,
+        "last_line": 3878,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a control or request message",
+      "summary": "Close the session upon receiving an unknown message type.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-unknown-control-message",
+        "d22-unknown-request-stream-message"
+      ],
+      "evaluators": [
+        "d22-unknown-message-session-close"
+      ],
+      "rationale": "A publisher receives messages on both stream kinds. Send a complete unknown frame after valid stream establishment; a message length does not authorize ignoring it. This sentence requires closure but does not prescribe a specific termination code."
+    },
+    {
+      "id": "D22-9-MUST-296",
+      "strength": "Must",
+      "source": {
+        "section": "9",
+        "first_line": 3882,
+        "last_line": 3882,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a message with mismatched body length",
+      "summary": "Close the session with PROTOCOL_VIOLATION when Message Length does not match the Message Body length defined by the message type.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-message-body-length-mismatch",
+        "d22-request-message-truncated-at-fin"
+      ],
+      "evaluators": [
+        "d22-message-body-length-protocol-violation"
+      ],
+      "rationale": "Use complete bounded bodies that cannot contain the required fields, excess bytes for a fixed body, or a request FIN conclusively ending a truncated message. A temporary fragment is not a length mismatch: no premature close is required while more bytes can arrive. Control-stream FIN also independently violates Section 6.3, so request-stream cases isolate truncation."
+    },
+    {
+      "id": "D22-9-1-MAY-297",
+      "strength": "May",
+      "source": {
+        "section": "9.1",
+        "first_line": 3890,
+        "last_line": 3891,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint not offering extensions that modify control message semantics",
+      "summary": "When not offering extensions that modify control message semantics, pipeline other control messages after SETUP without waiting for the peer's SETUP.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-pipelines-after-setup"
+      ],
+      "evaluators": [
+        "d22-setup-pipelining-capability"
+      ],
+      "rationale": "Withhold the listener's SETUP and observe the publisher's optional pipelining under a known extension configuration. After SETUP does not override Table 5 stream placement, and Section 6.3 allows request streams to arrive before setup completes. Choosing to wait is absence of an optional capability, not a required-rule failure."
+    },
+    {
+      "id": "D22-9-1-MUST-298",
+      "strength": "Must",
+      "source": {
+        "section": "9.1",
+        "first_line": 3896,
+        "last_line": 3896,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving SETUP",
+      "summary": "Ignore unknown Setup Options.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-unknown-options",
+        "d22-setup-duplicate-unknown-options"
+      ],
+      "evaluators": [
+        "d22-unknown-setup-options-ignored"
+      ],
+      "rationale": "Insert well-formed unknown key-value options in the listener's SETUP and verify otherwise valid session establishment and subsequent publication. Unknown options differ from unknown Message Parameters, whose Section 9.20 handling is fatal."
+    },
+    {
+      "id": "D22-9-1-MUST-299",
+      "strength": "Must",
+      "source": {
+        "section": "9.1",
+        "first_line": 3911,
+        "last_line": 3912,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of Setup Options",
+      "summary": "Ignore unrecognized Setup Options in the version-independent Setup Option namespace.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-unknown-options",
+        "d22-setup-duplicate-unknown-options"
+      ],
+      "evaluators": [
+        "d22-unknown-setup-options-ignored"
+      ],
+      "rationale": "This repeats the earlier normative duty at a separate lexical anchor. The same external scenario can cover both requirements without dropping either occurrence from the inventory."
+    },
+    {
+      "id": "D22-9-1-MUST-NOT-300",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1",
+        "first_line": 3912,
+        "last_line": 3914,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of SETUP",
+      "summary": "Do not repeat an Option Type in one SETUP unless its definition explicitly allows multiple instances.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-setup-option-multiplicity",
+        "d22-publisher-request-stream-placement"
+      ],
+      "evaluators": [
+        "d22-setup-option-duplicates-only-when-permitted"
+      ],
+      "rationale": "Decode publisher SETUP and compare option types with their draft-21 definitions. Section 9.1.4 expressly permits one or more authorization tokens; do not reject those legitimate repetitions. This is a sender constraint and does not invent a receiver error for duplicate known options."
+    },
+    {
+      "id": "D22-9-1-MUST-301",
+      "strength": "Must",
+      "source": {
+        "section": "9.1",
+        "first_line": 3914,
+        "last_line": 3915,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of Setup Options",
+      "summary": "Allow duplicate unknown Setup Options.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-duplicate-unknown-options"
+      ],
+      "evaluators": [
+        "d22-duplicate-unknown-setup-options-accepted"
+      ],
+      "rationale": "Repeat a well-formed unknown option in the peer SETUP and verify setup and publication remain usable. Unknown option multiplicity cannot be judged by known-option sender rules."
+    },
+    {
+      "id": "D22-9-1-1-MUST-NOT-302",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3934,
+        "last_line": 3935,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "transport server sending SETUP",
+      "summary": "Do not send AUTHORITY as a server.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Transport server and publisher are independent roles, so a publisher server has this duty. The runner is a listener and receives connections from publisher clients; it does not connect to a publisher server to observe its SETUP."
+    },
+    {
+      "id": "D22-9-1-1-MUST-NOT-303",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3934,
+        "last_line": 3935,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint sending SETUP over WebTransport",
+      "summary": "Do not send AUTHORITY when WebTransport is used.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-webtransport-publisher-setup",
+        "d22-publisher-request-stream-placement"
+      ],
+      "evaluators": [
+        "d22-webtransport-no-authority-option"
+      ],
+      "rationale": "The listener can inspect the client publisher's WebTransport SETUP. Section 6.2.1 carries the URI in the extended CONNECT exchange instead; no publisher-versus-subscriber assumption is needed."
+    },
+    {
+      "id": "D22-9-1-1-MUST-304",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3938,
+        "last_line": 3939,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client receiving AUTHORITY from a server",
+      "summary": "Close the session with INVALID_AUTHORITY when AUTHORITY is received from a server.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-server-sends-authority"
+      ],
+      "evaluators": [
+        "d22-server-authority-invalid-authority"
+      ],
+      "rationale": "A listener can deliberately send a syntactically valid AUTHORITY in its native-QUIC SETUP and observe the publisher client's required error, isolating the transport-role violation."
+    },
+    {
+      "id": "D22-9-1-1-MUST-305",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3938,
+        "last_line": 3939,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving AUTHORITY over WebTransport",
+      "summary": "Close the session with INVALID_AUTHORITY when AUTHORITY is received while WebTransport is used.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-webtransport-server-sends-authority",
+        "d22-server-sends-authority"
+      ],
+      "evaluators": [
+        "d22-webtransport-authority-invalid-authority",
+        "d22-server-authority-invalid-authority"
+      ],
+      "rationale": "Inject the option on WebTransport and observe the publisher client's close. The server-origin condition also applies and prescribes the same code; it does not prevent exercising the WebTransport case."
+    },
+    {
+      "id": "D22-9-1-1-MUST-306",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3938,
+        "last_line": 3939,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "server receiving an unsupported AUTHORITY",
+      "summary": "Close the session with INVALID_AUTHORITY when the server does not support the AUTHORITY received from its client.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A contribution publisher acting as a transport server is bound by this rule, but the listener-only harness cannot send client SETUP to a publisher server. Sending an authority from the listener tests the distinct forbidden-server-option branch instead."
+    },
+    {
+      "id": "D22-9-1-1-MUST-307",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3943,
+        "last_line": 3944,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "native-QUIC client connecting with a moqt URI",
+      "summary": "Set AUTHORITY to the authority portion of the moqt URI used to connect.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-publisher-uri-options"
+      ],
+      "evaluators": [
+        "d22-authority-matches-connection-uri"
+      ],
+      "rationale": "The driven publisher receives a known moqt URI; compare its emitted AUTHORITY with that URI's authority, including an explicit port when present. Section 6.2.2 bounds this to native QUIC; WebTransport forbids the option."
+    },
+    {
+      "id": "D22-9-1-1-MUST-308",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.1",
+        "first_line": 3945,
+        "last_line": 3945,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving malformed AUTHORITY",
+      "summary": "Close the session with MALFORMED_AUTHORITY when AUTHORITY does not conform to the URI authority formatting rules.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The unambiguous isolated case is a native-QUIC publisher server receiving malformed client AUTHORITY, outside the listener-only harness. Injecting it from this server also mandates INVALID_AUTHORITY; draft 21 does not specify error precedence between malformed and forbidden-role options. Do not force one error as a client-side oracle."
+    },
+    {
+      "id": "D22-9-1-2-MUST-NOT-309",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3950,
+        "last_line": 3951,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "transport server sending SETUP",
+      "summary": "Do not send PATH as a server.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Publisher servers have the same role-bound restriction as all servers, but this listener cannot observe a publisher in the server transport role. The separate WebTransport prohibition is observable for publisher clients."
+    },
+    {
+      "id": "D22-9-1-2-MUST-NOT-310",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3950,
+        "last_line": 3951,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint sending SETUP over WebTransport",
+      "summary": "Do not send PATH when WebTransport is used.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-webtransport-publisher-setup",
+        "d22-publisher-request-stream-placement"
+      ],
+      "evaluators": [
+        "d22-webtransport-no-path-option"
+      ],
+      "rationale": "Observe the publisher client's WebTransport SETUP. The request URI is already conveyed through extended CONNECT under Section 6.2.1."
+    },
+    {
+      "id": "D22-9-1-2-MUST-311",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3955,
+        "last_line": 3955,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client receiving PATH from a server",
+      "summary": "Close the session with INVALID_PATH when PATH is received from a server.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-server-sends-path"
+      ],
+      "evaluators": [
+        "d22-server-path-invalid-path"
+      ],
+      "rationale": "The listener sends a syntactically valid PATH in native SETUP and checks publisher-client termination. Using valid syntax avoids the overlapping malformed-PATH error condition."
+    },
+    {
+      "id": "D22-9-1-2-MUST-312",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3955,
+        "last_line": 3955,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving PATH over WebTransport",
+      "summary": "Close the session with INVALID_PATH when PATH is received while WebTransport is used.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-webtransport-server-sends-path",
+        "d22-server-sends-path"
+      ],
+      "evaluators": [
+        "d22-webtransport-path-invalid-path",
+        "d22-server-path-invalid-path"
+      ],
+      "rationale": "The injected server option on WebTransport triggers the required error at the publisher client. Both the transport and server-origin violations prescribe INVALID_PATH."
+    },
+    {
+      "id": "D22-9-1-2-MUST-313",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3955,
+        "last_line": 3955,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "server receiving an unsupported PATH",
+      "summary": "Close the session with INVALID_PATH when the server does not support the path specified by its client.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This can apply to a publisher server, but the listener-only runner does not connect to publisher servers. Sending PATH from the listener cannot exercise unsupported-client-path routing separately from the forbidden-server-option rule."
+    },
+    {
+      "id": "D22-9-1-2-MUST-314",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3959,
+        "last_line": 3961,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "native-QUIC client connecting with a moqt URI",
+      "summary": "Set PATH to the path-abempty portion of the moqt connection URI.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-publisher-uri-options"
+      ],
+      "evaluators": [
+        "d22-path-matches-uri-path-abempty"
+      ],
+      "rationale": "Compare the native publisher's SETUP with the known driven connection URI, including an empty path. Query concatenation is a separate normative occurrence; WebTransport carries the URI through CONNECT and forbids PATH."
+    },
+    {
+      "id": "D22-9-1-2-MUST-315",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3960,
+        "last_line": 3961,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "native-QUIC client connecting with a query-bearing moqt URI",
+      "summary": "When a query is present, concatenate ? followed by the query portion of the URI to PATH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-native-publisher-uri-query",
+        "d22-native-publisher-empty-query"
+      ],
+      "evaluators": [
+        "d22-path-query-concatenation"
+      ],
+      "rationale": "Use a known URI and verify the emitted option, distinguishing an absent query from a present empty query. This duty includes the literal separator and does not transmit a URI fragment."
+    },
+    {
+      "id": "D22-9-1-2-MUST-316",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.2",
+        "first_line": 3962,
+        "last_line": 3962,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving malformed PATH",
+      "summary": "Close the session with MALFORMED_PATH when PATH does not conform to its URI formatting rules.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "An isolated syntax test needs a native-QUIC publisher server receiving client PATH, outside this listener's role. Malformed PATH sent by the listener simultaneously requires INVALID_PATH for server origin; the draft supplies no precedence rule, so no client-side normative evaluator is assigned."
+    },
+    {
+      "id": "D22-9-1-4-MUST-317",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.4",
+        "first_line": 3999,
+        "last_line": 3999,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server receiving SETUP Authorization Tokens",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a server receives Alias Type DELETE or USE_ALIAS in SETUP.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sentence explicitly names a server, not every endpoint. A publisher server is subject to it, but this listener cannot deliver client SETUP to one. Do not expand the rule to publisher clients receiving a server token; other token-validity rules remain distinct."
+    },
+    {
+      "id": "D22-9-1-4-MUST-NOT-318",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.4",
+        "first_line": 4003,
+        "last_line": 4003,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving an oversized SETUP token registration",
+      "summary": "Do not fail the session with AUTH_TOKEN_CACHE_OVERFLOW when REGISTER in SETUP exceeds the receiver's MAX_AUTH_TOKEN_CACHE_SIZE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-register-exceeds-token-cache",
+        "d22-setup-register-default-zero-cache"
+      ],
+      "evaluators": [
+        "d22-setup-overflow-is-not-cache-overflow-close"
+      ],
+      "rationale": "Send a valid oversized REGISTER in the listener SETUP, using the publisher's announced limit or zero default. This explicit exception to Section 8.9 excludes that error code; unrelated token authorization failures remain possible and are not automatically conformance failures."
+    },
+    {
+      "id": "D22-9-1-4-MUST-319",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.4",
+        "first_line": 4004,
+        "last_line": 4004,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving an oversized SETUP token registration",
+      "summary": "Treat a SETUP REGISTER that exceeds MAX_AUTH_TOKEN_CACHE_SIZE as USE_VALUE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-setup-register-use-value-fallback"
+      ],
+      "evaluators": [
+        "d22-setup-overflow-token-used-without-registration"
+      ],
+      "rationale": "Section 9.1.3 charges 16 bytes plus Token Value size and defaults to zero. With a valid token under controlled authorization policy, verify USE_VALUE-equivalent handling and that a later USE_ALIAS cannot use the failed registration. This is observable token semantics, not a requirement to accept arbitrary credentials."
+    },
+    {
+      "id": "D22-9-1-4-MUST-320",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.4",
+        "first_line": 4006,
+        "last_line": 4009,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of SETUP token registrations",
+      "summary": "Purge Token Aliases that failed to register because of the peer's SETUP MAX_AUTH_TOKEN_CACHE_SIZE or its default of 0.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "SETUP can cross in flight before either endpoint knows the peer's capacity. Actual removal from the publisher's alias bookkeeping is internal; absence of later USE_ALIAS cannot distinguish a purged alias from one retained but never selected. A later invalid use can expose a separate protocol error without proving this memory-management action."
+    },
+    {
+      "id": "D22-9-1-5-SHOULD-321",
+      "strength": "Should",
+      "source": {
+        "section": "9.1.5",
+        "first_line": 4014,
+        "last_line": 4017,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of MOQT_IMPLEMENTATION",
+      "summary": "Encode the MOQT_IMPLEMENTATION option as a UTF-8 string.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-implementation-option"
+      ],
+      "evaluators": [
+        "d22-implementation-option-utf8"
+      ],
+      "rationale": "Validate the emitted bytes when the optional identity is present. This is a recommendation for encoding; it does not mandate language tags, a particular name format, or session rejection for non-UTF-8 input."
+    },
+    {
+      "id": "D22-9-1-5-SHOULD-322",
+      "strength": "Should",
+      "source": {
+        "section": "9.1.5",
+        "first_line": 4019,
+        "last_line": 4020,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint sending SETUP",
+      "summary": "Send MOQT_IMPLEMENTATION unless specifically configured not to do so.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-identity-enabled",
+        "d22-publisher-identity-disabled"
+      ],
+      "evaluators": [
+        "d22-implementation-option-respects-configured-omission"
+      ],
+      "rationale": "A driven fixture with known identity settings permits evaluating presence and the explicit omission exception. Section 15.8 also permits privacy-conscious deployments to omit or use a generic value. Passive absence alone cannot prove misbehavior when configuration and privacy policy are unknown."
+    },
+    {
+      "id": "D22-9-1-5-SHOULD-323",
+      "strength": "Should",
+      "source": {
+        "section": "9.1.5",
+        "first_line": 4024,
+        "last_line": 4025,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of MOQT_IMPLEMENTATION",
+      "summary": "Limit MOQT_IMPLEMENTATION to implementation name and version, avoiding advertising or other nonessential information.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The bytes are visible but the draft defines neither a grammar for name/version boundaries nor an objective test of essential information. Section 15.8 allows generic privacy values. Semantic review of an implementation's descriptive text cannot be replaced by a deterministic protocol oracle."
+    },
+    {
+      "id": "D22-9-1-5-SHOULD-NOT-324",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "9.1.5",
+        "first_line": 4026,
+        "last_line": 4028,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "implementation choosing its MOQT_IMPLEMENTATION identifier",
+      "summary": "Do not use another implementation's identifiers to declare compatibility.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A wire string alone cannot establish identifier ownership or whether its purpose is declaring compatibility. The draft provides no identity registry or attestation; this interoperability-debugging recommendation needs contextual human review."
+    },
+    {
+      "id": "D22-9-1-6-MUST-NOT-325",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.6",
+        "first_line": 4042,
+        "last_line": 4043,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber sending Range Filter parameters",
+      "summary": "Do not send Range Filter parameters when the peer omits MAX_FILTER_RANGES and its default limit is 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Section 3.3.2 defines these as subscriber-provided criteria in SUBSCRIBE, FETCH, SUBSCRIBE_TRACKS and subscriber REQUEST_UPDATE. Original publishers receive these parameters rather than send them in PUBLISH. Their receiver limit enforcement is classified separately."
+    },
+    {
+      "id": "D22-9-1-6-MUST-326",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.6",
+        "first_line": 4044,
+        "last_line": 4044,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving Range Filter parameters",
+      "summary": "Reject with REQUEST_ERROR code INVALID_FILTER when the total concurrent Ranges across all Range Filter parameters for a subscription or fetch exceed MAX_FILTER_RANGES.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-range-filter-total-limit",
+        "d22-range-filter-default-zero-limit",
+        "d22-range-filter-update-total-limit"
+      ],
+      "evaluators": [
+        "d22-range-filter-limit-invalid-filter"
+      ],
+      "rationale": "Read the publisher's advertised limit and test the aggregate number of Start/End pairs, including retained filters on update, not merely the count per parameter or across unrelated requests. The omitted option means zero supported ranges, unlike unlimited update concurrency. Section 3.3.2 supplies replacement/removal semantics."
+    },
+    {
+      "id": "D22-9-1-7-MUST-NOT-327",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.1.7",
+        "first_line": 4054,
+        "last_line": 4055,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of REQUEST_UPDATE",
+      "summary": "With a nonzero peer MAX_REQUEST_UPDATES, do not exceed that number of outstanding REQUEST_UPDATE messages on any single request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-update-credit-limit",
+        "d22-publisher-update-credit-per-stream",
+        "d22-publisher-update-zero-unlimited"
+      ],
+      "evaluators": [
+        "d22-publisher-update-outstanding-limit"
+      ],
+      "rationale": "A publisher can update its PUBLISH request under Section 9.5. Withhold responses to count outstanding updates; each corresponding REQUEST_OK or REQUEST_ERROR restores one credit on that stream. Zero or an omitted option means unlimited, not zero credits. Coalesced failures terminate the affected request under Section 9.5.1."
+    },
+    {
+      "id": "D22-9-1-7-MUST-328",
+      "strength": "Must",
+      "source": {
+        "section": "9.1.7",
+        "first_line": 4068,
+        "last_line": 4069,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving REQUEST_UPDATE",
+      "summary": "Close the session with TOO_MANY_REQUEST_UPDATES upon receiving another update on a stream already at its nonzero MAX_REQUEST_UPDATES outstanding limit.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-request-update-overrun",
+        "d22-request-update-unlimited",
+        "d22-request-update-independent-streams"
+      ],
+      "evaluators": [
+        "d22-update-overrun-session-error"
+      ],
+      "rationale": "Use the publisher's advertised limit and distinguish each request stream. Zero and omission mean unlimited. The draft explicitly notes immediate responders might never observe an overrun: a burst or responses not yet received by the harness do not prove simultaneous outstanding work at the receiver. Score the mandatory error only when the receiver-side over-limit precondition is established; otherwise report the scenario inconclusive."
+    },
+    {
+      "id": "D22-9-2-MUST-329",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4076,
+        "last_line": 4078,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client sending GOAWAY",
+      "summary": "Send a zero-length New Session URI in every client GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-client-goaway-control",
+        "d22-publisher-client-goaway-request"
+      ],
+      "evaluators": [
+        "d22-client-goaway-empty-uri"
+      ],
+      "rationale": "Inspect GOAWAY from the publisher client on either permitted stream kind. Client and publisher are distinct roles; the restriction follows transport initiation because clients cannot instruct servers to initiate connections."
+    },
+    {
+      "id": "D22-9-2-MAY-330",
+      "strength": "May",
+      "source": {
+        "section": "9.2",
+        "first_line": 4080,
+        "last_line": 4081,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint migrating an individual request",
+      "summary": "Send GOAWAY on a request stream to initiate migration of that individual request.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-goaway"
+      ],
+      "evaluators": [
+        "d22-request-scoped-goaway-capability"
+      ],
+      "rationale": "A driven publisher can send GOAWAY on an existing request stream while unrelated requests continue. Section 6.6.1 distinguishes this from control-stream migration of the whole session. The permission does not allow GOAWAY to replace a First message on a new stream."
+    },
+    {
+      "id": "D22-9-2-SHOULD-331",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4082,
+        "last_line": 4093,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving request-stream GOAWAY",
+      "summary": "Re-issue the specific request on a session at the provided URI, or on the current session if no URI is provided, after receiving request-stream GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-request-goaway-new-uri",
+        "d22-publish-request-goaway-empty-uri"
+      ],
+      "evaluators": [
+        "d22-request-goaway-reissue"
+      ],
+      "rationale": "Exercise publisher-originated PUBLISH or PUBLISH_NAMESPACE so the publisher can re-issue its own request, using controlled alternate listeners. The literal endpoint wording does not explain how a responder would re-issue a peer-originated SUBSCRIBE; that role ambiguity is unresolved and is not scored by converting the request type."
+    },
+    {
+      "id": "D22-9-2-SHOULD-332",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4082,
+        "last_line": 4093,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving request-stream GOAWAY",
+      "summary": "After request-stream GOAWAY, close the old request stream using the appropriate mechanism, such as FIN, stream reset or PUBLISH_DONE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-request-goaway-new-uri",
+        "d22-namespace-request-goaway"
+      ],
+      "evaluators": [
+        "d22-request-goaway-old-stream-closed"
+      ],
+      "rationale": "Closing the old stream is independently observable from re-issuing its request. Apply Section 6.4.2.2's direction-specific closure rules and the subscription's PUBLISH_DONE duties; request migration does not require draining unrelated session requests."
+    },
+    {
+      "id": "D22-9-2-SHOULD-333",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4098,
+        "last_line": 4099,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber handling GOAWAY",
+      "summary": "Individually unsubscribe from each existing subscription when handling GOAWAY.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "GOAWAY itself does not change subscription state. This recommendation names the subscriber; an original publisher's corresponding stream termination and migration duties are separate."
+    },
+    {
+      "id": "D22-9-2-MAY-334",
+      "strength": "May",
+      "source": {
+        "section": "9.2",
+        "first_line": 4099,
+        "last_line": 4099,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher that sent GOAWAY",
+      "summary": "Reject new requests after sending GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-new-request-after-publisher-goaway"
+      ],
+      "evaluators": [
+        "d22-goaway-sender-rejection-capability"
+      ],
+      "rationale": "Issue a new otherwise valid request after observing publisher GOAWAY and record its optional rejection. The publisher may continue accepting requests; this permission does not make rejection mandatory or terminate existing subscriptions by itself."
+    },
+    {
+      "id": "D22-9-2-SHOULD-NOT-335",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "9.2",
+        "first_line": 4101,
+        "last_line": 4104,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving control-stream GOAWAY",
+      "summary": "Do not initiate new SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS or TRACK_STATUS requests to the peer after receiving control-stream GOAWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-control-goaway-publisher-request-drain"
+      ],
+      "evaluators": [
+        "d22-no-new-publisher-requests-to-draining-peer"
+      ],
+      "rationale": "Publisher-originated PUBLISH and PUBLISH_NAMESPACE make this generic endpoint duty applicable. Stimulate new publications only after peer receipt is causally established, and distinguish old in-flight request streams from newly initiated work. Migrated requests to a new session are not prohibited by the old session's GOAWAY."
+    },
+    {
+      "id": "D22-9-2-SHOULD-336",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4107,
+        "last_line": 4108,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint that sent GOAWAY",
+      "summary": "Avoid initiating new requests after sending GOAWAY unless required by migration.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The draft permits the sender to originate requests and makes this recommendation conditional on migration necessity. The peer sees requests but cannot establish why each was required by the publisher's migration policy; Sections 7.4.1 and 7.5.1 give relay migration examples rather than a deterministic original-publisher necessity test."
+    },
+    {
+      "id": "D22-9-2-MAY-337",
+      "strength": "May",
+      "source": {
+        "section": "9.2",
+        "first_line": 4109,
+        "last_line": 4111,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint that received GOAWAY",
+      "summary": "Reject new requests after receiving GOAWAY using an appropriate error, such as REQUEST_ERROR with GOING_AWAY.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-new-request-after-listener-goaway"
+      ],
+      "evaluators": [
+        "d22-goaway-recipient-rejection-capability"
+      ],
+      "rationale": "Send GOAWAY to the publisher, then a controlled new request and observe optional rejection. GOING_AWAY is an example, not the sole required code, and continuing to serve requests is allowed."
+    },
+    {
+      "id": "D22-9-2-MUST-338",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4113,
+        "last_line": 4115,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving repeated control-stream GOAWAY",
+      "summary": "Close the session with PROTOCOL_VIOLATION upon receiving more than one GOAWAY on the control stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-duplicate-control-goaway"
+      ],
+      "evaluators": [
+        "d22-duplicate-control-goaway-protocol-violation"
+      ],
+      "rationale": "Send two GOAWAY messages on the established control stream while allowing time for the session to remain active. The per-stream duplicate rule is independent of any GOAWAY on a request stream."
+    },
+    {
+      "id": "D22-9-2-MUST-339",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4113,
+        "last_line": 4115,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "endpoint receiving repeated request-stream GOAWAY",
+      "summary": "Close the session with PROTOCOL_VIOLATION upon receiving more than one GOAWAY on a single request stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-duplicate-request-goaway",
+        "d22-goaway-on-distinct-request-streams"
+      ],
+      "evaluators": [
+        "d22-duplicate-request-goaway-protocol-violation"
+      ],
+      "rationale": "Duplicate two messages on the same existing request stream. A GOAWAY on another request stream or on the control stream is not a duplicate for this condition."
+    },
+    {
+      "id": "D22-9-2-MUST-340",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4129,
+        "last_line": 4130,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "client migrating after GOAWAY",
+      "summary": "Use the provided New Session URI for the new session when GOAWAY supplies one.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-goaway-alternate-uri"
+      ],
+      "evaluators": [
+        "d22-client-migrates-to-provided-uri"
+      ],
+      "rationale": "Direct the publisher client to a controlled second listener and verify its new connection target. The requirement selects the URI when opening the replacement session; request migration without a URI uses the current session under the earlier paragraph, while session migration reuses the current URI."
+    },
+    {
+      "id": "D22-9-2-SHOULD-341",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4131,
+        "last_line": 4132,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server supplying a New Session URI",
+      "summary": "Use the current URI's scheme for a GOAWAY New Session URI to ensure compatibility.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Only a server can provide a nonempty URI; client GOAWAY requires zero length. A publisher server has this recommendation, but the listener-only runner cannot observe that server sender role. It is not a permission for clients to ignore the URI provided by a server."
+    },
+    {
+      "id": "D22-9-2-MUST-342",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4134,
+        "last_line": 4135,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving an oversized GOAWAY URI",
+      "summary": "Close the session with PROTOCOL_VIOLATION when New Session URI Length exceeds 8192 bytes.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-goaway-uri-length-boundary"
+      ],
+      "evaluators": [
+        "d22-goaway-uri-overflow-protocol-violation"
+      ],
+      "rationale": "Send a complete server GOAWAY with 8193 URI bytes and compare with the 8192-byte boundary. A native-QUIC or WebTransport publisher client is permitted to receive a server URI; the error is a session error even for request-stream GOAWAY."
+    },
+    {
+      "id": "D22-9-2-MUST-343",
+      "strength": "Must",
+      "source": {
+        "section": "9.2",
+        "first_line": 4138,
+        "last_line": 4138,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server receiving a GOAWAY URI",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a server receives GOAWAY with a nonzero New Session URI Length.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Publisher servers are covered, but the runner only accepts connections and cannot send a client GOAWAY to a publisher server. A publisher client receiving a nonzero server URI is the valid migration case."
+    },
+    {
+      "id": "D22-9-2-SHOULD-344",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4153,
+        "last_line": 4154,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of request-stream GOAWAY",
+      "summary": "Reset the request stream with GOING_AWAY after the indicated GOAWAY timeout.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-goaway-timeout"
+      ],
+      "evaluators": [
+        "d22-request-goaway-timeout-reset"
+      ],
+      "rationale": "Keep the affected request open after a driven publisher emits a nonzero timeout and observe its reset code and elapsed time with transport timing allowance. Zero means no specific deadline; graceful earlier completion or the explicit permission to reset early does not violate this recommendation. Control-stream timeout instead closes the session."
+    },
+    {
+      "id": "D22-9-2-SHOULD-345",
+      "strength": "Should",
+      "source": {
+        "section": "9.2",
+        "first_line": 4155,
+        "last_line": 4156,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "recipient of GOAWAY with no specific timeout",
+      "summary": "Migrate as quickly as possible when the GOAWAY Timeout is 0.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Migration is observable, but as quickly as possible has no draft-defined deadline and depends on peer and application constraints. A harness timeout cannot establish this recommendation's violation. The separate URI and request re-issuance rules have observable criteria."
+    },
+    {
+      "id": "D22-9-2-MAY-346",
+      "strength": "May",
+      "source": {
+        "section": "9.2",
+        "first_line": 4156,
+        "last_line": 4158,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of GOAWAY",
+      "summary": "Close the session before the GOAWAY timeout elapses.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-goaway-early-session-close"
+      ],
+      "evaluators": [
+        "d22-goaway-early-session-close-capability"
+      ],
+      "rationale": "Observe a driven publisher's early closure relative to its advertised nonzero timeout. The timeout is a hint rather than a minimum session lifetime; this permission does not require an early close or specify an error code."
+    },
+    {
+      "id": "D22-9-2-MAY-347",
+      "strength": "May",
+      "source": {
+        "section": "9.2",
+        "first_line": 4156,
+        "last_line": 4158,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "sender of request-stream GOAWAY",
+      "summary": "Reset the request stream before the GOAWAY timeout elapses.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-goaway-early-request-reset"
+      ],
+      "evaluators": [
+        "d22-goaway-early-request-reset-capability"
+      ],
+      "rationale": "A request reset is an independently observable alternative to closing the whole session. The permission prevents treating the advertised timeout as a guaranteed grace period for the request."
+    },
+    {
+      "id": "D22-9-3-MUST-348",
+      "strength": "Must",
+      "source": {
+        "section": "9.3",
+        "first_line": 4211,
+        "last_line": 4212,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving REQUEST_OK with forbidden Track Properties",
+      "summary": "Close the session with PROTOCOL_VIOLATION when PUBLISH_OK, REQUEST_UPDATE_OK, SUBSCRIBE_NAMESPACE_OK or PUBLISH_NAMESPACE_OK contains Track Properties.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-ok-with-track-properties",
+        "d22-publish-update-ok-with-track-properties",
+        "d22-publish-namespace-ok-with-track-properties"
+      ],
+      "evaluators": [
+        "d22-request-ok-forbidden-track-properties"
+      ],
+      "rationale": "A publisher receives the listed responses for its outgoing PUBLISH, update and namespace requests; each is wire REQUEST_OK. TRACK_STATUS_OK carries properties. This paragraph omits SUBSCRIBE_TRACKS_OK from both lists despite naming it earlier, so its property semantics remain ambiguous and no invented prohibition is applied to it."
+    },
+    {
+      "id": "D22-9-4-1-SHOULD-349",
+      "strength": "Should",
+      "source": {
+        "section": "9.4.1",
+        "first_line": 4234,
+        "last_line": 4235,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester following a Redirect",
+      "summary": "Use the current session's URI when a Redirect Connect URI Length is zero.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-redirect-empty-connect-uri"
+      ],
+      "evaluators": [
+        "d22-redirect-empty-uri-reuses-current-uri"
+      ],
+      "rationale": "Redirect a publisher's PUBLISH or PUBLISH_NAMESPACE using an empty Connect URI and a known target. When following it, the publisher can reuse the existing session or establish one at the same URI; the requirement selects the URI rather than demanding a new connection."
+    },
+    {
+      "id": "D22-9-4-1-MUST-350",
+      "strength": "Must",
+      "source": {
+        "section": "9.4.1",
+        "first_line": 4236,
+        "last_line": 4236,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "server receiving a Redirect",
+      "summary": "Close the session with PROTOCOL_VIOLATION when a server receives a Redirect with nonzero Connect URI Length.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher server can receive a Redirect to its own outgoing request, but this listener cannot exercise the client peer role needed to send it. Nonzero server Redirect URIs received by publisher clients are permitted and must not trigger this server-only rule."
+    },
+    {
+      "id": "D22-9-4-1-MUST-351",
+      "strength": "Must",
+      "source": {
+        "section": "9.4.1",
+        "first_line": 4244,
+        "last_line": 4246,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "sender of a namespace-scoped Redirect",
+      "summary": "Use an empty Track Name in Redirects for SUBSCRIBE_NAMESPACE, PUBLISH_NAMESPACE and SUBSCRIBE_TRACKS.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-namespace-redirect",
+        "d22-publisher-subscribe-tracks-redirect"
+      ],
+      "evaluators": [
+        "d22-namespace-redirect-emitted-empty-track-name"
+      ],
+      "rationale": "A publisher can redirect peer namespace discovery requests. Inspect Track Name independently of the Redirect target's Track Namespace. A contribution client also needs zero Connect URI in replies to its server under the separate server-receiver constraint."
+    },
+    {
+      "id": "D22-9-4-1-MUST-352",
+      "strength": "Must",
+      "source": {
+        "section": "9.4.1",
+        "first_line": 4245,
+        "last_line": 4246,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving a namespace-scoped Redirect",
+      "summary": "Close the session with PROTOCOL_VIOLATION if a namespace-scoped request's Redirect contains a nonempty Track Name.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-namespace-redirect-nonempty-track-name"
+      ],
+      "evaluators": [
+        "d22-namespace-redirect-track-name-protocol-violation"
+      ],
+      "rationale": "Return REDIRECT with a nonempty Track Name to the publisher's PUBLISH_NAMESPACE. This applies to namespace-scoped requests, not ordinary PUBLISH whose redirect target uses the full Track Namespace and Track Name."
+    },
+    {
+      "id": "D22-9-4-2-SHOULD-353",
+      "strength": "Should",
+      "source": {
+        "section": "9.4.2",
+        "first_line": 4275,
+        "last_line": 4275,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester retrying after REQUEST_ERROR",
+      "summary": "Before resending a failed request with a nonzero Retry Interval, wait at least the Retry Interval minus one milliseconds.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-retry-interval",
+        "d22-publisher-request-immediate-retry"
+      ],
+      "evaluators": [
+        "d22-request-retry-minimum-delay"
+      ],
+      "rationale": "Return an error to a publisher-originated request and measure a same-parameters retry against the known response and interval. The field encodes minimum delay plus one: 1 permits immediate retry, not a one-millisecond minimum. The recommendation does not require a retry to occur."
+    },
+    {
+      "id": "D22-9-4-2-SHOULD-NOT-354",
+      "strength": "ShouldNot",
+      "source": {
+        "section": "9.4.2",
+        "first_line": 4276,
+        "last_line": 4276,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "requester receiving zero Retry Interval",
+      "summary": "Do not retry the failed request as sent when REQUEST_ERROR has Retry Interval 0.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publisher-request-zero-retry",
+        "d22-publisher-redirect-zero-retry"
+      ],
+      "evaluators": [
+        "d22-zero-retry-no-original-request-retry"
+      ],
+      "rationale": "Observe attempts to repeat the original request under a driven retry stimulus. Section 12.3 explicitly allows following a Redirect to a different URI or target despite zero Retry Interval; a redirected request is not prohibited repetition of the original."
+    },
+    {
+      "id": "D22-9-5-MUST-355",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 4302,
+        "last_line": 4302,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving an out-of-context REQUEST_UPDATE",
+      "summary": "Close the session with PROTOCOL_VIOLATION unless REQUEST_UPDATE comes from the original sender of SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS on that request's stream, or from the subscriber of a PUBLISH-established subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-update-on-track-status",
+        "d22-responder-update-on-publish-namespace",
+        "d22-subscriber-update-on-publish"
+      ],
+      "evaluators": [
+        "d22-request-update-context-and-direction"
+      ],
+      "rationale": "Exercise illegal TRACK_STATUS updates and responder updates on a publisher-originated namespace request, alongside a legal subscriber update on PUBLISH. Request-stream placement and the PUBLISH exception are essential; the generic original-sender permission also permits publisher-originated PUBLISH updates."
+    },
+    {
+      "id": "D22-9-5-MUST-356",
+      "strength": "Must",
+      "source": {
+        "section": "9.5",
+        "first_line": 4304,
+        "last_line": 4308,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of REQUEST_UPDATE",
+      "summary": "Respond with exactly one REQUEST_OK or REQUEST_ERROR for an update, except that coalesced failed updates can receive one REQUEST_ERROR for multiple REQUEST_UPDATE messages.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-single-request-update-response",
+        "d22-coalesced-successful-update-responses",
+        "d22-coalesced-failed-update-response"
+      ],
+      "evaluators": [
+        "d22-request-update-response-exclusivity"
+      ],
+      "rationale": "Send legal updates to a publisher on active subscriptions and account for responses on that same stream. Do not require one error per failed coalesced update or allow a success batch to collapse its acknowledgments. Section 9.5.1 separately requires failed-request cleanup."
+    },
+    {
+      "id": "D22-9-5-1-MUST-357",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4395,
+        "last_line": 4397,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher whose subscription update is unsuccessful",
+      "summary": "Also terminate the subscription by sending PUBLISH_DONE with UPDATE_FAILED when REQUEST_UPDATE is unsuccessful.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-failed-subscription-update-cleanup"
+      ],
+      "evaluators": [
+        "d22-failed-update-publish-done-update-failed"
+      ],
+      "rationale": "On an established SUBSCRIBE- or PUBLISH-initiated subscription, elicit an update REQUEST_ERROR and verify the additional PUBLISH_DONE and terminal stream behavior. The acknowledgment and subscription termination are distinct obligations; data closure must also respect Section 9.9."
+    },
+    {
+      "id": "D22-9-5-1-MUST-358",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4398,
+        "last_line": 4398,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher whose FETCH update fails",
+      "summary": "Reset the FETCH data stream when REQUEST_UPDATE fails for a FETCH.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-failed-fetch-update-data-reset"
+      ],
+      "evaluators": [
+        "d22-failed-fetch-update-resets-data-stream"
+      ],
+      "rationale": "Keep a FETCH data stream open, send an unsuccessful update on its associated request stream, and observe RESET_STREAM on the data stream. Resetting only the bidirectional request stream does not fulfill this separate duty."
+    },
+    {
+      "id": "D22-9-5-1-MUST-359",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4400,
+        "last_line": 4401,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "responder to SUBSCRIBE_NAMESPACE",
+      "summary": "Close the bidirectional request stream when a SUBSCRIBE_NAMESPACE REQUEST_UPDATE fails.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-failed-subscribe-namespace-update-close"
+      ],
+      "evaluators": [
+        "d22-failed-namespace-update-stream-close"
+      ],
+      "rationale": "A publisher answering namespace discovery is a responder. After its unsuccessful update response, verify its sending direction closes and complete the peer direction consistently with Section 6.4.2.2; the publisher cannot emit the peer's FIN."
+    },
+    {
+      "id": "D22-9-5-1-MUST-360",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4400,
+        "last_line": 4401,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "responder to SUBSCRIBE_TRACKS",
+      "summary": "Close the bidirectional request stream when a SUBSCRIBE_TRACKS REQUEST_UPDATE fails.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-failed-subscribe-tracks-update-close"
+      ],
+      "evaluators": [
+        "d22-failed-subscribe-tracks-update-stream-close"
+      ],
+      "rationale": "The contribution publisher can respond to track discovery. Observe closure of the failed discovery request using Section 6.4.2.2's directional semantics; do not infer that independently established PUBLISH subscriptions also terminate."
+    },
+    {
+      "id": "D22-9-5-1-MUST-361",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4400,
+        "last_line": 4401,
+        "occurrence": 1,
+        "clause": 3
+      },
+      "actor": "responder to PUBLISH_NAMESPACE",
+      "summary": "Close the bidirectional request stream when a PUBLISH_NAMESPACE REQUEST_UPDATE fails.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "For contribution namespace publication, the publisher is the PUBLISH_NAMESPACE requester and the listener is the responder. This clause governs the receiving peer's cleanup, not the original publisher's response behavior."
+    },
+    {
+      "id": "D22-9-5-1-MAY-362",
+      "strength": "May",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4403,
+        "last_line": 4404,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver of multiple same-stream REQUEST_UPDATE messages",
+      "summary": "Coalesce processing of same-stream REQUEST_UPDATE messages by applying only their cumulative result, with later parameter values overriding earlier ones.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "A publisher may skip intermediate processing states, but identical external final state and acknowledgments can result from processing every state before sending data. The peer cannot prove which internal strategy was used. This permission does not waive the separately testable success acknowledgment count or failure cleanup."
+    },
+    {
+      "id": "D22-9-5-1-MUST-363",
+      "strength": "Must",
+      "source": {
+        "section": "9.5.1",
+        "first_line": 4406,
+        "last_line": 4408,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "receiver coalescing successful REQUEST_UPDATE messages",
+      "summary": "Send REQUEST_OK for each successful update even when REQUEST_UPDATE processing is coalesced.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-coalesced-successful-update-responses"
+      ],
+      "evaluators": [
+        "d22-successful-updates-each-acknowledged"
+      ],
+      "rationale": "Count REQUEST_OK messages for a controlled successful update sequence on one stream. Successes still each restore one credit under Section 9.1.7, regardless of whether intermediate state processing is observable. Only a coalesced failure can collapse its response to one REQUEST_ERROR."
+    },
+    {
+      "id": "D22-9-5-2-MUST-NOT-364",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.5.2",
+        "first_line": 4419,
+        "last_line": 4429,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber updating a namespace discovery prefix",
+      "summary": "Do not update a discovery prefix to overlap another active request of the same type in the session: SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS have separate overlap spaces.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sender of the namespace subscription update is a subscriber. This clause constrains its selected prefix, not a publisher's own PUBLISH_NAMESPACE announcements. Publisher receiver errors for overlapping requests are separate requirements."
+    },
+    {
+      "id": "D22-9-6-MUST-365",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 4485,
+        "last_line": 4487,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher accepting a subscription",
+      "summary": "Reply with SUBSCRIBE_OK on a successful SUBSCRIBE.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-successful-subscribe-response"
+      ],
+      "evaluators": [
+        "d22-successful-subscribe-uses-subscribe-ok"
+      ],
+      "rationale": "Request an available, authorized track and verify the publisher response on the same bidirectional stream. Section 9.7 describes SUBSCRIBE_OK as the first response; it is distinct from the generic REQUEST_OK used as PUBLISH_OK. Rejecting a request does not trigger this success-only duty."
+    },
+    {
+      "id": "D22-9-6-MUST-366",
+      "strength": "Must",
+      "source": {
+        "section": "9.6",
+        "first_line": 4485,
+        "last_line": 4487,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher accepting a subscription",
+      "summary": "Start sending eligible Objects for a successful subscription when its forwarding state and filters permit delivery.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-successful-subscribe-object-delivery",
+        "d22-successful-subscribe-forward-zero"
+      ],
+      "evaluators": [
+        "d22-successful-subscription-delivers-eligible-objects"
+      ],
+      "rationale": "The conjunction separately requires reply and object delivery. Supply known available or newly produced Objects satisfying the filters with Forward=1. Section 3.1 prohibits Objects with Forward=0; idle sources and filtered Objects are not a delivery failure. This sentence does not establish receive ordering between response and data streams."
+    },
+    {
+      "id": "D22-9-8-SHOULD-367",
+      "strength": "Should",
+      "source": {
+        "section": "9.8",
+        "first_line": 4571,
+        "last_line": 4573,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving unwanted PUBLISH",
+      "summary": "Send REQUEST_ERROR with UNINTERESTED for a PUBLISH whose Track the subscriber does not wish to receive.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The publisher sends PUBLISH; its receiving subscriber chooses whether it wants the Track. This is a peer stimulus the listener can supply, not a contribution publisher response duty."
+    },
+    {
+      "id": "D22-9-8-SHOULD-368",
+      "strength": "Should",
+      "source": {
+        "section": "9.8",
+        "first_line": 4571,
+        "last_line": 4573,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "subscriber receiving unwanted PUBLISH",
+      "summary": "Abandon reading publisher-initiated streams for the unwanted subscription using STOP_SENDING.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Sending the rejection and stopping reads of associated data streams are independent subscriber actions. The original publisher does not receive its own publication data; its reaction to peer cancellation is inventoried separately."
+    },
+    {
+      "id": "D22-9-9-MUST-NOT-369",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.9",
+        "first_line": 4613,
+        "last_line": 4615,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending PUBLISH_DONE",
+      "summary": "Do not send PUBLISH_DONE until all streams that will ever be opened for the subscription have been closed.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This constrains sender action order across independent data and request streams. Section 9.9 explicitly allows PUBLISH_DONE arrival before late-opening streams and Objects; FIN or reset arrival after PUBLISH_DONE is not proof of wrong send order. Peer-only evidence cannot establish the sender's closure chronology or future stream-opening intent."
+    },
+    {
+      "id": "D22-9-9-MUST-NOT-370",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.9",
+        "first_line": 4613,
+        "last_line": 4615,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher sending PUBLISH_DONE",
+      "summary": "Do not send PUBLISH_DONE while any datagrams remain to be sent for the subscription.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Pending outbound datagrams are sender-local state and datagram arrival can be reordered or lost relative to the request stream. A datagram received after PUBLISH_DONE does not prove it was sent later; peer observations cannot certify an empty sender queue."
+    },
+    {
+      "id": "D22-9-9-MUST-NOT-371",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.9",
+        "first_line": 4620,
+        "last_line": 4622,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher ending a subscription with PUBLISH_DONE",
+      "summary": "Do not destroy subscription state before sending PUBLISH_DONE, while remaining free to stop publishing for any reason.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Subscription-state destruction is internal and cannot be inferred from lack of subsequent data. This publisher-initiated completion rule coexists with Section 3.1.1's explicit permission to remove state on receiving STOP_SENDING and after request failure; it must not require a PUBLISH_DONE after every cancellation. Stream state can outlive subscription state."
+    },
+    {
+      "id": "D22-9-9-SHOULD-372",
+      "strength": "Should",
+      "source": {
+        "section": "9.9",
+        "first_line": 4624,
+        "last_line": 4627,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving PUBLISH_DONE",
+      "summary": "Set a timer of at least the larger of SUBGROUP_DELIVERY_TIMEOUT and OBJECT_DELIVERY_TIMEOUT to allow inbound Objects after PUBLISH_DONE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The timer protects the receiving subscriber from dropping delayed Objects. The contribution publisher is the sender of PUBLISH_DONE and its internal delivery timeout enforcement is a different duty."
+    },
+    {
+      "id": "D22-9-9-MAY-373",
+      "strength": "May",
+      "source": {
+        "section": "9.9",
+        "first_line": 4627,
+        "last_line": 4629,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber no longer interested in the Track",
+      "summary": "Dispense with the post-PUBLISH_DONE timer if unsubscribed or otherwise no longer interested in the Track's Objects.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This is a conditional subscriber timer exception, not permission for publishers to ignore their stream closure or PUBLISH_DONE obligations."
+    },
+    {
+      "id": "D22-9-9-MAY-374",
+      "strength": "May",
+      "source": {
+        "section": "9.9",
+        "first_line": 4631,
+        "last_line": 4633,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving PUBLISH_DONE",
+      "summary": "Discard subscription state earlier, accepting the risk of not delivering late Objects to the application.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This receiver tradeoff concerns delivery to the subscriber application. It does not grant a publisher permission to destroy state before its own completion signaling. The cited sentence spans a page boundary."
+    },
+    {
+      "id": "D22-9-9-SHOULD-375",
+      "strength": "Should",
+      "source": {
+        "section": "9.9",
+        "first_line": 4633,
+        "last_line": 4635,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber deleting subscription state",
+      "summary": "Send STOP_SENDING on all streams related to the subscription when deleting its state.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The subscriber terminates reads it no longer needs. A publisher sends those data streams; its separate cancellation handling does not turn this receiver action into publisher behavior."
+    },
+    {
+      "id": "D22-9-9-MUST-376",
+      "strength": "Must",
+      "source": {
+        "section": "9.9",
+        "first_line": 4674,
+        "last_line": 4675,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher that opened no subscription streams",
+      "summary": "Set PUBLISH_DONE Stream Count to 0 if no data streams were opened for the subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-done-without-data-streams",
+        "d22-publish-done-datagram-only"
+      ],
+      "evaluators": [
+        "d22-publish-done-zero-stream-count"
+      ],
+      "rationale": "Use a driven subscription with no data streams, such as datagram-only delivery without fill. The definition counts empty Subgroups and fill fetch streams, so no received Objects alone does not establish zero streams. Use known fixture preconditions and a complete trace rather than stopping observation at PUBLISH_DONE arrival."
+    },
+    {
+      "id": "D22-9-9-MUST-377",
+      "strength": "Must",
+      "source": {
+        "section": "9.9",
+        "first_line": 4677,
+        "last_line": 4677,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher unable to determine exact subscription stream count",
+      "summary": "Set PUBLISH_DONE Stream Count to 2^64 - 1 when unable to set the exact number of streams opened for the subscription.",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The sentinel is visible, but the condition is the publisher's internal inability to determine its exact count. Peer traces cannot establish that inability, particularly when streams were reset before their identifying header. This does not turn all observed count discrepancies into violations of this conditional rule."
+    },
+    {
+      "id": "D22-9-9-SHOULD-378",
+      "strength": "Should",
+      "source": {
+        "section": "9.9",
+        "first_line": 4677,
+        "last_line": 4680,
+        "occurrence": 2,
+        "clause": 1
+      },
+      "actor": "subscriber retaining state after PUBLISH_DONE",
+      "summary": "Use a timeout or another mechanism to remove subscription state despite an incorrect Stream Count, a reset before SUBGROUP_HEADER or the maximum count sentinel.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "This prevents subscriber state leaks when completion cannot be established solely by counting identifiable data streams. It is not a publisher count-generation requirement."
+    },
+    {
+      "id": "D22-9-9-MAY-379",
+      "strength": "May",
+      "source": {
+        "section": "9.9",
+        "first_line": 4682,
+        "last_line": 4682,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "subscriber receiving more streams than PUBLISH_DONE reports",
+      "summary": "Close the session with PROTOCOL_VIOLATION when more subscription streams arrive than the PUBLISH_DONE Stream Count specifies.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The receiver may choose this error response. The publisher does not receive its own subscription streams, and this optional subscriber reaction does not establish a sender-order violation."
+    },
+    {
+      "id": "D22-9-10-MUST-380",
+      "strength": "Must",
+      "source": {
+        "section": "9.10",
+        "first_line": 4711,
+        "last_line": 4712,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "endpoint receiving PUBLISH_STATE_NOTIFY on another request type",
+      "summary": "Close the session with PROTOCOL_VIOLATION when PUBLISH_STATE_NOTIFY is received for a request other than a subscription.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-state-notify-on-namespace-request",
+        "d22-publish-state-notify-on-fetch"
+      ],
+      "evaluators": [
+        "d22-publish-state-notify-request-type-error"
+      ],
+      "rationale": "Send the notification on an established namespace or FETCH request stream to the publisher. Only SUBSCRIBE- or PUBLISH-established subscriptions support the message; its request-stream placement does not make it a general request-update mechanism."
+    },
+    {
+      "id": "D22-9-10-MUST-381",
+      "strength": "Must",
+      "source": {
+        "section": "9.10",
+        "first_line": 4711,
+        "last_line": 4712,
+        "occurrence": 1,
+        "clause": 2
+      },
+      "actor": "publisher receiving PUBLISH_STATE_NOTIFY from a subscriber",
+      "summary": "Close the session with PROTOCOL_VIOLATION when PUBLISH_STATE_NOTIFY is received from the subscriber.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscriber-sends-publish-state-notify",
+        "d22-publish-established-subscriber-sends-publish-state-notify"
+      ],
+      "evaluators": [
+        "d22-publish-state-notify-direction-error"
+      ],
+      "rationale": "Inject the message from the listener subscriber on both SUBSCRIBE- and PUBLISH-established subscriptions. Direction follows publisher/subscriber roles rather than transport client/server or which side opened the bidirectional stream. Valid publisher notifications are unilateral and do not receive REQUEST_OK or REQUEST_ERROR."
+    },
+    {
+      "id": "D22-9-10-MUST-NOT-382",
+      "strength": "MustNot",
+      "source": {
+        "section": "9.10",
+        "first_line": 4719,
+        "last_line": 4721,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending PUBLISH_STATE_NOTIFY",
+      "summary": "Do not use PUBLISH_STATE_NOTIFY to change a subscriber-controlled subscription parameter unless the subscriber requested the change.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-state-notify-preserves-subscriber-control",
+        "d22-publish-state-notify-requested-forward-change"
+      ],
+      "evaluators": [
+        "d22-notify-no-unsolicited-subscriber-value-change"
+      ],
+      "rationale": "Track the listener subscriber's requested values and publisher notifications, using FORWARD from Section 9.20.19 as an explicitly permitted notification parameter. Omitted parameters remain unchanged; report only a value change without a matching subscriber request. Publisher-controlled updates and reporting the requested current value remain allowed."
+    },
+    {
+      "id": "D22-9-10-MUST-383",
+      "strength": "Must",
+      "source": {
+        "section": "9.10",
+        "first_line": 4723,
+        "last_line": 4726,
+        "occurrence": 1,
+        "clause": 1
+      },
+      "actor": "publisher sending PUBLISH_STATE_NOTIFY",
+      "summary": "Include LARGEST_OBJECT, if known, in PUBLISH_STATE_NOTIFY to identify the Track location at which the change took effect.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-publish-state-notify-known-largest-object",
+        "d22-publish-state-notify-before-first-object"
+      ],
+      "evaluators": [
+        "d22-notify-known-largest-object-present"
+      ],
+      "rationale": "Use a controlled Track with a known published Object before stimulating a notification, and a separate no-Objects case. Sections 3.1.3 and 9.20.18 define the endpoint's Largest Location: it advances at the first byte published or received through a subscription, not when an Object is merely queued. No received Object alone is insufficient to infer what the publisher knows; the fixture and trace establish the precondition."
+    }
+  ]
+}
