@@ -197,7 +197,7 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        const auto options = parse_options(argc, argv);
+        auto options = parse_options(argc, argv);
         const auto build = moq::interop::app::build_info();
         const auto digest_file = options.requirements / "draft-digests.json";
         const auto source18 = moq::interop::requirements::load_draft_source(18, options.docs, digest_file);
@@ -208,6 +208,13 @@ int main(int argc, char* argv[]) {
         auto draft21 = std::make_shared<const moq::interop::requirements::RequirementCatalog>(
             moq::interop::requirements::RequirementCatalog::load(
                 source21, options.requirements / "draft21.json"));
+        // Draft 22 is known but not runnable: its catalog is incomplete by design.
+        const auto source22 = moq::interop::requirements::load_draft_source(22, options.docs, digest_file);
+        options.server.draft22_catalog =
+            std::make_shared<const moq::interop::requirements::RequirementCatalog>(
+                moq::interop::requirements::RequirementCatalog::load(
+                    source22, options.requirements / "draft22.json",
+                    moq::interop::requirements::CatalogLoadMode::AllowIncomplete));
         auto store = std::make_shared<moq::interop::storage::SqliteRunStore>(options.database, build);
         const auto recovered = store->recover_interrupted();
         if (recovered != 0)

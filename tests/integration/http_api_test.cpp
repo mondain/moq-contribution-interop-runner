@@ -81,6 +81,15 @@ std::shared_ptr<const requirements::RequirementCatalog> catalog(unsigned draft) 
             source, root / "requirements" / ("draft" + std::to_string(draft) + ".json")));
 }
 
+std::shared_ptr<const requirements::RequirementCatalog> catalog22() {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = requirements::load_draft_source(
+        22, root / "docs", root / "requirements" / "draft-digests.json");
+    return std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog::load(source, root / "requirements" / "draft22.json",
+                                               requirements::CatalogLoadMode::AllowIncomplete));
+}
+
 app::BuildInfo test_build() {
     return {std::string{"0.1<script>\0", 13}, "rev&\"'", {{"dep<script>", "one&two"}}};
 }
@@ -316,6 +325,102 @@ TEST_F(HttpApiTest, ValidatesDraftAndPaginatesRequirements) {
         EXPECT_FALSE(error.at("error").at("code").get<std::string>().empty());
         EXPECT_FALSE(error.at("error").at("message").get<std::string>().empty());
     }
+}
+
+class HttpApiDraft22Test : public ::testing::Test {
+protected:
+    void SetUp() override {
+        store_ = std::make_shared<storage::SqliteRunStore>(database_.path(), test_build());
+        ServerConfig config{.port = 0};
+        config.draft22_catalog = catalog22();
+        server_ = std::make_unique<HttpServer>(catalog(18), catalog(21), store_, test_build(), config);
+        ASSERT_TRUE(server_->start());
+        client_ = std::make_unique<httplib::Client>("127.0.0.1", server_->port());
+        client_->set_connection_timeout(2s);
+        client_->set_read_timeout(2s);
+    }
+    void TearDown() override { client_.reset(); server_.reset(); }
+    Json get_json(const std::string& path, int expected_status = 200) {
+        const auto response = client_->Get(path);
+        EXPECT_TRUE(response) << path;
+        if (!response) return {};
+        EXPECT_EQ(response->status, expected_status) << response->body;
+        return Json::parse(response->body);
+    }
+    TemporaryDatabase database_;
+    std::shared_ptr<storage::SqliteRunStore> store_;
+    std::unique_ptr<HttpServer> server_;
+    std::unique_ptr<httplib::Client> client_;
+};
+
+TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownIncompleteAndNotRunnable) {
+    const auto drafts = get_json("/api/v1/drafts");
+    ASSERT_EQ(drafts.at("drafts").size(), 3u);
+    EXPECT_EQ(drafts.at("drafts").at(0).at("draft"), 18);
+    EXPECT_TRUE(drafts.at("drafts").at(0).at("runnable"));
+    EXPECT_EQ(drafts.at("drafts").at(1).at("draft"), 21);
+    EXPECT_TRUE(drafts.at("drafts").at(1).at("runnable"));
+    EXPECT_EQ(drafts.at("drafts").at(2).at("draft"), 22);
+    EXPECT_FALSE(drafts.at("drafts").at(2).at("runnable"));
+    EXPECT_FALSE(drafts.at("drafts").at(2).at("complete"));
+    EXPECT_EQ(drafts.at("drafts").at(2).at("requirement_count"), 613);
+    // Healthz still reports only the runnable drafts and lists no draft 22 profile.
+    const auto health = get_json("/healthz");
+    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
+    for (const auto& profile : health.at("executable_profiles")) {
+        EXPECT_NE(profile.at("draft"), 22);
+    }
+}
+
+TEST_F(HttpApiDraft22Test, ServesDraft22RequirementsAndStillRejectsOtherDrafts) {
+    const auto page = get_json("/api/v1/requirements?draft=22&limit=3&offset=1");
+    EXPECT_EQ(page.at("draft"), 22);
+    EXPECT_EQ(page.at("pagination").at("total"), 613);
+    EXPECT_EQ(page.at("items").size(), 3u);
+    EXPECT_TRUE(page.at("items").at(0).at("id").get<std::string>().starts_with("D22-"));
+    const auto error = get_json("/api/v1/requirements?draft=23", 400);
+    EXPECT_EQ(error.at("error").at("code"), "unsupported_draft");
+    EXPECT_EQ(error.at("error").at("message"), "draft must be 18, 21 or 22.");
+}
+
+TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
+    const auto post = [&](const Json& request) {
+        auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
+        EXPECT_TRUE(response);
+        return response;
+    };
+    // Even a nonsense scenario list gets the draft error, not a scenario error.
+    const auto response = post({{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
+                                {"scenarios", Json::array({"no-such-scenario"})}, {"timeout_ms", 1000}});
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 422);
+    const auto error = Json::parse(response->body).at("error");
+    EXPECT_EQ(error.at("code"), "draft_not_runnable");
+    EXPECT_EQ(error.at("message"), "Draft 22 has a requirement catalog but no executable scenarios yet.");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+    // Draft 23 is still a malformed run configuration.
+    const auto invalid = post({{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},
+                               {"scenarios", Json::array({"x"})}, {"timeout_ms", 1000}});
+    ASSERT_TRUE(invalid);
+    EXPECT_EQ(invalid->status, 400);
+    EXPECT_EQ(Json::parse(invalid->body).at("error").at("code"), "invalid_run_config");
+}
+
+TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
+    const auto drafts = get_json("/api/v1/drafts");
+    ASSERT_EQ(drafts.at("drafts").size(), 2u);
+    for (const auto& entry : drafts.at("drafts")) EXPECT_TRUE(entry.at("runnable"));
+    const auto error = get_json("/api/v1/requirements?draft=22", 400);
+    EXPECT_EQ(error.at("error").at("code"), "unsupported_draft");
+    EXPECT_EQ(error.at("error").at("message"), "draft must be 18 or 21.");
+    const auto response = client_->Post(
+        "/api/v1/runs",
+        Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
+             {"scenarios", Json::array({"x"})}, {"timeout_ms", 1000}}.dump(),
+        "application/json");
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 422);
+    EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "draft_not_runnable");
 }
 
 TEST_F(HttpApiTest, ValidatesPublisherCapabilityDeclarations) {

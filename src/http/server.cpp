@@ -2,6 +2,7 @@
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/scenarios/draft18_close.h"
 #include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/scenarios/draft18_peer_close.h"
@@ -42,6 +43,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <vector>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -173,8 +175,10 @@ app::RunConfig parse_run_config(const httplib::Request& request,
         const auto mode = body.at("mode").get<std::string>();
         const auto scenarios = body.at("scenarios").get<std::vector<std::string>>();
         const auto timeout = body.at("timeout_ms").get<std::int64_t>();
-        if (draft != 18 && draft != 21) {
-            throw ApiError{400, "invalid_run_config", "draft must be 18 or 21."};
+        const std::optional<app::DraftVersion> parsed_draft =
+            draft < 0 ? std::nullopt : app::parse_draft(static_cast<unsigned>(draft));
+        if (!parsed_draft) {
+            throw ApiError{400, "invalid_run_config", "draft must be 18, 21 or 22."};
         }
         if (transport != "native-quic" && transport != "webtransport") {
             throw ApiError{400, "invalid_run_config",
@@ -274,7 +278,7 @@ app::RunConfig parse_run_config(const httplib::Request& request,
                 capabilities.fetch = value.get<bool>();
             }
         }
-        return {draft == 18 ? app::DraftVersion::Draft18 : app::DraftVersion::Draft21,
+        return {*parsed_draft,
                 transport == "native-quic" ? app::TransportKind::NativeQuic
                                              : app::TransportKind::WebTransport,
                 mode == "observed" ? app::RunMode::Observed : app::RunMode::Driven,
@@ -332,9 +336,10 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                        const storage::RunStore& store, const app::BuildInfo& build) {
     Json drafts = Json::array();
     for (const auto* catalog : {&draft18, &draft21}) {
-        const auto bindings = catalog->draft == 18
-            ? requirements::draft18_executable_bindings()
-            : requirements::draft21_executable_bindings();
+        const auto bindings = app::by_draft(
+            *app::parse_draft(catalog->draft),
+            [] { return requirements::draft18_executable_bindings(); },
+            [] { return requirements::draft21_executable_bindings(); });
         const auto audit = requirements::audit_completeness(
             *catalog, bindings, app::executable_scenarios(catalog->draft));
         Json findings = Json::array();
@@ -694,9 +699,15 @@ public:
         });
         server.Get("/api/v1/drafts", [this](const httplib::Request&, httplib::Response& response) {
             guarded(response, [this, &response] {
-                json_response(response, {{"schema_version", 1},
-                                         {"drafts", {detail::catalog_json(*draft18),
-                                                     detail::catalog_json(*draft21)}}});
+                Json drafts = Json::array();
+                std::vector<const requirements::RequirementCatalog*> listed = {draft18.get(), draft21.get()};
+                if (config.draft22_catalog) listed.push_back(config.draft22_catalog.get());
+                for (const auto* catalog : listed) {
+                    auto entry = detail::catalog_json(*catalog);
+                    entry["runnable"] = app::runnable(*app::parse_draft(catalog->draft));
+                    drafts.push_back(std::move(entry));
+                }
+                json_response(response, {{"schema_version", 1}, {"drafts", std::move(drafts)}});
             });
         });
         server.Get("/api/v1/requirements", [this](const httplib::Request& request,
@@ -706,8 +717,15 @@ public:
                     throw ApiError{400, "missing_draft", "draft query parameter is required."};
                 }
                 const auto draft = request.get_param_value("draft");
-                const auto* catalog = draft == "18" ? draft18.get() : draft == "21" ? draft21.get() : nullptr;
-                if (!catalog) throw ApiError{400, "unsupported_draft", "draft must be 18 or 21."};
+                const requirements::RequirementCatalog* catalog = nullptr;
+                if (draft == "18") catalog = draft18.get();
+                else if (draft == "21") catalog = draft21.get();
+                else if (draft == "22") catalog = config.draft22_catalog.get();
+                if (!catalog) {
+                    throw ApiError{400, "unsupported_draft",
+                                   config.draft22_catalog ? "draft must be 18, 21 or 22."
+                                                          : "draft must be 18 or 21."};
+                }
                 const auto page = query(request);
                 Json items = Json::array();
                 const auto begin = std::min(page.offset, catalog->requirements.size());
@@ -727,8 +745,10 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities);
-                const bool draft21_scenario =
-                    requested.draft == app::DraftVersion::Draft21;
+                if (!app::runnable(requested.draft))
+                    throw ApiError{422, "draft_not_runnable",
+                        "Draft " + std::to_string(app::draft_number(requested.draft)) +
+                        " has a requirement catalog but no executable scenarios yet."};
                 {
                     // Say which part of the selection is unsupported, and why, so the caller
                     // does not have to bisect a long scenario list.
@@ -791,7 +811,7 @@ public:
                         {"address", started.endpoint.address},
                         {"port", started.endpoint.port},
                         {"alpn", requested.transport == app::TransportKind::WebTransport
-                                     ? "h3" : draft21_scenario ? "moqt-21" : "moqt-18"}};
+                                     ? "h3" : std::string(app::alpn(requested.draft))}};
                     if (requested.transport == app::TransportKind::WebTransport) {
                         publisher_endpoint["url"] = started.url;
                         publisher_endpoint["path"] = started.path;
@@ -880,8 +900,10 @@ public:
             guarded(response, [this, &request, &response] {
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
-                                              ? *draft18 : *draft21;
+                    const auto& catalog = app::by_draft(
+                        run.config.draft,
+                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
+                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
                     json_response(response, serialize_result(run, catalog));
                 } catch (const std::out_of_range&) {
                     throw ApiError{404, "run_not_found", "The requested run was not found."};
@@ -893,8 +915,10 @@ public:
             guarded(response, [this, &request, &response] {
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
-                                              ? *draft18 : *draft21;
+                    const auto& catalog = app::by_draft(
+                        run.config.draft,
+                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
+                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
                     response.status = 200;
                     response.set_header("X-Content-Type-Options", "nosniff");
                     response.set_content(serialize_tap14(run, catalog),
@@ -910,8 +934,10 @@ public:
                 const auto filters = report_filters(request);
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = run.config.draft == app::DraftVersion::Draft18
-                                              ? *draft18 : *draft21;
+                    const auto& catalog = app::by_draft(
+                        run.config.draft,
+                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
+                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
                     response.status = 200;
                     html_headers(response);
                     response.set_content(detail::render_run_detail(run, catalog, filters),
