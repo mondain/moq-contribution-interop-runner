@@ -1,3 +1,7 @@
+#include "moq/interop/wire/draft21/location_filter.h"
+#include "moq/interop/wire/draft21/publish.h"
+#include "moq/interop/wire/draft22/location_filter.h"
+#include "moq/interop/wire/draft22/publish.h"
 #include "moq/interop/wire/draft22/shared.h"
 
 #include <gtest/gtest.h>
@@ -106,6 +110,16 @@ TEST(Draft22SharedSurface, SharedNamesWorkThroughTheDraft22Namespace) {
     ASSERT_TRUE(info.has_value());
     EXPECT_EQ(info->kind, draft22::MessageKind::Publish);
     EXPECT_TRUE(info->request_starter);
+}
+
+TEST(Draft22SharedSurface, ChangedModulesAreNotSharedWithDraft21) {
+    // draft-ietf-moq-transport-22 sections 9.8 and 9.20.9 change these.
+    static_assert(!std::is_same_v<draft22::PublishMessage, draft21::PublishMessage>);
+    static_assert(!std::is_same_v<draft22::PublishParameter, draft21::PublishParameter>);
+    static_assert(!std::is_same_v<decltype(&draft22::decode_publish),
+                                  decltype(&draft21::decode_publish)>);
+    static_assert(!std::is_same_v<draft22::LocationFilter, draft21::LocationFilter>);
+    SUCCEED();
 }
 
 }  // namespace
