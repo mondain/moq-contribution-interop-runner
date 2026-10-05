@@ -244,6 +244,7 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18_gap_b.cpp
     src/scenarios/draft21_gap_a.cpp
     src/scenarios/draft21_gap_a_token.cpp
+    src/scenarios/location_filter_param.cpp
     src/scenarios/draft21_contribution.cpp
     src/scenarios/draft21_contribution_support.cpp
     src/scenarios/draft21_contribution_session.cpp
@@ -815,6 +816,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-wire-draft-tests tests/unit/wire_draft_test.cpp)
     target_link_libraries(moq-interop-wire-draft-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
     add_test(NAME wire-draft COMMAND moq-interop-wire-draft-tests)
+
+    add_executable(moq-interop-location-filter-param-tests tests/unit/location_filter_param_test.cpp)
+    target_link_libraries(moq-interop-location-filter-param-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME location-filter-param COMMAND moq-interop-location-filter-param-tests)
 
     add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
     target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE

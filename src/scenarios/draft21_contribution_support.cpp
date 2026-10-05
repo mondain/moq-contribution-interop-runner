@@ -61,6 +61,8 @@ Param param_lp(std::uint64_t type, const Bytes& value) {
     return {type, std::move(encoded)};
 }
 
+Param filter_param(const FilterFields& fields) { return {0x21, filter_param_value(fields)}; }
+
 Bytes encode_params(std::vector<Param> params) {
     std::stable_sort(params.begin(), params.end(),
                      [](const Param& left, const Param& right) { return left.type < right.type; });
