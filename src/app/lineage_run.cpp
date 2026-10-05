@@ -3,6 +3,7 @@
 #include "moq/interop/requirements/lineage_translate.h"
 
 #include <map>
+#include <stdexcept>
 #include <string>
 
 namespace moq::interop::app {
@@ -15,8 +16,11 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
     for (std::size_t index = 0; index < translated.size(); ++index)
         by_id.emplace(translated[index].requirement_id, index);
     std::map<std::string, std::size_t> own_by_id;
-    for (std::size_t index = 0; index < own_outcomes.size(); ++index)
-        own_by_id.emplace(own_outcomes[index].requirement_id, index);
+    for (std::size_t index = 0; index < own_outcomes.size(); ++index) {
+        const auto& id = own_outcomes[index].requirement_id;
+        if (by_id.contains(id) || !own_by_id.emplace(id, index).second)
+            throw std::logic_error("own draft 22 outcome duplicates another outcome for row " + id);
+    }
     std::vector<requirements::Outcome> outcomes;
     outcomes.reserve(draft22.requirements.size());
     for (const auto& row : draft22.requirements) {

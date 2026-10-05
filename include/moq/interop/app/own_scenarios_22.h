@@ -86,7 +86,9 @@ public:
         return ids_;
     }
 
-    // `shared` followed by the implemented own ids; `shared` itself when none is implemented.
+    // `shared` followed by the implemented own ids; `shared` itself when none is implemented. The combined
+    // list is cached from the first `shared` seen after a registration change: the only caller
+    // (executable_scenarios(22)) always passes the same static list.
     std::span<const std::string_view> with_own(std::span<const std::string_view> shared) {
         std::lock_guard lock(mutex_);
         if (ids_.empty()) return shared;

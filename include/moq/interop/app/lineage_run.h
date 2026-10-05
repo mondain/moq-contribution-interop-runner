@@ -41,8 +41,10 @@ inline std::optional<LineageRun> lineage_run(const RunConfig& config) {
 // rows, then the own draft 22 evaluators' outcomes (already keyed by draft 22 rows) for rows the
 // translation does not reach, plus one outcome for every row neither reaches (NotRun when scored,
 // otherwise the row's own NotTestable/NotApplicable class). One outcome per catalog row, in catalog
-// order; a translated or own outcome the catalog lacks, or an own outcome for a row the translation
-// already reached, is kept at the end so scoring fails loudly instead of losing it.
+// order; a translated or own outcome the catalog lacks is appended after the catalog rows (no severity
+// merge), where scoring rejects it. An own outcome for a row the translation reached, or two own outcomes
+// for one row, throws std::logic_error: own rows (kOwnRows22) name only own scenarios and evaluators, which
+// LineageRunOwn.RowsNamingOwnIdsAreOwnRowsAndNameOnlyOwnIds guards on the catalog data.
 std::vector<requirements::Outcome> lineage_outcomes(const requirements::RequirementCatalog& draft22,
                                                     std::span<const requirements::Outcome> draft21_outcomes,
                                                     std::span<const requirements::Outcome> own_outcomes = {});

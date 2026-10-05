@@ -1,6 +1,7 @@
 #include "moq/interop/app/own_scenario_dispatch_22.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -8,9 +9,16 @@
 namespace moq::interop::app {
 namespace {
 
+// A production own probe. Its traits live only in kOwnScenarioTraits22 (the predicates' single source);
+// own_probe_tables_agree_22() checks that both tables name the same ids.
+struct OwnProbe22 {
+    std::string_view id;
+    std::function<scenarios::RawProbeDefinition(const RunConfig&)> probe;
+};
+
 // Production probes for the ids in kOwnScenarioTraits22 (Tasks 9-10 add them together).
-const std::vector<OwnScenario22>& production_scenarios() {
-    static const std::vector<OwnScenario22> table;
+const std::vector<OwnProbe22>& production_probes() {
+    static const std::vector<OwnProbe22> table;
     return table;
 }
 
@@ -30,13 +38,26 @@ std::optional<OwnEvaluator22> own_evaluator(std::string_view id) {
 }  // namespace
 
 std::optional<scenarios::RawProbeDefinition> own_probe_22(std::string_view id, const RunConfig& execution) {
-    auto scenario = OwnScenarioRegistry22::instance().registered_scenario(id);
-    if (!scenario) {
-        for (const auto& entry : production_scenarios())
-            if (entry.traits.id == id) scenario = entry;
+    if (const auto scenario = OwnScenarioRegistry22::instance().registered_scenario(id)) {
+        if (!scenario->probe) return std::nullopt;
+        return scenario->probe(execution);
     }
-    if (!scenario || !scenario->probe) return std::nullopt;
-    return scenario->probe(execution);
+    for (const auto& entry : production_probes())
+        if (entry.id == id && entry.probe) return entry.probe(execution);
+    return std::nullopt;
+}
+
+bool has_own_probe_22(std::string_view id) {
+    if (const auto scenario = OwnScenarioRegistry22::instance().registered_scenario(id))
+        return static_cast<bool>(scenario->probe);
+    return std::any_of(production_probes().begin(), production_probes().end(),
+                       [&](const auto& entry) { return entry.id == id && entry.probe; });
+}
+
+std::vector<std::string_view> production_own_evaluator_ids_22() {
+    std::vector<std::string_view> ids;
+    for (const auto& entry : production_evaluators()) ids.push_back(entry.id);
+    return ids;
 }
 
 std::vector<requirements::Outcome> evaluate_own_draft22(const requirements::RequirementCatalog& draft22,

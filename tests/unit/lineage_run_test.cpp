@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 namespace moq::interop::app {
@@ -211,16 +212,76 @@ TEST(LineageRunOwn, OwnOutcomesFillTheirDraft22RowsAndNothingElse) {
     }
 }
 
-TEST(LineageRunOwn, AnOwnOutcomeForARowTheCatalogLacksOrTheTranslationReachedIsKeptAtTheEnd) {
+TEST(LineageRunOwn, AnOwnOutcomeForARowTheCatalogLacksIsKeptAtTheEnd) {
     const auto d21 = catalog(21);
     const auto d22 = catalog(22);
-    const auto& shared_row = requirements::lineage_data::kSharedRows.front();
-    const std::vector<requirements::Outcome> own{{"D22-NO-SUCH-ROW", requirements::OutcomeState::Pass},
-                                                 {std::string(shared_row.d22), requirements::OutcomeState::Pass}};
+    const std::vector<requirements::Outcome> own{{"D22-NO-SUCH-ROW", requirements::OutcomeState::Pass}};
     const auto outcomes = lineage_outcomes(*d22, unobserved(*d21), own);
-    ASSERT_EQ(outcomes.size(), d22->requirements.size() + 2);
-    EXPECT_EQ(outcomes[outcomes.size() - 2].requirement_id, "D22-NO-SUCH-ROW");
-    EXPECT_EQ(outcomes.back().requirement_id, shared_row.d22);
+    ASSERT_EQ(outcomes.size(), d22->requirements.size() + 1);
+    EXPECT_EQ(outcomes.back().requirement_id, "D22-NO-SUCH-ROW");
+}
+
+TEST(LineageRunOwn, AnOwnOutcomeThatDuplicatesAnotherOutcomeThrows) {
+    const auto d21 = catalog(21);
+    const auto d22 = catalog(22);
+    const auto source = unobserved(*d21);
+    // A row the translation reached.
+    const auto& shared_row = requirements::lineage_data::kSharedRows.front();
+    const std::vector<requirements::Outcome> translated{{std::string(shared_row.d22), requirements::OutcomeState::Pass}};
+    EXPECT_THROW(lineage_outcomes(*d22, source, translated), std::logic_error);
+    // Two own outcomes for one row.
+    const std::vector<requirements::Outcome> twice{{"D22-6-3-MAY-159", requirements::OutcomeState::Pass},
+                                                   {"D22-6-3-MAY-159", requirements::OutcomeState::Fail}};
+    EXPECT_THROW(lineage_outcomes(*d22, source, twice), std::logic_error);
+}
+
+// The data guard behind lineage_outcomes and evaluate_own_draft22: a row that names an own scenario or an own
+// evaluator is an own row and names nothing shared, so it never receives a translated outcome as well, and
+// every scenario it names carries a draft 22 id in the transcripts.
+TEST(LineageRunOwn, RowsNamingOwnIdsAreOwnRowsAndNameOnlyOwnIds) {
+    const auto d22 = catalog(22);
+    const auto contains = [](const auto& list, std::string_view id) {
+        return std::find(list.begin(), list.end(), id) != list.end();
+    };
+    const auto& own_scenarios = requirements::lineage_data::kOwnScenarios22;
+    const auto& own_evaluators = requirements::lineage_data::kOwnEvaluators22;
+    std::size_t naming_own = 0;
+    for (const auto& row : d22->requirements) {
+        const bool names_own =
+            std::any_of(row.scenarios.begin(), row.scenarios.end(),
+                        [&](const auto& id) { return contains(own_scenarios, id); }) ||
+            std::any_of(row.evaluators.begin(), row.evaluators.end(),
+                        [&](const auto& id) { return contains(own_evaluators, id); });
+        if (!names_own) continue;
+        ++naming_own;
+        SCOPED_TRACE(row.id);
+        EXPECT_TRUE(contains(requirements::lineage_data::kOwnRows22, row.id));
+        for (const auto& id : row.scenarios) EXPECT_TRUE(contains(own_scenarios, id)) << id;
+        for (const auto& id : row.evaluators) EXPECT_TRUE(contains(own_evaluators, id)) << id;
+    }
+    EXPECT_GT(naming_own, 0u) << "guards against a vacuous walk";
+}
+
+// Row 069 with the publisher declaring no FETCH: passing SUBSCRIBE evidence alone never passes it, and it stays
+// in the denominators (the FETCH scenario was skipped, so its evaluator was never exercised).
+TEST(LineageRunOwn, Row069StaysNotRunAndScoredWithoutFetchEvidence) {
+    const auto d21 = catalog(21);
+    const auto d22 = catalog(22);
+    const PublisherCapabilities no_fetch{.fetch = false};
+    // What evaluate_own_draft22 yields for 069 when only the SUBSCRIBE contexts ran.
+    const std::vector<requirements::Outcome> own{{"D22-3-3-1-MUST-NOT-069", requirements::OutcomeState::NotRun}};
+    auto outcomes = lineage_outcomes(*d22, unobserved(*d21), own);
+    apply_publisher_capabilities(22, *d22, no_fetch, outcomes);
+    const auto found = std::find_if(outcomes.begin(), outcomes.end(),
+                                    [](const auto& outcome) { return outcome.requirement_id == "D22-3-3-1-MUST-NOT-069"; });
+    ASSERT_NE(found, outcomes.end());
+    EXPECT_EQ(found->state, requirements::OutcomeState::NotRun);
+    const auto with_row = score_lineage(*d22, outcomes);
+    auto dropped = outcomes;
+    for (auto& outcome : dropped)
+        if (outcome.requirement_id == "D22-3-3-1-MUST-NOT-069") outcome.state = requirements::OutcomeState::NotApplicable;
+    EXPECT_GT(with_row.required.possible, score_lineage(*d22, dropped).required.possible)
+        << "069 stays in the required denominator";
 }
 
 TEST(LineageRunOwn, FetchExclusionOnTheDraft22Catalog) {

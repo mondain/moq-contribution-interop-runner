@@ -17,6 +17,12 @@ namespace moq::interop::app {
 // from the run's execution config; nothing for any other id. Call under ScopedWireDraft(22).
 std::optional<scenarios::RawProbeDefinition> own_probe_22(std::string_view id, const RunConfig& execution);
 
+// Whether own_probe_22 has a probe for `id` (without building it).
+bool has_own_probe_22(std::string_view id);
+
+// The ids of the production own evaluators (tests check them against kOwnEvaluators22).
+std::vector<std::string_view> production_own_evaluator_ids_22();
+
 // The own draft 22 evaluators' outcomes over a run's transcripts, keyed by draft 22 row ids: one outcome
 // for every applicable, testable row of `draft22` that names an implemented own evaluator. A row passes
 // when every scenario it names ran once with a verdict and every evaluator it names was exercised, and

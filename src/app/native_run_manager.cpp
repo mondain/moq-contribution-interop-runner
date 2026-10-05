@@ -64,14 +64,22 @@ using namespace std::chrono_literals;
 // on the draft 22 wire.
 std::optional<LineageRun> plan_run(const RunConfig& requested) {
     if (requested.draft != DraftVersion::Draft22) return lineage_run(requested);
+    // Each id is classified once, so the shared subset and the rebuilt list cannot disagree.
+    std::vector<bool> own;
     RunConfig shared = requested;
-    std::erase_if(shared.scenario_ids, [](const auto& id) { return own_scenario_22(id).has_value(); });
+    shared.scenario_ids.clear();
+    for (const auto& id : requested.scenario_ids) {
+        own.push_back(own_scenario_22(id).has_value());
+        if (!own.back()) shared.scenario_ids.push_back(id);
+    }
     auto plan = lineage_run(shared);
     if (!plan) return std::nullopt;
+    auto implementations = std::move(plan->execution.scenario_ids);
     plan->execution.scenario_ids.clear();
-    for (const auto& id : requested.scenario_ids)
-        plan->execution.scenario_ids.emplace_back(
-            own_scenario_22(id) ? std::string_view(id) : *implementation_scenario_id(id));
+    std::size_t next_shared = 0;
+    for (std::size_t index = 0; index < requested.scenario_ids.size(); ++index)
+        plan->execution.scenario_ids.push_back(own[index] ? requested.scenario_ids[index]
+                                                          : std::move(implementations[next_shared++]));
     return plan;
 }
 
@@ -1551,6 +1559,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             return {RunStartStatus::InvalidConfig, {}, {}};
         if (plan->wire_draft == DraftVersion::Draft22 && own_scenario_22(id)) {
             // An own draft 22 scenario: a raw probe on the draft 22 wire, scored by own evaluators.
+            // Follow-up for Tasks 9-10: this branch skips the family transport gates (webtransport_only /
+            // native_only profiles, gap_*_only_scenario); a transport-specific own scenario needs a field in
+            // OwnScenarioTraits22 and a check here.
             if (auto reason = scenario_skip_reason(22, id, execution.publisher_capabilities)) {
                 if (skipped.empty()) {
                     first_skipped_requested = requested.scenario_ids[index];

@@ -1,5 +1,6 @@
 #include "moq/interop/app/lineage_run.h"
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/own_scenario_dispatch_22.h"
 #include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/requirements/draft_source.h"
@@ -709,8 +710,9 @@ TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgai
         excluded+=app::row_not_applicable_reason(22,row,capabilities).has_value() &&
                   row.applicability==requirements::Applicability::Applicable &&
                   row.testability==requirements::Testability::Testable;
-    // Only rows whose scenarios are all shared FETCH ones leave; an own FETCH scenario (e.g.
-    // d22-fetch-bounded-location-range) is not known to need FETCH yet.
+    // Only rows whose scenarios all need FETCH leave. The own FETCH scenario d22-fetch-bounded-location-range
+    // is known to need FETCH (kDraft22OwnFetchScenarios), but the only row naming it (069) also names own
+    // SUBSCRIBE scenarios and stays scored.
     EXPECT_GE(excluded,1u);
     EXPECT_EQ(static_cast<std::size_t>(std::count_if(run.outcomes.begin(),run.outcomes.end(),[&](const auto& outcome) {
         const auto row=std::find_if(draft22->requirements.begin(),draft22->requirements.end(),
@@ -975,6 +977,81 @@ TEST(NativeRunManagerDraft22Lineage, AnOwnFetchScenarioIsSkippedForAPublisherWit
         app::RunMode::Observed,{std::string(fetch)},1000ms,app::TrackFixture{{"n"},"t"}});
     ASSERT_EQ(capable.status,app::RunStartStatus::Started);
     EXPECT_TRUE(manager.stop(capable.id));
+}
+
+// The production own tables cannot drift: with no overlay registered, an own id has a probe exactly when the
+// header traits (which the predicates read) list it, and every production evaluator is an own evaluator.
+TEST(OwnScenarioTables22, ProductionProbesAndTraitsNameTheSameIds) {
+    ASSERT_TRUE(app::own_scenario_ids_22().size()==app::kOwnScenarioTraits22.size()) << "no overlay may be registered";
+    for (const auto id : requirements::lineage_data::kOwnScenarios22)
+        EXPECT_EQ(app::has_own_probe_22(id),app::own_scenario_22(id).has_value()) << id;
+    for (const auto& traits : app::kOwnScenarioTraits22)
+        EXPECT_TRUE(std::find(requirements::lineage_data::kOwnScenarios22.begin(),
+                              requirements::lineage_data::kOwnScenarios22.end(),traits.id)!=
+                    requirements::lineage_data::kOwnScenarios22.end()) << traits.id;
+    for (const auto id : app::production_own_evaluator_ids_22())
+        EXPECT_TRUE(std::find(requirements::lineage_data::kOwnEvaluators22.begin(),
+                              requirements::lineage_data::kOwnEvaluators22.end(),id)!=
+                    requirements::lineage_data::kOwnEvaluators22.end()) << id;
+}
+
+app::OwnEvaluator22 passing_own_evaluator(std::string_view id,std::atomic<unsigned>& calls) {
+    return {id,[&calls](const scenarios::RawProbeTranscript& transcript) -> std::optional<bool> {
+        ++calls;
+        return transcript.complete && !transcript.harness_failed;
+    }};
+}
+
+// Row 069 end to end with fetch=false: both SUBSCRIBE scenarios run (stubs on the duplicate request-GOAWAY
+// probe) and pass their evaluator; the FETCH scenario is skipped. The row stays NotRun and scored.
+TEST(NativeRunManagerDraft22Lineage, WithoutFetchRow069StaysNotRunOnPassingSubscribeEvidence) {
+    StubObservations seen;
+    constexpr std::string_view subscribe="d22-subscribe-bounded-location-range";
+    constexpr std::string_view fetch="d22-fetch-bounded-location-range";
+    constexpr std::string_view update="d22-update-subscription-location-range";
+    const app::ScopedOwnScenario22 subscribe_stub(stub_own_scenario(seen,subscribe));
+    const app::ScopedOwnScenario22 fetch_stub(stub_own_scenario(seen,fetch));
+    const app::ScopedOwnScenario22 update_stub(stub_own_scenario(seen,update));
+    std::atomic<unsigned> subscription_calls{0},fetch_calls{0};
+    const app::ScopedOwnEvaluator22 subscription(passing_own_evaluator(
+        "d22-subscription-objects-within-effective-location-range",subscription_calls));
+    const app::ScopedOwnEvaluator22 fetch_evaluator(passing_own_evaluator(
+        "d22-fetch-objects-within-requested-location-range",fetch_calls));
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,draft22);
+    const std::vector<std::string> ids={std::string(subscribe),std::string(fetch),std::string(update)};
+    const app::PublisherCapabilities capabilities{.fetch=false};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,ids,2000ms,app::TrackFixture{{"n"},"t"},capabilities});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started) << "a mixed selection skips only the FETCH scenario";
+    ASSERT_TRUE(context_ready(store,started.id,1));
+    goaway_publisher(started.endpoint.port,"moqt-22",true);
+    ASSERT_TRUE(context_ready(store,started.id,2));
+    goaway_publisher(started.endpoint.port,"moqt-22",true);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.scenario_ids,ids);
+    std::vector<std::string> fetch_kinds;
+    for (const auto& event : run.events)
+        if (event.scenario_id==fetch) fetch_kinds.push_back(event.kind);
+    EXPECT_EQ(fetch_kinds,std::vector<std::string>{"context_skipped"}) << "the own FETCH id is only skipped";
+    const auto skip=std::find_if(run.events.begin(),run.events.end(),[&](const auto& event) {
+        return event.kind=="context_skipped" && event.scenario_id==fetch;
+    });
+    ASSERT_NE(skip,run.events.end());
+    EXPECT_EQ(skip->detail,"publisher declared no FETCH support");
+    for (const auto id : {subscribe,update})
+        EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+            return event.kind=="context_complete" && event.scenario_id==id;
+        })) << id;
+    EXPECT_GT(subscription_calls.load(),0u) << "the SUBSCRIBE evidence was evaluated";
+    expect_draft22_outcomes(run,*draft22);
+    EXPECT_EQ(state_of(run,"D22-3-3-1-MUST-NOT-069"),requirements::OutcomeState::NotRun);
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->required.possible,draft22_denominators(*draft22,capabilities).required.possible)
+        << "069 is not excluded by the declaration";
+    EXPECT_TRUE(manager.stop(started.id));
 }
 }
 }
