@@ -309,7 +309,7 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "original publisher choosing per-Object forwarding preferences",
+      "actor": "original publisher choosing per-Object Delivery Modes",
       "summary": "Use both Subgroups and Datagrams within the same Group or Track.",
       "applicability": "Applicable",
       "testability": "Testable",
@@ -319,7 +319,7 @@
       "evaluators": [
         "d22-mixed-forwarding-capability"
       ],
-      "rationale": "Observe distinct Objects in a controlled mixed-preference Track. This permission does not allow the same Object's forwarding preference to change across deliveries, nor require mixed-mode support for conformance."
+      "rationale": "Observe distinct Objects in a controlled mixed-Delivery-Mode Track. This permission does not allow the same Object's Delivery Mode to change across deliveries, nor require mixed-mode support for conformance."
     },
     {
       "id": "D22-2-1-1-MUST-018",
@@ -332,7 +332,7 @@
         "clause": 1
       },
       "actor": "publisher delivering an Object through a subscription",
-      "summary": "Send a subscription Object using its Object Forwarding Preference.",
+      "summary": "Send a subscription Object according to its Delivery Mode.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -341,7 +341,7 @@
       "evaluators": [
         "d22-object-forwarding-preference-preserved"
       ],
-      "rationale": "Compare a controlled Object's known or previously observed preference with subscription delivery. FETCH uses a stream even for Datagram-preference Objects and is explicitly outside this subscription-only obligation."
+      "rationale": "Compare a controlled Object's known or previously observed Delivery Mode with subscription delivery. FETCH uses a stream even for Datagram Delivery Mode Objects (Section 3.2.1: the Object Delivery Mode does not apply) and is explicitly outside this subscription-only obligation."
     },
     {
       "id": "D22-2-2-MUST-NOT-019",
@@ -679,7 +679,7 @@
         "clause": 1
       },
       "actor": "publisher",
-      "summary": "Send exactly one SUBSCRIBE_OK or REQUEST_ERROR in response to each SUBSCRIBE.",
+      "summary": "Send exactly one SUBSCRIBE_OK or SUBSCRIBE_ERROR (a REQUEST_ERROR on the SUBSCRIBE request stream) in response to each SUBSCRIBE.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -689,7 +689,7 @@
       "evaluators": [
         "d22-one-subscribe-ok-or-request-error"
       ],
-      "rationale": "Correlate each bidirectional request stream with one acceptance or rejection response, including conflicting duplicate responses. SUBSCRIBE_OK remains a distinct response in Section 9.7; no additional response is allowed merely because object delivery begins."
+      "rationale": "Correlate each bidirectional request stream with one acceptance or rejection response, including conflicting duplicate responses. SUBSCRIBE_OK remains a distinct response in Section 9.7, while SUBSCRIBE_ERROR is the Section 1.5 shorthand for REQUEST_ERROR; no additional response is allowed merely because object delivery begins."
     },
     {
       "id": "D22-3-1-MUST-036",
@@ -702,12 +702,12 @@
         "clause": 1
       },
       "actor": "subscriber",
-      "summary": "Send exactly one PUBLISH_OK or REQUEST_ERROR in response to each PUBLISH.",
+      "summary": "Send exactly one PUBLISH_OK or PUBLISH_ERROR in response to each PUBLISH.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Responding to PUBLISH is the subscriber's role. In draft 21, Section 9.3 defines PUBLISH_OK as shorthand for REQUEST_OK on the PUBLISH request stream, not an independently encoded message."
+      "rationale": "Responding to PUBLISH is the subscriber's role. In draft 22, Section 1.5 defines PUBLISH_OK and PUBLISH_ERROR as shorthand for REQUEST_OK and REQUEST_ERROR (Sections 9.3 and 9.4) on the PUBLISH request stream, not independently encoded messages."
     },
     {
       "id": "D22-3-1-SHOULD-037",

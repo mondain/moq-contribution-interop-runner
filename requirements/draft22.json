@@ -309,7 +309,7 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "original publisher choosing per-Object forwarding preferences",
+      "actor": "original publisher choosing per-Object Delivery Modes",
       "summary": "Use both Subgroups and Datagrams within the same Group or Track.",
       "applicability": "Applicable",
       "testability": "Testable",
@@ -319,7 +319,7 @@
       "evaluators": [
         "d22-mixed-forwarding-capability"
       ],
-      "rationale": "Observe distinct Objects in a controlled mixed-preference Track. This permission does not allow the same Object's forwarding preference to change across deliveries, nor require mixed-mode support for conformance."
+      "rationale": "Observe distinct Objects in a controlled mixed-Delivery-Mode Track. This permission does not allow the same Object's Delivery Mode to change across deliveries, nor require mixed-mode support for conformance."
     },
     {
       "id": "D22-2-1-1-MUST-018",
@@ -332,7 +332,7 @@
         "clause": 1
       },
       "actor": "publisher delivering an Object through a subscription",
-      "summary": "Send a subscription Object using its Object Forwarding Preference.",
+      "summary": "Send a subscription Object according to its Delivery Mode.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -341,7 +341,7 @@
       "evaluators": [
         "d22-object-forwarding-preference-preserved"
       ],
-      "rationale": "Compare a controlled Object's known or previously observed preference with subscription delivery. FETCH uses a stream even for Datagram-preference Objects and is explicitly outside this subscription-only obligation."
+      "rationale": "Compare a controlled Object's known or previously observed Delivery Mode with subscription delivery. FETCH uses a stream even for Datagram Delivery Mode Objects (Section 3.2.1: the Object Delivery Mode does not apply) and is explicitly outside this subscription-only obligation."
     },
     {
       "id": "D22-2-2-MUST-NOT-019",
@@ -679,7 +679,7 @@
         "clause": 1
       },
       "actor": "publisher",
-      "summary": "Send exactly one SUBSCRIBE_OK or REQUEST_ERROR in response to each SUBSCRIBE.",
+      "summary": "Send exactly one SUBSCRIBE_OK or SUBSCRIBE_ERROR (a REQUEST_ERROR on the SUBSCRIBE request stream) in response to each SUBSCRIBE.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -689,7 +689,7 @@
       "evaluators": [
         "d22-one-subscribe-ok-or-request-error"
       ],
-      "rationale": "Correlate each bidirectional request stream with one acceptance or rejection response, including conflicting duplicate responses. SUBSCRIBE_OK remains a distinct response in Section 9.7; no additional response is allowed merely because object delivery begins."
+      "rationale": "Correlate each bidirectional request stream with one acceptance or rejection response, including conflicting duplicate responses. SUBSCRIBE_OK remains a distinct response in Section 9.7, while SUBSCRIBE_ERROR is the Section 1.5 shorthand for REQUEST_ERROR; no additional response is allowed merely because object delivery begins."
     },
     {
       "id": "D22-3-1-MUST-036",
@@ -702,12 +702,12 @@
         "clause": 1
       },
       "actor": "subscriber",
-      "summary": "Send exactly one PUBLISH_OK or REQUEST_ERROR in response to each PUBLISH.",
+      "summary": "Send exactly one PUBLISH_OK or PUBLISH_ERROR in response to each PUBLISH.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Responding to PUBLISH is the subscriber's role. In draft 21, Section 9.3 defines PUBLISH_OK as shorthand for REQUEST_OK on the PUBLISH request stream, not an independently encoded message."
+      "rationale": "Responding to PUBLISH is the subscriber's role. In draft 22, Section 1.5 defines PUBLISH_OK and PUBLISH_ERROR as shorthand for REQUEST_OK and REQUEST_ERROR (Sections 9.3 and 9.4) on the PUBLISH request stream, not independently encoded messages."
     },
     {
       "id": "D22-3-1-SHOULD-037",
@@ -1089,13 +1089,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber receiving a Subgroup before its alias is established",
-      "summary": "Withhold stream flow control beyond SUBGROUP_HEADER until its Track Alias is established.",
+      "actor": "endpoint receiving a data stream before its Track Alias is established",
+      "summary": "Withhold stream flow control beyond the stream header (SUBGROUP_HEADER) until its Track Alias is established.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The original publisher does not receive incoming subscription Subgroups. This is separate from the general endpoint flow-control allocation rule following it."
+      "rationale": "The original publisher does not receive incoming subscription Subgroups, the only data streams that carry a Track Alias. This is separate from the general endpoint flow-control allocation rule following it."
     },
     {
       "id": "D22-3-1-3-1-MUST-056",
@@ -1126,7 +1126,7 @@
         "clause": 1
       },
       "actor": "publisher",
-      "summary": "Send exactly one FETCH_OK or REQUEST_ERROR in response to a FETCH.",
+      "summary": "Send exactly one FETCH_OK or FETCH_ERROR (a REQUEST_ERROR on the FETCH request stream) in response to a FETCH.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -1136,7 +1136,7 @@
       "evaluators": [
         "d22-one-fetch-ok-or-request-error"
       ],
-      "rationale": "Observe the bidirectional FETCH request stream for one correlated success or rejection response. Section 9.11 allows response ordering relative to data delivery; early Objects do not count as a response and do not waive exclusivity."
+      "rationale": "Observe the bidirectional FETCH request stream for one correlated success or rejection response. Section 3.2 allows the response at any time relative to object delivery; early Objects do not count as a response and do not waive exclusivity."
     },
     {
       "id": "D22-3-2-MAY-058",
@@ -1172,7 +1172,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The listener sees the End Location value but cannot inspect when the publisher learned it. A plausible or later-consistent value does not prove prior knowledge, and cross-stream delivery timing cannot establish that private state. Section 9.12 separately defines externally visible End Location bounds."
+      "rationale": "The listener sees the End Location value but cannot inspect when the publisher learned it. A plausible or later-consistent value does not prove prior knowledge, and cross-stream delivery timing cannot establish that private state. Section 9.12 separately defines the externally visible (inclusive) End Location bounds."
     },
     {
       "id": "D22-3-2-MUST-060",
@@ -1185,7 +1185,7 @@
         "clause": 1
       },
       "actor": "publisher receiving FETCH for a track with no published Objects",
-      "summary": "Return REQUEST_ERROR INVALID_RANGE when no Objects have been published for the requested Track.",
+      "summary": "Return FETCH_ERROR INVALID_RANGE when no Objects have been published for the requested Track.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -1194,7 +1194,7 @@
       "evaluators": [
         "d22-empty-track-fetch-invalid-range"
       ],
-      "rationale": "Use a known existing Track whose controlled source has not published any Object, isolating INVALID_RANGE from DOES_NOT_EXIST. Section 3.1.3 advances Largest Object at first-byte publication; merely queued content does not satisfy this precondition."
+      "rationale": "Use a known existing Track whose controlled source has not published any Object, isolating INVALID_RANGE from DOES_NOT_EXIST. Section 3.1.4 advances Largest Object at first-byte publication; merely queued content does not satisfy this precondition."
     },
     {
       "id": "D22-3-2-MUST-061",
@@ -1207,7 +1207,7 @@
         "clause": 2
       },
       "actor": "publisher receiving FETCH starting beyond Largest Object",
-      "summary": "Return REQUEST_ERROR INVALID_RANGE when the requested Start Location is greater than Largest Object.",
+      "summary": "Return FETCH_ERROR INVALID_RANGE when the requested Start Location is greater than Largest Object.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -1216,7 +1216,7 @@
       "evaluators": [
         "d22-fetch-start-invalid-range"
       ],
-      "rationale": "Freeze a controlled Track after a known publication and request a later Location. Equality remains valid. Although this paragraph cites Section 9.6, Sections 3.1.3 and 9.20.18 define Largest Object in this draft; an End Location beyond it alone is not this error."
+      "rationale": "Freeze a controlled Track after a known publication and request a later Location. Equality remains valid. The paragraph cites Section 3.1.4 (Largest Object); the LARGEST_OBJECT parameter is Section 9.20.17. An End Location beyond Largest Object alone is not this error."
     },
     {
       "id": "D22-3-2-1-MUST-062",
@@ -1229,7 +1229,7 @@
         "clause": 1
       },
       "actor": "publisher sending fetched groups",
-      "summary": "Send fetched groups in the requested ascending or descending group order.",
+      "summary": "Send fetched groups in the requested (Section 9.20.8 GROUP_ORDER) ascending or descending group order.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -1240,7 +1240,7 @@
       "evaluators": [
         "d22-fetch-group-order"
       ],
-      "rationale": "Parse the ordered Objects on the single FETCH stream, so cross-stream arrival cannot reorder them. Within each group the following sentence uses Object ID order, not subgroup ID. Section 9.20.9 defaults FETCH to Ascending; publisher subscription preference does not replace that default."
+      "rationale": "Parse the ordered Objects on the single FETCH stream, so cross-stream arrival cannot reorder them. Within each group the following sentence uses Object ID order, not subgroup ID, and the Object Delivery Mode does not apply. Section 9.20.8 defaults FETCH to Ascending; publisher subscription preference does not replace that default."
     },
     {
       "id": "D22-3-2-2-SHOULD-NOT-063",
@@ -1374,17 +1374,19 @@
         "clause": 1
       },
       "actor": "publisher",
-      "summary": "Do not send subscription-delivered Objects outside the requested Location range.",
+      "summary": "Do not send Objects outside the requested Location range of the subscription or FETCH that delivers them.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
         "d22-subscribe-bounded-location-range",
-        "d22-update-subscription-location-range"
+        "d22-update-subscription-location-range",
+        "d22-fetch-bounded-location-range"
       ],
       "evaluators": [
-        "d22-subscription-objects-within-effective-location-range"
+        "d22-subscription-objects-within-effective-location-range",
+        "d22-fetch-objects-within-requested-location-range"
       ],
-      "rationale": "Exercise inclusive boundaries and relative forms from Section 9.20.10 with controlled Largest Object. Updates are asynchronous: evaluate the range in effect when the publisher sends, not simply the subscriber's current filter at arrival. Fill-delivered Objects follow FILL_PARAMETERS and are not subject to this subscription-delivery range."
+      "rationale": "Exercise inclusive boundaries and every explicit Location Filter Type from Section 9.20.9 (0x01 relative start through 0x05 Next Object) with controlled Largest Object, on SUBSCRIBE and on FETCH (Section 3.3.1: fetch requests can also specify a Location filter). Updates are asynchronous: evaluate a subscription against the range in effect when the publisher sends, not simply the subscriber's current filter at arrival. Draft 22 drops the draft 21 'subscription-delivered' qualifier and the paragraph that sent fill-delivered Objects to FILL_PARAMETERS; a fill fetch stream is judged against the LOCATION_FILTER inside its FILL_PARAMETERS, which is the range requested for it."
     },
     {
       "id": "D22-3-3-2-MAY-070",
@@ -1638,13 +1640,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber receiving the first SUBSCRIBE_NAMESPACE response",
-      "summary": "Close the session with PROTOCOL_VIOLATION unless the first SUBSCRIBE_NAMESPACE response message is REQUEST_OK or REQUEST_ERROR.",
+      "actor": "subscriber receiving the first SUBSCRIBE_TRACKS response",
+      "summary": "Close the session with PROTOCOL_VIOLATION if the first message on the SUBSCRIBE_TRACKS response stream is not SUBSCRIBE_TRACKS_OK or SUBSCRIBE_TRACKS_ERROR (REQUEST_OK or REQUEST_ERROR).",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This lexical occurrence prescribes subscriber response validation. The publisher's first-response obligation is independently stated in Section 4.1; do not turn a subscriber close rule into another publisher response rule."
+      "rationale": "This receiver is the subscriber requesting tracks. In draft 22 Section 3.6 states the publisher's response without a BCP 14 keyword ('will respond'), so there is no separate publisher first-response MUST for SUBSCRIBE_TRACKS; resulting PUBLISH messages use their own bidirectional streams."
     },
     {
       "id": "D22-3-6-MUST-083",
@@ -1657,7 +1659,7 @@
         "clause": 1
       },
       "actor": "publisher receiving an overlapping SUBSCRIBE_TRACKS",
-      "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP when a SUBSCRIBE_TRACKS shares a common prefix with an established SUBSCRIBE_TRACKS in the same session.",
+      "summary": "Respond with SUBSCRIBE_TRACKS_ERROR (REQUEST_ERROR) PREFIX_OVERLAP when a SUBSCRIBE_TRACKS shares a common prefix with an established SUBSCRIBE_TRACKS in the same session.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -1667,7 +1669,7 @@
       "evaluators": [
         "d22-track-discovery-overlap-request-error"
       ],
-      "rationale": "The two discovery types have independent overlap spaces. Exercise a confirmed established SUBSCRIBE_TRACKS followed by a conflicting prefix, with the same prefix on SUBSCRIBE_NAMESPACE as a distinct-type control. Preserve shares a common prefix without importing a narrower definition."
+      "rationale": "The two discovery types have independent overlap spaces (Section 12.3, PREFIX_OVERLAP). Exercise a confirmed established SUBSCRIBE_TRACKS followed by a conflicting prefix, with the same prefix on SUBSCRIBE_NAMESPACE as a distinct-type control. Preserve shares a common prefix without importing a narrower definition."
     },
     {
       "id": "D22-3-6-MUST-084",
@@ -1679,17 +1681,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher accepting SUBSCRIBE_NAMESPACE",
-      "summary": "Ensure the subscriber is authorized to perform the namespace subscription.",
+      "actor": "publisher accepting SUBSCRIBE_TRACKS",
+      "summary": "Ensure the subscriber is authorized to perform the SUBSCRIBE_TRACKS (track-discovery) namespace subscription.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d22-namespace-discovery-authorization"
+        "d22-track-discovery-authorization"
       ],
       "evaluators": [
-        "d22-namespace-discovery-authorized-only"
+        "d22-track-discovery-authorized-only"
       ],
-      "rationale": "A driven fixture supplies a known authorization policy and valid versus unauthorized credentials. Observe whether namespace discovery is granted under that policy; this sentence does not prescribe a particular rejection code. Without a controllable policy the scenario remains NOT_RUN rather than presuming unrestricted access is wrong."
+      "rationale": "Use a controlled authorization policy with authorized and unauthorized track-discovery requests. The sentence calls this a namespace subscription but is in Section 3.6 (SUBSCRIBE_TRACKS); retain its actor and request context. No arbitrary credential format or error code is imposed."
     },
     {
       "id": "D22-3-6-MUST-NOT-085",
@@ -1818,7 +1820,7 @@
         "clause": 1
       },
       "actor": "subscriber",
-      "summary": "Reply to PUBLISH containing an unrecognized Mandatory Track Property with REQUEST_ERROR UNSUPPORTED_EXTENSION.",
+      "summary": "Reply to PUBLISH containing an unrecognized Mandatory Track Property with PUBLISH_ERROR (REQUEST_ERROR) UNSUPPORTED_EXTENSION.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1854,7 +1856,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Send REQUEST_ERROR UNSUPPORTED_EXTENSION to pending downstream subscribers after receiving SUBSCRIBE_OK with an unrecognized Mandatory Track Property.",
+      "summary": "Send SUBSCRIBE_ERROR (REQUEST_ERROR) UNSUPPORTED_EXTENSION to pending downstream subscribers after receiving SUBSCRIBE_OK with an unrecognized Mandatory Track Property.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1890,7 +1892,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Send REQUEST_ERROR UNSUPPORTED_EXTENSION downstream for an unrecognized Mandatory Track Property in FETCH_OK if no FETCH_OK or REQUEST_ERROR has yet been sent downstream.",
+      "summary": "Send FETCH_ERROR (REQUEST_ERROR) UNSUPPORTED_EXTENSION downstream for an unrecognized Mandatory Track Property in FETCH_OK if no FETCH_OK or FETCH_ERROR has yet been sent downstream.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -2014,7 +2016,7 @@
         "clause": 1
       },
       "actor": "subscriber",
-      "summary": "Send SUBSCRIBE or FETCH for Tracks in a namespace without first receiving its PUBLISH_NAMESPACE.",
+      "summary": "Send SUBSCRIBE, FETCH or TRACK_STATUS for Tracks in a namespace without first receiving its PUBLISH_NAMESPACE.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -2032,7 +2034,7 @@
         "clause": 1
       },
       "actor": "subscriber",
-      "summary": "Send exactly one REQUEST_OK or REQUEST_ERROR as the first response on a PUBLISH_NAMESPACE bidirectional stream.",
+      "summary": "Send exactly one PUBLISH_NAMESPACE_OK or PUBLISH_NAMESPACE_ERROR (REQUEST_OK or REQUEST_ERROR) as the first message on a PUBLISH_NAMESPACE bidirectional stream.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -2072,7 +2074,7 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "Report reception of a PUBLISH_NAMESPACE REQUEST_OK to the Application to guide namespace publication decisions.",
+      "summary": "Report reception of a PUBLISH_NAMESPACE_OK to the Application to guide namespace publication decisions.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
@@ -2090,7 +2092,7 @@
         "clause": 2
       },
       "actor": "endpoint",
-      "summary": "Report reception of a PUBLISH_NAMESPACE REQUEST_ERROR to the Application to guide namespace publication decisions.",
+      "summary": "Report reception of a PUBLISH_NAMESPACE_ERROR to the Application to guide namespace publication decisions.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
@@ -2143,13 +2145,18 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber receiving the first SUBSCRIBE_TRACKS response",
-      "summary": "Close the session with PROTOCOL_VIOLATION unless the first SUBSCRIBE_TRACKS response is REQUEST_OK or REQUEST_ERROR.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "This receiver is the listener requesting tracks. The separate publisher first-response duty is in Section 4.1; resulting PUBLISH messages use their own bidirectional streams."
+      "actor": "publisher",
+      "summary": "Send a single SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR (REQUEST_OK or REQUEST_ERROR) as the first message on the response half of the SUBSCRIBE_NAMESPACE bidirectional stream.",
+      "applicability": "Applicable",
+      "testability": "Testable",
+      "scenarios": [
+        "d22-subscribe-namespace-accepted",
+        "d22-subscribe-namespace-rejected"
+      ],
+      "evaluators": [
+        "d22-subscribe-namespace-single-first-response"
+      ],
+      "rationale": "Open a namespace-discovery request stream and verify exactly one initial success or rejection response before any NAMESPACE or NAMESPACE_DONE message. Section 1.5 defines SUBSCRIBE_NAMESPACE_OK and SUBSCRIBE_NAMESPACE_ERROR as shorthand for REQUEST_OK (Section 9.3) and REQUEST_ERROR (Section 9.4). The subscriber close rule in the same sentence is D22-4-2-MUST-109."
     },
     {
       "id": "D22-4-2-MUST-109",
@@ -2202,7 +2209,7 @@
         "clause": 1
       },
       "actor": "publisher receiving an overlapping SUBSCRIBE_NAMESPACE",
-      "summary": "Respond with REQUEST_ERROR PREFIX_OVERLAP when a SUBSCRIBE_NAMESPACE shares a common prefix with an established SUBSCRIBE_NAMESPACE in the same session.",
+      "summary": "Respond with SUBSCRIBE_NAMESPACE_ERROR (REQUEST_ERROR) PREFIX_OVERLAP when a SUBSCRIBE_NAMESPACE shares a common prefix with an established SUBSCRIBE_NAMESPACE in the same session.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -2212,7 +2219,7 @@
       "evaluators": [
         "d22-namespace-overlap-request-error"
       ],
-      "rationale": "Establish one request before sending the conflicting request. SUBSCRIBE_TRACKS occupies an independent overlap space. The draft says shares a common prefix; retain that wording and include identical and ancestor-prefix stimuli without redefining it using another draft."
+      "rationale": "Establish one request before sending the conflicting request. SUBSCRIBE_TRACKS occupies an independent overlap space (Section 12.3, PREFIX_OVERLAP). The draft says shares a common prefix; retain that wording and include identical and ancestor-prefix stimuli without redefining it using another draft."
     },
     {
       "id": "D22-4-2-MUST-NOT-112",
@@ -2286,17 +2293,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher accepting SUBSCRIBE_TRACKS",
-      "summary": "Ensure the subscriber is authorized to perform the track-discovery namespace subscription.",
+      "actor": "publisher accepting SUBSCRIBE_NAMESPACE",
+      "summary": "Ensure the subscriber is authorized to perform a SUBSCRIBE_NAMESPACE namespace subscription.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "d22-track-discovery-authorization"
+        "d22-namespace-discovery-authorization"
       ],
       "evaluators": [
-        "d22-track-discovery-authorized-only"
+        "d22-namespace-discovery-authorized-only"
       ],
-      "rationale": "Use a controlled authorization policy with authorized and unauthorized track-discovery requests. The paragraph calls this a namespace subscription but is in SUBSCRIBE_TRACKS; retain its actor and request context. No arbitrary credential format or error code is imposed."
+      "rationale": "A driven fixture supplies a known authorization policy and valid versus unauthorized credentials. Observe whether namespace discovery is granted under that policy; this sentence (Section 4.2.1, Namespace Subscription Authorization) does not prescribe a particular rejection code. Without a controllable policy the scenario remains NOT_RUN rather than presuming unrestricted access is wrong."
     },
     {
       "id": "D22-4-2-2-MAY-116",
@@ -3009,7 +3016,7 @@
       "evaluators": [
         "d22-quic-datagram-extension-supported"
       ],
-      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
+      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection, native or WebTransport over HTTP/3, even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
     },
     {
       "id": "D22-6-2-MUST-154",
@@ -3126,7 +3133,7 @@
         "clause": 1
       },
       "actor": "receiving endpoint",
-      "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream if buffering is unwanted or its message type is unsupported.",
+      "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream or unidirectional Object stream if buffering is unwanted or its message type is unsupported.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -3135,7 +3142,7 @@
       "evaluators": [
         "d22-pre-setup-request-stream-reset"
       ],
-      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. The permission applies to bidirectional request streams, not an invented reset rule for every early unidirectional Object stream; buffering instead is also permitted."
+      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. Draft 22 says 'such streams', so the permission now also covers early unidirectional Object streams, which a listener validating a publisher does not normally send; buffering instead is also permitted."
     },
     {
       "id": "D22-6-3-MUST-NOT-160",
@@ -3905,7 +3912,7 @@
         "clause": 1
       },
       "actor": "endpoint receiving Objects",
-      "summary": "Treat a Track as Malformed after receiving a duplicate Object with a different Forwarding Preference, Subgroup ID, Priority or Payload.",
+      "summary": "Treat a Track as Malformed after receiving a duplicate Object with a different Delivery Mode, Subgroup ID, Priority or Payload.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -3977,12 +3984,12 @@
         "clause": 1
       },
       "actor": "Object cache",
-      "summary": "Store every Object field defined in Section 11.1.1, except Object Properties whose definitions specify otherwise.",
+      "summary": "Store every Object field defined in Section 2.1.1, except Object Properties (Section 11.1.2) whose definitions specify otherwise.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In this Caching Relays section, the cache retains received Object identity, priority, forwarding, subgroup, status, property and payload fields. The publisher's original content store is not this relay cache."
+      "rationale": "In this Caching Relays section, the cache retains received Object identity, priority, Delivery Mode, subgroup, status, property and payload fields. The publisher's original content store is not this relay cache."
     },
     {
       "id": "D22-7-2-MUST-202",
@@ -3995,12 +4002,12 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Set Forward=1 upstream when at least one downstream subscriber to the Track has Forward=1.",
+      "summary": "Keep an unpaused (Forward=1) upstream subscription when at least one downstream subscriber to the Track is not paused.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This aggregates downstream demand into an upstream relay subscription. When all downstream Forward values are zero, the relay has discretion; neither case creates an upstream-subscription duty for an original publisher."
+      "rationale": "This aggregates downstream demand into an upstream relay subscription. When all downstream subscribers are paused, the relay has discretion; neither case creates an upstream-subscription duty for an original publisher."
     },
     {
       "id": "D22-7-3-MUST-203",
@@ -4121,7 +4128,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Follow Section 9.20.18 LARGEST_OBJECT constraints, including selecting the maximum upstream advertised or received Object Location.",
+      "summary": "Follow Section 9.20.17 LARGEST_OBJECT constraints, including selecting the maximum upstream advertised or received Object Location.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -4283,12 +4290,12 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Limit publishers in a namespace by rejecting or closing namespace subscriptions with NAMESPACE_TOO_LARGE.",
+      "summary": "Duplicate citation of D22-7-5-MAY-217 (NAMESPACE_TOO_LARGE); the cited sentence offers only CONFLICTING_FILTERS (D22-7-5-MAY-219) and PREFIX_OVERLAP (D22-7-5-MAY-220).",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This permission is in Relay Resource Protection in Large Namespaces and addresses relay publisher-count limits, not a universal original-publisher error policy."
+      "rationale": "Draft 21 listed NAMESPACE_TOO_LARGE, CONFLICTING_FILTERS and PREFIX_OVERLAP in one MAY sentence, giving three clause rows. Draft 22 moved NAMESPACE_TOO_LARGE into its own preceding sentence (D22-7-5-MAY-217), but the carry tool kept three positional rows on the remaining two-option sentence. This clause-1 row has no distinct obligation; it is kept as a placeholder because row ids are positional counters tied to the delta file, and it carries the D21-4-3-1-MAY-101 accounting."
     },
     {
       "id": "D22-7-5-MAY-219",
@@ -4337,7 +4344,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Pause a PUBLISH-initiated subscription using REQUEST_UPDATE with Forward State=0 until subscribers for the new Track are known.",
+      "summary": "Pause a PUBLISH-initiated subscription with REQUEST_UPDATE (Section 3.1.1) until subscribers for the new Track are known.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -4355,7 +4362,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Verify that a publisher is authorized to publish the Tracks whose namespace matches its PUBLISH_NAMESPACE.",
+      "summary": "Verify that a publisher is authorized to publish the Tracks whose namespace matches the Track Namespace Prefix in its PUBLISH_NAMESPACE.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -4580,7 +4587,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 9.20.7 describes the relay's RENDEZVOUS_TIMEOUT wait. Completing that pending downstream request is a relay duty separate from the prohibition on also forwarding PUBLISH."
+      "rationale": "Section 9.20.6 describes the relay's RENDEZVOUS_TIMEOUT wait. Completing that pending downstream request is a relay duty separate from the prohibition on also forwarding PUBLISH."
     },
     {
       "id": "D22-7-6-MUST-NOT-235",
@@ -4616,7 +4623,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay-only source sentence literally names PUBLISH_OK. Draft-21 Table 5 marks the legacy 0x1E type reserved and Section 9.3 defines REQUEST_OK aliases; this catalog preserves the source wording and does not invent a PUBLISH_OK wire message or import another draft's type."
+      "rationale": "The relay-only source sentence names PUBLISH_OK, which Section 1.5 defines as shorthand for a REQUEST_OK (Section 9.3) sent in response to PUBLISH; this catalog does not invent a PUBLISH_OK wire message or import another draft's type."
     },
     {
       "id": "D22-7-6-MUST-237",
@@ -4919,12 +4926,12 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Do not modify an unsupported Property, except that an unsupported Mandatory Track Property follows Section 3.6 instead.",
+      "summary": "Do not modify an unsupported Property, except that an unsupported Mandatory Track Property follows Section 3.7 instead.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay preserves unknown properties without needing semantic understanding. Section 3.6 prevents processing or forwarding an unsupported mandatory Track property; it is not a general exception permitting mutation. An original publisher does not relay these properties."
+      "rationale": "The relay preserves unknown properties without needing semantic understanding. Section 3.7 prevents processing or forwarding an unsupported mandatory Track property; it is not a general exception permitting mutation. An original publisher does not relay these properties."
     },
     {
       "id": "D22-8-4-MUST-253",
@@ -4937,7 +4944,7 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Forward an unsupported Property unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "summary": "Forward an unsupported Property unless it is an unsupported Mandatory Track Property governed by Section 3.7.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -4955,7 +4962,7 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Cache an unsupported Property with its Track or Object unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "summary": "Cache an unsupported Property with its Track or Object unless it is an unsupported Mandatory Track Property governed by Section 3.7.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -5652,7 +5659,7 @@
         "clause": 1
       },
       "actor": "receiver of an over-limit token registration",
-      "summary": "Terminate the Session with AUTH_TOKEN_CACHE_OVERFLOW if a registration would exceed MAX_AUTH_TOKEN_CACHE_SIZE, subject to the SETUP-specific exception in Section 9.1.4.",
+      "summary": "Terminate the Session with AUTH_TOKEN_CACHE_OVERFLOW if a registration outside SETUP would exceed MAX_AUTH_TOKEN_CACHE_SIZE; registrations in SETUP follow Section 9.1.4.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -6659,7 +6666,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The draft permits the sender to originate requests and makes this recommendation conditional on migration necessity. The peer sees requests but cannot establish why each was required by the publisher's migration policy; Sections 7.4.1 and 7.5.1 give relay migration examples rather than a deterministic original-publisher necessity test."
+      "rationale": "The draft permits the sender to originate requests and makes this recommendation conditional on migration necessity. The peer sees requests but cannot establish why each was required by the publisher's migration policy; Sections 7.4.1 and 7.6.1 give relay migration examples rather than a deterministic original-publisher necessity test."
     },
     {
       "id": "D22-9-2-MAY-337",
@@ -7082,7 +7089,7 @@
         "clause": 1
       },
       "actor": "receiver of REQUEST_UPDATE",
-      "summary": "Respond with exactly one REQUEST_OK or REQUEST_ERROR for an update, except that coalesced failed updates can receive one REQUEST_ERROR for multiple REQUEST_UPDATE messages.",
+      "summary": "Respond with exactly one REQUEST_UPDATE_OK or REQUEST_UPDATE_ERROR (REQUEST_OK or REQUEST_ERROR) for an update, except that coalesced failed updates can receive one REQUEST_UPDATE_ERROR for multiple REQUEST_UPDATE messages.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -7230,7 +7237,7 @@
         "clause": 1
       },
       "actor": "receiver coalescing successful REQUEST_UPDATE messages",
-      "summary": "Send REQUEST_OK for each successful update even when REQUEST_UPDATE processing is coalesced.",
+      "summary": "Send REQUEST_UPDATE_OK (REQUEST_OK) for each successful update even when REQUEST_UPDATE processing is coalesced.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -7239,7 +7246,7 @@
       "evaluators": [
         "d22-successful-updates-each-acknowledged"
       ],
-      "rationale": "Count REQUEST_OK messages for a controlled successful update sequence on one stream. Successes still each restore one credit under Section 9.1.7, regardless of whether intermediate state processing is observable. Only a coalesced failure can collapse its response to one REQUEST_ERROR."
+      "rationale": "Count REQUEST_UPDATE_OK messages for a controlled successful update sequence on one stream. Successes still each restore one credit under Section 9.1.7, regardless of whether intermediate state processing is observable. Only a coalesced failure can collapse its response to one REQUEST_UPDATE_ERROR."
     },
     {
       "id": "D22-9-5-2-MUST-NOT-364",
@@ -7315,7 +7322,7 @@
         "clause": 1
       },
       "actor": "subscriber receiving unwanted PUBLISH",
-      "summary": "Send REQUEST_ERROR with UNINTERESTED for a PUBLISH whose Track the subscriber does not wish to receive.",
+      "summary": "Send PUBLISH_ERROR (REQUEST_ERROR) with UNINTERESTED for a PUBLISH whose Track the subscriber does not wish to receive.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -7633,7 +7640,7 @@
       "evaluators": [
         "d22-notify-known-largest-object-present"
       ],
-      "rationale": "Use a controlled Track with a known published Object before stimulating a notification, and a separate no-Objects case. Sections 3.1.3 and 9.20.18 define the endpoint's Largest Location: it advances at the first byte published or received through a subscription, not when an Object is merely queued. No received Object alone is insufficient to infer what the publisher knows; the fixture and trace establish the precondition."
+      "rationale": "Use a controlled Track with a known published Object before stimulating a notification, and a separate no-Objects case. Sections 3.1.4 and 9.20.17 define the endpoint's Largest Location: it advances at the first byte published or received through a subscription, not when an Object is merely queued. No received Object alone is insufficient to infer what the publisher knows; the fixture and trace establish the precondition."
     },
     {
       "id": "D22-9-12-MUST-384",
@@ -7687,7 +7694,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The alternative to forwarding TRACK_STATUS is also explicitly a relay operation, subject to authorization and Section 7.5. It does not impose upstream subscription behavior on an original publisher."
+      "rationale": "The alternative to forwarding TRACK_STATUS is also explicitly a relay operation, subject to authorization and Section 7.6. It does not impose upstream subscription behavior on an original publisher."
     },
     {
       "id": "D22-9-20-MUST-387",
@@ -7905,7 +7912,7 @@
       "evaluators": [
         "d22-out-of-scope-parameter-protocol-violation"
       ],
-      "rationale": "Use a known parameter with a legal encoding in a forbidden message, accounting for SUBSCRIBE_TRACKS inheritance under Section 9.18.1 and nested fill's explicit exceptions. Section 9.20.2 is empty in this draft, so the individual definitions supply scope. SETUP uses a separate namespace."
+      "rationale": "Use a known parameter with a legal encoding in a forbidden message, accounting for SUBSCRIBE_TRACKS inheritance under Section 3.6.2 and nested fill's explicit exceptions. Draft 22 states the scope both in each parameter definition and in each control message's list of allowed parameters (#1916); the empty draft 21 Section 9.20.2 is gone. SETUP uses a separate namespace."
     },
     {
       "id": "D22-9-20-2-MAY-397",
@@ -8119,7 +8126,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The nested placement is distinct from a top-level subscription parameter. Sections 3.4 and 9.20.16 define independent fill state; Section 9.18.1 permits joining via SUBSCRIBE_TRACKS. This permission does not require the publisher to send subscriber fill requests."
+      "rationale": "The nested placement is distinct from a top-level subscription parameter. Sections 3.4 and 9.20.15 define independent fill state; Section 3.6.2 permits joining via SUBSCRIBE_TRACKS. This permission does not require the publisher to send subscriber fill requests."
     },
     {
       "id": "D22-9-20-5-SHOULD-408",
@@ -8137,7 +8144,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The budget spans all upstream FETCHes for the request, rather than restarting per object. Its relay actor and upstream sources exclude the original publisher; do not reinterpret it as that publisher's local scheduling deadline."
+      "rationale": "The budget spans all upstream FETCHes for the request (now stated in Section 3.2.3), rather than restarting per object. Its relay actor and upstream sources exclude the original publisher; do not reinterpret it as that publisher's local scheduling deadline."
     },
     {
       "id": "D22-9-20-5-MUST-NOT-409",
@@ -8240,7 +8247,7 @@
         "clause": 1
       },
       "actor": "relay whose rendezvous timeout expires",
-      "summary": "Respond with REQUEST_ERROR TIMEOUT if the rendezvous wait expires without a publisher.",
+      "summary": "Respond with SUBSCRIBE_ERROR (REQUEST_ERROR) TIMEOUT if the rendezvous wait expires without a publisher.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -8276,7 +8283,7 @@
         "clause": 1
       },
       "actor": "relay receiving zero rendezvous timeout without a publisher",
-      "summary": "Immediately return REQUEST_ERROR DOES_NOT_EXIST when RENDEZVOUS_TIMEOUT is zero and no publisher is available.",
+      "summary": "Immediately return SUBSCRIBE_ERROR (REQUEST_ERROR) DOES_NOT_EXIST when RENDEZVOUS_TIMEOUT is zero and no publisher is available.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -8407,7 +8414,7 @@
       "evaluators": [
         "d22-publisher-location-filter-capability"
       ],
-      "rationale": "Decode the length-prefixed field count and advertised filter in publisher messages. PUBLISH_STATE_NOTIFY reports the current filter; Section 9.10 forbids changing subscriber-controlled values without subscriber request. Zero length means no filter, while omission in updates or notifications leaves the value unchanged."
+      "rationale": "Decode the explicit Location Filter Type (0x00-0x05) and the fields it selects in publisher messages; any other type is a PROTOCOL_VIOLATION, so a publisher emitting one fails. The draft 21 length-inferred field count no longer exists. PUBLISH_STATE_NOTIFY reports the current filter; Section 9.10 forbids changing subscriber-controlled values without subscriber request. Type 0x00 means no filter, while omission in updates or notifications leaves the value unchanged."
     },
     {
       "id": "D22-9-20-9-MAY-423",
@@ -8425,7 +8432,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscriber emission is a listener action. Section 9.18.1 permits subscription filters in SUBSCRIBE_TRACKS and Section 9.20.16 separately allows them inside fill. The publisher's range-selection and overflow duties are classified independently; the optional sender permission is not a receiver MUST."
+      "rationale": "Subscriber emission is a listener action. Section 3.6.2 permits subscription filters in SUBSCRIBE_TRACKS and Section 9.20.15 separately allows them inside fill. The publisher's range-selection and overflow duties are classified independently; the optional sender permission is not a receiver MUST."
     },
     {
       "id": "D22-9-20-9-MUST-424",
@@ -8438,7 +8445,7 @@
         "clause": 1
       },
       "actor": "endpoint decoding an absolute Location Filter",
-      "summary": "Close the session with PROTOCOL_VIOLATION if StartGroup plus EndGroupDelta exceeds 2^64 - 1.",
+      "summary": "Close the session with PROTOCOL_VIOLATION if StartGroup plus EndGroupDelta exceeds 2^64 - 1 in a Location Filter of Type 0x03 or 0x04.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -8448,7 +8455,7 @@
       "evaluators": [
         "d22-location-filter-overflow-protocol-violation"
       ],
-      "rationale": "Use an absolute filter with EndGroupDelta present, distinguishing this error from the clamping specified for a relative one-field start. Section 9.20.10 gives four optional fields, zero-length removal, and the special two-zero-field Next Object form; neither range-filter INVALID_FILTER nor relative clamping applies to this sum."
+      "rationale": "Send an absolute filter of explicit Location Filter Type 0x03 or 0x04 (the types that carry EndGroupDelta), distinguishing this error from the clamping specified for relative Type 0x01. Section 9.20.9 now selects the fields by Location Filter Type 0x00-0x05 (0x00 no filter, 0x05 Next Object) instead of inferring them from a Length, and makes any other type a PROTOCOL_VIOLATION without a BCP 14 keyword; neither range-filter INVALID_FILTER nor relative clamping applies to this sum."
     },
     {
       "id": "D22-9-20-12-MUST-425",
@@ -8511,7 +8518,7 @@
       "evaluators": [
         "d22-object-property-filter-invalid-filter"
       ],
-      "rationale": "Send a nonempty filter with odd Property Type after negotiating sufficient range capacity. Zero-length removal has no Property Type and does not trigger this condition. Section 8.3 Figure 2 establishes that odd properties carry bytes, whereas this filter requires integer values."
+      "rationale": "Send a nonempty filter with odd Property Type after negotiating sufficient range capacity. Zero-length removal has no Property Type and does not trigger this condition. Section 8.3 Figure 3 establishes that odd properties carry bytes, whereas this filter requires integer values."
     },
     {
       "id": "D22-9-20-14-MUST-428",
@@ -10366,8 +10373,8 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "relay receiving EndOfGroup or EndOfTrack",
-      "summary": "Treat an EndOfGroup or EndOfTrack Object as a signal to close corresponding streams before upstream FIN arrives.",
+      "actor": "relay receiving End of Group or End of Track",
+      "summary": "Treat an End of Group or End of Track Object as a signal to close corresponding streams before upstream FIN arrives.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -10443,7 +10450,7 @@
         "clause": 1
       },
       "actor": "publisher receiving renewed forwarding interest",
-      "summary": "Reopen a stopped Subgroup stream after a later REQUEST_UPDATE changes Forward State from 0 to 1.",
+      "summary": "Reopen a stopped Subgroup stream after a later REQUEST_UPDATE resumes the paused subscription (Forward State 0 to 1).",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -10452,7 +10459,7 @@
       "evaluators": [
         "d22-stopped-subgroup-resume-capability"
       ],
-      "rationale": "Establish Forward State 0 before sending the update to 1, following STOP_SENDING. This optional exception does not authorize unconditional immediate reopening or require any replay of previously sent Objects."
+      "rationale": "Pause the subscription (Forward State 0) and send STOP_SENDING before sending the resuming update. This optional exception does not authorize unconditional immediate reopening or require any replay of previously sent Objects."
     },
     {
       "id": "D22-11-3-2-SHOULD-526",

@@ -86,7 +86,7 @@
       "evaluators": [
         "d22-quic-datagram-extension-supported"
       ],
-      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
+      "rationale": "The controlled peer can offer QUIC DATAGRAM and establish that the publisher advertises usable extension support. This is required for a MOQT QUIC connection, native or WebTransport over HTTP/3, even when a particular Track sends only streams, and the text notes that WebTransport over HTTP/3 already requires it."
     },
     {
       "id": "D22-6-2-MUST-154",
@@ -203,7 +203,7 @@
         "clause": 1
       },
       "actor": "receiving endpoint",
-      "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream if buffering is unwanted or its message type is unsupported.",
+      "summary": "Before session and control-stream establishment, optionally reset an early bidirectional request stream or unidirectional Object stream if buffering is unwanted or its message type is unsupported.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -212,7 +212,7 @@
       "evaluators": [
         "d22-pre-setup-request-stream-reset"
       ],
-      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. The permission applies to bidirectional request streams, not an invented reset rule for every early unidirectional Object stream; buffering instead is also permitted."
+      "rationale": "Send an early request before delivering the peer SETUP and observe this permitted stream reset. Draft 22 says 'such streams', so the permission now also covers early unidirectional Object streams, which a listener validating a publisher does not normally send; buffering instead is also permitted."
     },
     {
       "id": "D22-6-3-MUST-NOT-160",
@@ -982,7 +982,7 @@
         "clause": 1
       },
       "actor": "endpoint receiving Objects",
-      "summary": "Treat a Track as Malformed after receiving a duplicate Object with a different Forwarding Preference, Subgroup ID, Priority or Payload.",
+      "summary": "Treat a Track as Malformed after receiving a duplicate Object with a different Delivery Mode, Subgroup ID, Priority or Payload.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1054,12 +1054,12 @@
         "clause": 1
       },
       "actor": "Object cache",
-      "summary": "Store every Object field defined in Section 11.1.1, except Object Properties whose definitions specify otherwise.",
+      "summary": "Store every Object field defined in Section 2.1.1, except Object Properties (Section 11.1.2) whose definitions specify otherwise.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In this Caching Relays section, the cache retains received Object identity, priority, forwarding, subgroup, status, property and payload fields. The publisher's original content store is not this relay cache."
+      "rationale": "In this Caching Relays section, the cache retains received Object identity, priority, Delivery Mode, subgroup, status, property and payload fields. The publisher's original content store is not this relay cache."
     },
     {
       "id": "D22-7-2-MUST-202",
@@ -1072,12 +1072,12 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Set Forward=1 upstream when at least one downstream subscriber to the Track has Forward=1.",
+      "summary": "Keep an unpaused (Forward=1) upstream subscription when at least one downstream subscriber to the Track is not paused.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This aggregates downstream demand into an upstream relay subscription. When all downstream Forward values are zero, the relay has discretion; neither case creates an upstream-subscription duty for an original publisher."
+      "rationale": "This aggregates downstream demand into an upstream relay subscription. When all downstream subscribers are paused, the relay has discretion; neither case creates an upstream-subscription duty for an original publisher."
     },
     {
       "id": "D22-7-3-MUST-203",
@@ -1198,7 +1198,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Follow Section 9.20.18 LARGEST_OBJECT constraints, including selecting the maximum upstream advertised or received Object Location.",
+      "summary": "Follow Section 9.20.17 LARGEST_OBJECT constraints, including selecting the maximum upstream advertised or received Object Location.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1360,12 +1360,12 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Limit publishers in a namespace by rejecting or closing namespace subscriptions with NAMESPACE_TOO_LARGE.",
+      "summary": "Duplicate citation of D22-7-5-MAY-217 (NAMESPACE_TOO_LARGE); the cited sentence offers only CONFLICTING_FILTERS (D22-7-5-MAY-219) and PREFIX_OVERLAP (D22-7-5-MAY-220).",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This permission is in Relay Resource Protection in Large Namespaces and addresses relay publisher-count limits, not a universal original-publisher error policy."
+      "rationale": "Draft 21 listed NAMESPACE_TOO_LARGE, CONFLICTING_FILTERS and PREFIX_OVERLAP in one MAY sentence, giving three clause rows. Draft 22 moved NAMESPACE_TOO_LARGE into its own preceding sentence (D22-7-5-MAY-217), but the carry tool kept three positional rows on the remaining two-option sentence. This clause-1 row has no distinct obligation; it is kept as a placeholder because row ids are positional counters tied to the delta file, and it carries the D21-4-3-1-MAY-101 accounting."
     },
     {
       "id": "D22-7-5-MAY-219",
@@ -1414,7 +1414,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Pause a PUBLISH-initiated subscription using REQUEST_UPDATE with Forward State=0 until subscribers for the new Track are known.",
+      "summary": "Pause a PUBLISH-initiated subscription with REQUEST_UPDATE (Section 3.1.1) until subscribers for the new Track are known.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1432,7 +1432,7 @@
         "clause": 1
       },
       "actor": "relay",
-      "summary": "Verify that a publisher is authorized to publish the Tracks whose namespace matches its PUBLISH_NAMESPACE.",
+      "summary": "Verify that a publisher is authorized to publish the Tracks whose namespace matches the Track Namespace Prefix in its PUBLISH_NAMESPACE.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -1657,7 +1657,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Section 9.20.7 describes the relay's RENDEZVOUS_TIMEOUT wait. Completing that pending downstream request is a relay duty separate from the prohibition on also forwarding PUBLISH."
+      "rationale": "Section 9.20.6 describes the relay's RENDEZVOUS_TIMEOUT wait. Completing that pending downstream request is a relay duty separate from the prohibition on also forwarding PUBLISH."
     },
     {
       "id": "D22-7-6-MUST-NOT-235",
@@ -1693,7 +1693,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay-only source sentence literally names PUBLISH_OK. Draft-21 Table 5 marks the legacy 0x1E type reserved and Section 9.3 defines REQUEST_OK aliases; this catalog preserves the source wording and does not invent a PUBLISH_OK wire message or import another draft's type."
+      "rationale": "The relay-only source sentence names PUBLISH_OK, which Section 1.5 defines as shorthand for a REQUEST_OK (Section 9.3) sent in response to PUBLISH; this catalog does not invent a PUBLISH_OK wire message or import another draft's type."
     },
     {
       "id": "D22-7-6-MUST-237",
@@ -1996,12 +1996,12 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Do not modify an unsupported Property, except that an unsupported Mandatory Track Property follows Section 3.6 instead.",
+      "summary": "Do not modify an unsupported Property, except that an unsupported Mandatory Track Property follows Section 3.7 instead.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The relay preserves unknown properties without needing semantic understanding. Section 3.6 prevents processing or forwarding an unsupported mandatory Track property; it is not a general exception permitting mutation. An original publisher does not relay these properties."
+      "rationale": "The relay preserves unknown properties without needing semantic understanding. Section 3.7 prevents processing or forwarding an unsupported mandatory Track property; it is not a general exception permitting mutation. An original publisher does not relay these properties."
     },
     {
       "id": "D22-8-4-MUST-253",
@@ -2014,7 +2014,7 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Forward an unsupported Property unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "summary": "Forward an unsupported Property unless it is an unsupported Mandatory Track Property governed by Section 3.7.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -2032,7 +2032,7 @@
         "clause": 1
       },
       "actor": "relay receiving an unsupported Property",
-      "summary": "Cache an unsupported Property with its Track or Object unless it is an unsupported Mandatory Track Property governed by Section 3.6.",
+      "summary": "Cache an unsupported Property with its Track or Object unless it is an unsupported Mandatory Track Property governed by Section 3.7.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],

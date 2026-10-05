@@ -55,7 +55,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The alternative to forwarding TRACK_STATUS is also explicitly a relay operation, subject to authorization and Section 7.5. It does not impose upstream subscription behavior on an original publisher."
+      "rationale": "The alternative to forwarding TRACK_STATUS is also explicitly a relay operation, subject to authorization and Section 7.6. It does not impose upstream subscription behavior on an original publisher."
     },
     {
       "id": "D22-9-20-MUST-387",
@@ -273,7 +273,7 @@
       "evaluators": [
         "d22-out-of-scope-parameter-protocol-violation"
       ],
-      "rationale": "Use a known parameter with a legal encoding in a forbidden message, accounting for SUBSCRIBE_TRACKS inheritance under Section 9.18.1 and nested fill's explicit exceptions. Section 9.20.2 is empty in this draft, so the individual definitions supply scope. SETUP uses a separate namespace."
+      "rationale": "Use a known parameter with a legal encoding in a forbidden message, accounting for SUBSCRIBE_TRACKS inheritance under Section 3.6.2 and nested fill's explicit exceptions. Draft 22 states the scope both in each parameter definition and in each control message's list of allowed parameters (#1916); the empty draft 21 Section 9.20.2 is gone. SETUP uses a separate namespace."
     },
     {
       "id": "D22-9-20-2-MAY-397",
@@ -487,7 +487,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The nested placement is distinct from a top-level subscription parameter. Sections 3.4 and 9.20.16 define independent fill state; Section 9.18.1 permits joining via SUBSCRIBE_TRACKS. This permission does not require the publisher to send subscriber fill requests."
+      "rationale": "The nested placement is distinct from a top-level subscription parameter. Sections 3.4 and 9.20.15 define independent fill state; Section 3.6.2 permits joining via SUBSCRIBE_TRACKS. This permission does not require the publisher to send subscriber fill requests."
     },
     {
       "id": "D22-9-20-5-SHOULD-408",
@@ -505,7 +505,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The budget spans all upstream FETCHes for the request, rather than restarting per object. Its relay actor and upstream sources exclude the original publisher; do not reinterpret it as that publisher's local scheduling deadline."
+      "rationale": "The budget spans all upstream FETCHes for the request (now stated in Section 3.2.3), rather than restarting per object. Its relay actor and upstream sources exclude the original publisher; do not reinterpret it as that publisher's local scheduling deadline."
     },
     {
       "id": "D22-9-20-5-MUST-NOT-409",
@@ -608,7 +608,7 @@
         "clause": 1
       },
       "actor": "relay whose rendezvous timeout expires",
-      "summary": "Respond with REQUEST_ERROR TIMEOUT if the rendezvous wait expires without a publisher.",
+      "summary": "Respond with SUBSCRIBE_ERROR (REQUEST_ERROR) TIMEOUT if the rendezvous wait expires without a publisher.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -644,7 +644,7 @@
         "clause": 1
       },
       "actor": "relay receiving zero rendezvous timeout without a publisher",
-      "summary": "Immediately return REQUEST_ERROR DOES_NOT_EXIST when RENDEZVOUS_TIMEOUT is zero and no publisher is available.",
+      "summary": "Immediately return SUBSCRIBE_ERROR (REQUEST_ERROR) DOES_NOT_EXIST when RENDEZVOUS_TIMEOUT is zero and no publisher is available.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -775,7 +775,7 @@
       "evaluators": [
         "d22-publisher-location-filter-capability"
       ],
-      "rationale": "Decode the length-prefixed field count and advertised filter in publisher messages. PUBLISH_STATE_NOTIFY reports the current filter; Section 9.10 forbids changing subscriber-controlled values without subscriber request. Zero length means no filter, while omission in updates or notifications leaves the value unchanged."
+      "rationale": "Decode the explicit Location Filter Type (0x00-0x05) and the fields it selects in publisher messages; any other type is a PROTOCOL_VIOLATION, so a publisher emitting one fails. The draft 21 length-inferred field count no longer exists. PUBLISH_STATE_NOTIFY reports the current filter; Section 9.10 forbids changing subscriber-controlled values without subscriber request. Type 0x00 means no filter, while omission in updates or notifications leaves the value unchanged."
     },
     {
       "id": "D22-9-20-9-MAY-423",
@@ -793,7 +793,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Subscriber emission is a listener action. Section 9.18.1 permits subscription filters in SUBSCRIBE_TRACKS and Section 9.20.16 separately allows them inside fill. The publisher's range-selection and overflow duties are classified independently; the optional sender permission is not a receiver MUST."
+      "rationale": "Subscriber emission is a listener action. Section 3.6.2 permits subscription filters in SUBSCRIBE_TRACKS and Section 9.20.15 separately allows them inside fill. The publisher's range-selection and overflow duties are classified independently; the optional sender permission is not a receiver MUST."
     },
     {
       "id": "D22-9-20-9-MUST-424",
@@ -806,7 +806,7 @@
         "clause": 1
       },
       "actor": "endpoint decoding an absolute Location Filter",
-      "summary": "Close the session with PROTOCOL_VIOLATION if StartGroup plus EndGroupDelta exceeds 2^64 - 1.",
+      "summary": "Close the session with PROTOCOL_VIOLATION if StartGroup plus EndGroupDelta exceeds 2^64 - 1 in a Location Filter of Type 0x03 or 0x04.",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -816,7 +816,7 @@
       "evaluators": [
         "d22-location-filter-overflow-protocol-violation"
       ],
-      "rationale": "Use an absolute filter with EndGroupDelta present, distinguishing this error from the clamping specified for a relative one-field start. Section 9.20.10 gives four optional fields, zero-length removal, and the special two-zero-field Next Object form; neither range-filter INVALID_FILTER nor relative clamping applies to this sum."
+      "rationale": "Send an absolute filter of explicit Location Filter Type 0x03 or 0x04 (the types that carry EndGroupDelta), distinguishing this error from the clamping specified for relative Type 0x01. Section 9.20.9 now selects the fields by Location Filter Type 0x00-0x05 (0x00 no filter, 0x05 Next Object) instead of inferring them from a Length, and makes any other type a PROTOCOL_VIOLATION without a BCP 14 keyword; neither range-filter INVALID_FILTER nor relative clamping applies to this sum."
     },
     {
       "id": "D22-9-20-12-MUST-425",
@@ -879,7 +879,7 @@
       "evaluators": [
         "d22-object-property-filter-invalid-filter"
       ],
-      "rationale": "Send a nonempty filter with odd Property Type after negotiating sufficient range capacity. Zero-length removal has no Property Type and does not trigger this condition. Section 8.3 Figure 2 establishes that odd properties carry bytes, whereas this filter requires integer values."
+      "rationale": "Send a nonempty filter with odd Property Type after negotiating sufficient range capacity. Zero-length removal has no Property Type and does not trigger this condition. Section 8.3 Figure 3 establishes that odd properties carry bytes, whereas this filter requires integer values."
     },
     {
       "id": "D22-9-20-14-MUST-428",

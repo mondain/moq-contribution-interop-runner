@@ -145,16 +145,16 @@
       "draft22_id": "D22-2-1-MAY-017",
       "draft21_id": "D21-11-MAY-504",
       "change": "reworded",
-      "note": "similarity=0.62",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 11 to 2.1; the sentence no longer mentions the Object Forwarding Preference (renamed Delivery Mode)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-2-1-1-MUST-018",
       "draft21_id": "D21-11-1-1-MUST-505",
       "change": "reworded",
-      "note": "similarity=0.73",
-      "reviewed": false,
+      "note": "editorial rewording: Object Forwarding Preference renamed Delivery Mode; moved from Section 11.1.1 to 2.1.1",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -225,8 +225,8 @@
       "draft22_id": "D22-2-3-1-SHOULD-NOT-027",
       "draft21_id": "D21-2-3-1-SHOULD-NOT-025",
       "change": "identical",
-      "note": "",
-      "reviewed": false,
+      "note": "explicit Location Filter Type: not a wire-encoding row; the subscriber recommendation text is unchanged and stays NotApplicable",
+      "reviewed": true,
       "tags": [
         "location_filter"
       ]
@@ -291,16 +291,16 @@
       "draft22_id": "D22-3-1-MUST-035",
       "draft21_id": "D21-3-1-MUST-033",
       "change": "reworded",
-      "note": "similarity=0.87",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_ERROR written as the SUBSCRIBE_ERROR shorthand (#1912)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-1-MUST-036",
       "draft21_id": "D21-3-1-MUST-034",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_ERROR written as the PUBLISH_ERROR shorthand (#1912)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -451,8 +451,8 @@
       "draft22_id": "D22-3-1-3-1-MAY-055",
       "draft21_id": "D21-11-3-1-MAY-529",
       "change": "reworded",
-      "note": "similarity=0.74",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 11.3.1 to the Unknown Track Alias section 3.1.3.1; SUBGROUP_HEADER generalized to 'stream header'",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -467,48 +467,48 @@
       "draft22_id": "D22-3-2-MUST-057",
       "draft21_id": "D21-3-2-1-MUST-052",
       "change": "reworded",
-      "note": "similarity=0.87",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); moved from Section 3.2.1 to 3.2",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-2-MAY-058",
       "draft21_id": "D21-9-12-MAY-378",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 9.12 to the Fetch section 3.2 (#1895)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-2-MUST-NOT-059",
       "draft21_id": "D21-9-12-MUST-NOT-379",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 9.12 to 3.2 (#1895)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-2-MUST-060",
       "draft21_id": "D21-9-11-MUST-375",
       "change": "reworded",
-      "note": "similarity=0.86",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); moved from Section 9.11 to 3.2",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-2-MUST-061",
       "draft21_id": "D21-9-11-MUST-376",
       "change": "reworded",
-      "note": "similarity=0.86",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_ERROR written as the FETCH_ERROR shorthand (#1912); Largest Object reference now Section 3.1.4",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-2-1-MUST-062",
       "draft21_id": "D21-9-11-MUST-377",
       "change": "reworded",
-      "note": "similarity=0.61",
-      "reviewed": false,
+      "note": "editorial rewording: 'either ascending or descending' replaced by a reference to Section 9.20.8; moved to Section 3.2.1 (#1895)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -563,8 +563,8 @@
       "draft22_id": "D22-3-3-1-MUST-NOT-069",
       "draft21_id": "D21-3-3-1-MUST-NOT-057",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "obligation changed: 'subscription-delivered objects' became 'objects', so the MUST NOT now also covers FETCH delivery (added d22-fetch-bounded-location-range and d22-fetch-objects-within-requested-location-range); not itself a wire-encoding row, but its stimuli use the explicit Location Filter Type",
+      "reviewed": true,
       "tags": [
         "location_filter"
       ]
@@ -667,25 +667,25 @@
     },
     {
       "draft22_id": "D22-3-6-MUST-082",
-      "draft21_id": "D21-9-15-MUST-384",
+      "draft21_id": "D21-9-18-MUST-392",
       "change": "reworded",
-      "note": "similarity=0.86",
-      "reviewed": false,
+      "note": "re-paired by hand: the carry tool paired this SUBSCRIBE_TRACKS subscriber-close rule with D21-9-15-MUST-384 (the SUBSCRIBE_NAMESPACE version); its counterpart is D21-9-18-MUST-392; editorial rewording otherwise (SUBSCRIBE_TRACKS_OK/ERROR shorthand, moved to Section 3.6)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-6-MUST-083",
       "draft21_id": "D21-9-18-MUST-393",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: SUBSCRIBE_TRACKS_ERROR shorthand (#1912); moved to Section 3.6 (#1946); the independent-overlap-space sentence now lives in Section 12.3",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-3-6-MUST-084",
-      "draft21_id": "D21-9-15-MUST-386",
+      "draft21_id": "D21-9-18-MUST-394",
       "change": "moved",
-      "note": "section moved",
+      "note": "re-paired by hand: identical sentence; the carry tool matched it to the SUBSCRIBE_NAMESPACE copy D21-9-15-MUST-386 instead of the SUBSCRIBE_TRACKS copy D21-9-18-MUST-394; section moved",
       "reviewed": true,
       "tags": []
     },
@@ -741,8 +741,8 @@
       "draft22_id": "D22-3-7-MUST-091",
       "draft21_id": "D21-3-6-MUST-073",
       "change": "reworded",
-      "note": "similarity=0.86",
-      "reviewed": false,
+      "note": "editorial rewording: PUBLISH_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -757,8 +757,8 @@
       "draft22_id": "D22-3-7-MUST-093",
       "draft21_id": "D21-3-6-MUST-075",
       "change": "reworded",
-      "note": "similarity=0.89",
-      "reviewed": false,
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -773,8 +773,8 @@
       "draft22_id": "D22-3-7-MUST-095",
       "draft21_id": "D21-3-6-MUST-077",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: FETCH_ERROR shorthand (#1912); section 3.6 renumbered 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -821,16 +821,16 @@
       "draft22_id": "D22-4-1-MAY-101",
       "draft21_id": "D21-4-2-MAY-088",
       "change": "reworded",
-      "note": "similarity=0.94",
-      "reviewed": false,
+      "note": "obligation changed: the subscriber permission now also covers TRACK_STATUS; still a subscriber permission (NotApplicable); moved to Section 4.1",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-4-1-MUST-102",
       "draft21_id": "D21-4-2-MUST-094",
       "change": "reworded",
-      "note": "similarity=0.83",
-      "reviewed": false,
+      "note": "editorial rewording: PUBLISH_NAMESPACE_OK/ERROR shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -845,24 +845,24 @@
       "draft22_id": "D22-4-1-SHOULD-104",
       "draft21_id": "D21-4-2-SHOULD-092",
       "change": "reworded",
-      "note": "similarity=0.85",
-      "reviewed": false,
+      "note": "editorial rewording: PUBLISH_NAMESPACE_OK shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-4-1-SHOULD-105",
       "draft21_id": "D21-4-2-SHOULD-093",
       "change": "reworded",
-      "note": "similarity=0.85",
-      "reviewed": false,
+      "note": "editorial rewording: PUBLISH_NAMESPACE_ERROR shorthand (#1912); moved to Section 4.1",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-4-1-SHOULD-106",
       "draft21_id": "D21-4-2-SHOULD-098",
       "change": "reworded",
-      "note": "similarity=0.81",
-      "reviewed": false,
+      "note": "editorial rewording: 'request it from the senders' became 'request the Track from the sender(s)'; moved to Section 4.1",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -875,17 +875,17 @@
     },
     {
       "draft22_id": "D22-4-2-MUST-108",
-      "draft21_id": "D21-9-18-MUST-392",
+      "draft21_id": "D21-4-1-MUST-082",
       "change": "reworded",
-      "note": "similarity=0.64",
-      "reviewed": false,
+      "note": "re-paired by hand: the carry tool paired this publisher first-response rule with D21-9-18-MUST-392 (SUBSCRIBE_TRACKS subscriber close); its counterpart is D21-4-1-MUST-082; editorial rewording otherwise (SUBSCRIBE_NAMESPACE_OK/ERROR shorthand, moved to Section 4.2)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-4-2-MUST-109",
-      "draft21_id": "",
-      "change": "new",
-      "note": "second clause of the Section 4.2 first-response sentence; same obligation as D21-9-15-MUST-384, which the carry tool paired with D22-3-6-MUST-082 (the SUBSCRIBE_TRACKS rule) instead; part 8b must re-pair the reworded rows",
+      "draft21_id": "D21-9-15-MUST-384",
+      "change": "reworded",
+      "note": "re-paired by hand: same obligation as D21-9-15-MUST-384, which the carry tool had paired with D22-3-6-MUST-082 (so 8a recorded this row as new); editorial rewording (SUBSCRIBE_NAMESPACE_OK/ERROR shorthand, moved to Section 4.2); row content as reviewed in 8a",
       "reviewed": true,
       "tags": []
     },
@@ -901,8 +901,8 @@
       "draft22_id": "D22-4-2-MUST-111",
       "draft21_id": "D21-9-15-MUST-385",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: SUBSCRIBE_NAMESPACE_ERROR shorthand (#1912); moved from Section 9.15 to 4.2 (#1946)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -931,10 +931,10 @@
     },
     {
       "draft22_id": "D22-4-2-1-MUST-115",
-      "draft21_id": "D21-9-18-MUST-394",
+      "draft21_id": "D21-9-15-MUST-386",
       "change": "reworded",
-      "note": "similarity=0.86",
-      "reviewed": false,
+      "note": "re-paired by hand: the carry tool paired this SUBSCRIBE_NAMESPACE authorization rule with D21-9-18-MUST-394 (SUBSCRIBE_TRACKS); its counterpart is D21-9-15-MUST-386; editorial rewording otherwise ('this' became 'a', moved to Section 4.2.1)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1157,8 +1157,8 @@
       "draft22_id": "D22-5-2-MUST-143",
       "draft21_id": "D21-5-2-MUST-129",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: identical obligation text; 'Object Forwarding Preference is Subgroup' became 'Object Delivery Mode is Subgroup' in the leading clause",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1237,16 +1237,16 @@
       "draft22_id": "D22-6-2-MUST-153",
       "draft21_id": "D21-6-2-MUST-139",
       "change": "reworded",
-      "note": "similarity=0.79",
-      "reviewed": false,
+      "note": "editorial rewording: the sentence now names both transports ('directly over QUIC or over WebTransport on HTTP/3'), the only two MOQT runs over",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-6-2-MUST-154",
       "draft21_id": "D21-6-2-MUST-140",
       "change": "reworded",
-      "note": "similarity=0.79",
-      "reviewed": false,
+      "note": "editorial rewording: the sentence now names both transports explicitly",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1285,8 +1285,8 @@
       "draft22_id": "D22-6-3-MAY-159",
       "draft21_id": "D21-6-3-MAY-145",
       "change": "reworded",
-      "note": "similarity=0.96",
-      "reviewed": false,
+      "note": "obligation changed: 'such bidirectional streams' became 'such streams', extending the reset permission to early unidirectional Object streams; the publisher-observable request-stream case and its d22 ids are unchanged",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1589,8 +1589,8 @@
       "draft22_id": "D22-7-1-MUST-197",
       "draft21_id": "D21-7-1-MUST-183",
       "change": "reworded",
-      "note": "similarity=0.83",
-      "reviewed": false,
+      "note": "editorial rewording: Forwarding Preference renamed Delivery Mode (#1886)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1621,16 +1621,16 @@
       "draft22_id": "D22-7-1-MUST-201",
       "draft21_id": "D21-7-1-MUST-187",
       "change": "reworded",
-      "note": "similarity=0.83",
-      "reviewed": false,
+      "note": "editorial rewording: Object field list moved to Section 2.1.1 and Object Properties renumbered 11.1.2",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-2-MUST-202",
       "draft21_id": "D21-7-2-MUST-188",
       "change": "reworded",
-      "note": "similarity=0.72",
-      "reviewed": false,
+      "note": "editorial rewording: Forward State described as a subscription being paused (#1940); Forward=1 upstream became an unpaused upstream subscription",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1685,8 +1685,8 @@
       "draft22_id": "D22-7-4-MUST-209",
       "draft21_id": "D21-7-4-MUST-195",
       "change": "reworded",
-      "note": "similarity=0.83",
-      "reviewed": false,
+      "note": "editorial rewording: LARGEST_OBJECT renumbered Section 9.20.17",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1757,48 +1757,48 @@
       "draft22_id": "D22-7-5-MAY-218",
       "draft21_id": "D21-4-3-1-MAY-101",
       "change": "reworded",
-      "note": "similarity=0.72",
-      "reviewed": false,
+      "note": "duplicate of D22-7-5-MAY-217",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-5-MAY-219",
       "draft21_id": "D21-4-3-1-MAY-102",
       "change": "reworded",
-      "note": "similarity=0.72",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 4.3.1 to 7.5; now its own 'Relays MAY likewise limit the load imposed by subscribers' sentence, clause 2 of the cited sentence",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-5-MAY-220",
       "draft21_id": "D21-4-3-1-MAY-103",
       "change": "reworded",
-      "note": "similarity=0.72",
-      "reviewed": false,
+      "note": "editorial rewording: moved from Section 4.3.1 to 7.5; second option of the 'Relays MAY likewise' sentence",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-6-MAY-221",
       "draft21_id": "D21-7-5-MAY-201",
       "change": "reworded",
-      "note": "similarity=0.73",
-      "reviewed": false,
+      "note": "editorial rewording: 'in Forward State=0' became 'pause the Subscription' (#1940); section 7.5 renumbered 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-6-MUST-222",
       "draft21_id": "D21-7-5-MUST-202",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: 'the namespace in' became 'the Track Namespace Prefix in' (prefix matching was already draft 21 behaviour); section 7.5 renumbered 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-6-MUST-223",
       "draft21_id": "D21-7-5-MUST-203",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: only the PUBLISH_NAMESPACE clause of the shared sentence changed; section 7.5 renumbered 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -1885,24 +1885,24 @@
       "draft22_id": "D22-7-6-MUST-234",
       "draft21_id": "D21-7-5-MUST-216",
       "change": "reworded",
-      "note": "similarity=0.93",
-      "reviewed": false,
+      "note": "editorial rewording: RENDEZVOUS_TIMEOUT renumbered Section 9.20.6; section 7.5 renumbered 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-6-MUST-NOT-235",
       "draft21_id": "D21-7-5-MUST-NOT-217",
       "change": "reworded",
-      "note": "similarity=0.93",
-      "reviewed": false,
+      "note": "editorial rewording: RENDEZVOUS_TIMEOUT renumbered Section 9.20.6; section 7.5 renumbered 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-7-6-MUST-236",
       "draft21_id": "D21-7-5-MUST-219",
       "change": "reworded",
-      "note": "similarity=0.95",
-      "reviewed": false,
+      "note": "editorial rewording: the sentence now starts 'When a relay receives' instead of 'When it receives'; section 7.5 renumbered 7.6; PUBLISH_OK is now a defined shorthand",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2029,24 +2029,24 @@
       "draft22_id": "D22-8-4-MUST-NOT-252",
       "draft21_id": "D21-8-4-MUST-NOT-234",
       "change": "reworded",
-      "note": "similarity=0.93",
-      "reviewed": false,
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-8-4-MUST-253",
       "draft21_id": "D21-8-4-MUST-235",
       "change": "reworded",
-      "note": "similarity=0.93",
-      "reviewed": false,
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-8-4-MUST-254",
       "draft21_id": "D21-8-4-MUST-236",
       "change": "reworded",
-      "note": "similarity=0.93",
-      "reviewed": false,
+      "note": "editorial rewording: Mandatory Track Properties renumbered Section 3.7",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2325,8 +2325,8 @@
       "draft22_id": "D22-8-9-MUST-289",
       "draft21_id": "D21-8-9-MUST-277",
       "change": "reworded",
-      "note": "similarity=0.77",
-      "reviewed": false,
+      "note": "editorial rewording: the rule is now explicitly scoped to registrations outside SETUP (#1927), which matches the draft 21 reading already recorded in this row",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2701,8 +2701,8 @@
       "draft22_id": "D22-9-2-SHOULD-336",
       "draft21_id": "D21-9-2-SHOULD-325",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: Graceful Publisher Relay Switchover renumbered Section 7.6.1",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2861,8 +2861,8 @@
       "draft22_id": "D22-9-5-MUST-356",
       "draft21_id": "D21-9-5-MUST-345",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_UPDATE_OK/ERROR shorthand (#1912)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2917,8 +2917,8 @@
       "draft22_id": "D22-9-5-1-MUST-363",
       "draft21_id": "D21-9-5-1-MUST-352",
       "change": "reworded",
-      "note": "similarity=0.91",
-      "reviewed": false,
+      "note": "editorial rewording: REQUEST_UPDATE_OK shorthand (#1912)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -2949,16 +2949,16 @@
       "draft22_id": "D22-9-8-SHOULD-367",
       "draft21_id": "D21-9-8-SHOULD-356",
       "change": "reworded",
-      "note": "similarity=0.94",
-      "reviewed": false,
+      "note": "editorial rewording: PUBLISH_ERROR shorthand (#1912)",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-8-SHOULD-368",
       "draft21_id": "D21-9-8-SHOULD-357",
       "change": "reworded",
-      "note": "similarity=0.94",
-      "reviewed": false,
+      "note": "editorial rewording: only the PUBLISH_ERROR shorthand in the shared sentence changed",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3077,8 +3077,8 @@
       "draft22_id": "D22-9-10-MUST-383",
       "draft21_id": "D21-9-10-MUST-372",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: LARGEST_OBJECT renumbered Section 9.20.17",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3093,16 +3093,16 @@
       "draft22_id": "D22-9-13-MAY-385",
       "draft21_id": "D21-9-13-MAY-381",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: Publisher Interactions renumbered Section 7.6 in the shared sentence",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-13-MAY-386",
       "draft21_id": "D21-9-13-MAY-382",
       "change": "reworded",
-      "note": "similarity=0.92",
-      "reviewed": false,
+      "note": "editorial rewording: Publisher Interactions renumbered Section 7.6",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3181,8 +3181,8 @@
       "draft22_id": "D22-9-20-1-MUST-396",
       "draft21_id": "D21-9-20-1-MUST-404",
       "change": "reworded",
-      "note": "similarity=0.89",
-      "reviewed": false,
+      "note": "editorial rewording: scope is now stated by both the parameter definition and the message's allowed-parameter list (#1916); same receiver obligation",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3261,24 +3261,24 @@
       "draft22_id": "D22-9-20-5-MAY-406",
       "draft21_id": "D21-9-20-6-MAY-414",
       "change": "reworded",
-      "note": "similarity=0.94",
-      "reviewed": false,
+      "note": "editorial rewording: FILL_TIMEOUT renumbered Section 9.20.5 and FILL_PARAMETERS 9.20.15",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-5-MAY-407",
       "draft21_id": "D21-9-20-6-MAY-415",
       "change": "reworded",
-      "note": "similarity=0.94",
-      "reviewed": false,
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-5-SHOULD-408",
       "draft21_id": "D21-9-20-6-SHOULD-416",
       "change": "reworded",
-      "note": "similarity=0.91",
-      "reviewed": false,
+      "note": "editorial rewording: the total-budget explanation moved to Section 3.2.3 (#1895); FILL_TIMEOUT renumbered Section 9.20.5",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3325,8 +3325,8 @@
       "draft22_id": "D22-9-20-6-SHOULD-414",
       "draft21_id": "D21-9-20-7-SHOULD-422",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); RENDEZVOUS_TIMEOUT renumbered Section 9.20.6",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3341,8 +3341,8 @@
       "draft22_id": "D22-9-20-6-MUST-416",
       "draft21_id": "D21-9-20-7-MUST-424",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: SUBSCRIBE_ERROR shorthand (#1912); RENDEZVOUS_TIMEOUT renumbered Section 9.20.6",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3365,16 +3365,16 @@
       "draft22_id": "D22-9-20-8-MAY-419",
       "draft21_id": "D21-9-20-9-MAY-427",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15; GROUP_ORDER renumbered 9.20.8",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-8-MAY-420",
       "draft21_id": "D21-9-20-9-MAY-428",
       "change": "reworded",
-      "note": "similarity=0.88",
-      "reviewed": false,
+      "note": "editorial rewording: FILL_PARAMETERS renumbered Section 9.20.15; GROUP_ORDER renumbered 9.20.8",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -3389,8 +3389,8 @@
       "draft22_id": "D22-9-20-9-MAY-422",
       "draft21_id": "D21-9-20-10-MAY-430",
       "change": "identical",
-      "note": "",
-      "reviewed": false,
+      "note": "explicit Location Filter Type: same permission text, but the evaluator must decode Type 0x00-0x05 (other values are a PROTOCOL_VIOLATION) instead of the length-inferred encoding",
+      "reviewed": true,
       "tags": [
         "location_filter"
       ]
@@ -3399,8 +3399,8 @@
       "draft22_id": "D22-9-20-9-MAY-423",
       "draft21_id": "D21-9-20-10-MAY-431",
       "change": "identical",
-      "note": "",
-      "reviewed": false,
+      "note": "explicit Location Filter Type: sender permission text unchanged and NotApplicable; the listener's own stimuli must use the explicit type; section references updated",
+      "reviewed": true,
       "tags": [
         "location_filter"
       ]
@@ -3409,8 +3409,8 @@
       "draft22_id": "D22-9-20-9-MUST-424",
       "draft21_id": "D21-9-20-10-MUST-432",
       "change": "identical",
-      "note": "",
-      "reviewed": false,
+      "note": "explicit Location Filter Type: same MUST, but the overflow now arises only in Types 0x03/0x04 and the scenarios must encode the explicit type instead of a 3- or 4-field Length",
+      "reviewed": true,
       "tags": [
         "location_filter"
       ]
@@ -3427,32 +3427,32 @@
       "draft22_id": "D22-9-20-13-MUST-426",
       "draft21_id": "D21-9-20-14-MUST-434",
       "change": "reworded",
-      "note": "similarity=0.95",
-      "reviewed": false,
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; OBJECT_PROPERTY_FILTER renumbered Section 9.20.13",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-13-MUST-427",
       "draft21_id": "D21-9-20-14-MUST-435",
       "change": "reworded",
-      "note": "similarity=0.95",
-      "reviewed": false,
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; OBJECT_PROPERTY_FILTER renumbered Section 9.20.13",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-14-MUST-428",
       "draft21_id": "D21-9-20-15-MUST-436",
       "change": "reworded",
-      "note": "similarity=0.95",
-      "reviewed": false,
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; TRACK_PROPERTY_FILTER renumbered Section 9.20.14",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-9-20-14-MUST-429",
       "draft21_id": "D21-9-20-15-MUST-437",
       "change": "reworded",
-      "note": "similarity=0.95",
-      "reviewed": false,
+      "note": "editorial rewording: Key-Value-Pair figure renumbered Figure 3; TRACK_PROPERTY_FILTER renumbered Section 9.20.14",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4131,8 +4131,8 @@
       "draft22_id": "D22-11-3-2-SHOULD-514",
       "draft21_id": "D21-11-3-2-SHOULD-538",
       "change": "reworded",
-      "note": "similarity=0.81",
-      "reviewed": false,
+      "note": "editorial rewording: identical obligation sentence; draft 21 citation also spanned the following sentence",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4187,8 +4187,8 @@
       "draft22_id": "D22-11-3-2-MAY-521",
       "draft21_id": "D21-11-3-2-MAY-545",
       "change": "reworded",
-      "note": "similarity=0.85",
-      "reviewed": false,
+      "note": "editorial rewording: EndOfGroup/EndOfTrack spelled End of Group/End of Track",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4219,8 +4219,8 @@
       "draft22_id": "D22-11-3-2-MAY-525",
       "draft21_id": "D21-11-3-2-MAY-549",
       "change": "reworded",
-      "note": "similarity=0.77",
-      "reviewed": false,
+      "note": "editorial rewording: 'changes the Forward State from 0 to 1' became 'resumes the subscription' (#1940)",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4235,16 +4235,16 @@
       "draft22_id": "D22-11-4-1-1-MUST-527",
       "draft21_id": "D21-11-4-1-1-MUST-551",
       "change": "reworded",
-      "note": "similarity=0.89",
-      "reviewed": false,
+      "note": "editorial rewording: identical obligation sentence; the carry tool saw a different neighbouring sentence boundary",
+      "reviewed": true,
       "tags": []
     },
     {
       "draft22_id": "D22-11-4-1-1-MUST-528",
       "draft21_id": "D21-11-4-1-1-MUST-552",
       "change": "reworded",
-      "note": "similarity=0.89",
-      "reviewed": false,
+      "note": "editorial rewording: identical obligation sentence; the carry tool saw a different neighbouring sentence boundary",
+      "reviewed": true,
       "tags": []
     },
     {
@@ -4931,7 +4931,7 @@
       "draft22_id": "",
       "draft21_id": "D21-4-1-MUST-082",
       "change": "removed",
-      "note": "superseded by D22-4-2-MUST-108 (SUBSCRIBE_NAMESPACE first-response rule moved to Section 4.2 with SUBSCRIBE_NAMESPACE_OK/ERROR shorthand names; that row currently carries D21-9-18-MUST-392 and needs re-pairing in part 8b)",
+      "note": "superseded by D22-4-2-MUST-108 (SUBSCRIBE_NAMESPACE first-response rule moved to Section 4.2 with SUBSCRIBE_NAMESPACE_OK/ERROR shorthand names); part 8b re-paired D22-4-2-MUST-108 to this row as reworded, and this removed entry is kept because delta entries are not deleted",
       "reviewed": true,
       "tags": []
     },

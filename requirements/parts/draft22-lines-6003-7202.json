@@ -568,8 +568,8 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "relay receiving EndOfGroup or EndOfTrack",
-      "summary": "Treat an EndOfGroup or EndOfTrack Object as a signal to close corresponding streams before upstream FIN arrives.",
+      "actor": "relay receiving End of Group or End of Track",
+      "summary": "Treat an End of Group or End of Track Object as a signal to close corresponding streams before upstream FIN arrives.",
       "applicability": "NotApplicable",
       "testability": "NotApplicable",
       "scenarios": [],
@@ -645,7 +645,7 @@
         "clause": 1
       },
       "actor": "publisher receiving renewed forwarding interest",
-      "summary": "Reopen a stopped Subgroup stream after a later REQUEST_UPDATE changes Forward State from 0 to 1.",
+      "summary": "Reopen a stopped Subgroup stream after a later REQUEST_UPDATE resumes the paused subscription (Forward State 0 to 1).",
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
@@ -654,7 +654,7 @@
       "evaluators": [
         "d22-stopped-subgroup-resume-capability"
       ],
-      "rationale": "Establish Forward State 0 before sending the update to 1, following STOP_SENDING. This optional exception does not authorize unconditional immediate reopening or require any replay of previously sent Objects."
+      "rationale": "Pause the subscription (Forward State 0) and send STOP_SENDING before sending the resuming update. This optional exception does not authorize unconditional immediate reopening or require any replay of previously sent Objects."
     },
     {
       "id": "D22-11-3-2-SHOULD-526",
