@@ -135,6 +135,7 @@ add_library(moq-interop-requirements
     src/requirements/scoring.cpp
     src/requirements/carry_forward.cpp
     src/requirements/lineage.cpp
+    src/requirements/lineage_policy.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
@@ -787,6 +788,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lineage-tests tests/unit/lineage_test.cpp)
     target_link_libraries(moq-interop-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lineage COMMAND moq-interop-lineage-tests)
+
+    add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
+    target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME draft22-lineage COMMAND moq-interop-draft22-lineage-tests)
 
     add_executable(moq-interop-draft22-catalog-tests tests/unit/draft22_catalog_test.cpp)
     target_compile_definitions(moq-interop-draft22-catalog-tests PRIVATE
