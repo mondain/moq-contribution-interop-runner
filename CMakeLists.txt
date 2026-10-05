@@ -962,6 +962,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME draft21-publisher-request
              COMMAND moq-interop-draft21-publisher-request-tests)
 
+    add_executable(moq-interop-draft22-wire-audit-tests
+                   tests/golden/draft22_wire_audit_test.cpp)
+    target_compile_definitions(moq-interop-draft22-wire-audit-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-wire-audit-tests PRIVATE
+                          moq-interop-wire moq-interop-requirements GTest::gtest_main)
+    add_test(NAME draft22-wire-audit
+             COMMAND moq-interop-draft22-wire-audit-tests)
+
     add_executable(moq-interop-draft21-request-ids-tests
                    tests/protocol/draft21_request_ids_test.cpp)
     target_link_libraries(moq-interop-draft21-request-ids-tests PRIVATE
