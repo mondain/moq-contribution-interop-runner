@@ -35,14 +35,9 @@ std::set<std::string> draft22_filter_building_scenarios() {
         "d21-subgroup-restart-after-reset",
         // draft21_gap_a.cpp:116-124 bounded_update() (a)
         "d21-update-subscription-location-range",
-        // draft21_response.cpp:34-36 publish_ready() decodes the received PUBLISH's 0x21 (b)
-        "d21-subscriber-update-on-publish",
         // draft21_close.cpp:336-338 builds `0x21 <length> ...` (a); lines 418-420 nest it in FILL_PARAMETERS (a)
         "d21-location-filter-end-group-overflow",
         "d21-fill-location-filter-end-group-overflow",
-        // draft21_close.cpp:126-128 publish_track() decodes the received PUBLISH's 0x21 (b), gating
-        // the scenario at lines 516 and 545
-        "d21-publish-established-subscriber-sends-publish-state-notify",
         // fetch_first_object.cpp:76-81 FETCH with a length-prefixed 0x21 (a)
         "d21-fetch-first-object-flags",
         // fetch_probe.cpp:62-66 encode_fetch (a), shared by both fetch probe definitions

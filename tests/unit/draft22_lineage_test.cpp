@@ -81,8 +81,8 @@ TEST(Draft22Lineage, EveryDraft21SourceRowAndNameExistsAndEveryNameIsClassifiedO
 TEST(Draft22Lineage, CountsArePinned) {
     EXPECT_EQ(lineage_data::kSharedRows.size(), 597);
     EXPECT_EQ(lineage_data::kOwnRows22.size(), 17);
-    EXPECT_EQ(lineage_data::kSharedScenarios.size(), 259);
-    EXPECT_EQ(lineage_data::kOwnScenarios22.size(), 56);
+    EXPECT_EQ(lineage_data::kSharedScenarios.size(), 261);
+    EXPECT_EQ(lineage_data::kOwnScenarios22.size(), 54);
     EXPECT_EQ(lineage_data::kSharedEvaluators.size(), 262);
     EXPECT_EQ(lineage_data::kOwnEvaluators22.size(), 6);
 }

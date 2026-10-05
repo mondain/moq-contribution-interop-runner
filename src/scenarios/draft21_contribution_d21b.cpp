@@ -15,6 +15,7 @@
 //   D21-13-MUST-593/594   unknown GREASE values (SETUP options, REQUEST_ERROR
 //                         code, token type, Stream Reset code)
 
+#include "moq/interop/scenarios/wire_draft.h"
 #include "draft21_contribution_support.h"
 
 #include "moq/interop/wire/draft21/key_values.h"
@@ -675,7 +676,7 @@ Spec token_not_copied() {
             for (const auto& [id, stream] : view.streams()) {
                 if ((id & 3u) != 0u) continue;  // publisher-opened request streams
                 wire::Cursor cursor(stream.bytes);
-                auto decoded = d21::decode_publish(cursor);
+                auto decoded = decode_publish_for_wire(cursor);
                 const auto* publish = std::get_if<d21::PublishMessage>(&decoded);
                 if (!publish) continue;
                 if (accepted && stream.first_event > frames.front().event) observed = true;

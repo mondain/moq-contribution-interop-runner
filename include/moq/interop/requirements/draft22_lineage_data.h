@@ -637,7 +637,7 @@ inline constexpr std::array<std::string_view, 17> kOwnRows22{{
     "D22-9-20-9-MUST-424",
 }};
 
-inline constexpr std::array<NamePair, 259> kSharedScenarios{{
+inline constexpr std::array<NamePair, 261> kSharedScenarios{{
     {"d22-alias-reassignment-with-old-data-outstanding", "d21-alias-reassignment-with-old-data-outstanding"},
     {"d22-application-namespace-publication-under-session", "d21-application-namespace-publication-under-session"},
     {"d22-application-track-publication-under-session", "d21-application-track-publication-under-session"},
@@ -740,6 +740,7 @@ inline constexpr std::array<NamePair, 259> kSharedScenarios{{
     {"d22-publish-distinct-tracks-in-one-scope", "d21-publish-distinct-tracks-in-one-scope"},
     {"d22-publish-done-code-relevance", "d21-publish-done-code-relevance"},
     {"d22-publish-done-datagram-only", "d21-publish-done-datagram-only"},
+    {"d22-publish-established-subscriber-sends-publish-state-notify", "d21-publish-established-subscriber-sends-publish-state-notify"},
     {"d22-publish-namespace-ok-with-track-properties", "d21-publish-namespace-ok-with-track-properties"},
     {"d22-publish-namespace-redirect-nonempty-track-name", "d21-publish-namespace-redirect-nonempty-track-name"},
     {"d22-publish-namespace-redirect-target", "d21-publish-namespace-redirect-target"},
@@ -871,6 +872,7 @@ inline constexpr std::array<NamePair, 259> kSharedScenarios{{
     {"d22-subscribe-tracks-oversized-namespace", "d21-subscribe-tracks-oversized-namespace"},
     {"d22-subscribe-tracks-publish-skipped-then-capacity-recovers", "d21-subscribe-tracks-publish-skipped-then-capacity-recovers"},
     {"d22-subscriber-sends-publish-state-notify", "d21-subscriber-sends-publish-state-notify"},
+    {"d22-subscriber-update-on-publish", "d21-subscriber-update-on-publish"},
     {"d22-successful-subscribe-forward-zero", "d21-successful-subscribe-forward-zero"},
     {"d22-successful-subscribe-object-delivery", "d21-successful-subscribe-object-delivery"},
     {"d22-successful-subscribe-response", "d21-successful-subscribe-response"},
@@ -899,7 +901,7 @@ inline constexpr std::array<NamePair, 259> kSharedScenarios{{
     {"d22-webtransport-server-sends-path", "d21-webtransport-server-sends-path"},
 }};
 
-inline constexpr std::array<std::string_view, 259> kSharedScenarioIds22{{
+inline constexpr std::array<std::string_view, 261> kSharedScenarioIds22{{
     "d22-alias-reassignment-with-old-data-outstanding",
     "d22-application-namespace-publication-under-session",
     "d22-application-track-publication-under-session",
@@ -1002,6 +1004,7 @@ inline constexpr std::array<std::string_view, 259> kSharedScenarioIds22{{
     "d22-publish-distinct-tracks-in-one-scope",
     "d22-publish-done-code-relevance",
     "d22-publish-done-datagram-only",
+    "d22-publish-established-subscriber-sends-publish-state-notify",
     "d22-publish-namespace-ok-with-track-properties",
     "d22-publish-namespace-redirect-nonempty-track-name",
     "d22-publish-namespace-redirect-target",
@@ -1133,6 +1136,7 @@ inline constexpr std::array<std::string_view, 259> kSharedScenarioIds22{{
     "d22-subscribe-tracks-oversized-namespace",
     "d22-subscribe-tracks-publish-skipped-then-capacity-recovers",
     "d22-subscriber-sends-publish-state-notify",
+    "d22-subscriber-update-on-publish",
     "d22-successful-subscribe-forward-zero",
     "d22-successful-subscribe-object-delivery",
     "d22-successful-subscribe-response",
@@ -1161,7 +1165,7 @@ inline constexpr std::array<std::string_view, 259> kSharedScenarioIds22{{
     "d22-webtransport-server-sends-path",
 }};
 
-inline constexpr std::array<std::string_view, 56> kOwnScenarios22{{
+inline constexpr std::array<std::string_view, 54> kOwnScenarios22{{
     "d22-cancel-fetch-with-open-request-and-data-streams",
     "d22-cancel-subscription-with-concurrent-fill-streams",
     "d22-control-stream-lifetime",
@@ -1194,7 +1198,6 @@ inline constexpr std::array<std::string_view, 56> kOwnScenarios22{{
     "d22-prior-object-gap-repeat",
     "d22-prior-object-gap-singleton",
     "d22-publish-done-without-data-streams",
-    "d22-publish-established-subscriber-sends-publish-state-notify",
     "d22-publish-state-notify-before-first-object",
     "d22-publish-state-notify-known-largest-object",
     "d22-publish-state-notify-preserves-subscriber-control",
@@ -1213,7 +1216,6 @@ inline constexpr std::array<std::string_view, 56> kOwnScenarios22{{
     "d22-subgroup-start-location-fin",
     "d22-subscribe-bounded-location-range",
     "d22-subscribe-single-subgroup",
-    "d22-subscriber-update-on-publish",
     "d22-subscription-forwarding-preference",
     "d22-update-subscription-location-range",
     "d22-webtransport-h3-datagram-support",

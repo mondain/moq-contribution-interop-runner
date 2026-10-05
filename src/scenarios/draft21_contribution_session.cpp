@@ -3,6 +3,7 @@
 // accounting, response message types, FETCH range errors, namespace
 // discovery ordering, Message Parameter serialization and padding.
 
+#include "moq/interop/scenarios/wire_draft.h"
 #include "draft21_contribution_support.h"
 
 #include "moq/interop/wire/draft21/publish.h"
@@ -125,7 +126,7 @@ Spec grease_request_error_spec() {
         auto definition = base_definition("");
         definition.peer_request_ready = [](auto input) {
             wire::Cursor cursor(input);
-            return std::holds_alternative<d21::PublishMessage>(d21::decode_publish(cursor));
+            return std::holds_alternative<d21::PublishMessage>(decode_publish_for_wire(cursor));
         };
         // Reject the publisher's own PUBLISH with an unknown code, then use
         // a fresh request on the same session.

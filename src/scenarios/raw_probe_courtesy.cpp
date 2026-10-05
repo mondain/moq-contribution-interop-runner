@@ -1,3 +1,4 @@
+#include "moq/interop/scenarios/wire_draft.h"
 #include "raw_probe_courtesy.h"
 
 #include "moq/interop/wire/cursor.h"
@@ -30,6 +31,7 @@ std::optional<std::uint64_t> vi(wire::Cursor& cursor) {
 // Section 8.9: does an AUTHORIZATION TOKEN parameter (0x03) in this REQUEST_UPDATE
 // body (Request ID, parameters) name an Alias with Alias Type USE_ALIAS? PUBLISH
 // tokens come from its decoder.
+// Safe under draft 22: parameters are delta-encoded in ascending Type order, so AUTHORIZATION_TOKEN (0x03) is read before any LOCATION_FILTER (0x21); do not extend this walk to parameters above 0x21.
 bool update_uses_alias(std::span<const std::byte> body) {
     wire::Cursor cursor(body);
     if (!vi(cursor)) return false;
@@ -145,7 +147,7 @@ void PublisherCourtesy::parse(transport::StreamId id, Stream& stream) {
             framed.push_back(static_cast<std::byte>(frame_body.size() & 255u));
             framed.insert(framed.end(), frame_body.begin(), frame_body.end());
             wire::Cursor publish_cursor(framed);
-            const auto decoded = d21::decode_publish(publish_cursor);
+            const auto decoded = decode_publish_for_wire(publish_cursor);
             if (const auto* publish = std::get_if<d21::PublishMessage>(&decoded)) {
                 publish_alias = publish->track_alias;
                 for (const auto& parameter : publish->parameters)

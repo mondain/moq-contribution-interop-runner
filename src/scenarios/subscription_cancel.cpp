@@ -1,3 +1,4 @@
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/subscription_cancel.h"
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/wire/draft21/request_frame.h"
@@ -182,7 +183,7 @@ bool publish_aliases_distinct(unsigned draft, const std::map<transport::StreamId
             const auto* publish = message ? std::get_if<d18::PublishMessage>(message) : nullptr;
             if (!publish || publish->track_alias == alias) return false;
         } else {
-            const auto decoded = d21::decode_publish(cursor);
+            const auto decoded = decode_publish_for_wire(cursor);
             const auto* publish = std::get_if<d21::PublishMessage>(&decoded);
             if (!publish || publish->track_alias == alias) return false;
         }

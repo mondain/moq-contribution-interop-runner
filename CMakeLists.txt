@@ -190,6 +190,7 @@ add_library(moq-interop-session
     src/session/draft21_request_ids.cpp
     src/session/draft21_control_state.cpp
     src/session/draft21_publish_open.cpp
+    src/session/wire_draft.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -797,6 +798,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lineage-tests tests/unit/lineage_test.cpp)
     target_link_libraries(moq-interop-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lineage COMMAND moq-interop-lineage-tests)
+
+    add_executable(moq-interop-wire-draft-tests tests/unit/wire_draft_test.cpp)
+    target_link_libraries(moq-interop-wire-draft-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME wire-draft COMMAND moq-interop-wire-draft-tests)
 
     add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
     target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE

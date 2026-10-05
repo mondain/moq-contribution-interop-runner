@@ -3,6 +3,7 @@
 // and SUBSCRIBE_TRACKS. See draft21_contribution_residual.cpp for the fixture
 // contract these rows share.
 
+#include "moq/interop/scenarios/wire_draft.h"
 #include "draft21_contribution_support.h"
 #include "draft21_contribution_residual_internal.h"
 
@@ -387,7 +388,7 @@ Spec skipped_publish_spec() {
             definition.publisher_exit_is_evidence = true;
             definition.peer_request_ready = [](auto input) {
                 wire::Cursor cursor(input);
-                return std::holds_alternative<wire::draft21::PublishMessage>(wire::draft21::decode_publish(cursor));
+                return std::holds_alternative<wire::draft21::PublishMessage>(decode_publish_for_wire(cursor));
             };
             Bytes body;
             put_vi(body, 1);

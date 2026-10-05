@@ -1,3 +1,4 @@
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/draft21_response.h"
 #include "moq/interop/wire/draft21/location_filter.h"
 #include "moq/interop/wire/draft21/publish_done.h"
@@ -26,7 +27,7 @@ bool setup_ready(std::span<const std::byte> input) {
 }
 bool publish_ready(std::span<const std::byte> input) {
     wire::Cursor cursor(input);
-    const auto decoded = wire::draft21::decode_publish(cursor);
+    const auto decoded = decode_publish_for_wire(cursor);
     const auto* publish = std::get_if<wire::draft21::PublishMessage>(&decoded);
     if (!publish || publish->request_id % 2 != 0 || cursor.remaining() != 0 ||
         wire::draft21::validate_track_properties(publish->track_properties)) return false;

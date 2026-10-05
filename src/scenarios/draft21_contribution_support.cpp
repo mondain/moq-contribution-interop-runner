@@ -217,6 +217,7 @@ std::optional<wire::draft21::Token> recover_token(std::span<const std::byte> req
         const auto delta = read_vi(body);
         if (!delta) return std::nullopt;
         parameter += *delta;
+        // Safe under draft 22: parameters are delta-encoded in ascending Type order, so AUTHORIZATION_TOKEN (0x03) is read before any LOCATION_FILTER (0x21); do not extend this walk to parameters above 0x21.
         // Even types carry a varint; odd types a length-prefixed value (Section 9.20).
         if ((parameter & 1u) == 0u) {
             if (!read_vi(body)) return std::nullopt;
