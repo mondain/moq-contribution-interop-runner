@@ -1,4 +1,5 @@
 #include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
@@ -464,7 +465,7 @@ public:
                 (run_config.transport == TransportKind::WebTransport ? 4u : 1u);
         quic.certificate_path = config.certificate_path;
         quic.private_key_path = config.private_key_path;
-        const std::string protocol = run_config.draft == DraftVersion::Draft21 ? "moqt-21" : "moqt-18";
+        const std::string protocol(app::alpn(run_config.draft));
         if (run_config.transport == TransportKind::WebTransport) {
             transport::WebTransportListenerConfig settings;
             settings.quic = std::move(quic);
@@ -526,7 +527,8 @@ public:
             if (found == profiles.end()) return std::nullopt;
             return std::move(found->definition);
         };
-        if (run_config.draft == DraftVersion::Draft18) {
+        return app::by_draft(run_config.draft,
+            [&]() -> std::optional<scenarios::RawProbeDefinition> {
             if (auto value = find(scenarios::draft18_response_probes(run_config.timeout))) return value;
             if (auto value = find(scenarios::draft18_peer_close_probes(run_config.timeout))) return value;
             if (auto value = find(scenarios::draft18_request_profiles(run_config.timeout))) return value;
@@ -543,11 +545,13 @@ public:
             }
             return scenarios::draft18_close_probe(id, run_config.timeout, std::move(close_namespace),
                                                   std::move(close_name));
-        }
-        if (auto value = find(scenarios::draft21_response_probes(run_config.timeout))) return value;
-        if (auto value = find(scenarios::draft21_peer_close_probes(run_config.timeout))) return value;
-        if (auto value = find(scenarios::draft21_request_profiles(run_config.timeout))) return value;
-        return find(scenarios::draft21_close_probes(run_config.timeout));
+            },
+            [&]() -> std::optional<scenarios::RawProbeDefinition> {
+            if (auto value = find(scenarios::draft21_response_probes(run_config.timeout))) return value;
+            if (auto value = find(scenarios::draft21_peer_close_probes(run_config.timeout))) return value;
+            if (auto value = find(scenarios::draft21_request_profiles(run_config.timeout))) return value;
+            return find(scenarios::draft21_close_probes(run_config.timeout));
+            });
     }
 
     static bool driver_failed(const DriverResult& result) {
@@ -632,10 +636,7 @@ public:
 
     void finalize_raw_family(Worker* worker, const RunConfig& run_config, bool operational_error,
                              std::string_view last_scenario_id) {
-        std::vector<requirements::Outcome> outcomes;
-        if (run_config.draft == DraftVersion::Draft21) {
-            outcomes = requirements::evaluate_draft21_raw_probes(*draft21, worker->transcripts);
-        } else {
+        const auto outcomes_18 = [&]() -> std::vector<requirements::Outcome> {
             std::vector<requirements::ScenarioContext> contexts;
             contexts.reserve(worker->transcripts.size());
             for (const auto& transcript : worker->transcripts) {
@@ -647,9 +648,16 @@ public:
                 context.raw_probe = transcript;
                 contexts.push_back(std::move(context));
             }
-            outcomes = requirements::evaluate_draft18(*draft18, contexts);
-        }
-        const auto& catalog = run_config.draft == DraftVersion::Draft21 ? *draft21 : *draft18;
+            return requirements::evaluate_draft18(*draft18, contexts);
+        };
+        const auto outcomes_21 = [&]() -> std::vector<requirements::Outcome> {
+            return requirements::evaluate_draft21_raw_probes(*draft21, worker->transcripts);
+        };
+        std::vector<requirements::Outcome> outcomes = app::by_draft(run_config.draft, outcomes_18, outcomes_21);
+        // Pointer-returning lambdas: a reference-returning by_draft trips -Wdangling-reference.
+        const auto& catalog = *app::by_draft(run_config.draft,
+            [&]() -> const requirements::RequirementCatalog* { return draft18.get(); },
+            [&]() -> const requirements::RequirementCatalog* { return draft21.get(); });
         // Rows whose every scenario needs a capability the publisher declared absent are
         // not applicable to this run (they leave the score denominators).
         apply_publisher_capabilities(static_cast<unsigned>(run_config.draft), catalog,
@@ -839,11 +847,9 @@ public:
                     }
                     handle = started.handle;
                 }
-                if (run_config.draft == DraftVersion::Draft21) {
-                    run_draft21(worker, *listener, run_config, &driver, handle, record_driver);
-                } else {
-                    run_draft18(worker, *listener, run_config, &driver, handle, record_driver);
-                }
+                app::by_draft(run_config.draft,
+                    [&] { run_draft18(worker, *listener, run_config, &driver, handle, record_driver); },
+                    [&] { run_draft21(worker, *listener, run_config, &driver, handle, record_driver); });
             }
         } catch (const std::exception& error) {
             std::cerr << "publisher run " << worker->id << " failed: "
@@ -1096,8 +1102,9 @@ public:
                          " ordinal=" + std::to_string(worker->context_ordinal);
             store->append_events(worker->id,std::span(&uri,1));
         }
-        const auto request_profiles = run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_request_profiles() : scenarios::draft21_request_profiles();
+        const auto request_profiles = app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_request_profiles(); },
+            [&] { return scenarios::draft21_request_profiles(); });
         const auto request_profile = std::find_if(request_profiles.begin(), request_profiles.end(),
             [&](const auto& profile) { return profile.definition.id == transcript.scenario_id; });
         if (request_profile != request_profiles.end() && request_profile->compatibility_error) {
@@ -1141,9 +1148,9 @@ public:
             return std::move(found->definition);
         }
         if (request_goaway_scenario(static_cast<unsigned>(run_config.draft),id)) {
-            auto profiles = run_config.draft == DraftVersion::Draft18
-                ? scenarios::draft18_request_goaway_probes(run_config.timeout)
-                : scenarios::draft21_request_goaway_probes(run_config.timeout);
+            auto profiles = app::by_draft(run_config.draft,
+                [&] { return scenarios::draft18_request_goaway_probes(run_config.timeout); },
+                [&] { return scenarios::draft21_request_goaway_probes(run_config.timeout); });
             const auto found = std::find_if(profiles.begin(),profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown request GOAWAY probe");
@@ -1207,47 +1214,47 @@ public:
             if (found != probes.end()) return std::move(found->definition);
             return execute(scenarios::draft21_gap_a_token_probes(run_config.timeout, name_space, name));
         }
-        if (immutable_repeat) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_immutable_repeat_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_immutable_repeat_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
-        if (object_repeat) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_object_repeat_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_object_repeat_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
-        if (group_order) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_fetch_group_order_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_fetch_group_order_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
+        if (immutable_repeat) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_immutable_repeat_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_immutable_repeat_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
+        if (object_repeat) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_object_repeat_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_object_repeat_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
+        if (group_order) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_fetch_group_order_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_fetch_group_order_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
         if (notify_fetch || notify_direction) return execute(scenarios::draft21_close_probes(run_config.timeout, name_space,
             bytes_of(run_config.track_fixture->track_name)));
-        if (first_fetch) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_fetch_first_object_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_fetch_first_object_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
-        if (discovery_overlap) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_discovery_overlap_probes(run_config.timeout, name_space)
-            : scenarios::draft21_discovery_overlap_probes(run_config.timeout, name_space));
+        if (first_fetch) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_fetch_first_object_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_fetch_first_object_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
+        if (discovery_overlap) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_discovery_overlap_probes(run_config.timeout, name_space); },
+            [&] { return scenarios::draft21_discovery_overlap_probes(run_config.timeout, name_space); }));
         if (range_filter) return execute(scenarios::draft21_range_filter_probes(
             run_config.timeout, name_space, bytes_of(run_config.track_fixture->track_name)));
         if (request_response) return execute(scenarios::draft21_request_response_probes(
             run_config.timeout, name_space, bytes_of(run_config.track_fixture->track_name)));
         if (fetch_response) return execute(scenarios::draft21_fetch_response_probes(
             run_config.timeout, name_space, bytes_of(run_config.track_fixture->track_name)));
-        if (fetch) return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_fetch_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_fetch_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
-        return execute(run_config.draft == DraftVersion::Draft18
-            ? scenarios::draft18_subscription_cancel_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name))
-            : scenarios::draft21_subscription_cancel_probes(run_config.timeout, name_space,
-                bytes_of(run_config.track_fixture->track_name)));
+        if (fetch) return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_fetch_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_fetch_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
+        return execute(app::by_draft(run_config.draft,
+            [&] { return scenarios::draft18_subscription_cancel_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); },
+            [&] { return scenarios::draft21_subscription_cancel_probes(run_config.timeout, name_space,
+                bytes_of(run_config.track_fixture->track_name)); }));
     }
 
     void run_draft18(Worker* worker,
@@ -1554,7 +1561,7 @@ RunStartResult NativeRunManager::start(const RunConfig& config) {
             listener = std::move(created.listener);
             if (config.transport == TransportKind::WebTransport) {
                 path = "/moq";
-                protocol = config.draft == DraftVersion::Draft21 ? "moqt-21" : "moqt-18";
+                protocol = std::string(app::alpn(config.draft));
                 const auto host = endpoint.address.find(':') != std::string::npos
                     ? "[" + endpoint.address + "]" : endpoint.address;
                 url = "https://" + host + ":" + std::to_string(endpoint.port) + path;
@@ -1649,8 +1656,12 @@ std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
 }
 
 bool NativeRunManager::supports(DraftVersion draft) const noexcept {
-    return draft == DraftVersion::Draft18 ||
-           (draft == DraftVersion::Draft21 && impl_->draft21 != nullptr);
+    switch (draft) {
+        case DraftVersion::Draft18: return true;
+        case DraftVersion::Draft21: return impl_->draft21 != nullptr;
+        case DraftVersion::Draft22: return false;
+    }
+    return false;
 }
 
 bool NativeRunManager::supports_driven() const noexcept {
