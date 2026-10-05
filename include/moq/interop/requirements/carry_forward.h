@@ -25,4 +25,23 @@ struct OccurrenceContext {
 
 std::vector<OccurrenceContext> extract_contexts(const DraftSource& source);
 
+enum class DeltaClass { Identical, Moved, Reworded, New, Removed };
+
+const char* to_string(DeltaClass change);
+
+struct CarryMatch {
+    DeltaClass change{DeltaClass::New};
+    OccurrenceContext target;
+    std::vector<const Requirement*> sources;
+    double similarity{0.0};
+};
+
+struct CarryResult {
+    std::vector<CarryMatch> matches;
+    std::vector<const Requirement*> removed;
+};
+
+CarryResult carry_forward(const DraftSource& old_source, const RequirementCatalog& old_catalog,
+                          const DraftSource& new_source);
+
 }  // namespace moq::interop::requirements

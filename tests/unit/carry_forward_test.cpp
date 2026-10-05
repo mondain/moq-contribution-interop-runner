@@ -135,5 +135,111 @@ TEST(CarryForwardContextTest, SectionsMatchTheReviewedDraft21Catalog) {
     EXPECT_LE(unparsed * 100, contexts.size() * 3) << unparsed << " of " << contexts.size();
 }
 
+RequirementCatalog catalog_for(const DraftSource& source) {
+    RequirementCatalog catalog{source.number, source.sha256, true, {}};
+    unsigned counter = 0;
+    for (const auto& occurrence : scan_normative_occurrences(source)) {
+        const char* token = "MAY";
+        switch (occurrence.normalized_strength) {
+            case Strength::Must: token = "MUST"; break;
+            case Strength::MustNot: token = "MUST-NOT"; break;
+            case Strength::Should: token = "SHOULD"; break;
+            case Strength::ShouldNot: token = "SHOULD-NOT"; break;
+            case Strength::May: break;
+        }
+        catalog.requirements.push_back(
+            {"D21-1-" + std::string(token) + "-" + std::to_string(++counter),
+             occurrence.normalized_strength,
+             {"1", occurrence.first_line, occurrence.last_line, occurrence.occurrence_on_line, 1},
+             "endpoint", "summary", Applicability::Applicable, Testability::NotTestable, {}, {},
+             "rationale"});
+    }
+    return catalog;
+}
+
+constexpr const char* kOld =
+    "1.  Introduction\n"
+    "\n"
+    "   An endpoint MUST send HELLO.  A peer MAY ignore it.\n"
+    "\n"
+    "2.  Other Things\n"
+    "\n"
+    "   A relay SHOULD NOT forward.\n"
+    "\n"
+    "   A sender MUST retry.\n";
+
+constexpr const char* kNew =
+    "1.  Introduction\n"
+    "\n"
+    "   An endpoint MUST send HELLO immediately.  A peer MAY ignore it.\n"
+    "\n"
+    "2.  Other Things\n"
+    "\n"
+    "   A sender MUST retry.\n"
+    "\n"
+    "3.  Relays\n"
+    "\n"
+    "   A relay SHOULD NOT forward.\n"
+    "\n"
+    "   An endpoint MUST close the session.\n";
+
+TEST(CarryForwardMatchTest, ClassifiesIdenticalMovedRewordedNewAndRemoved) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    ASSERT_EQ(result.matches.size(), 5u);
+    EXPECT_EQ(result.matches[0].change, DeltaClass::Reworded);
+    EXPECT_GE(result.matches[0].similarity, 0.6);
+    ASSERT_EQ(result.matches[0].sources.size(), 1u);
+    EXPECT_EQ(result.matches[0].sources[0]->id, "D21-1-MUST-1");
+    EXPECT_EQ(result.matches[1].change, DeltaClass::Identical);
+    EXPECT_EQ(result.matches[1].sources[0]->id, "D21-1-MAY-2");
+    EXPECT_EQ(result.matches[2].change, DeltaClass::Identical);
+    EXPECT_EQ(result.matches[2].sources[0]->id, "D21-1-MUST-4");
+    EXPECT_EQ(result.matches[3].change, DeltaClass::Moved);
+    EXPECT_EQ(result.matches[3].sources[0]->id, "D21-1-SHOULD-NOT-3");
+    EXPECT_EQ(result.matches[4].change, DeltaClass::New);
+    EXPECT_TRUE(result.matches[4].sources.empty());
+    EXPECT_TRUE(result.removed.empty());
+}
+
+TEST(CarryForwardMatchTest, ReportsUnmatchedDraft21RowsAsRemoved) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22,
+        "1.  Introduction\n\n   A peer MAY ignore it.\n");
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    ASSERT_EQ(result.matches.size(), 1u);
+    EXPECT_EQ(result.matches[0].change, DeltaClass::Identical);
+    ASSERT_EQ(result.removed.size(), 3u);
+}
+
+TEST(CarryForwardMatchTest, DuplicateSentencesInTwoSectionsMatchOneToOne) {
+    const auto old_source = source_from_text(21,
+        "1.  A\n\n   *  It MUST be first.\n\n2.  B\n\n   *  It MUST be first.\n");
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22,
+        "1.  A\n\n   *  It MUST be first.\n\n2.  B\n\n   *  It MUST be first.\n");
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    ASSERT_EQ(result.matches.size(), 2u);
+    EXPECT_EQ(result.matches[0].sources[0]->id, "D21-1-MUST-1");
+    EXPECT_EQ(result.matches[1].sources[0]->id, "D21-1-MUST-2");
+    EXPECT_EQ(result.matches[0].change, DeltaClass::Identical);
+    EXPECT_EQ(result.matches[1].change, DeltaClass::Identical);
+}
+
+TEST(CarryForwardMatchTest, KeywordsInOneSentenceMatchByOrdinal) {
+    const char* text = "1.  A\n\n   The words \"MUST\", \"MUST NOT\" and \"MAY\" are defined.\n";
+    const auto old_source = source_from_text(21, text);
+    const auto old_catalog = catalog_for(old_source);
+    const auto result = carry_forward(old_source, old_catalog, source_from_text(22, text));
+    ASSERT_EQ(result.matches.size(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(result.matches[i].change, DeltaClass::Identical);
+        EXPECT_EQ(result.matches[i].sources[0]->source.occurrence, i + 1);
+    }
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

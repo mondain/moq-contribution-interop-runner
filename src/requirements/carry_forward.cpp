@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 #include <regex>
+#include <set>
+#include <sstream>
 #include <utility>
 
 namespace moq::interop::requirements {
@@ -85,6 +88,31 @@ struct Paragraph {
     std::size_t first_line{0};
     std::size_t last_line{0};
 };
+
+double similarity(const std::string& left, const std::string& right) {
+    const auto words = [](const std::string& text) {
+        std::set<std::string> result;
+        std::istringstream input(text);
+        for (std::string word; input >> word;) {
+            const auto first = word.find_first_not_of(".,;:()\"");
+            const auto last = word.find_last_not_of(".,;:()\"");
+            if (first != std::string::npos) {
+                result.insert(word.substr(first, last - first + 1));
+            }
+        }
+        return result;
+    };
+    const auto a = words(left);
+    const auto b = words(right);
+    if (a.empty() || b.empty()) {
+        return 0.0;
+    }
+    std::size_t shared = 0;
+    for (const auto& word : a) {
+        shared += b.count(word);
+    }
+    return static_cast<double>(shared) / static_cast<double>(a.size() + b.size() - shared);
+}
 
 }  // namespace
 
@@ -197,6 +225,118 @@ std::vector<OccurrenceContext> extract_contexts(const DraftSource& source) {
             context.section_title = std::prev(heading)->title;
         }
         result.push_back(std::move(context));
+    }
+    return result;
+}
+
+const char* to_string(DeltaClass change) {
+    switch (change) {
+        case DeltaClass::Identical: return "identical";
+        case DeltaClass::Moved: return "moved";
+        case DeltaClass::Reworded: return "reworded";
+        case DeltaClass::New: return "new";
+        case DeltaClass::Removed: return "removed";
+    }
+    return "new";
+}
+
+CarryResult carry_forward(const DraftSource& old_source, const RequirementCatalog& old_catalog,
+                          const DraftSource& new_source) {
+    using Anchor = std::pair<std::size_t, unsigned>;
+    const auto old_contexts = extract_contexts(old_source);
+    const auto new_contexts = extract_contexts(new_source);
+
+    std::map<Anchor, std::vector<const Requirement*>> rows_by_anchor;
+    for (const auto& row : old_catalog.requirements) {
+        rows_by_anchor[{row.source.first_line, row.source.occurrence}].push_back(&row);
+    }
+    for (auto& [anchor, rows] : rows_by_anchor) {
+        std::sort(rows.begin(), rows.end(), [](const Requirement* a, const Requirement* b) {
+            return a->source.clause < b->source.clause;
+        });
+    }
+    const auto rows_for = [&](const OccurrenceContext& context) {
+        const auto it = rows_by_anchor.find({context.first_line, context.occurrence_on_line});
+        return it == rows_by_anchor.end() ? std::vector<const Requirement*>{} : it->second;
+    };
+
+    std::vector<bool> used(old_contexts.size(), false);
+    std::map<std::pair<std::string, unsigned>, std::vector<std::size_t>> index;
+    for (std::size_t i = 0; i < old_contexts.size(); ++i) {
+        if (!old_contexts[i].sentence.empty()) {
+            index[{old_contexts[i].sentence, old_contexts[i].ordinal_in_sentence}].push_back(i);
+        }
+    }
+
+    CarryResult result;
+    result.matches.resize(new_contexts.size());
+    std::vector<bool> matched(new_contexts.size(), false);
+    for (std::size_t j = 0; j < new_contexts.size(); ++j) {
+        const auto& target = new_contexts[j];
+        result.matches[j].target = target;
+        if (target.sentence.empty()) {
+            continue;
+        }
+        const auto found = index.find({target.sentence, target.ordinal_in_sentence});
+        if (found == index.end()) {
+            continue;
+        }
+        std::optional<std::size_t> chosen;
+        for (const auto candidate : found->second) {
+            if (used[candidate]) {
+                continue;
+            }
+            if (old_contexts[candidate].section_title == target.section_title) {
+                chosen = candidate;
+                break;
+            }
+            if (!chosen) {
+                chosen = candidate;
+            }
+        }
+        if (!chosen) {
+            continue;
+        }
+        used[*chosen] = true;
+        matched[j] = true;
+        result.matches[j].change = old_contexts[*chosen].section_title == target.section_title
+                                       ? DeltaClass::Identical
+                                       : DeltaClass::Moved;
+        result.matches[j].sources = rows_for(old_contexts[*chosen]);
+        result.matches[j].similarity = 1.0;
+    }
+
+    for (std::size_t j = 0; j < new_contexts.size(); ++j) {
+        if (matched[j] || new_contexts[j].sentence.empty()) {
+            continue;
+        }
+        double best = 0.0;
+        std::optional<std::size_t> chosen;
+        for (std::size_t i = 0; i < old_contexts.size(); ++i) {
+            if (used[i] || old_contexts[i].strength != new_contexts[j].strength ||
+                old_contexts[i].sentence.empty()) {
+                continue;
+            }
+            const auto score = similarity(old_contexts[i].sentence, new_contexts[j].sentence);
+            if (score > best) {
+                best = score;
+                chosen = i;
+            }
+        }
+        if (chosen && best >= 0.6) {
+            used[*chosen] = true;
+            result.matches[j].change = DeltaClass::Reworded;
+            result.matches[j].sources = rows_for(old_contexts[*chosen]);
+            result.matches[j].similarity = best;
+        }
+    }
+
+    for (std::size_t i = 0; i < old_contexts.size(); ++i) {
+        if (!used[i]) {
+            for (const auto* row : rows_for(old_contexts[i])) {
+                result.removed.push_back(row);
+            }
+        }
     }
     return result;
 }
