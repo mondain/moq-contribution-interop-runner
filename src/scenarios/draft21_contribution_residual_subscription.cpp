@@ -3,9 +3,9 @@
 // and SUBSCRIBE_TRACKS. See draft21_contribution_residual.cpp for the fixture
 // contract these rows share.
 
-#include "moq/interop/scenarios/wire_draft.h"
 #include "draft21_contribution_support.h"
 #include "draft21_contribution_residual_internal.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/draft21/publish.h"
 

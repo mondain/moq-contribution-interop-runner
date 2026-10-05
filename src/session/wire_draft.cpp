@@ -18,7 +18,8 @@ wire::DecodeError unrepresentable(std::size_t offset) {
 bool filter_payload(const wire::draft22::LocationFilter& filter, std::vector<std::byte>& payload) {
     using Type = wire::draft22::LocationFilterType;
     wire::ByteWriter writer(64);
-    const auto put = [&](std::uint64_t value) { return wire::write_vi64(value, writer); };
+    // At most four varints of at most 9 bytes (36 bytes) into a 64-byte writer: the writes cannot fail.
+    const auto put =[&](std::uint64_t value) { return wire::write_vi64(value, writer); };
     switch (filter.type) {
         case Type::None: break;
         case Type::RelativeGroup: put(filter.start_group); break;

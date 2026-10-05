@@ -1,5 +1,5 @@
-#include "moq/interop/scenarios/wire_draft.h"
 #include "raw_probe_courtesy.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft21/publish.h"

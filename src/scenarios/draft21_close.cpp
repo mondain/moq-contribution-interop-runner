@@ -1,5 +1,5 @@
-#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/wire/draft21/setup.h"

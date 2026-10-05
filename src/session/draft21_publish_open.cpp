@@ -1,5 +1,5 @@
-#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/session/draft21_publish_open.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include "moq/interop/wire/draft21/message_types.h"
 #include "moq/interop/wire/draft21/request_frame.h"

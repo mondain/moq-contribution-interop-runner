@@ -1,5 +1,5 @@
-#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/draft21_peer_close.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/publish.h"
 #include "moq/interop/wire/draft21/request_frame.h"
 #include "moq/interop/wire/draft21/setup.h"
