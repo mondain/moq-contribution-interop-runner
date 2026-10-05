@@ -4,6 +4,7 @@
 // Object Forwarding Preference, datagram and Subgroup header flags, and
 // Subgroup stream termination.
 
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
 
 #include "moq/interop/wire/draft21/key_values.h"
@@ -215,20 +216,11 @@ bool request_rejected(const View& view, std::size_t write) {
 }
 
 // ---- request builders ---------------------------------------------------------
-Bytes location_pair(std::uint64_t group, std::uint64_t object) {
-    Bytes result;
-    put_vi(result, group);
-    put_vi(result, object);
-    return result;
-}
-
-Param start_filter() { return param_lp(0x21, location_pair(kTargetGroup, kTargetObject)); }
+Param start_filter() { return filter_param({kTargetGroup, kTargetObject}); }
 
 Param target_range_filter() {
-    auto value = location_pair(kTargetGroup, kTargetObject);
-    put_vi(value, 0);              // End Group delta
-    put_vi(value, kTargetObject);  // End Object
-    return param_lp(0x21, value);
+    // {Start Group, Start Object, End Group delta, End Object}
+    return filter_param({kTargetGroup, kTargetObject, 0, kTargetObject});
 }
 
 RawProbeWrite update_write(Bytes bytes, std::size_t base) {
@@ -615,6 +607,10 @@ Spec premature_close_spec() {
 }
 
 }  // namespace
+
+Bytes objects_start_filter_for_test() { return encode_params({start_filter()}); }
+
+Bytes objects_target_range_filter_for_test() { return encode_params({target_range_filter()}); }
 
 std::vector<Spec> object_specs() {
     std::vector<Spec> result;

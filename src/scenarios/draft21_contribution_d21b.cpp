@@ -15,6 +15,7 @@
 //   D21-13-MUST-593/594   unknown GREASE values (SETUP options, REQUEST_ERROR
 //                         code, token type, Stream Reset code)
 
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
 #include "moq/interop/scenarios/wire_draft.h"
 
@@ -362,6 +363,11 @@ Judgement done_judgement(const View& view, bool need_datagram_objects) {
     return {true, done->streams == 0};
 }
 
+// A start group this far in the future matches no Object, so the publisher opens no data stream.
+Param future_start_filter() {
+    return filter_param({1000000, 0});
+}
+
 Spec done_without_streams() {
     return spec("d21-publish-done-without-data-streams",
         {{"D21-9-9-MUST-365", "d21-publish-done-zero-stream-count"}},
@@ -369,11 +375,8 @@ Spec done_without_streams() {
             auto definition = base_definition("");
             // No Object can match a start group this far in the future, so the
             // publisher opens no data stream for the subscription.
-            Bytes filter;
-            put_vi(filter, 1000000);
-            put_vi(filter, 0);
             definition.writes.push_back(request_write(subscribe_frame(
-                1, fixture, {param_u8(kForwardParameter, 1), param_lp(0x21, filter)})));
+                1, fixture, {param_u8(kForwardParameter, 1), future_start_filter()})));
             // A publisher that does not end the subscription by itself must
             // end it for this REQUEST_UPDATE, which cannot succeed.
             definition.writes.push_back(update_write(failing_update(3), 0));
@@ -1032,6 +1035,8 @@ Spec goaway_replacement_uri() {
 }
 
 }  // namespace
+
+Bytes d21b_future_start_filter_for_test() { return encode_params({future_start_filter()}); }
 
 std::vector<Spec> d21b_specs() {
     std::vector<Spec> result;

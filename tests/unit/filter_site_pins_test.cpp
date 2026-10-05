@@ -1,3 +1,4 @@
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_gap_a_testing.h"
 
 #include "moq/interop/scenarios/wire_draft.h"
@@ -10,6 +11,8 @@
 
 namespace moq::interop::scenarios {
 namespace {
+
+namespace d21c = ::moq::interop::scenarios::d21c;
 
 using Bytes = std::vector<std::byte>;
 using Namespace = std::vector<Bytes>;
@@ -110,6 +113,58 @@ TEST(FilterSitePins, LocationFilterSeamDiffersBetweenDrafts) {
         }
         EXPECT_STRNE(c.wire21, c.wire22);
     }
+}
+
+
+// ---- contribution scenario sites (d21c) ------------------------------------------------------------
+// Each seam returns encode_params({parameter}): vi(delta from 0) then the value, so a LOCATION_FILTER
+// (0x21) starts "21". Wire 21: vi(len) + vi64 fields. Wire 22: Type + fields, no length.
+// vi64 widths: 0..127 one byte; 200 = 80c8; 300 = 812c; 1000000 = cf4240 (three bytes).
+
+TEST(FilterSitePins, Draft21BytesOfEveryContributionSite) {
+    // objects: start {7,9}; range {7,9,0,9}.
+    EXPECT_EQ(hex(d21c::objects_start_filter_for_test()), "21" "02" "0709");
+    EXPECT_EQ(hex(d21c::objects_target_range_filter_for_test()), "21" "04" "07090009");
+    // residual_subscription: location_range and bounded_filter (= range with End Group delta 0).
+    EXPECT_EQ(hex(d21c::residual_location_range_for_test(0, 0, 1, 1)), "21" "04" "00000101");
+    EXPECT_EQ(hex(d21c::residual_location_range_for_test(200, 300, 0, 9)), "21" "06" "80c8812c0009");
+    EXPECT_EQ(hex(d21c::residual_bounded_filter_for_test(0, 1, 1)), "21" "04" "00010001");
+    EXPECT_EQ(hex(d21c::residual_bounded_filter_for_test(200, 1, 9)), "21" "05" "80c8010009");
+    // fill_whole_track: FILL_PARAMETERS 0x23, length 2, nested "21 00" (delta 0x21, zero-length filter).
+    EXPECT_EQ(hex(d21c::residual_fill_whole_track_for_test()), "23" "02" "2100");
+    // d21b done_without_streams: start group 1000000, object 0.
+    EXPECT_EQ(hex(d21c::d21b_future_start_filter_for_test()), "21" "04" "cf4240" "00");
+    // session fetch_range_spec: start group 2^62, object 0.
+    EXPECT_EQ(hex(d21c::session_far_start_filter_for_test()), "21" "0a" "ff" "4000000000000000" "00");
+    // residual_token: whole group {0,0,0}.
+    EXPECT_EQ(hex(d21c::token_whole_group_filter_for_test()), "21" "03" "000000");
+}
+
+// Wire 22. Sites whose values are fixed AND coincide with wire 21 (field count == Type value, one-byte
+// values) are pinned for framing only and prove nothing about routing; Task 6's static source guard covers
+// them: objects start {7,9}, objects range {7,9,0,9}, residual {0,0,1,1}/{0,1,0,1}, token {0,0,0}, and
+// fill_whole_track (the nested None filter "21 00" is identical in both drafts). The next test's cases
+// differ from wire 21 and so do prove routing.
+TEST(FilterSitePins, Draft22ContributionSitesCoincidingWithDraft21) {
+    ScopedWireDraft wire22(22);
+    EXPECT_EQ(hex(d21c::objects_start_filter_for_test()), "21" "02" "0709");
+    EXPECT_EQ(hex(d21c::objects_target_range_filter_for_test()), "21" "04" "07090009");
+    EXPECT_EQ(hex(d21c::residual_location_range_for_test(0, 0, 1, 1)), "21" "04" "00000101");
+    EXPECT_EQ(hex(d21c::residual_bounded_filter_for_test(0, 1, 1)), "21" "04" "00010001");
+    EXPECT_EQ(hex(d21c::token_whole_group_filter_for_test()), "21" "03" "000000");
+    // fill_whole_track: FILL_PARAMETERS 0x23, length 2, nested delta 0x21 then Type None (00).
+    EXPECT_EQ(hex(d21c::residual_fill_whole_track_for_test()), "23" "02" "2100");
+}
+
+TEST(FilterSitePins, Draft22ContributionSitesDifferFromDraft21) {
+    ScopedWireDraft wire22(22);
+    // Wire 21 lengths were 06 / 05; wire 22 carries the Type (4 AbsoluteRange) with no length.
+    EXPECT_EQ(hex(d21c::residual_location_range_for_test(200, 300, 0, 9)), "21" "04" "80c8812c0009");
+    EXPECT_EQ(hex(d21c::residual_bounded_filter_for_test(200, 1, 9)), "21" "04" "80c8010009");
+    // d21b: wire 21 "2104cf424000"; wire 22 Absolute (Type 2) then cf4240 00.
+    EXPECT_EQ(hex(d21c::d21b_future_start_filter_for_test()), "21" "02" "cf4240" "00");
+    // session: wire 21 length 0a; wire 22 Absolute (Type 2), the nine-byte vi64, then 00.
+    EXPECT_EQ(hex(d21c::session_far_start_filter_for_test()), "21" "02" "ff" "4000000000000000" "00");
 }
 
 }  // namespace

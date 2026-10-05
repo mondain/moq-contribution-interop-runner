@@ -3,6 +3,7 @@
 // accounting, response message types, FETCH range errors, namespace
 // discovery ordering, Message Parameter serialization and padding.
 
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
 #include "moq/interop/scenarios/wire_draft.h"
 
@@ -343,6 +344,11 @@ std::optional<std::uint64_t> request_error_code(const Frame& frame_value) {
     return read_vi(body);
 }
 
+// A start group far beyond any Largest Object.
+Param far_start_filter() {
+    return filter_param({std::uint64_t{1} << 62, 0});
+}
+
 Spec fetch_range_spec(const char* scenario, const char* requirement, const char* evaluator,
                       bool start_beyond, bool only_error_proves) {
     Spec spec;
@@ -351,12 +357,7 @@ Spec fetch_range_spec(const char* scenario, const char* requirement, const char*
     spec.build = [start_beyond](const Fixture& fixture) {
         auto definition = base_definition("");
         std::vector<Param> params;
-        if (start_beyond) {
-            Bytes filter;
-            put_vi(filter, std::uint64_t{1} << 62);  // far beyond any Largest Object
-            put_vi(filter, 0);
-            params.push_back(param_lp(0x21, filter));
-        }
+        if (start_beyond) params.push_back(far_start_filter());
         definition.writes.push_back(request_write(fetch_frame(1, fixture, params), true));
         return definition;
     };
@@ -570,6 +571,8 @@ Spec padding_spec(const char* scenario, const char* requirement, const char* eva
 }
 
 }  // namespace
+
+Bytes session_far_start_filter_for_test() { return encode_params({far_start_filter()}); }
 
 std::vector<Spec> session_specs() {
     std::vector<Spec> result;
