@@ -2,7 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <nlohmann/json.hpp>
+
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <utility>
@@ -269,6 +273,111 @@ TEST(CarryForwardWireTest, ReportsAddedRemovedAndChangedBlocks) {
     EXPECT_EQ(delta.added, std::vector<std::string>{"D Message"});
     EXPECT_EQ(delta.removed, std::vector<std::string>{"C Message"});
     EXPECT_EQ(delta.changed, std::vector<std::string>{"B Message"});
+}
+
+class CarryEmitTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        dir_ = std::filesystem::temp_directory_path() /
+               ("moq-carry-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(dir_ / "parts");
+    }
+    void TearDown() override { std::filesystem::remove_all(dir_); }
+    std::filesystem::path dir_;
+};
+
+TEST_F(CarryEmitTest, WritesLoadablePartitionsMergedCatalogAndDelta) {
+    const auto old_source = source_from_text(21, kOld);
+    auto old_catalog = catalog_for(old_source);
+    old_catalog.requirements[1].applicability = Applicability::Applicable;
+    old_catalog.requirements[1].testability = Testability::Testable;
+    old_catalog.requirements[1].scenarios = {"d21-scenario"};
+    old_catalog.requirements[1].evaluators = {"d21-evaluator"};
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    EmitOptions options{dir_, 6, false};
+    write_catalog_outputs(result, old_catalog, new_source, WireDelta{{}, {}, {"X Message"}}, options);
+
+    const auto merged = RequirementCatalog::load(new_source, dir_ / "draft22.json",
+                                                 CatalogLoadMode::AllowIncomplete);
+    EXPECT_FALSE(merged.complete);
+    ASSERT_EQ(merged.requirements.size(), 5u);
+    EXPECT_EQ(merged.requirements[0].id, "D22-1-MUST-001");
+    EXPECT_EQ(merged.requirements[3].id, "D22-3-SHOULD-NOT-004");
+    EXPECT_EQ(merged.requirements[1].scenarios, std::vector<std::string>{"d22-scenario"});
+    EXPECT_EQ(merged.requirements[1].evaluators, std::vector<std::string>{"d22-evaluator"});
+
+    std::size_t part_rows = 0;
+    std::size_t parts = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir_ / "parts")) {
+        const auto part = RequirementCatalog::load(new_source, entry.path(),
+                                                   CatalogLoadMode::AllowIncomplete);
+        part_rows += part.requirements.size();
+        ++parts;
+    }
+    EXPECT_GT(parts, 1u);
+    EXPECT_EQ(part_rows, 5u);
+
+    std::ifstream delta_file(dir_ / "draft21-to-22-delta.json");
+    const auto delta = nlohmann::json::parse(delta_file);
+    EXPECT_EQ(delta.at("wire_delta").at("changed").at(0), "X Message");
+    ASSERT_EQ(delta.at("entries").size(), 5u);
+    EXPECT_EQ(delta.at("entries").at(0).at("change"), "reworded");
+    EXPECT_FALSE(delta.at("entries").at(0).at("reviewed").get<bool>());
+    EXPECT_TRUE(delta.at("entries").at(1).at("reviewed").get<bool>());
+}
+
+TEST_F(CarryEmitTest, RefusesToOverwriteWithoutForceAndMergeRebuildsFromParts) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    EmitOptions options{dir_, 6, false};
+    write_catalog_outputs(result, old_catalog, new_source, {}, options);
+    EXPECT_THROW(write_catalog_outputs(result, old_catalog, new_source, {}, options),
+                 std::runtime_error);
+
+    std::filesystem::remove(dir_ / "draft22.json");
+    merge_partitions(new_source, dir_);
+    const auto merged = RequirementCatalog::load(new_source, dir_ / "draft22.json",
+                                                 CatalogLoadMode::AllowIncomplete);
+    EXPECT_EQ(merged.requirements.size(), 5u);
+}
+
+TEST_F(CarryEmitTest, TagsLocationFilterRowsAndLeavesThemUnreviewed) {
+    const char* text = "1.  Filters\n\n   A Location Filter MUST be explicit.\n";
+    const auto old_source = source_from_text(21, text);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, text);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    write_catalog_outputs(result, old_catalog, new_source, {}, EmitOptions{dir_, 1200, false});
+    std::ifstream delta_file(dir_ / "draft21-to-22-delta.json");
+    const auto delta = nlohmann::json::parse(delta_file);
+    const auto& entry = delta.at("entries").at(0);
+    EXPECT_EQ(entry.at("change"), "identical");
+    EXPECT_EQ(entry.at("tags").at(0), "location_filter");
+    EXPECT_FALSE(entry.at("reviewed").get<bool>());
+}
+
+TEST_F(CarryEmitTest, PartitionCutsNeverFallInsideACitation) {
+    std::string text = "1.  A\n\n";
+    for (int i = 0; i < 6; ++i) {
+        text += "   Endpoint MUST do thing " + std::to_string(i) + ",\n   then wait,\n   then stop.\n\n";
+    }
+    const auto old_source = source_from_text(21, text);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, text);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    write_catalog_outputs(result, old_catalog, new_source, {}, EmitOptions{dir_, 4, false});
+    for (const auto& entry : std::filesystem::directory_iterator(dir_ / "parts")) {
+        const auto name = entry.path().filename().string();
+        const auto last = std::stoul(name.substr(name.size() - 9, 4));
+        const auto part = RequirementCatalog::load(new_source, entry.path(),
+                                                   CatalogLoadMode::AllowIncomplete);
+        for (const auto& row : part.requirements) {
+            EXPECT_LE(row.source.last_line, last) << name << " " << row.id;
+        }
+    }
 }
 
 }  // namespace

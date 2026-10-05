@@ -298,6 +298,10 @@ target_link_libraries(moq-interop-audit PRIVATE
     moq-interop-draft21-evaluators moq-interop-execution-audit
     nlohmann_json::nlohmann_json)
 install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
+add_executable(moq-interop-catalog-carry src/app/catalog_carry_main.cpp)
+target_compile_definitions(moq-interop-catalog-carry PRIVATE
+    MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(moq-interop-catalog-carry PRIVATE moq-interop-requirements)
 install(DIRECTORY docs/ DESTINATION share/moq-interop/docs
         FILES_MATCHING PATTERN "*.txt")
 install(DIRECTORY requirements/ DESTINATION share/moq-interop/requirements
@@ -765,8 +769,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-carry-forward-tests tests/unit/carry_forward_test.cpp)
     target_compile_definitions(moq-interop-carry-forward-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    target_link_libraries(moq-interop-carry-forward-tests PRIVATE
-        moq-interop-requirements GTest::gtest_main)
+    target_link_libraries(moq-interop-carry-forward-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
 
     add_executable(moq-interop-catalog-tests tests/unit/catalog_test.cpp tests/unit/catalog_audit_test.cpp)

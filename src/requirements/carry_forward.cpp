@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <map>
 #include <optional>
 #include <regex>
 #include <set>
+#include <stdexcept>
 #include <sstream>
 #include <utility>
+
+#include <nlohmann/json.hpp>
 
 namespace moq::interop::requirements {
 namespace {
@@ -112,6 +118,112 @@ double similarity(const std::string& left, const std::string& right) {
         shared += b.count(word);
     }
     return static_cast<double>(shared) / static_cast<double>(a.size() + b.size() - shared);
+}
+
+using Json = nlohmann::ordered_json;
+
+const char* strength_token(Strength strength) {
+    switch (strength) {
+        case Strength::Must: return "MUST";
+        case Strength::MustNot: return "MUST-NOT";
+        case Strength::Should: return "SHOULD";
+        case Strength::ShouldNot: return "SHOULD-NOT";
+        case Strength::May: return "MAY";
+    }
+    return "MAY";
+}
+
+const char* strength_name(Strength strength) {
+    switch (strength) {
+        case Strength::Must: return "Must";
+        case Strength::MustNot: return "MustNot";
+        case Strength::Should: return "Should";
+        case Strength::ShouldNot: return "ShouldNot";
+        case Strength::May: return "May";
+    }
+    return "May";
+}
+
+const char* applicability_name(Applicability value) {
+    switch (value) {
+        case Applicability::Applicable: return "Applicable";
+        case Applicability::NotApplicable: return "NotApplicable";
+        case Applicability::Informative: return "Informative";
+    }
+    return "Applicable";
+}
+
+const char* testability_name(Testability value) {
+    switch (value) {
+        case Testability::Testable: return "Testable";
+        case Testability::NotTestable: return "NotTestable";
+        case Testability::NotApplicable: return "NotApplicable";
+    }
+    return "NotTestable";
+}
+
+std::string planned_id(const std::string& id) {
+    constexpr std::string_view old_prefix = "d21-";
+    return "d22-" + (id.starts_with(old_prefix) ? id.substr(old_prefix.size()) : id);
+}
+
+std::vector<std::string> planned_ids(const std::vector<std::string>& ids) {
+    std::vector<std::string> result;
+    for (const auto& id : ids) {
+        result.push_back(planned_id(id));
+    }
+    return result;
+}
+
+bool mentions_location_filter(const OccurrenceContext& context) {
+    std::string text = context.sentence + " " + context.section_title;
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text.find("location filter") != std::string::npos ||
+           text.find("location_filter") != std::string::npos;
+}
+
+Json row_json(const std::string& id, Strength strength, const OccurrenceContext& target,
+              unsigned clause, const std::string& actor, const std::string& summary,
+              Applicability applicability, Testability testability,
+              const std::vector<std::string>& scenarios, const std::vector<std::string>& evaluators,
+              const std::string& rationale) {
+    return Json{{"id", id},
+                {"strength", strength_name(strength)},
+                {"source", {{"section", target.section},
+                            {"first_line", target.first_line},
+                            {"last_line", std::max(target.last_line, target.sentence_last_line)},
+                            {"occurrence", target.occurrence_on_line},
+                            {"clause", clause}}},
+                {"actor", actor},
+                {"summary", summary},
+                {"applicability", applicability_name(applicability)},
+                {"testability", testability_name(testability)},
+                {"scenarios", scenarios},
+                {"evaluators", evaluators},
+                {"rationale", rationale}};
+}
+
+Json catalog_json(const DraftSource& source, Json rows) {
+    return Json{{"draft", source.number},
+                {"source_sha256", source.sha256},
+                {"complete", false},
+                {"requirements", std::move(rows)}};
+}
+
+void write_json(const std::filesystem::path& path, const Json& value) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("Cannot write " + path.string());
+    }
+    output << value.dump(2) << "\n";
+}
+
+std::string partition_name(unsigned draft, std::size_t first, std::size_t last) {
+    std::ostringstream name;
+    name << "draft" << draft << "-lines-" << std::setfill('0') << std::setw(4) << first << '-'
+         << std::setw(4) << last << ".json";
+    return name.str();
 }
 
 }  // namespace
@@ -391,6 +503,147 @@ WireDelta diff_wire_blocks(const DraftSource& old_source, const DraftSource& new
         }
     }
     return delta;
+}
+
+void write_catalog_outputs(const CarryResult& result, const RequirementCatalog& old_catalog,
+                           const DraftSource& new_source, const WireDelta& wire_delta,
+                           const EmitOptions& options) {
+    const auto merged_path =
+        options.requirements_dir / ("draft" + std::to_string(new_source.number) + ".json");
+    if (std::filesystem::exists(merged_path) && !options.force) {
+        throw std::runtime_error(merged_path.string() + " exists; pass --force to overwrite reviewed output");
+    }
+
+    Json rows = Json::array();
+    Json entries = Json::array();
+    unsigned counter = 0;
+    for (const auto& match : result.matches) {
+        const auto& target = match.target;
+        std::vector<std::string> tags;
+        if (mentions_location_filter(target)) {
+            tags.push_back("location_filter");
+        }
+        const bool carried = match.change != DeltaClass::New && !match.sources.empty();
+        const auto make_id = [&](Strength strength) {
+            std::string section = target.section;
+            std::replace(section.begin(), section.end(), '.', '-');
+            std::ostringstream id;
+            id << "D" << new_source.number << '-' << section << '-' << strength_token(strength) << '-'
+               << std::setfill('0') << std::setw(3) << ++counter;
+            return id.str();
+        };
+        const bool reviewed = tags.empty() &&
+            (match.change == DeltaClass::Identical || match.change == DeltaClass::Moved);
+        std::string note;
+        if (match.change == DeltaClass::Moved) {
+            note = "section moved";
+        } else if (match.change == DeltaClass::Reworded) {
+            std::ostringstream text;
+            text << "similarity=" << std::fixed << std::setprecision(2) << match.similarity;
+            note = text.str();
+        }
+        if (carried) {
+            for (const auto* source_row : match.sources) {
+                const auto id = make_id(target.strength);
+                rows.push_back(row_json(id, target.strength, target, source_row->source.clause,
+                                        source_row->actor, source_row->summary,
+                                        source_row->applicability, source_row->testability,
+                                        planned_ids(source_row->scenarios),
+                                        planned_ids(source_row->evaluators), source_row->rationale));
+                entries.push_back(Json{{"draft22_id", id}, {"draft21_id", source_row->id},
+                                       {"change", to_string(match.change)}, {"note", note},
+                                       {"reviewed", reviewed}, {"tags", tags}});
+            }
+        } else {
+            const auto id = make_id(target.strength);
+            const auto summary = target.sentence.empty()
+                ? "Unreviewed draft 22 requirement at line " + std::to_string(target.first_line)
+                : target.sentence.substr(0, 160);
+            rows.push_back(row_json(id, target.strength, target, 1, "endpoint", summary,
+                                    Applicability::Applicable, Testability::NotTestable, {}, {},
+                                    "Unreviewed new draft 22 obligation; classification pending review."));
+            entries.push_back(Json{{"draft22_id", id}, {"draft21_id", ""}, {"change", "new"},
+                                   {"note", note}, {"reviewed", false}, {"tags", tags}});
+        }
+    }
+    for (const auto* removed : result.removed) {
+        entries.push_back(Json{{"draft22_id", ""}, {"draft21_id", removed->id},
+                               {"change", "removed"}, {"note", ""}, {"reviewed", false},
+                               {"tags", Json::array()}});
+    }
+
+    std::filesystem::create_directories(options.requirements_dir / "parts");
+    const auto prefix = "draft" + std::to_string(new_source.number) + "-lines-";
+    for (const auto& item : std::filesystem::directory_iterator(options.requirements_dir / "parts")) {
+        if (item.path().filename().string().starts_with(prefix)) {
+            std::filesystem::remove(item.path());
+        }
+    }
+    const std::size_t line_count = new_source.line_offsets.size();
+    std::size_t start = 1;
+    std::size_t row_index = 0;
+    while (start <= line_count) {
+        std::size_t cut = std::min(line_count, start + options.partition_lines - 1);
+        while (cut < line_count) {
+            bool crosses = false;
+            for (const auto& row : rows) {
+                const auto first = row.at("source").at("first_line").get<std::size_t>();
+                const auto last = row.at("source").at("last_line").get<std::size_t>();
+                if (first <= cut && last > cut) {
+                    crosses = true;
+                    break;
+                }
+            }
+            if (!crosses) {
+                break;
+            }
+            ++cut;
+        }
+        Json part_rows = Json::array();
+        for (; row_index < rows.size() &&
+               rows[row_index].at("source").at("first_line").get<std::size_t>() <= cut;
+             ++row_index) {
+            part_rows.push_back(rows[row_index]);
+        }
+        write_json(options.requirements_dir / "parts" / partition_name(new_source.number, start, cut),
+                   catalog_json(new_source, std::move(part_rows)));
+        start = cut + 1;
+    }
+
+    write_json(merged_path, catalog_json(new_source, rows));
+    write_json(options.requirements_dir /
+                   ("draft" + std::to_string(old_catalog.draft) + "-to-" +
+                    std::to_string(new_source.number) + "-delta.json"),
+               Json{{"from_draft", old_catalog.draft},
+                    {"to_draft", new_source.number},
+                    {"from_sha256", old_catalog.source_sha256},
+                    {"to_sha256", new_source.sha256},
+                    {"wire_delta", {{"added", wire_delta.added},
+                                    {"removed", wire_delta.removed},
+                                    {"changed", wire_delta.changed},
+                                    {"conclusion", ""}}},
+                    {"entries", std::move(entries)}});
+}
+
+void merge_partitions(const DraftSource& new_source, const std::filesystem::path& requirements_dir) {
+    const auto prefix = "draft" + std::to_string(new_source.number) + "-lines-";
+    std::vector<std::filesystem::path> paths;
+    for (const auto& item : std::filesystem::directory_iterator(requirements_dir / "parts")) {
+        if (item.is_regular_file() && item.path().filename().string().starts_with(prefix)) {
+            paths.push_back(item.path());
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    Json rows = Json::array();
+    for (const auto& path : paths) {
+        std::ifstream input(path);
+        const auto part = Json::parse(input);
+        for (const auto& row : part.at("requirements")) {
+            rows.push_back(row);
+        }
+    }
+    write_json(requirements_dir / ("draft" + std::to_string(new_source.number) + ".json"),
+               catalog_json(new_source, std::move(rows)));
 }
 
 }  // namespace moq::interop::requirements

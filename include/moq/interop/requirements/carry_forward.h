@@ -3,6 +3,7 @@
 #include "moq/interop/requirements/catalog.h"
 
 #include <cstddef>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <string_view>
@@ -53,5 +54,17 @@ struct WireDelta {
 
 std::map<std::string, std::string> extract_wire_blocks(const DraftSource& source);
 WireDelta diff_wire_blocks(const DraftSource& old_source, const DraftSource& new_source);
+
+struct EmitOptions {
+    std::filesystem::path requirements_dir;
+    std::size_t partition_lines{1200};
+    bool force{false};
+};
+
+void write_catalog_outputs(const CarryResult& result, const RequirementCatalog& old_catalog,
+                           const DraftSource& new_source, const WireDelta& wire_delta,
+                           const EmitOptions& options);
+
+void merge_partitions(const DraftSource& new_source, const std::filesystem::path& requirements_dir);
 
 }  // namespace moq::interop::requirements
