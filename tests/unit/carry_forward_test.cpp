@@ -241,5 +241,35 @@ TEST(CarryForwardMatchTest, KeywordsInOneSentenceMatchByOrdinal) {
     }
 }
 
+TEST(CarryForwardWireTest, ExtractsNamedBlocksAcrossPageBreaks) {
+    const auto source = source_from_text(22,
+        "   LOCATION_FILTER Parameter {\n"
+        "     Parameter Type (vi64) = 0x21,\n"
+        "     Location Filter Type (vi64),\n"
+        "   }\n"
+        "\n"
+        "   GOAWAY Message {\n"
+        "     Type (vi64) = 0x10,\n"
+        "   }\n");
+    const auto blocks = extract_wire_blocks(source);
+    ASSERT_EQ(blocks.size(), 2u);
+    EXPECT_EQ(blocks.at("LOCATION_FILTER Parameter"),
+              "Parameter Type (vi64) = 0x21, Location Filter Type (vi64),");
+    EXPECT_EQ(blocks.at("GOAWAY Message"), "Type (vi64) = 0x10,");
+}
+
+TEST(CarryForwardWireTest, ReportsAddedRemovedAndChangedBlocks) {
+    const auto old_source = source_from_text(21,
+        "   A Message {\n     X (i),\n   }\n\n   B Message {\n     Y (i),\n   }\n\n"
+        "   C Message {\n     Z (i),\n   }\n");
+    const auto new_source = source_from_text(22,
+        "   A Message {\n     X (i),\n   }\n\n   B Message {\n     Y (i),\n     Q (i),\n   }\n\n"
+        "   D Message {\n     W (i),\n   }\n");
+    const auto delta = diff_wire_blocks(old_source, new_source);
+    EXPECT_EQ(delta.added, std::vector<std::string>{"D Message"});
+    EXPECT_EQ(delta.removed, std::vector<std::string>{"C Message"});
+    EXPECT_EQ(delta.changed, std::vector<std::string>{"B Message"});
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

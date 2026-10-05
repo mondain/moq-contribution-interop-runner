@@ -3,6 +3,7 @@
 #include "moq/interop/requirements/catalog.h"
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,5 +44,14 @@ struct CarryResult {
 
 CarryResult carry_forward(const DraftSource& old_source, const RequirementCatalog& old_catalog,
                           const DraftSource& new_source);
+
+struct WireDelta {
+    std::vector<std::string> added;
+    std::vector<std::string> removed;
+    std::vector<std::string> changed;
+};
+
+std::map<std::string, std::string> extract_wire_blocks(const DraftSource& source);
+WireDelta diff_wire_blocks(const DraftSource& old_source, const DraftSource& new_source);
 
 }  // namespace moq::interop::requirements

@@ -341,4 +341,56 @@ CarryResult carry_forward(const DraftSource& old_source, const RequirementCatalo
     return result;
 }
 
+std::map<std::string, std::string> extract_wire_blocks(const DraftSource& source) {
+    static const std::regex open_re(R"(^\s{3}([A-Za-z0-9_][A-Za-z0-9_ ()/-]*?) \{\s*$)");
+    static const std::regex close_re(R"(^\s{3}\}\s*$)");
+    std::map<std::string, std::string> blocks;
+    std::map<std::string, unsigned> seen;
+    const auto lines = clean_lines(source);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        std::smatch open;
+        if (!std::regex_match(lines[i].text, open, open_re)) {
+            continue;
+        }
+        std::string body;
+        std::size_t j = i + 1;
+        for (; j < lines.size() && !std::regex_match(lines[j].text, close_re); ++j) {
+            const auto piece = normalize_text(lines[j].text);
+            if (!piece.empty()) {
+                body += (body.empty() ? "" : " ") + piece;
+            }
+        }
+        if (j == lines.size()) {
+            continue;
+        }
+        auto name = normalize_text(open[1].str());
+        if (const auto count = ++seen[name]; count > 1) {
+            name += "#" + std::to_string(count);
+        }
+        blocks.emplace(std::move(name), std::move(body));
+        i = j;
+    }
+    return blocks;
+}
+
+WireDelta diff_wire_blocks(const DraftSource& old_source, const DraftSource& new_source) {
+    const auto old_blocks = extract_wire_blocks(old_source);
+    const auto new_blocks = extract_wire_blocks(new_source);
+    WireDelta delta;
+    for (const auto& [name, body] : new_blocks) {
+        const auto it = old_blocks.find(name);
+        if (it == old_blocks.end()) {
+            delta.added.push_back(name);
+        } else if (it->second != body) {
+            delta.changed.push_back(name);
+        }
+    }
+    for (const auto& [name, body] : old_blocks) {
+        if (!new_blocks.contains(name)) {
+            delta.removed.push_back(name);
+        }
+    }
+    return delta;
+}
+
 }  // namespace moq::interop::requirements
