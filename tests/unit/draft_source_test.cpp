@@ -89,6 +89,16 @@ TEST_F(DraftSourceTest, ReportsExpectedAndActualDigestForOneByteChange) {
     }
 }
 
+TEST_F(DraftSourceTest, LoadsDraft22WithVerifiedDigest) {
+    const auto draft = load_draft_source(22, kProjectRoot / "docs",
+                                         kProjectRoot / "requirements/draft-digests.json");
+
+    EXPECT_EQ(draft.number, 22u);
+    EXPECT_EQ(draft.path, kProjectRoot / "docs/draft-ietf-moq-transport-22.txt");
+    EXPECT_EQ(draft.line_offsets.size(), 9240u);
+    EXPECT_EQ(draft.sha256.size(), 64u);
+}
+
 TEST_F(DraftSourceTest, RejectsDraftLargerThanTheBound) {
     const auto oversized = temp_dir_ / "draft-ietf-moq-transport-18.txt";
     {
