@@ -130,6 +130,7 @@ add_library(moq-interop-requirements
     src/requirements/audit.cpp
     src/requirements/completeness.cpp
     src/requirements/scoring.cpp
+    src/requirements/carry_forward.cpp
 )
 target_link_libraries(moq-interop-requirements PUBLIC moq-interop-app)
 target_link_libraries(moq-interop-requirements PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
@@ -760,6 +761,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     )
     target_link_libraries(moq-interop-draft-source-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft-source COMMAND moq-interop-draft-source-tests)
+
+    add_executable(moq-interop-carry-forward-tests tests/unit/carry_forward_test.cpp)
+    target_compile_definitions(moq-interop-carry-forward-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-carry-forward-tests PRIVATE
+        moq-interop-requirements GTest::gtest_main)
+    add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
 
     add_executable(moq-interop-catalog-tests tests/unit/catalog_test.cpp tests/unit/catalog_audit_test.cpp)
     target_compile_definitions(moq-interop-catalog-tests PRIVATE
