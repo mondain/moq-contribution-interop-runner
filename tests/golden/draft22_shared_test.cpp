@@ -1,7 +1,9 @@
 #include "moq/interop/wire/draft21/location_filter.h"
 #include "moq/interop/wire/draft21/publish.h"
+#include "moq/interop/wire/draft21/publisher_request.h"
 #include "moq/interop/wire/draft22/location_filter.h"
 #include "moq/interop/wire/draft22/publish.h"
+#include "moq/interop/wire/draft22/publisher_request.h"
 #include "moq/interop/wire/draft22/shared.h"
 
 #include <gtest/gtest.h>
@@ -119,6 +121,9 @@ TEST(Draft22SharedSurface, ChangedModulesAreNotSharedWithDraft21) {
     static_assert(!std::is_same_v<decltype(&draft22::decode_publish),
                                   decltype(&draft21::decode_publish)>);
     static_assert(!std::is_same_v<draft22::LocationFilter, draft21::LocationFilter>);
+    static_assert(!std::is_same_v<draft22::PublisherRequestMessage, draft21::PublisherRequestMessage>);
+    static_assert(!std::is_same_v<decltype(&draft22::decode_publisher_request_message),
+                                  decltype(&draft21::decode_publisher_request_message)>);
     SUCCEED();
 }
 
