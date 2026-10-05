@@ -979,6 +979,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME draft22-location-filter
              COMMAND moq-interop-draft22-location-filter-tests)
 
+    add_executable(moq-interop-draft22-shared-tests
+                   tests/golden/draft22_shared_test.cpp)
+    target_link_libraries(moq-interop-draft22-shared-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-shared COMMAND moq-interop-draft22-shared-tests)
+
     add_executable(moq-interop-draft21-request-ids-tests
                    tests/protocol/draft21_request_ids_test.cpp)
     target_link_libraries(moq-interop-draft21-request-ids-tests PRIVATE
