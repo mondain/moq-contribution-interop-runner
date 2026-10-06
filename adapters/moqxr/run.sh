@@ -54,34 +54,39 @@ scenario_id=$(jq -r '.scenario_id' "$request_file")
 # under a d22- prefix (the lineage table pairs each d22-X with d21-X), so its d21- id, impl_id, selects
 # the draft 21 options below unchanged. The own draft 22 scenarios and the unscored probes have no
 # d21- twin: they are matched by their d22- id first and get the explicit options in this table
-# (decided from what each raw probe asks of the publisher; the draft 21 scenario each mirrors is named):
+# (decided from what each raw probe asks of the publisher; the closest draft 21 scenario is named):
 #
-#   d22- id                                  options                         mirrors
-#   subscribe-bounded-location-range         --forward 1                     d21-subscribe-bounded-location-range
+#   d22- id                                  options                         closest d21 scenario
+#   subscribe-bounded-location-range         --forward 0 --paced, timeout+3  d21-update-subscription-location-range (*)
 #   update-subscription-location-range       --forward 0 --paced, timeout+3  d21-update-subscription-location-range
-#   fetch-bounded-location-range             --forward 1                     d21-fetch-first-object-flags
-#   discover-original-publisher-namespaces   --forward 1                     d21-discover-original-publisher-namespaces
+#   fetch-bounded-location-range             --forward 0 --paced, timeout+3  d21-fetch-datagram-preference
+#   discover-original-publisher-namespaces   --forward 0 --paced, timeout+3  d21-namespace-discovery-authorization (*)
 #   publisher-location-filter-parameter      --forward 1                     d21-publisher-parameter-serialization
 #   request-stream-before-peer-setup         --forward 0 --paced, timeout+3  d21-successful-subscribe-response
 #   location-filter-end-group-overflow       --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow
-#   fill-location-filter-end-group-overflow  --forward 1                     d21-fill-location-filter-end-group-overflow
+#   fill-location-filter-end-group-overflow  --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow (*)
 #   location-filter-unknown-type (probe)     --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow
 #   location-filter-absolute-origin (probe)  --forward 0 --paced, timeout+3  d21-successful-subscribe-response
 #
-# --forward 1 where the probe needs objects already published (FETCH reads the publisher's cache) or
-# judges the publisher's own PUBLISH (parameters, namespaces); --forward 0 --paced where the runner is
-# the subscriber and the publisher must wait for its SUBSCRIBE and keep serving until the runner ends
-# the context. This chooses moqxr CLI options; it never changes what a scenario expects.
+# (*) The d21- namesake runs with --forward 1; these draft 22 probes deliberately do not copy that.
+# At drafts 21 and 22, --forward 1 makes moqxr send its own PUBLISH and block until it is answered,
+# giving up after about 2 seconds; while blocked it serves none of the runner's requests. So every
+# probe in which the runner is the subscriber (SUBSCRIBE, REQUEST_UPDATE, FETCH, SUBSCRIBE_NAMESPACE)
+# and does not answer that PUBLISH gets --forward 0 --paced: moqxr waits for the runner's requests,
+# keeps Subgroup streams open, and outlives the context so the runner ends it. Only
+# publisher-location-filter-parameter keeps --forward 1: it answers moqxr's PUBLISH (courtesy Accept)
+# and judges the LOCATION_FILTER moqxr sends on it. This chooses moqxr CLI options; it never changes
+# what a scenario expects.
 impl_id=$scenario_id
 own22=
 if [[ "$draft" == 22 ]]; then
     case "$scenario_id" in
-        d22-subscribe-bounded-location-range|d22-fetch-bounded-location-range|\
-        d22-discover-original-publisher-namespaces|d22-publisher-location-filter-parameter|\
-        d22-fill-location-filter-end-group-overflow)
+        d22-publisher-location-filter-parameter)
             own22=push ;;
-        d22-update-subscription-location-range|d22-request-stream-before-peer-setup|\
-        d22-location-filter-end-group-overflow|d22-location-filter-unknown-type|\
+        d22-subscribe-bounded-location-range|d22-update-subscription-location-range|\
+        d22-fetch-bounded-location-range|d22-discover-original-publisher-namespaces|\
+        d22-request-stream-before-peer-setup|d22-location-filter-end-group-overflow|\
+        d22-fill-location-filter-end-group-overflow|d22-location-filter-unknown-type|\
         d22-location-filter-absolute-origin)
             own22=await-paced ;;
         d22-*) impl_id="d21-${scenario_id#d22-}" ;;

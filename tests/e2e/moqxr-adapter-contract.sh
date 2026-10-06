@@ -109,6 +109,21 @@ mv "$test_dir/request.next" "$test_dir/request.json"
 output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
     MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
 [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
+# An own draft 22 id takes its own entry, not the options of its d21- namesake: the draft 21
+# d21-subscribe-bounded-location-range runs with --forward 1, the draft 22 own scenario of the same name
+# with --forward 0 --paced.
+make_request 21 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d21-subscribe-bounded-location-range"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+[[ "$output" == *"<--forward>"$'\n'"<1>"$'\n'"<--timeout>"$'\n'"<3>"* && "$output" != *"<--paced>"* ]]
+make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d22-subscribe-bounded-location-range"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+[[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
 # A draft the adapter does not list is refused (exit 64) before the publisher starts.
 make_request 23 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
 set +e

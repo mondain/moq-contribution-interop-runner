@@ -187,18 +187,22 @@ For a draft 22 request, the bundled moqxr adapter gives a scenario shared with d
 (`d22-X` paired with `d21-X`) exactly the moqxr options of `d21-X`, with `--draft 22`.
 The draft 22 own scenarios and the two unscored probes have no draft 21 twin; their
 options are listed in `adapters/moqxr/run.sh` and pinned by
-`tests/golden/moqxr-cmdlines-d22.txt` (timeout+3 is the scenario timeout plus 3 seconds):
+`tests/golden/moqxr-cmdlines-d22.txt` (timeout+3 is the scenario timeout plus 3 seconds).
+With `--forward 1`, moqxr sends its own PUBLISH and blocks until it is answered, so every
+probe in which the runner is the subscriber and does not answer that PUBLISH gets
+`--forward 0 --paced`. Only `publisher-location-filter-parameter` answers it and keeps
+`--forward 1`:
 
-| `d22-` scenario | moqxr options | Mirrors |
+| `d22-` scenario | moqxr options | Closest draft 21 scenario |
 |---|---|---|
-| `subscribe-bounded-location-range` | `--forward 1` | `d21-subscribe-bounded-location-range` |
+| `subscribe-bounded-location-range` | `--forward 0 --paced`, timeout+3 | `d21-update-subscription-location-range` |
 | `update-subscription-location-range` | `--forward 0 --paced`, timeout+3 | `d21-update-subscription-location-range` |
-| `fetch-bounded-location-range` | `--forward 1` | `d21-fetch-first-object-flags` |
-| `discover-original-publisher-namespaces` | `--forward 1` | `d21-discover-original-publisher-namespaces` |
+| `fetch-bounded-location-range` | `--forward 0 --paced`, timeout+3 | `d21-fetch-datagram-preference` |
+| `discover-original-publisher-namespaces` | `--forward 0 --paced`, timeout+3 | `d21-namespace-discovery-authorization` |
 | `publisher-location-filter-parameter` | `--forward 1` | `d21-publisher-parameter-serialization` |
 | `request-stream-before-peer-setup` | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
 | `location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
-| `fill-location-filter-end-group-overflow` | `--forward 1` | `d21-fill-location-filter-end-group-overflow` |
+| `fill-location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
 | `location-filter-unknown-type` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
 | `location-filter-absolute-origin` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
 
