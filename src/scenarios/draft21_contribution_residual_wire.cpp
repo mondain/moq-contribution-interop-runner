@@ -6,13 +6,6 @@ namespace moq::interop::scenarios::d21c::residual {
 
 using namespace shared;
 
-Bytes location_pair(std::uint64_t group, std::uint64_t object) {
-    Bytes result;
-    put_vi(result, group);
-    put_vi(result, object);
-    return result;
-}
-
 RawProbeDefinition residual_definition() {
     return base_definition("");
 }

@@ -1,4 +1,6 @@
 #include "moq/interop/scenarios/immutable_repeat.h"
+#include "inline_filter_sites_testing.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
@@ -49,7 +51,8 @@ Bytes encode_fetch(unsigned draft, const Fixture& fixture, std::uint64_t id) {
         if (!d18::encode_message(d18::Message{request}, output).has_value())
             throw std::invalid_argument("unencodable immutable repeat FETCH");
     } else {
-        wire::ByteWriter body(65535), filter(27);
+        wire::ByteWriter body(65535);
+        const auto filter = filter_param_value({7, 9, 0, 9});
         bool ok = wire::write_vi64(id, body) &&
                   wire::write_vi64(fixture.track_namespace.size(), body);
         for (const auto& field : fixture.track_namespace)
@@ -58,9 +61,7 @@ Bytes encode_fetch(unsigned draft, const Fixture& fixture, std::uint64_t id) {
         // FETCH_RANGE 0x21 followed by INCLUDE_PROPERTIES 0x35 (delta 0x14).
         ok = ok && wire::write_length_prefixed_bytes(fixture.track_name, body) &&
              wire::write_vi64(2, body) && wire::write_vi64(0x21, body) &&
-             wire::write_vi64(7, filter) && wire::write_vi64(9, filter) &&
-             wire::write_vi64(0, filter) && wire::write_vi64(9, filter) &&
-             wire::write_length_prefixed_bytes(filter.bytes(), body) &&
+             body.append_bytes(filter) &&
              wire::write_vi64(0x14, body) && body.append_byte(std::byte{1}) &&
              wire::write_vi64(0x16, output) &&
              output.append_byte(static_cast<std::byte>(body.size() >> 8u)) &&
@@ -403,6 +404,11 @@ std::vector<ImmutableRepeatProbe> profiles(unsigned draft, std::chrono::millisec
     return result;
 }
 } // namespace
+
+SiteBytes immutable_repeat_fetch_for_test(const SiteNamespace& track_namespace, const SiteBytes& track_name,
+                                          std::uint64_t request_id) {
+    return encode_fetch(21, Fixture{track_namespace, track_name}, request_id);
+}
 
 std::vector<ImmutableRepeatProbe> draft18_immutable_repeat_probes(
     std::chrono::milliseconds deadline, Namespace ns, Bytes name) {

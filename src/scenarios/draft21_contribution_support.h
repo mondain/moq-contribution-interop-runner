@@ -4,6 +4,7 @@
 // header is private to src/scenarios and is not part of the runner API.
 
 #include "moq/interop/scenarios/draft21_contribution.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/draft21/key_values.h"
@@ -52,6 +53,8 @@ Param param_u8(std::uint64_t type, unsigned value);
 Param param_vi(std::uint64_t type, std::uint64_t value);
 Param param_location(std::uint64_t type, std::uint64_t group, std::uint64_t object);
 Param param_lp(std::uint64_t type, const Bytes& value);
+// LOCATION_FILTER (0x21) in the active wire draft's form; the drop-in for param_lp(0x21, ...).
+Param filter_param(const FilterFields& fields);
 // Delta-encodes ascending parameters; the count is written separately.
 Bytes encode_params(std::vector<Param> params);
 

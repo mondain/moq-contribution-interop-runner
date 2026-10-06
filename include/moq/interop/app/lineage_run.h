@@ -38,12 +38,16 @@ inline std::optional<LineageRun> lineage_run(const RunConfig& config) {
 }
 
 // The outcomes a draft 22 lineage run stores: the draft 21 evaluators' outcomes translated to draft 22
-// rows, plus one outcome for every draft 22 row the translation does not reach (an own row has no
-// evaluator yet: NotRun when scored, otherwise the row's own NotTestable/NotApplicable class). One
-// outcome per catalog row, in catalog order; a translated id the catalog lacks is kept at the end so
-// scoring fails loudly instead of losing it.
+// rows, then the own draft 22 evaluators' outcomes (already keyed by draft 22 rows) for rows the
+// translation does not reach, plus one outcome for every row neither reaches (NotRun when scored,
+// otherwise the row's own NotTestable/NotApplicable class). One outcome per catalog row, in catalog
+// order; a translated or own outcome the catalog lacks is appended after the catalog rows (no severity
+// merge), where scoring rejects it. An own outcome for a row the translation reached, or two own outcomes
+// for one row, throws std::logic_error: own rows (kOwnRows22) name only own scenarios and evaluators, which
+// LineageRunOwn.RowsNamingOwnIdsAreOwnRowsAndNameOnlyOwnIds guards on the catalog data.
 std::vector<requirements::Outcome> lineage_outcomes(const requirements::RequirementCatalog& draft22,
-                                                    std::span<const requirements::Outcome> draft21_outcomes);
+                                                    std::span<const requirements::Outcome> draft21_outcomes,
+                                                    std::span<const requirements::Outcome> own_outcomes = {});
 
 // Scores lineage outcomes against the draft 22 catalog. requirements::score() refuses a catalog that
 // is not complete; the draft 22 catalog stays incomplete until its own rows have evaluators

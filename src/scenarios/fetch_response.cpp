@@ -1,4 +1,6 @@
 #include "moq/interop/scenarios/fetch_response.h"
+#include "inline_filter_sites_testing.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/wire/draft21/publish_done.h"
 #include "moq/interop/wire/draft21/request_error.h"
 #include "moq/interop/wire/draft21/request_frame.h"
@@ -56,11 +58,10 @@ Bytes encode_fetch(const Fixture& fixture) {
     success = success && wire::write_length_prefixed_bytes(fixture.track_name, body);
     // Section9.20.10: explicit absolute start0/0, inclusive complete final
     // group. Three vi64 fields distinguish this from Next Object.
-    wire::ByteWriter filter(27);
-    success = success && wire::write_vi64(0, filter) && wire::write_vi64(0, filter) &&
-              wire::write_vi64(std::numeric_limits<std::uint64_t>::max(), filter) &&
+    const auto filter = filter_param_value({0, 0, std::numeric_limits<std::uint64_t>::max()});
+    success = success &&
               wire::write_vi64(1, body) && wire::write_vi64(0x21, body) &&
-              wire::write_length_prefixed_bytes(filter.bytes(), body) &&
+              body.append_bytes(filter) &&
               wire::write_vi64(0x16, output) &&
               output.append_byte(static_cast<std::byte>(body.size() >> 8u)) &&
               output.append_byte(static_cast<std::byte>(body.size() & 255u)) &&
@@ -202,6 +203,10 @@ Observation observe(const RawProbeTranscript& t) {
     return o;
 }
 } // namespace
+
+SiteBytes fetch_response_fetch_for_test(const SiteNamespace& track_namespace, const SiteBytes& track_name) {
+    return encode_fetch(Fixture{track_namespace, track_name});
+}
 std::vector<FetchResponseProbe> draft21_fetch_response_probes(std::chrono::milliseconds deadline,
                                                               Namespace track_namespace,
                                                               Bytes track_name) {

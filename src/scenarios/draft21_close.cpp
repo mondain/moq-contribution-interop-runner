@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
@@ -331,15 +332,24 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     add("D21-9-20-9-MUST-429", "d21-group-order-zero",
         "d21-group-order-bounds-protocol-violation", bidi,
         subscribe(bytes({0x22, 0})));
-    Bytes location;
-    integer(location, std::numeric_limits<std::uint64_t>::max());
-    location.insert(location.end(), {std::byte{0}, std::byte{1}});
-    Bytes filter{std::byte{0x21}};
-    integer(filter, location.size());
-    filter.insert(filter.end(), location.begin(), location.end());
-    add("D21-9-20-10-MUST-432", "d21-location-filter-end-group-overflow",
-        "d21-location-filter-overflow-protocol-violation", bidi,
-        subscribe(filter));
+    // StartGroup u64max with End Group delta 1 overflows. Wire 21 keeps the length-prefixed bytes through the
+    // builder. Draft 22 cannot represent the filter (filter_param_value throws std::logic_error), so under
+    // wire 22 the two overflow probes are left out of the list rather than failing every other probe. These
+    // ids stay own (never run as shared); their draft 22 replacements are separate scenarios.
+    // The omission is safe because it is never observed on a wire-21 thread: draft21_executable_bindings()
+    // and the server's scenario listings build this list on wire-21 threads, so the two ids never vanish from
+    // a draft 21 binding or listing. The draft 22 replacements are the own scenarios in
+    // draft22_location_filter_probes.cpp.
+    const bool overflow_representable = current_wire_draft() != 22;
+    Bytes filter;
+    if (overflow_representable) {
+        const Bytes location = filter_param_value({std::numeric_limits<std::uint64_t>::max(), 0, 1});
+        filter.push_back(std::byte{0x21});
+        filter.insert(filter.end(), location.begin(), location.end());
+        add("D21-9-20-10-MUST-432", "d21-location-filter-end-group-overflow",
+            "d21-location-filter-overflow-protocol-violation", bidi,
+            subscribe(filter));
+    }
     add("D21-9-20-19-MUST-460", "d21-forward-value-two",
         "d21-forward-bounds-protocol-violation", bidi,
         subscribe(bytes({0x10, 2})));
@@ -413,12 +423,15 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     add("D21-9-20-9-MUST-429", "d21-fill-invalid-group-order",
         "d21-group-order-bounds-protocol-violation", bidi,
         subscribe(bytes({0x23, 2, 0x22, 3})));
-    Bytes fill_location{std::byte{0x23}};
-    integer(fill_location, filter.size());
-    fill_location.insert(fill_location.end(), filter.begin(), filter.end());
-    add("D21-9-20-10-MUST-432", "d21-fill-location-filter-end-group-overflow",
-        "d21-location-filter-overflow-protocol-violation", bidi,
-        subscribe(fill_location));
+    if (overflow_representable) {
+        // The nested filter reuses `filter`, built above through the same builder.
+        Bytes fill_location{std::byte{0x23}};
+        integer(fill_location, filter.size());
+        fill_location.insert(fill_location.end(), filter.begin(), filter.end());
+        add("D21-9-20-10-MUST-432", "d21-fill-location-filter-end-group-overflow",
+            "d21-location-filter-overflow-protocol-violation", bidi,
+            subscribe(fill_location));
+    }
     add("D21-9-20-19-MUST-460", "d21-forward-value-255",
         "d21-forward-bounds-protocol-violation", bidi,
         subscribe(bytes({0x10, 255})));

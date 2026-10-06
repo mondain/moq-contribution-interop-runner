@@ -3,16 +3,24 @@
 #include "moq/interop/requirements/lineage_translate.h"
 
 #include <map>
+#include <stdexcept>
 #include <string>
 
 namespace moq::interop::app {
 
 std::vector<requirements::Outcome> lineage_outcomes(const requirements::RequirementCatalog& draft22,
-                                                    std::span<const requirements::Outcome> draft21_outcomes) {
+                                                    std::span<const requirements::Outcome> draft21_outcomes,
+                                                    std::span<const requirements::Outcome> own_outcomes) {
     auto translated = requirements::translate_shared_outcomes(draft21_outcomes);
     std::map<std::string, std::size_t> by_id;
     for (std::size_t index = 0; index < translated.size(); ++index)
         by_id.emplace(translated[index].requirement_id, index);
+    std::map<std::string, std::size_t> own_by_id;
+    for (std::size_t index = 0; index < own_outcomes.size(); ++index) {
+        const auto& id = own_outcomes[index].requirement_id;
+        if (by_id.contains(id) || !own_by_id.emplace(id, index).second)
+            throw std::logic_error("own draft 22 outcome duplicates another outcome for row " + id);
+    }
     std::vector<requirements::Outcome> outcomes;
     outcomes.reserve(draft22.requirements.size());
     for (const auto& row : draft22.requirements) {
@@ -28,6 +36,11 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
             by_id.erase(found);
             continue;
         }
+        if (const auto own = own_by_id.find(row.id); own != own_by_id.end()) {
+            outcomes.push_back(own_outcomes[own->second]);
+            own_by_id.erase(own);
+            continue;
+        }
         auto state = requirements::OutcomeState::NotRun;
         if (row.applicability != requirements::Applicability::Applicable)
             state = requirements::OutcomeState::NotApplicable;
@@ -37,6 +50,8 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
     }
     for (const auto& outcome : translated)
         if (by_id.contains(outcome.requirement_id)) outcomes.push_back(outcome);
+    for (const auto& outcome : own_outcomes)
+        if (own_by_id.contains(outcome.requirement_id)) outcomes.push_back(outcome);
     return outcomes;
 }
 

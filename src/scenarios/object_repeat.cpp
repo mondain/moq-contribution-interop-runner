@@ -1,4 +1,6 @@
 #include "moq/interop/scenarios/object_repeat.h"
+#include "inline_filter_sites_testing.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/wire/draft18/objects.h"
@@ -53,7 +55,10 @@ Bytes subscribe(const Fixture& fixture) {
     integer(body, fixture.name.size());
     body.insert(body.end(), fixture.name.begin(), fixture.name.end());
     // FORWARD=1 and an absolute LOCATION_FILTER starting at Group7/Object9.
-    const auto parameters = bytes({2, 0x10, 1, 0x11, 2, 7, 9});
+    // Two parameters: FORWARD (0x10) = 1, then LOCATION_FILTER (delta 0x11 from 0x10).
+    Bytes parameters = bytes({2, 0x10, 1, 0x11});
+    const auto filter = filter_param_value({7, 9});
+    parameters.insert(parameters.end(), filter.begin(), filter.end());
     body.insert(body.end(), parameters.begin(), parameters.end());
     return frame(3, body);
 }
@@ -386,6 +391,10 @@ std::vector<ObjectRepeatProbe> profiles(unsigned draft, std::chrono::millisecond
     };
 }
 }  // namespace
+
+SiteBytes object_repeat_subscribe_for_test(const SiteNamespace& track_namespace, const SiteBytes& track_name) {
+    return subscribe(Fixture{track_namespace, track_name});
+}
 std::vector<ObjectRepeatProbe> draft18_object_repeat_probes(std::chrono::milliseconds deadline, Namespace ns, Bytes name) {
     return profiles(18, deadline, {std::move(ns), std::move(name)});
 }

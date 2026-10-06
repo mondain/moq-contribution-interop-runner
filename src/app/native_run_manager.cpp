@@ -1,6 +1,7 @@
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/lineage_run.h"
+#include "moq/interop/app/own_scenario_dispatch_22.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
@@ -57,6 +58,30 @@ namespace moq::interop::app {
 namespace {
 
 using namespace std::chrono_literals;
+
+// lineage_run for every selected id except the implemented own draft 22 ones, which lineage_run refuses:
+// those keep their draft 22 id in the execution list, in the requested order, and are dispatched natively
+// on the draft 22 wire.
+std::optional<LineageRun> plan_run(const RunConfig& requested) {
+    if (requested.draft != DraftVersion::Draft22) return lineage_run(requested);
+    // Each id is classified once, so the shared subset and the rebuilt list cannot disagree.
+    std::vector<bool> own;
+    RunConfig shared = requested;
+    shared.scenario_ids.clear();
+    for (const auto& id : requested.scenario_ids) {
+        own.push_back(own_scenario_22(id).has_value());
+        if (!own.back()) shared.scenario_ids.push_back(id);
+    }
+    auto plan = lineage_run(shared);
+    if (!plan) return std::nullopt;
+    auto implementations = std::move(plan->execution.scenario_ids);
+    plan->execution.scenario_ids.clear();
+    std::size_t next_shared = 0;
+    for (std::size_t index = 0; index < requested.scenario_ids.size(); ++index)
+        plan->execution.scenario_ids.push_back(own[index] ? requested.scenario_ids[index]
+                                                          : std::move(implementations[next_shared++]));
+    return plan;
+}
 
 constexpr std::string_view kDuplicateSubscribeScenario =
     "subscribe-again-to-established-publisher-track";
@@ -497,16 +522,29 @@ public:
     static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe(
         const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
         auto definition = resolve_raw_probe_definition(config, run_config, id);
-        if (definition)
-            scenarios::apply_default_namespace_answer(*definition, static_cast<unsigned>(run_config.draft));
+        if (definition) finish_raw_probe(*definition, run_config);
+        return definition;
+    }
+
+    // An own draft 22 scenario's probe, built on the draft 22 wire and finished like a family probe
+    // (`run_config` is the execution config: the draft 21 family).
+    static std::optional<scenarios::RawProbeDefinition> resolve_own_probe(const RunConfig& run_config,
+                                                                          std::string_view id) {
+        const scenarios::ScopedWireDraft wire(22);
+        auto definition = own_probe_22(id, run_config);
+        if (definition) finish_raw_probe(*definition, run_config);
+        return definition;
+    }
+
+    static void finish_raw_probe(scenarios::RawProbeDefinition& definition, const RunConfig& run_config) {
+        scenarios::apply_default_namespace_answer(definition, static_cast<unsigned>(run_config.draft));
         // A definition that opted into a liveness follow-up asks for the track fixture.
-        if (definition && definition->liveness && run_config.track_fixture) {
+        if (definition.liveness && run_config.track_fixture) {
             std::vector<std::vector<std::byte>> name_space;
             for (const auto& field : run_config.track_fixture->namespace_fields)
                 name_space.push_back(bytes_of(field));
-            scenarios::bind_liveness_track(*definition, name_space, bytes_of(run_config.track_fixture->track_name));
+            scenarios::bind_liveness_track(definition, name_space, bytes_of(run_config.track_fixture->track_name));
         }
-        return definition;
     }
 
     static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
@@ -673,8 +711,10 @@ public:
             [&]() -> const requirements::RequirementCatalog* { return draft21.get(); });
         const bool lineage = plan.wire_draft != run_config.draft;
         if (lineage) {
-            // A draft 22 run: the draft 21 evaluators' complete outcome set, keyed by draft 22 rows.
-            outcomes = lineage_outcomes(*draft22, outcomes);
+            // A draft 22 run: the draft 21 evaluators' complete outcome set, keyed by draft 22 rows, with
+            // the own draft 22 evaluators' outcomes (already draft 22 rows) for the rows they reach.
+            const auto own = evaluate_own_draft22(*draft22, worker->transcripts);
+            outcomes = lineage_outcomes(*draft22, outcomes, own);
             catalog = draft22.get();
         }
         // Rows whose every scenario needs a capability the publisher declared absent are
@@ -797,6 +837,15 @@ public:
                     " timed_out=" + (completed.timed_out ? "true" : "false") +
                     " event_limit=" + (completed.event_limit_reached ? "true" : "false") +
                     " cancelled=" + (worker->stop_requested ? "true" : "false"));
+                // An unscored draft 22 probe: its verdict is evidence only, never a requirement outcome.
+                if (plan.wire_draft == DraftVersion::Draft22) {
+                    if (const auto unscored = evaluate_unscored_probe_22(completed)) {
+                        const char* verdict = !unscored->verdict ? "not_run" : *unscored->verdict ? "pass" : "fail";
+                        append_context_event(worker, current_id, "unscored_probe_verdict",
+                            "evaluator=" + std::string(unscored->evaluator) + " verdict=" + verdict +
+                            " scored=false (no catalog row names this probe)");
+                    }
+                }
                 if (operational_error || worker->stop_requested) {
                     // Contexts that never ran are named, so the run explains its own end.
                     std::string not_run;
@@ -1494,8 +1543,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         return {RunStartStatus::Unsupported, {}, {}};
     if (requested.scenario_ids.empty() || requested.scenario_ids.size() > 100)
         return {RunStartStatus::InvalidConfig, {}, {}};
-    // An own, unknown or not yet executable draft 22 scenario has no lineage run.
-    auto plan = lineage_run(requested);
+    // An unknown, unimplemented own or not yet executable draft 22 scenario has no run; an implemented
+    // own draft 22 scenario bypasses lineage_run and is dispatched natively below.
+    auto plan = plan_run(requested);
     if (!plan) return {RunStartStatus::Unsupported, {}, {}};
     const RunConfig& execution = plan->execution;
     if (execution.scenario_ids.empty() || execution.scenario_ids.size() > 100 ||
@@ -1510,16 +1560,46 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     // run; how results present it is sub-project D4's). The API is answered with the requested id.
     std::vector<std::pair<std::string, std::string>> skipped;
     std::string first_skipped_requested;
+    std::string first_skipped_capability;
     const auto draft = static_cast<unsigned>(execution.draft);
     for (std::size_t index = 0; index < execution.scenario_ids.size(); ++index) {
         const auto& id = execution.scenario_ids[index];
         if (id.empty() || !selected.insert(id).second)
             return {RunStartStatus::InvalidConfig, {}, {}};
+        if (plan->wire_draft == DraftVersion::Draft22 && own_scenario_22(id)) {
+            // An own draft 22 scenario: a raw probe on the draft 22 wire, scored by own evaluators.
+            // Follow-up for Tasks 9-10: this branch skips the family transport gates (webtransport_only /
+            // native_only profiles, gap_*_only_scenario); a transport-specific own scenario needs a field in
+            // OwnScenarioTraits22 and a check here.
+            if (auto reason = scenario_skip_reason(22, id, execution.publisher_capabilities)) {
+                if (skipped.empty()) {
+                    first_skipped_requested = requested.scenario_ids[index];
+                    first_skipped_capability = std::string(scenario_required_capability(22, id).value_or("unknown"));
+                }
+                skipped.emplace_back(id, std::move(*reason));
+                continue;
+            }
+            if ((scenario_requires_track(22, id) || execution.mode == RunMode::Driven) &&
+                !execution.track_fixture)
+                return {RunStartStatus::InvalidConfig, {}, {}};
+            try {
+                auto definition = Impl::resolve_own_probe(execution, id);
+                if (!definition || definition->id != id)
+                    return {RunStartStatus::Unsupported, {}, {}};
+                definitions.push_back(std::move(*definition));
+            } catch (const std::invalid_argument&) {
+                return {RunStartStatus::InvalidConfig, {}, {}};
+            }
+            continue;
+        }
         if (!executable_scenario(draft, id) ||
             (execution.scenario_ids.size() > 1 && !raw_probe_scenario(draft, id)))
             return {RunStartStatus::Unsupported, {}, {}};
         if (auto reason = scenario_skip_reason(draft, id, execution.publisher_capabilities)) {
-            if (skipped.empty()) first_skipped_requested = requested.scenario_ids[index];
+            if (skipped.empty()) {
+                first_skipped_requested = requested.scenario_ids[index];
+                first_skipped_capability = std::string(scenario_required_capability(draft, id).value_or("unknown"));
+            }
             skipped.emplace_back(id, std::move(*reason));
             continue;
         }
@@ -1582,7 +1662,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         }
         if (raw_probe_scenario(draft, id)) {
             try {
-                auto definition = impl_->resolve_raw_probe(impl_->config, execution, id);
+                // start() runs on the caller's thread, outside the worker's ScopedWireDraft: build the
+                // writes for the wire draft the peer speaks.
+                auto definition = resolve_probe(impl_->config, execution, id, plan->wire_draft);
                 if (!definition || definition->id != id)
                     return {RunStartStatus::Unsupported, {}, {}};
                 definitions.push_back(std::move(*definition));
@@ -1594,8 +1676,7 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     if (skipped.size() == execution.scenario_ids.size()) {
         RunStartResult rejected{RunStartStatus::ScenarioRequiresCapability, {}, {}};
         rejected.scenario = first_skipped_requested;
-        rejected.capability = std::string(
-            scenario_required_capability(draft, skipped.front().first).value_or("unknown"));
+        rejected.capability = first_skipped_capability;
         return rejected;
     }
     const bool needs_replacement = std::any_of(definitions.begin(), definitions.end(),
@@ -1719,6 +1800,13 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
 
 std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
     const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id) {
+    return Impl::resolve_raw_probe(manager_config, run_config, id);
+}
+
+std::optional<scenarios::RawProbeDefinition> NativeRunManager::resolve_probe(
+    const NativeRunManagerConfig& manager_config, const RunConfig& run_config, std::string_view id,
+    DraftVersion wire_draft) {
+    const scenarios::ScopedWireDraft wire(draft_number(wire_draft));
     return Impl::resolve_raw_probe(manager_config, run_config, id);
 }
 

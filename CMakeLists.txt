@@ -244,6 +244,14 @@ add_library(moq-interop-scenarios
     src/scenarios/draft18_gap_b.cpp
     src/scenarios/draft21_gap_a.cpp
     src/scenarios/draft21_gap_a_token.cpp
+    src/scenarios/location_filter_param.cpp
+    src/scenarios/draft22_probe_support.cpp
+    src/scenarios/draft22_location_range.cpp
+    src/scenarios/draft22_namespace_discovery.cpp
+    src/scenarios/draft22_pre_setup_request.cpp
+    src/scenarios/draft22_publisher_location_filter.cpp
+    src/scenarios/draft22_location_filter_probes.cpp
+    src/scenarios/parameter_walk.cpp
     src/scenarios/draft21_contribution.cpp
     src/scenarios/draft21_contribution_support.cpp
     src/scenarios/draft21_contribution_session.cpp
@@ -291,7 +299,7 @@ target_compile_options(moq-interop-draft21-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(moq-interop-runs src/app/native_run_manager.cpp)
+add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
@@ -448,6 +456,56 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-raw-family-driver-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME raw-family-driver COMMAND moq-interop-raw-family-driver-tests)
+    add_executable(moq-interop-d22-location-range-live-tests
+                   tests/integration/draft22_location_range_live_test.cpp)
+    target_link_libraries(moq-interop-d22-location-range-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-location-range-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-location-range-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-location-range-live COMMAND moq-interop-d22-location-range-live-tests)
+    add_executable(moq-interop-d22-namespace-discovery-live-tests
+                   tests/integration/draft22_namespace_discovery_live_test.cpp)
+    target_link_libraries(moq-interop-d22-namespace-discovery-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-namespace-discovery-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-namespace-discovery-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-namespace-discovery-live COMMAND moq-interop-d22-namespace-discovery-live-tests)
+    add_executable(moq-interop-d22-publisher-location-filter-live-tests
+                   tests/integration/draft22_publisher_location_filter_live_test.cpp)
+    target_link_libraries(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-publisher-location-filter-live COMMAND moq-interop-d22-publisher-location-filter-live-tests)
+    add_executable(moq-interop-d22-pre-setup-request-live-tests
+                   tests/integration/draft22_pre_setup_request_live_test.cpp)
+    target_link_libraries(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-pre-setup-request-live COMMAND moq-interop-d22-pre-setup-request-live-tests)
+    add_executable(moq-interop-d22-location-filter-probes-live-tests
+                   tests/integration/draft22_location_filter_probes_live_test.cpp)
+    target_link_libraries(moq-interop-d22-location-filter-probes-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-location-filter-probes-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-location-filter-probes-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-location-filter-probes-live COMMAND moq-interop-d22-location-filter-probes-live-tests)
     add_test(NAME production-link
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/integration/production-link.sh"
                      "$<TARGET_FILE:moq-interop-runner>")
@@ -773,6 +831,51 @@ if(MOQ_INTEROP_BUILD_TESTS)
         GTest::gtest_main)
     add_test(NAME draft21-gap-a-token COMMAND moq-interop-draft21-gap-a-token-tests)
 
+    # Draft 22 own scenarios for D22-3-3-1-MUST-NOT-069 (Location ranges on SUBSCRIBE, REQUEST_UPDATE, FETCH).
+    add_executable(moq-interop-d22-location-range-tests
+                   tests/protocol/draft22_location_range_test.cpp)
+    target_link_libraries(moq-interop-d22-location-range-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-location-range-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-location-range COMMAND moq-interop-d22-location-range-tests)
+
+    # Draft 22 own scenario for D22-4-2-MUST-110 (NAMESPACE for each known namespace matching the prefix).
+    add_executable(moq-interop-d22-namespace-discovery-tests
+                   tests/protocol/draft22_namespace_discovery_test.cpp)
+    target_link_libraries(moq-interop-d22-namespace-discovery-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-namespace-discovery-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-namespace-discovery COMMAND moq-interop-d22-namespace-discovery-tests)
+
+    # Draft 22 own scenario for D22-9-20-9-MAY-422 (LOCATION_FILTER in publisher messages).
+    add_executable(moq-interop-d22-publisher-location-filter-tests
+                   tests/protocol/draft22_publisher_location_filter_test.cpp)
+    target_link_libraries(moq-interop-d22-publisher-location-filter-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-publisher-location-filter-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-publisher-location-filter COMMAND moq-interop-d22-publisher-location-filter-tests)
+
+    # Draft 22 own scenario for D22-6-3-MAY-159 (a request stream before the session is established).
+    add_executable(moq-interop-d22-pre-setup-request-tests
+                   tests/protocol/draft22_pre_setup_request_test.cpp)
+    target_link_libraries(moq-interop-d22-pre-setup-request-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-pre-setup-request-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-pre-setup-request COMMAND moq-interop-d22-pre-setup-request-tests)
+
+    # Draft 22 own scenarios for D22-9-20-9-MUST-424 (End Group overflow) and the unscored Location Filter probes.
+    add_executable(moq-interop-d22-location-filter-probes-tests
+                   tests/protocol/draft22_location_filter_probes_test.cpp)
+    target_link_libraries(moq-interop-d22-location-filter-probes-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-location-filter-probes-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-location-filter-probes COMMAND moq-interop-d22-location-filter-probes-tests)
+
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
     add_test(NAME version COMMAND moq-interop-unit-tests)
@@ -815,6 +918,31 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-wire-draft-tests tests/unit/wire_draft_test.cpp)
     target_link_libraries(moq-interop-wire-draft-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
     add_test(NAME wire-draft COMMAND moq-interop-wire-draft-tests)
+
+    add_executable(moq-interop-location-filter-param-tests tests/unit/location_filter_param_test.cpp)
+    target_link_libraries(moq-interop-location-filter-param-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME location-filter-param COMMAND moq-interop-location-filter-param-tests)
+
+    add_executable(moq-interop-parameter-walk-tests tests/unit/parameter_walk_test.cpp)
+    target_include_directories(moq-interop-parameter-walk-tests PRIVATE "${PROJECT_SOURCE_DIR}/src/scenarios")
+    target_link_libraries(moq-interop-parameter-walk-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME parameter-walk COMMAND moq-interop-parameter-walk-tests)
+
+    add_executable(moq-interop-filter-site-pins-tests tests/unit/filter_site_pins_test.cpp)
+    target_include_directories(moq-interop-filter-site-pins-tests PRIVATE "${PROJECT_SOURCE_DIR}/src/scenarios")
+    target_link_libraries(moq-interop-filter-site-pins-tests PRIVATE moq-interop-scenarios moq-interop-wire GTest::gtest_main)
+    add_test(NAME filter-site-pins COMMAND moq-interop-filter-site-pins-tests)
+
+    add_executable(moq-interop-draft22-filter-guard-tests tests/integration/draft22_filter_guard_test.cpp)
+    target_link_libraries(moq-interop-draft22-filter-guard-tests PRIVATE
+        moq-interop-runs moq-interop-scenarios moq-interop-requirements moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft22-filter-guard COMMAND moq-interop-draft22-filter-guard-tests)
+
+    add_executable(moq-interop-filter-source-guard-tests tests/unit/filter_source_guard_test.cpp)
+    target_compile_definitions(moq-interop-filter-source-guard-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-filter-source-guard-tests PRIVATE GTest::gtest_main)
+    add_test(NAME filter-source-guard COMMAND moq-interop-filter-source-guard-tests)
 
     add_executable(moq-interop-draft22-lineage-tests tests/unit/draft22_lineage_test.cpp)
     target_compile_definitions(moq-interop-draft22-lineage-tests PRIVATE

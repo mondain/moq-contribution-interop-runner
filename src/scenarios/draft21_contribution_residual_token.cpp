@@ -4,6 +4,7 @@
 // row order, which is why the Subgroup timer row sits here. See
 // draft21_contribution_residual.cpp for the fixture contract these rows share.
 
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
 #include "draft21_contribution_residual_internal.h"
 
@@ -163,6 +164,11 @@ constexpr std::uint64_t kSubgroupDeliveryTimeout = 0x06;
 constexpr std::uint64_t kSubgroupTimeoutMs = 200;
 constexpr std::uint64_t kHeldStreamCredit = 64;
 
+// The whole of Group 0: start (0,0), End Group delta 0.
+Param whole_group_filter() {
+    return filter_param({0, 0, 0});
+}
+
 Spec uncommitted_subgroup_spec() {
     return spec("d21-subgroup-completion-withheld-acknowledgments",
         {{"D21-5-2-MUST-130", "d21-uncommitted-subgroup-timeout-reset"}},
@@ -170,11 +176,9 @@ Spec uncommitted_subgroup_spec() {
             auto definition = residual_definition();
             definition.initial_peer_uni_stream_data = kHeldStreamCredit;
             definition.hold_uni_stream_credit = true;
-            auto whole_group = location_pair(0, 0);
-            put_vi(whole_group, 0);
             definition.writes.push_back(request_write(subscribe_frame(1, fixture,
                 {param_vi(kSubgroupDeliveryTimeout, kSubgroupTimeoutMs), param_u8(0x10, 1),
-                 param_lp(0x21, whole_group)})));
+                 whole_group_filter()})));
             return definition;
         },
         [](const View& view) -> Judgement {
@@ -317,6 +321,8 @@ Spec expired_token_alias_spec() {
 }
 
 }  // namespace
+
+Bytes token_whole_group_filter_for_test() { return encode_params({whole_group_filter()}); }
 
 std::vector<Spec> residual_token_specs() {
     std::vector<Spec> result;

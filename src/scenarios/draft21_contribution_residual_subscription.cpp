@@ -3,6 +3,7 @@
 // and SUBSCRIBE_TRACKS. See draft21_contribution_residual.cpp for the fixture
 // contract these rows share.
 
+#include "draft21_contribution_filter_testing.h"
 #include "draft21_contribution_support.h"
 #include "draft21_contribution_residual_internal.h"
 #include "moq/interop/scenarios/wire_draft.h"
@@ -30,10 +31,7 @@ constexpr std::uint64_t kSubscribeTracks = 0x51;
 // Object 0 of the End Group.
 Param location_range(std::uint64_t start_group, std::uint64_t start_object,
                      std::uint64_t end_group_delta, std::uint64_t end_object) {
-    auto value = location_pair(start_group, start_object);
-    put_vi(value, end_group_delta);
-    put_vi(value, end_object);
-    return param_lp(0x21, value);
+    return filter_param({start_group, start_object, end_group_delta, end_object});
 }
 
 // A single-Group range [first, last] in one Group.
@@ -174,7 +172,7 @@ Spec filter_conjunction_spec() {
 // Section 9.20.16) whose nested LOCATION_FILTER is zero-length, so "the fill
 // range is the entire track up to Largest Object" (Section 3.4, lines 1282-1288).
 Param fill_whole_track() {
-    return param_lp(0x23, encode_params({param_lp(0x21, {})}));
+    return param_lp(0x23, encode_params({filter_param({})}));
 }
 
 // LARGEST_OBJECT (parameter 0x9) of a SUBSCRIBE_OK. A Message Parameter is not a
@@ -428,6 +426,17 @@ Spec skipped_publish_spec() {
 }
 
 }  // namespace
+
+Bytes residual_location_range_for_test(std::uint64_t start_group, std::uint64_t start_object,
+                                       std::uint64_t end_group_delta, std::uint64_t end_object) {
+    return encode_params({location_range(start_group, start_object, end_group_delta, end_object)});
+}
+
+Bytes residual_bounded_filter_for_test(std::uint64_t group, std::uint64_t first, std::uint64_t last) {
+    return encode_params({bounded_filter(group, first, last)});
+}
+
+Bytes residual_fill_whole_track_for_test() { return encode_params({fill_whole_track()}); }
 
 std::vector<Spec> residual_subscription_specs() {
     std::vector<Spec> result;

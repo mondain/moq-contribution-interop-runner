@@ -1,4 +1,6 @@
 #include "moq/interop/scenarios/fetch_group_order.h"
+#include "inline_filter_sites_testing.h"
+#include "moq/interop/scenarios/location_filter_param.h"
 
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
@@ -57,7 +59,9 @@ Bytes encode_fetch(unsigned draft, const Fixture& fixture, const Request& reques
         if (!d18::encode_message(d18::Message{fetch}, output).has_value())
             throw std::invalid_argument("unencodable draft18 FETCH fixture");
     } else {
-        wire::ByteWriter body(65535), filter(27);
+        wire::ByteWriter body(65535);
+        const auto filter = filter_param_value(
+            {kStart.group, kStart.object, kEnd.group - kStart.group, kEnd.object});
         bool ok = wire::write_vi64(request.id, body) &&
                   wire::write_vi64(fixture.track_namespace.size(), body);
         for (const auto& field : fixture.track_namespace)
@@ -65,11 +69,7 @@ Bytes encode_fetch(unsigned draft, const Fixture& fixture, const Request& reques
         ok = ok && wire::write_length_prefixed_bytes(fixture.track_name, body) &&
              wire::write_vi64(request.explicit_order ? 2 : 1, body) &&
              wire::write_vi64(0x21, body) &&
-             wire::write_vi64(kStart.group, filter) &&
-             wire::write_vi64(kStart.object, filter) &&
-             wire::write_vi64(kEnd.group - kStart.group, filter) &&
-             wire::write_vi64(kEnd.object, filter) &&
-             wire::write_length_prefixed_bytes(filter.bytes(), body);
+             body.append_bytes(filter);
         if (request.explicit_order)
             ok = ok && wire::write_vi64(1, body) &&
                  body.append_byte(static_cast<std::byte>(request.descending ? 2 : 1));
@@ -353,6 +353,11 @@ std::vector<FetchGroupOrderProbe> profiles(unsigned draft, std::chrono::millisec
     return result;
 }
 } // namespace
+
+SiteBytes fetch_group_order_fetch_for_test(const SiteNamespace& track_namespace, const SiteBytes& track_name,
+                                           bool explicit_order, bool descending) {
+    return encode_fetch(21, Fixture{track_namespace, track_name}, Request{1, descending, explicit_order});
+}
 
 std::vector<FetchGroupOrderProbe> draft18_fetch_group_order_probes(
     std::chrono::milliseconds deadline, Namespace ns, Bytes name) {
