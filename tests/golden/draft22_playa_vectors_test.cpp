@@ -9,6 +9,12 @@
 // no codec for that message or parameter value; the framing we do have is still asserted).
 // A vector that is neither fails EveryVectorIsCoveredOrAllowlisted, so a new vector cannot be
 // skipped silently. The file has no negative (must-reject) vectors.
+//
+// Agreement on all 29 vectors is a PARTIAL independent check, not proof that our draft 22 codecs
+// are right: the moqxr-sourced vectors (moqxr-encoder, moqxr-decoder-verified) derive from moqxr's
+// draft 21 codec, the draft-text vectors were built from the draft 21 text, and draft 22 changed
+// only LOCATION_FILTER (Section 9.20.9). Only the converted-from-d21 vectors (the three Next Object
+// forms) were re-encoded for draft 22, with moq-playa's own codec.
 #include "moq/interop/scenarios/parameter_walk.h"
 #include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft22/location_filter.h"
