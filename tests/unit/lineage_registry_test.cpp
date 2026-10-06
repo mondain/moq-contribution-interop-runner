@@ -47,8 +47,9 @@ TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21Impl
 // scenarios implemented in production follow them (D2 Tasks 9-10 add them one at a time).
 TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
     EXPECT_EQ(shared_scenario_ids_22().size(), 307u);
-    // Task 9a: the three row 069 scenarios; Task 9b: d22-discover-original-publisher-namespaces (row 110).
-    EXPECT_EQ(kOwnScenarioTraits22.size(), 4u);
+    // Task 9a: the three row 069 scenarios; Task 9b: d22-discover-original-publisher-namespaces (row 110)
+    // and d22-publisher-location-filter-parameter (row 422).
+    EXPECT_EQ(kOwnScenarioTraits22.size(), 5u);
     EXPECT_EQ(executable_scenarios(22).size(), 213u + kOwnScenarioTraits22.size());
 }
 

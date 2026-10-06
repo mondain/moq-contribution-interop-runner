@@ -248,6 +248,7 @@ add_library(moq-interop-scenarios
     src/scenarios/draft22_probe_support.cpp
     src/scenarios/draft22_location_range.cpp
     src/scenarios/draft22_namespace_discovery.cpp
+    src/scenarios/draft22_publisher_location_filter.cpp
     src/scenarios/parameter_walk.cpp
     src/scenarios/draft21_contribution.cpp
     src/scenarios/draft21_contribution_support.cpp
@@ -473,6 +474,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-namespace-discovery-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-namespace-discovery-live COMMAND moq-interop-d22-namespace-discovery-live-tests)
+    add_executable(moq-interop-d22-publisher-location-filter-live-tests
+                   tests/integration/draft22_publisher_location_filter_live_test.cpp)
+    target_link_libraries(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-publisher-location-filter-live COMMAND moq-interop-d22-publisher-location-filter-live-tests)
     add_test(NAME production-link
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/integration/production-link.sh"
                      "$<TARGET_FILE:moq-interop-runner>")
@@ -815,6 +826,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-namespace-discovery-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-namespace-discovery COMMAND moq-interop-d22-namespace-discovery-tests)
+
+    # Draft 22 own scenario for D22-9-20-9-MAY-422 (LOCATION_FILTER in publisher messages).
+    add_executable(moq-interop-d22-publisher-location-filter-tests
+                   tests/protocol/draft22_publisher_location_filter_test.cpp)
+    target_link_libraries(moq-interop-d22-publisher-location-filter-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-publisher-location-filter-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-publisher-location-filter COMMAND moq-interop-d22-publisher-location-filter-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)

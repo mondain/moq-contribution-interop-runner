@@ -2,6 +2,7 @@
 
 #include "moq/interop/scenarios/draft22_location_range.h"
 #include "moq/interop/scenarios/draft22_namespace_discovery.h"
+#include "moq/interop/scenarios/draft22_publisher_location_filter.h"
 
 #include <algorithm>
 #include <functional>
@@ -64,6 +65,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_namespace_discovery_probe(execution.timeout, std::move(track.name_space),
                                                                  std::move(track.name));
          }},
+        {scenarios::kDraft22PublisherLocationFilter, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_publisher_location_filter_probe(
+                 execution.timeout, std::move(track.name_space), std::move(track.name));
+         }},
     };
     return table;
 }
@@ -74,6 +80,7 @@ const std::vector<OwnEvaluator22>& production_evaluators() {
         {scenarios::kDraft22SubscriptionRangeEvaluator, scenarios::evaluate_draft22_subscription_location_range},
         {scenarios::kDraft22FetchRangeEvaluator, scenarios::evaluate_draft22_fetch_location_range},
         {scenarios::kDraft22NamespaceDiscoveryEvaluator, scenarios::evaluate_draft22_namespace_discovery},
+        {scenarios::kDraft22PublisherLocationFilterEvaluator, scenarios::evaluate_draft22_publisher_location_filter},
     };
     return table;
 }
