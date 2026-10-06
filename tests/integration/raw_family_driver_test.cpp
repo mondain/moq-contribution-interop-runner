@@ -630,6 +630,11 @@ TEST(NativeRunManagerDraft22Lineage, SupportsDraft22OnlyWithTheDraft22Catalog) {
     EXPECT_FALSE(no21.supports(app::DraftVersion::Draft22));
     // Only a draft 22 catalog is accepted in the draft 22 position.
     EXPECT_THROW(lineage_manager(store,catalog(21)),std::invalid_argument);
+    // And only a complete one, as for drafts 18 and 21: requirements::score() refuses an incomplete catalog, so
+    // every run against it would score Error.
+    auto incomplete=std::make_shared<requirements::RequirementCatalog>(*catalog22());
+    incomplete->complete=false;
+    EXPECT_THROW(lineage_manager(store,incomplete),std::invalid_argument);
 }
 
 TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
@@ -962,7 +967,9 @@ TEST(NativeRunManagerDraft22Lineage, ARegisteredOwnScenarioRunsNativelyAndIsScor
     EXPECT_EQ(state_of(run,"D22-6-3-MAY-159"),requirements::OutcomeState::Pass);
     ASSERT_TRUE(run.score);
     EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Incomplete);
-    const auto rescored=app::score_lineage(*draft22,run.outcomes);
+    const auto rescored=requirements::score(*draft22,run.outcomes);
+    EXPECT_EQ(run.score->verdict,rescored.verdict);
+    EXPECT_EQ(run.score->required.possible,rescored.required.possible);
     EXPECT_EQ(run.score->coverage.possible,rescored.coverage.possible);
     EXPECT_EQ(run.score->coverage.earned,rescored.coverage.earned);
     EXPECT_EQ(run.score->weighted.earned,rescored.weighted.earned);
@@ -971,7 +978,8 @@ TEST(NativeRunManagerDraft22Lineage, ARegisteredOwnScenarioRunsNativelyAndIsScor
     auto unscored=run.outcomes;
     for (auto& outcome : unscored)
         if (outcome.requirement_id=="D22-6-3-MAY-159") outcome.state=requirements::OutcomeState::NotRun;
-    EXPECT_GT(run.score->coverage.earned,app::score_lineage(*draft22,unscored).coverage.earned);
+    EXPECT_EQ(run.score->coverage.earned,requirements::score(*draft22,unscored).coverage.earned+1u)
+        << "D22-6-3-MAY-159 is a MAY row: weight 1";
     EXPECT_TRUE(manager.stop(started.id));
 }
 

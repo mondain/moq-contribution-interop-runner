@@ -124,7 +124,7 @@ TEST(CompletenessTest, ReportsRequiredRowCompletionForAllDrafts) {
         const auto catalog = RequirementCatalog::load(
             source, root / "requirements" /
                 ("draft" + std::to_string(draft) + ".json"),
-            draft == 22 ? CatalogLoadMode::AllowIncomplete : CatalogLoadMode::RequireComplete);
+            CatalogLoadMode::RequireComplete);
         const auto bindings = draft == 18 ? draft18_executable_bindings()
             : draft == 21 ? draft21_executable_bindings()
                           : draft22_executable_bindings();
@@ -153,21 +153,8 @@ TEST(CompletenessTest, ReportsRequiredRowCompletionForAllDrafts) {
             }));
         EXPECT_EQ(report.required_total - report.required_covered, blocking);
         const auto audit = audit_normative_occurrences(source, catalog);
-        if (draft == 22) {
-            // requirements/draft22.json is still complete:false, so the only blocking finding
-            // is incomplete_catalog and the only audit error is the incomplete-catalog one.
-            // TODO(D3 Task 4): when the catalog flips to complete:true, replace this branch
-            // with EXPECT_TRUE(report.complete()) and EXPECT_TRUE(audit.ok()) like 18 and 21.
-            for (const auto& finding : report.findings) {
-                if (finding.blocking)
-                    EXPECT_EQ(finding.code, "incomplete_catalog") << finding.requirement_id;
-            }
-            EXPECT_TRUE(audit.missing.empty());
-            EXPECT_TRUE(audit.multiply_classified.empty());
-        } else {
-            EXPECT_TRUE(report.complete());
-            EXPECT_TRUE(audit.ok());
-        }
+        EXPECT_TRUE(report.complete());
+        EXPECT_TRUE(audit.ok());
     }
 }
 

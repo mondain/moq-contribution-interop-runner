@@ -55,14 +55,4 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
     return outcomes;
 }
 
-requirements::ScoreSummary score_lineage(const requirements::RequirementCatalog& draft22,
-                                         std::span<const requirements::Outcome> outcomes) {
-    if (draft22.complete) return requirements::score(draft22, outcomes);
-    auto scored = draft22;
-    scored.complete = true;
-    auto summary = requirements::score(scored, outcomes);
-    if (summary.verdict == requirements::RunVerdict::Pass) summary.verdict = requirements::RunVerdict::Incomplete;
-    return summary;
-}
-
 }  // namespace moq::interop::app

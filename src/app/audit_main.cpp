@@ -98,11 +98,7 @@ int main(int argc, char* argv[]) {
             moq::interop::requirements::RequirementCatalog::load(
                 source, options.requirements /
                     ("draft" + std::to_string(options.draft) + ".json"),
-                // Draft 22 may still be complete:false; the audit loads it anyway and the gate
-                // reports it (incomplete_catalog, exit 1) instead of refusing to run.
-                options.draft == 22
-                    ? moq::interop::requirements::CatalogLoadMode::AllowIncomplete
-                    : moq::interop::requirements::CatalogLoadMode::RequireComplete);
+                moq::interop::requirements::CatalogLoadMode::RequireComplete);
         const auto source_audit =
             moq::interop::requirements::audit_normative_occurrences(source, catalog);
         const auto bindings = [&] {

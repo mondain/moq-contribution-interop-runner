@@ -403,12 +403,12 @@ TEST(Draft22OwnBindings, OwnBindingsUseOnlyKnownEvidenceKindsAndCoverTheirRows) 
 }
 
 // (a) The draft 22 gate on the whole table: every required row covered (170 of 170), the two own MAY rows added to
-// the optional coverage inherited from draft 21, and no blocking finding except incomplete_catalog, which stands
-// until requirements/draft22.json is flipped to complete (audit_completeness emits it for complete == false).
-TEST(Draft22Gate, CoversEveryRequiredRowAndBlocksOnlyOnTheIncompleteCatalog) {
+// the optional coverage inherited from draft 21, and no blocking finding: requirements/draft22.json is complete
+// (D3 Task 4), so the incomplete_catalog finding that stood until then is gone and the gate passes.
+TEST(Draft22Gate, CoversEveryRequiredRowAndPasses) {
     const auto source = load_draft_source(22, kRoot / "docs", kRoot / "requirements/draft-digests.json");
     const auto catalog = RequirementCatalog::load(source, kRoot / "requirements/draft22.json",
-                                                  CatalogLoadMode::AllowIncomplete);
+                                                  CatalogLoadMode::RequireComplete);
     const auto report = audit_completeness(catalog, draft22_executable_bindings(), app::executable_scenarios(22));
     EXPECT_EQ(report.draft, 22u);
     EXPECT_EQ(report.required_total, 170u);
@@ -418,20 +418,20 @@ TEST(Draft22Gate, CoversEveryRequiredRowAndBlocksOnlyOnTheIncompleteCatalog) {
     std::vector<std::string> blocking;
     for (const auto& finding : report.findings)
         if (finding.blocking) blocking.push_back(finding.code + " " + finding.requirement_id);
-    EXPECT_EQ(blocking, std::vector<std::string>{"incomplete_catalog "});
-    EXPECT_FALSE(catalog.complete);
-    EXPECT_FALSE(report.complete());  // only because of incomplete_catalog
-    // The full-corpus keyword audit likewise fails today only on the complete flag: every normative occurrence
-    // is classified exactly once and every citation anchors.
+    EXPECT_TRUE(blocking.empty());
+    EXPECT_TRUE(catalog.complete);
+    EXPECT_TRUE(report.complete());
+    // The full-corpus keyword audit passes too: every normative occurrence is classified exactly once, every
+    // citation anchors and the catalog is complete.
     const auto audit = audit_normative_occurrences(source, catalog);
     EXPECT_TRUE(audit.missing.empty());
     EXPECT_TRUE(audit.multiply_classified.empty());
-    EXPECT_EQ(audit.errors, std::vector<std::string>{"Incomplete catalog cannot pass the full-corpus audit"});
+    EXPECT_TRUE(audit.errors.empty());
+    EXPECT_TRUE(audit.ok());
 }
 
 // Gap audit: runs the draft 22 gate on the whole table and prints every finding grouped by cause, then pins the
-// counts per code: no binding defect of any kind, no uncovered required row, and only advisory optional gaps
-// besides the incomplete_catalog finding.
+// counts per code: no binding defect of any kind, no uncovered required row, and only advisory optional gaps.
 TEST(Draft22GapAudit, ReportsEveryUncoveredRequiredRow) {
     const auto source = load_draft_source(22, kRoot / "docs", kRoot / "requirements/draft-digests.json");
     const auto catalog = RequirementCatalog::load(source, kRoot / "requirements/draft22.json",
@@ -504,7 +504,7 @@ TEST(Draft22GapAudit, ReportsEveryUncoveredRequiredRow) {
     EXPECT_EQ(codes["missing_evidence_schema"], 0u);
     EXPECT_EQ(codes["wrong_draft_binding"], 0u);
     EXPECT_EQ(codes["missing_required_evaluator"], 0u);
-    EXPECT_EQ(codes["incomplete_catalog"], 1u);
+    EXPECT_EQ(codes["incomplete_catalog"], 0u);  // was 1 while requirements/draft22.json was complete:false
     EXPECT_EQ(codes["missing_optional_evaluator"], 94u);
 }
 

@@ -72,11 +72,13 @@ TEST_F(Draft22CatalogTest, PartitionsTileTheWholeDraftAndCoverEveryOccurrence) {
     EXPECT_EQ(covered, occurrences.size());
 }
 
-TEST_F(Draft22CatalogTest, MergedCatalogIsThePartitionsInOrderAndIsIncomplete) {
+// The merged catalog was complete:false until D3 Task 4: the draft 22 completeness gate passes (170 of 170 required
+// rows bound, no blocking finding), so it is complete and loads for production.
+TEST_F(Draft22CatalogTest, MergedCatalogIsThePartitionsInOrderAndIsComplete) {
     const auto source = load_draft_source(22, kRoot / "docs", kRoot / "requirements/draft-digests.json");
     const auto merged = RequirementCatalog::load(source, kRoot / "requirements/draft22.json",
-                                                 CatalogLoadMode::AllowIncomplete);
-    EXPECT_FALSE(merged.complete);
+                                                 CatalogLoadMode::RequireComplete);
+    EXPECT_TRUE(merged.complete);
     std::vector<std::string> expected;
     for (const auto& file : partitions()) {
         const auto part = read_json(kRoot / "requirements/parts" / file.name);
@@ -89,9 +91,6 @@ TEST_F(Draft22CatalogTest, MergedCatalogIsThePartitionsInOrderAndIsIncomplete) {
         actual.push_back(row.id);
     }
     EXPECT_EQ(actual, expected);
-    EXPECT_THROW(RequirementCatalog::load(source, kRoot / "requirements/draft22.json",
-                                          CatalogLoadMode::RequireComplete),
-                 std::runtime_error);
 }
 
 TEST_F(Draft22CatalogTest, IdsAreUniqueAcrossAllThreeDrafts) {

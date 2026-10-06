@@ -16,20 +16,20 @@ set +e
 status=$?
 set -e
 grep -q '^Required executable coverage: 170/170$' "$test_dir/text.out"
-# requirements/draft22.json is still complete:false, so the static gate fails with the
-# incomplete_catalog finding and the exit status is 1. D3 Task 4 flips the catalog and this
-# expectation to status 0 with "Static gate: PASS".
-[[ "$status" -eq 1 ]] || { echo "unexpected status $status" >&2; exit 1; }
-grep -q '^Static gate: FAIL' "$test_dir/text.out"
+# requirements/draft22.json is complete and every required row is bound, so the static gate
+# passes with no blocking finding and the exit status is 0.
+[[ "$status" -eq 0 ]] || { echo "unexpected status $status" >&2; exit 1; }
+grep -q '^Static gate: PASS' "$test_dir/text.out"
 
 set +e
 "$audit_bin" --draft 22 --format json "${common[@]}" >"$test_dir/audit.json"
 status=$?
 set -e
-[[ "$status" -eq 1 ]] || exit 1
+[[ "$status" -eq 0 ]] || { echo "unexpected JSON status $status" >&2; exit 1; }
 jq -e '.draft == 22 and .executable_coverage.required_covered == 170 and
-    .executable_coverage.required_total == 170 and .static_complete == false and
-    ([.findings[] | select(.blocking) | .code] | unique) == ["incomplete_catalog"]' \
+    .executable_coverage.required_total == 170 and .static_complete == true and
+    .source_audit.complete == true and
+    ([.findings[] | select(.blocking)] | length) == 0' \
     "$test_dir/audit.json" >/dev/null
 
 # --database with draft 22 is refused (audit_execution over stored draft 22 runs is D4).
@@ -39,6 +39,7 @@ set +e
     >"$test_dir/db.out" 2>"$test_dir/db.err"
 status=$?
 set -e
-[[ "$status" -ne 0 ]] || exit 1
+# A refused option is a usage error (exit 2), distinct from a failed gate (exit 1).
+[[ "$status" -eq 2 ]] || { echo "unexpected --database status $status" >&2; exit 1; }
 grep -q 'stored draft 22 runs are not supported yet' "$test_dir/db.err"
 printf 'audit CLI draft 22 passed\n'

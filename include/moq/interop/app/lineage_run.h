@@ -49,11 +49,4 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
                                                     std::span<const requirements::Outcome> draft21_outcomes,
                                                     std::span<const requirements::Outcome> own_outcomes = {});
 
-// Scores lineage outcomes against the draft 22 catalog. requirements::score() refuses a catalog that
-// is not complete; the draft 22 catalog stays incomplete until its own rows have evaluators
-// (sub-projects D2/D3), so this scores the rows as they are and never reports a Pass for an
-// incomplete catalog (a Pass becomes Incomplete). A complete catalog is scored by score() unchanged.
-requirements::ScoreSummary score_lineage(const requirements::RequirementCatalog& draft22,
-                                         std::span<const requirements::Outcome> outcomes);
-
 }  // namespace moq::interop::app

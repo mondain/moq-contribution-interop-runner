@@ -74,7 +74,7 @@ public:
         std::shared_ptr<const requirements::RequirementCatalog> catalog,
         std::shared_ptr<storage::RunStore> store,
         NativeRunManagerConfig config);
-    // `draft22` (optional, may be an incomplete catalog) enables draft 22 runs by lineage: the shared
+    // `draft22` (optional, must be complete like the others) enables draft 22 runs by lineage: the shared
     // scenarios run on draft 21's family and are scored against it. It needs `draft21` as well.
     NativeRunManager(
         std::shared_ptr<const requirements::RequirementCatalog> draft18,
