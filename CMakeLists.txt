@@ -1086,6 +1086,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME publisher-driver COMMAND moq-interop-publisher-driver-tests)
     add_test(NAME moqxr-adapter-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-contract.sh")
+    foreach(moqxr_cmdline_draft 18 21)
+        add_test(NAME moqxr-adapter-cmdlines-d${moqxr_cmdline_draft}
+                 COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-cmdlines.sh"
+                         ${moqxr_cmdline_draft})
+    endforeach()
+    add_executable(moq-interop-executable-ids-golden-tests tests/unit/executable_ids_golden_test.cpp)
+    target_compile_definitions(moq-interop-executable-ids-golden-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-executable-ids-golden-tests PRIVATE moq-interop-app GTest::gtest_main)
+    add_test(NAME executable-ids-golden COMMAND moq-interop-executable-ids-golden-tests)
 
     add_executable(moq-interop-webtransport-run-api-tests
                    tests/integration/webtransport_run_api_test.cpp)
