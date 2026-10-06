@@ -248,6 +248,7 @@ add_library(moq-interop-scenarios
     src/scenarios/draft22_probe_support.cpp
     src/scenarios/draft22_location_range.cpp
     src/scenarios/draft22_namespace_discovery.cpp
+    src/scenarios/draft22_pre_setup_request.cpp
     src/scenarios/draft22_publisher_location_filter.cpp
     src/scenarios/parameter_walk.cpp
     src/scenarios/draft21_contribution.cpp
@@ -484,6 +485,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-publisher-location-filter-live COMMAND moq-interop-d22-publisher-location-filter-live-tests)
+    add_executable(moq-interop-d22-pre-setup-request-live-tests
+                   tests/integration/draft22_pre_setup_request_live_test.cpp)
+    target_link_libraries(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-pre-setup-request-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-pre-setup-request-live COMMAND moq-interop-d22-pre-setup-request-live-tests)
     add_test(NAME production-link
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/integration/production-link.sh"
                      "$<TARGET_FILE:moq-interop-runner>")
@@ -835,6 +846,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-publisher-location-filter-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-publisher-location-filter COMMAND moq-interop-d22-publisher-location-filter-tests)
+
+    # Draft 22 own scenario for D22-6-3-MAY-159 (a request stream before the session is established).
+    add_executable(moq-interop-d22-pre-setup-request-tests
+                   tests/protocol/draft22_pre_setup_request_test.cpp)
+    target_link_libraries(moq-interop-d22-pre-setup-request-tests PRIVATE
+        moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-d22-pre-setup-request-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-pre-setup-request COMMAND moq-interop-d22-pre-setup-request-tests)
 
     add_executable(moq-interop-unit-tests tests/unit/version_test.cpp)
     target_link_libraries(moq-interop-unit-tests PRIVATE moq-interop-app GTest::gtest_main)
