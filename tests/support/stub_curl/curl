@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Stand-in for curl, put first on PATH by tests/e2e/moqxr-matrix-plan.sh.
+#
+# Answers exactly the HTTP calls tests/e2e/driven-moqxr.sh makes against the runner, for the run id
+# `run-<http port>` that tests/support/stub_runner.sh prepares: the health check (only once the
+# stub runner for that port is ready), POST /api/v1/runs (the body is appended to
+# $MOQ_STUB_DIR/calls.log as `request: POST <url> <compact json>`, the --dry-run plan format), the
+# run (finalized, one pass and one fail outcome), its events (one publisher_process exit status 0)
+# and the exported result (one requirement row). Any other call fails like curl --fail would.
+set -euo pipefail
+url=
+data=
+method=GET
+while (($#)); do
+    case "$1" in
+        -X) method=$2; shift ;;
+        -d) data=$2; shift ;;
+        -H|--output) shift ;;
+        http://*) url=$1 ;;
+    esac
+    shift
+done
+port=${url#http://127.0.0.1:}
+port=${port%%/*}
+path=/${url#http://127.0.0.1:"$port"/}
+run=run-$port
+case "$method $path" in
+    "GET /healthz")
+        [[ -e "$MOQ_STUB_DIR/ready-$port" ]] || exit 7 ;;
+    "POST /api/v1/runs")
+        printf 'request: POST %s %s\n' "$url" "$(jq -c . <<<"$data")" >>"$MOQ_STUB_DIR/calls.log"
+        jq -n --arg id "$run" '{run: {id: $id, state: "created"}}' ;;
+    "GET /api/v1/runs/$run")
+        jq -n --arg id "$run" '{run: {id: $id, state: "finalized", verdict: "fail",
+            outcomes: [{state: "pass"}, {state: "fail"}]}}' ;;
+    "GET /api/v1/runs/$run/events?limit=100")
+        jq -n '{items: [{kind: "publisher_process", detail: "{\"status\":0}"}]}' ;;
+    "GET /results/$run.json")
+        jq -n '{requirements: [{id: "stub"}]}' ;;
+    *)
+        printf 'stub curl: unexpected %s %s\n' "$method" "$url" >&2
+        exit 22 ;;
+esac
