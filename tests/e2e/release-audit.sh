@@ -6,12 +6,16 @@ usage() {
     exit 2
 }
 
+# Draft 22 has no docker_d22_* stages: the container image carries no draft 22 peer (the picoquic
+# test peer and the image's runner validation cover drafts 18 and 21 only). Draft 22 is covered by
+# the moqxr driven stages over both transports and by its static audit.
 required_stages=(
     native_suite asan_ubsan fuzz_smoke
     docker_d18_native docker_d18_webtransport
     docker_d21_native docker_d21_webtransport
     moqxr_d18_webtransport moqxr_d21_webtransport
-    audit_d18 audit_d21
+    moqxr_d22_native moqxr_d22_webtransport
+    audit_d18 audit_d21 audit_d22
 )
 
 if [[ ( $# -eq 3 || $# -eq 7 ) && "$1" == run ]]; then
@@ -88,9 +92,21 @@ if [[ ( $# -eq 3 || $# -eq 7 ) && "$1" == run ]]; then
                 "$root_dir/build/moq-interop-runner" "$audit_bin" \
                 "$publisher_bin" "$fixture"
         done
+        # Draft 22 runs the driven matrix pair (tests/e2e/driven-moqxr.sh, one reference
+        # scenario per run) on both transports: moqxr publishes draft 22 over native QUIC and
+        # WebTransport (the 2026-10-06 sweep against 4b615f4 ran both). repeatability.sh
+        # accepts drafts 18 and 21 only.
+        for transport in native_quic webtransport; do
+            stage_transport=$transport
+            if [[ "$transport" == native_quic ]]; then stage_transport=native; fi
+            stage_id="moqxr_d22_${stage_transport}"
+            run_stage "$stage_id" timeout 180 bash \
+                "$root_dir/tests/e2e/moqxr-matrix.sh" --pair 22 "$transport" \
+                "$root_dir/build/moq-interop-runner" "$publisher_bin" "$fixture"
+        done
     fi
     drafts='[]'
-    for draft in 18 21; do
+    for draft in 18 21 22; do
         command="$audit_bin --draft $draft --format json --docs $root_dir/docs --requirements $root_dir/requirements"
         set +e
         "$audit_bin" --draft "$draft" --format json --docs "$root_dir/docs" \
@@ -140,7 +156,7 @@ if [[ "$actual_revision" != "$expected_revision" ]]; then
     failed=1
 fi
 
-for draft in 18 21; do
+for draft in 18 21 22; do
     if ! jq -e --argjson draft "$draft" '[.drafts[] | select(.draft == $draft)] | length == 1' \
         "$report" >/dev/null; then
         printf 'missing or duplicate draft: %s\n' "$draft" >&2

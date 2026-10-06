@@ -244,8 +244,10 @@ run (above); a later adapter change could pace it as the other 14.
 
 ## Results observed with moqxr 0993cf7
 
-The release audit pins moqxr `0993cf7d537b0d7af56f87f7017b3fc14f39b614`
-(`0.4.1-dev+g0993cf7`). Against it, three-run repeatability passed for draft 18 and
+The release audit pinned moqxr `0993cf7d537b0d7af56f87f7017b3fc14f39b614`
+(`0.4.1-dev+g0993cf7`) until the draft 22 work moved the pin to
+`4b615f4874d67653035642c80a3d454db759859e`, the revision of the draft 22 sweep. Against
+`0993cf7`, three-run repeatability passed for draft 18 and
 draft 21 over WebTransport, and the four-way driven matrix passed (draft 18 native 3,
 WebTransport 5; draft 21 native 3, WebTransport 5; no failures).
 
