@@ -80,7 +80,7 @@ TEST(Draft22Lineage, EveryDraft21SourceRowAndNameExistsAndEveryNameIsClassifiedO
 // Pinned so a change in the delta file is a visible event. Update only with a reviewed delta change.
 //
 // The 8 own scenarios and why:
-//   row-driven (a row naming them changed its obligation):
+//   row-driven (a row naming them is new or changed its obligation):
 //     d22-fetch-bounded-location-range, d22-subscribe-bounded-location-range,
 //     d22-update-subscription-location-range                    D22-3-3-1-MUST-NOT-069
 //     d22-discover-original-publisher-namespaces                D22-4-2-MUST-110

@@ -100,7 +100,7 @@ std::set<std::string> draft21_location_filter_scenarios() {
 }
 
 // The residual: draft 21 scenarios whose expectation is a draft 21 filter fact or which cannot run under
-// wire draft 22. Each has a draft 22 replacement written as an own scenario.
+// wire draft 22. Each is also own by its row and has a draft 22 own scenario (d22-location-filter-end-group-overflow and d22-fill-location-filter-end-group-overflow).
 std::set<std::string> draft22_filter_building_scenarios() {
     return {
         // Sends {u64max,0,1}: StartGroup + EndGroupDelta overflows. Draft 22 cannot encode it, so the probe
