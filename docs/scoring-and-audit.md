@@ -179,7 +179,7 @@ Required stages, all of which must be `pass` for `check` to succeed:
 `moqxr_d22_webtransport`, `audit_d18`, `audit_d21` and `audit_d22`. The draft 18 and 21
 moqxr stages run `tests/e2e/repeatability.sh`; the draft 22 stages run the
 `tests/e2e/moqxr-matrix.sh --pair 22` pair on each transport. There are no Docker stages
-for draft 22: the container image carries no draft 22 peer. The artifact (`release-audit.json`) also stores the source revision,
+for draft 22: the container image carries no draft 22 peer. The moqxr draft 22 stages are smoke tests: each runs one reference scenario and passes when the run finishes with publisher evidence, whatever the verdict; they do not assert that any row passes. The artifact (`release-audit.json`) also stores the source revision,
 the draft source digests, the static gate result for each draft, the external
 publisher version, executable SHA-256 and fixture SHA-256, plus logs, Docker
 run results and the repeat databases. `check` rejects revision drift, digest
