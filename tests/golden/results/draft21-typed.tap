@@ -1,0 +1,6 @@
+TAP version 14
+1..1
+ok 1 - d21-setup-duplicate-unknown-options
+  ---
+  {"draft":21,"failed":0,"not_run":0,"passed":3,"result":"pass","run_id":"<run-id>","scenario_id":"d21-setup-duplicate-unknown-options","scoring_profile":"standards"}
+  ...

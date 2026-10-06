@@ -1,0 +1,10 @@
+TAP version 14
+1..2
+ok 1 - receive-setup-with-duplicate-unknown-options
+  ---
+  {"draft":18,"failed":0,"not_run":0,"passed":1,"result":"pass","run_id":"<run-id>","scenario_id":"receive-setup-with-duplicate-unknown-options","scoring_profile":"standards"}
+  ...
+ok 2 - observe-publisher-setup-options
+  ---
+  {"draft":18,"failed":0,"not_run":0,"passed":1,"result":"pass","run_id":"<run-id>","scenario_id":"observe-publisher-setup-options","scoring_profile":"standards"}
+  ...

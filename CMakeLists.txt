@@ -466,6 +466,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-raw-family-driver-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME raw-family-driver COMMAND moq-interop-raw-family-driver-tests)
+    # Golden result pins for drafts 18 and 21 (MOQ_UPDATE_GOLDEN=1 regenerates tests/golden/results/).
+    add_executable(moq-interop-draft-result-pins-tests tests/integration/draft_result_pins_test.cpp)
+    target_link_libraries(moq-interop-draft-result-pins-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client
+        nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft-result-pins-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-draft-result-pins-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME draft-result-pins COMMAND moq-interop-draft-result-pins-tests)
     add_executable(moq-interop-d22-location-range-live-tests
                    tests/integration/draft22_location_range_live_test.cpp)
     target_link_libraries(moq-interop-d22-location-range-live-tests PRIVATE

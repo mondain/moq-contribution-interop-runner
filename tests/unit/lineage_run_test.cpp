@@ -404,5 +404,69 @@ TEST(LineageRunOwn, FetchExclusionOnTheDraft22Catalog) {
     EXPECT_EQ(outcomes.front().state, requirements::OutcomeState::NotApplicable);
 }
 
+// ---- stamp_scenario_id: evidence of a draft 22 run carries the requested draft 22 ids ----------
+
+TEST(StampScenarioId, IsTheIdentityForDrafts18And21) {
+    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21}) {
+        for (const std::string_view id : {"d21-duplicate-request-goaway", "d22-duplicate-request-goaway",
+                                          "subscribe-namespace-at-publisher", "d21-no-such-scenario", ""}) {
+            EXPECT_EQ(stamp_scenario_id(draft, id), id);
+        }
+    }
+    // Every shared draft 21 implementation id is left alone by a draft 21 run.
+    for (const auto& pair : requirements::lineage_data::kSharedScenarios)
+        EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft21, pair.d21), pair.d21);
+}
+
+TEST(StampScenarioId, MapsEverySharedDraft21ImplementationIdToItsDraft22Id) {
+    const auto& pairs = requirements::lineage_data::kSharedScenarios;
+    ASSERT_EQ(pairs.size(), 307u);
+    for (const auto& pair : pairs) {
+        SCOPED_TRACE(std::string(pair.d21));
+        EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft22, pair.d21), pair.d22);
+        // A draft 22 id is already stamped.
+        EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft22, pair.d22), pair.d22);
+    }
+    EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft22, "d21-duplicate-request-goaway"), "d22-duplicate-request-goaway");
+}
+
+TEST(StampScenarioId, OwnScenariosAndUnscoredProbesPassThroughOnDraft22) {
+    for (const auto id : requirements::lineage_data::kOwnScenarios22)
+        EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft22, id), id);
+    for (const std::string_view probe : {"d22-location-filter-unknown-type", "d22-location-filter-absolute-origin"})
+        EXPECT_EQ(stamp_scenario_id(DraftVersion::Draft22, probe), probe);
+}
+
+TEST(StampScenarioId, AnUnknownDraft21IdOnDraft22IsALogicError) {
+    try {
+        (void)stamp_scenario_id(DraftVersion::Draft22, "d21-no-such-scenario");
+        FAIL() << "expected std::logic_error";
+    } catch (const std::logic_error& error) {
+        EXPECT_NE(std::string(error.what()).find("d21-no-such-scenario"), std::string::npos) << error.what();
+    }
+}
+
+TEST(StampScenarioId, IsInjectiveAndIdempotent) {
+    std::set<std::string> stamped;
+    for (const auto& pair : requirements::lineage_data::kSharedScenarios)
+        EXPECT_TRUE(stamped.insert(stamp_scenario_id(DraftVersion::Draft22, pair.d21)).second)
+            << pair.d21 << " stamps to an id another draft 21 id already stamps to";
+    EXPECT_EQ(stamped.size(), requirements::lineage_data::kSharedScenarios.size());
+    std::vector<std::string_view> ids;
+    for (const auto& pair : requirements::lineage_data::kSharedScenarios) {
+        ids.push_back(pair.d21);
+        ids.push_back(pair.d22);
+    }
+    ids.insert(ids.end(), requirements::lineage_data::kOwnScenarios22.begin(),
+               requirements::lineage_data::kOwnScenarios22.end());
+    ids.insert(ids.end(), {"d22-location-filter-unknown-type", "d22-location-filter-absolute-origin"});
+    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21, DraftVersion::Draft22}) {
+        for (const auto id : ids) {
+            const auto once = stamp_scenario_id(draft, id);
+            EXPECT_EQ(stamp_scenario_id(draft, once), once) << id;
+        }
+    }
+}
+
 }  // namespace
 }  // namespace moq::interop::app
