@@ -120,7 +120,7 @@ have the runner launch your publisher for you, follow the
 ctest --test-dir build -j2 --timeout 600 --output-on-failure
 bash tests/e2e/moqxr-adapter-contract.sh              # adapter mapping, no network
 bash examples/harness/test-adapter.sh                 # example adapter, no network
-build/moq-interop-audit --draft 18                    # static completeness gate (also --draft 21)
+build/moq-interop-audit --draft 18                    # static completeness gate (also --draft 21 and --draft 22)
 ```
 
 The default suite needs `jq`, `openssl` and `curl`. Checks against an external
