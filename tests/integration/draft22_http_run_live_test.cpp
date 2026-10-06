@@ -16,9 +16,15 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <unistd.h>
+
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -38,7 +44,13 @@ std::shared_ptr<const requirements::RequirementCatalog> catalog(unsigned draft) 
 
 class Draft22HttpRunLive : public ::testing::Test {
 protected:
-    void SetUp() override {
+    void SetUp() override { build({}, {}); }
+
+    // (Re)builds the manager and the server as main.cpp wires them, with an optional publisher driver.
+    void build(const std::filesystem::path& driver, const std::filesystem::path& driver_logs) {
+        api_.reset();
+        server_.reset();
+        runs_.reset();
         store_ = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
         // As main.cpp: the draft 22 catalog loads RequireComplete, and the one object serves both.
         auto draft18 = catalog(18);
@@ -50,7 +62,8 @@ protected:
                 .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
                 .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
                 .certificate_path = std::filesystem::path(PICOQUIC_TEST_CERT_DIR) / "cert.pem",
-                .private_key_path = std::filesystem::path(PICOQUIC_TEST_CERT_DIR) / "key.pem"},
+                .private_key_path = std::filesystem::path(PICOQUIC_TEST_CERT_DIR) / "key.pem",
+                .driver_executable = driver, .driver_log_root = driver_logs},
             draft22_);
         http::ServerConfig config;
         config.port = 0;
@@ -197,6 +210,171 @@ TEST_F(Draft22HttpRunLive, UnimplementedDraft22IdIsRefusedLikeDraft21) {
     EXPECT_EQ(draft22->status, 422);
     EXPECT_EQ(Json::parse(draft22->body).at("error").at("code"), Json::parse(draft21->body).at("error").at("code"));
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+// A selection of only FETCH scenarios from a publisher declaring fetch=false: the manager names the requested
+// draft 22 id, and the API answers it as it answers draft 21 (422 scenario_requires_publisher_capability, the
+// message naming the scenario and the capability), before any run exists.
+TEST_F(Draft22HttpRunLive, FetchOnlySelectionWithoutFetchIsRefusedLikeDraft21) {
+    const auto post = [&](unsigned draft, const std::string& id) {
+        auto body = request(draft, {id});
+        body["publisher_capabilities"] = {{"fetch", false}};
+        const auto response = api_->Post("/api/v1/runs", body.dump(), "application/json");
+        EXPECT_TRUE(response);
+        return std::pair{response ? response->status : 0, response ? Json::parse(response->body) : Json{}};
+    };
+    const auto [status21, body21] = post(21, "d21-fetch-accepted");
+    const auto [status22, body22] = post(22, "d22-fetch-accepted");
+    EXPECT_EQ(status22, 422) << body22;
+    EXPECT_EQ(status22, status21);
+    EXPECT_EQ(body22.at("error").at("code"), "scenario_requires_publisher_capability");
+    EXPECT_EQ(body22.at("error").at("code"), body21.at("error").at("code"));
+    const auto message = body22.at("error").at("message").get<std::string>();
+    EXPECT_EQ(message, "Scenario d22-fetch-accepted requires the publisher capability fetch, which this run "
+                       "declares the publisher does not implement.");
+    // The draft 21 message, with the draft 22 id in place of the draft 21 id.
+    auto expected21 = message;
+    expected21.replace(expected21.find("d22-"), 4, "d21-");
+    EXPECT_EQ(body21.at("error").at("message"), expected21);
+    // The manager's own answer behind the response.
+    const auto started = runs_->start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-fetch-accepted"}, 1000ms, app::TrackFixture{{"n"}, "t"}, {.fetch = false}});
+    EXPECT_EQ(started.status, app::RunStartStatus::ScenarioRequiresCapability);
+    EXPECT_EQ(started.scenario, "d22-fetch-accepted");
+    EXPECT_EQ(started.capability, "fetch");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+// The SETUP a native QUIC client sends on the replacement session: PATH and AUTHORITY from the URI it uses.
+d22pub::Bytes client_setup(const std::string& path, const std::string& authority) {
+    d22pub::Bytes options;
+    const auto put = [&](unsigned delta, const std::string& value) {
+        options.push_back(static_cast<std::byte>(delta));
+        options.push_back(static_cast<std::byte>(value.size()));
+        for (const char c : value) options.push_back(static_cast<std::byte>(static_cast<unsigned char>(c)));
+    };
+    put(1, path);
+    put(4, authority);
+    auto setup = d22pub::bytes({0xaf, 0, 0, static_cast<unsigned>(options.size())});
+    setup.insert(setup.end(), options.begin(), options.end());
+    return setup;
+}
+
+// d22-publisher-goaway-alternate-uri (a shared scenario with a replacement session): the second listener the
+// runner opens for the GOAWAY's New Session URI accepts moqt-22, the run's wire draft, and refuses moqt-21, the
+// draft its scenarios execute as. The publisher migrates and the draft 22 row passes.
+TEST_F(Draft22HttpRunLive, ReplacementSessionListenerSpeaksMoqt22) {
+    const auto created = api_->Post("/api/v1/runs", request(22, {"d22-publisher-goaway-alternate-uri"}).dump(),
+                                    "application/json");
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->status, 201) << created->body;
+    const auto body = Json::parse(created->body);
+    EXPECT_EQ(body.at("publisher_endpoint").at("alpn"), "moqt-22");
+    const auto id = body.at("run").at("id").get<std::string>();
+    auto first = d22pub::Client::create(
+        {.port = body.at("publisher_endpoint").at("port").get<std::uint16_t>(), .alpn = d22pub::alpn22()});
+    ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(d22pub::pump_until(*first, [&] { return first->established(); }));
+    ASSERT_TRUE(first->send_stream(2, d22pub::setup(), false));
+    // The runner's SETUP (4 bytes), then the GOAWAY naming the replacement listener.
+    ASSERT_TRUE(d22pub::pump_until(*first, [&] {
+        const auto control = first->stream(3);
+        return control && control->data.size() > 4;
+    }));
+    const auto control = first->stream(3);
+    std::string text;
+    for (const auto byte : control->data) text.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
+    const auto marker = text.find("moqt://127.0.0.1:");
+    ASSERT_NE(marker, std::string::npos) << "no New Session URI in the GOAWAY";
+    const auto port = static_cast<std::uint16_t>(std::stoul(text.substr(marker + 17)));
+    ASSERT_NE(port, 0);
+    ASSERT_NE(text.find("/moq-next", marker), std::string::npos);
+
+    // A draft 21 client cannot open the replacement session of a draft 22 run.
+    {
+        auto wrong = d22pub::Client::create({.port = port, .alpn = d22pub::bytes({'m', 'o', 'q', 't', '-', '2', '1'})});
+        ASSERT_NE(wrong, nullptr);
+        EXPECT_FALSE(d22pub::pump_until(*wrong, [&] { first->pump(); return wrong->established(); }, 500ms))
+            << "the replacement listener accepted moqt-21";
+    }
+    auto second = d22pub::Client::create({.port = port, .alpn = d22pub::alpn22()});
+    ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(d22pub::pump_until(*second, [&] { first->pump(); return second->established(); }))
+        << "the replacement listener refused moqt-22";
+    ASSERT_TRUE(second->send_stream(2, client_setup("/moq-next", "127.0.0.1:" + std::to_string(port)), false));
+    ASSERT_TRUE(d22pub::pump_until(*first, [&] {
+        second->pump();
+        return store_->load(id).state == storage::RunState::Finalized;
+    }, 6s));
+    const auto run = store_->load(id);
+    EXPECT_FALSE(std::any_of(run.events.begin(), run.events.end(),
+                             [](const auto& event) { return event.kind == "harness_error"; }));
+    // The replacement session's events are stored under the draft 22 id.
+    const auto replacement = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "raw_probe_replacement_event";
+    });
+    ASSERT_NE(replacement, run.events.end());
+    EXPECT_EQ(replacement->scenario_id, "d22-publisher-goaway-alternate-uri");
+    expect_draft22_identity(run);
+    expect_audited(run);
+    const auto stored = get("/api/v1/runs/" + id).at("run");
+    EXPECT_TRUE(std::any_of(stored.at("outcomes").begin(), stored.at("outcomes").end(), [](const Json& outcome) {
+        return outcome.at("requirement_id") == "D22-9-2-MUST-340" && outcome.at("state") == "pass";
+    }));
+}
+
+// A driven draft 22 run through POST /api/v1/runs: the driver executable is started once per context with a
+// DriverRequest carrying draft 22 and the requested draft 22 scenario id. The test driver connects with moqt-22
+// only for such a request, so the draft 22 row passing shows the contract end to end.
+TEST_F(Draft22HttpRunLive, DrivenRunHandsTheDriverDraft22AndTheRequestedIds) {
+    const auto logs = std::filesystem::temp_directory_path() /
+        ("moq-d22-http-driven-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(logs);
+    std::filesystem::create_directories(logs);
+    build(PICOQUIC_FAMILY_DRIVER_PATH, logs);
+    const auto health = get("/healthz");
+    EXPECT_TRUE(std::any_of(health.at("executable_profiles").begin(), health.at("executable_profiles").end(),
+                            [](const Json& profile) {
+                                return profile.at("draft") == 22 && profile.at("mode") == "driven" &&
+                                       profile.at("configured").get<bool>();
+                            }));
+    const std::vector<std::string> ids = {"d22-duplicate-request-goaway", "d22-goaway-on-distinct-request-streams"};
+    auto body = request(22, ids);
+    body["mode"] = "driven";
+    const auto created = api_->Post("/api/v1/runs", body.dump(), "application/json");
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->status, 201) << created->body;
+    const auto response = Json::parse(created->body);
+    EXPECT_EQ(response.at("run").at("config").at("mode"), "driven");
+    EXPECT_EQ(response.at("publisher_endpoint").at("alpn"), "moqt-22");
+    const auto id = response.at("run").at("id").get<std::string>();
+    const auto run = d22pub::finalized(*store_, id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(std::any_of(run.events.begin(), run.events.end(),
+                             [](const auto& event) { return event.kind == "harness_error"; }));
+    std::vector<std::string> driven;
+    for (const auto& event : run.events) {
+        if (event.kind != "publisher_process") continue;
+        ASSERT_TRUE(event.scenario_id);
+        driven.push_back(*event.scenario_id);
+        const auto result = Json::parse(event.detail);
+        const auto directory =
+            std::filesystem::path(result.at("stdout_log").at("path").get<std::string>()).parent_path();
+        std::ifstream input(directory / "request.json");
+        ASSERT_TRUE(input.good()) << directory;
+        const auto driver_request = Json::parse(input);
+        EXPECT_EQ(driver_request.at("draft"), 22);
+        EXPECT_EQ(driver_request.at("scenario_id"), *event.scenario_id);
+    }
+    EXPECT_EQ(driven, ids);
+    expect_draft22_identity(run);
+    expect_audited(run);
+    const auto stored = get("/api/v1/runs/" + id).at("run");
+    EXPECT_TRUE(std::any_of(stored.at("outcomes").begin(), stored.at("outcomes").end(), [](const Json& outcome) {
+        return outcome.at("requirement_id") == "D22-9-2-MUST-339" && outcome.at("state") == "pass";
+    }));
+    build({}, {});
+    std::filesystem::remove_all(logs);
 }
 
 }  // namespace

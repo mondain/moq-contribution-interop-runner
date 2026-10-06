@@ -3,6 +3,7 @@
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/storage/run_store.h"
 
@@ -83,6 +84,9 @@ int publisher_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
     }
     return 0;
 }
+
+// Whether the runner accepted the last publish_setup's WebTransport CONNECT.
+bool last_connect_accepted = false;
 
 bool publish_setup(unsigned port, unsigned draft,
                    const std::shared_ptr<storage::SqliteRunStore>& store,
@@ -396,7 +400,7 @@ bool publish_setup(unsigned port, unsigned draft,
                 }
                 for (const auto& event : run.events) {
                     if (event.kind == "peer_setup_received" &&
-                        (draft == 21 || response_sent) && !reject_code &&
+                        (draft != 18 || response_sent) && !reject_code &&
                         expected_requirement_id.empty())
                         success = true;
                 }
@@ -415,6 +419,7 @@ bool publish_setup(unsigned port, unsigned draft,
     if (h3 != nullptr) h3zero_callback_delete_context(cnx, h3);
     picoquic_free(quic);
     ::close(socket_fd);
+    last_connect_accepted = state.accepted;
     if (!success) {
         const auto run = store->load(id);
         std::cerr << "draft=" << draft << " accepted=" << state.accepted
@@ -803,6 +808,112 @@ TEST(WebTransportRunApi, AllocatesExactPublisherUrlForBothDrafts) {
             EXPECT_NE(finding.code, "missing_evaluator_evidence")
                 << finding.requirement_id << " " << finding.detail;
         }
+    }
+}
+
+// A draft 22 run over WebTransport (Draft22Wt16), wired as main.cpp wires it: the endpoint is h3 with the
+// WebTransport protocol moqt-22, a publisher offering moqt-22 in its CONNECT completes the session, one offering
+// moqt-21 does not, and the stored run is a draft 22 run with draft 22 evidence.
+TEST(WebTransportRunApi, Draft22RunNegotiatesMoqt22OverH3) {
+    const app::BuildInfo build{"test", "test", {}};
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", build);
+    auto draft18 = catalog(18);
+    auto draft21 = catalog(21);
+    auto draft22 = catalog(22);
+    auto runs = std::make_shared<app::NativeRunManager>(draft18, draft21, store,
+        app::NativeRunManagerConfig{
+            .bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
+            .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
+            .certificate_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "cert.pem",
+            .private_key_path = std::filesystem::path{PICOQUIC_TEST_CERT_DIR} / "key.pem"},
+        draft22);
+    http::ServerConfig config;
+    config.port = 0;
+    config.draft22_catalog = draft22;
+    http::HttpServer server(draft18, draft21, store, build, config, runs);
+    ASSERT_TRUE(server.start());
+    httplib::Client api("127.0.0.1", server.port());
+    const auto start = [&](unsigned timeout_ms) {
+        const Json request{{"draft", 22}, {"transport", "webtransport"},
+                           {"mode", "observed"},
+                           {"scenarios", Json::array({"d22-publisher-request-stream-placement"})},
+                           {"timeout_ms", timeout_ms},
+                           {"track", {{"namespace_hex", Json::array({"6e"})},
+                                      {"name_hex", "78"}}}};
+        const auto response = api.Post("/api/v1/runs", request.dump(), "application/json");
+        EXPECT_TRUE(response);
+        EXPECT_EQ(response ? response->status : 0, 201) << (response ? response->body : "");
+        return response ? Json::parse(response->body) : Json{};
+    };
+    const auto stop = [&](const std::string& id) {
+        const auto stopped = api.Post("/api/v1/runs/" + id + "/stop", "", "application/json");
+        ASSERT_TRUE(stopped);
+        if (stopped->status == 409) {
+            EXPECT_EQ(store->load(id).state, storage::RunState::Finalized);
+        } else {
+            EXPECT_EQ(stopped->status, 200) << stopped->body;
+        }
+    };
+
+    {
+        const auto body = start(1000);
+        ASSERT_FALSE(body.empty());
+        const auto& endpoint = body.at("publisher_endpoint");
+        EXPECT_EQ(endpoint.at("alpn"), "h3");
+        EXPECT_EQ(endpoint.at("protocol"), "moqt-22");
+        EXPECT_EQ(endpoint.at("path"), "/moq");
+        const auto port = endpoint.at("port").get<unsigned>();
+        EXPECT_EQ(endpoint.at("url"), "https://127.0.0.1:" + std::to_string(port) + "/moq");
+        EXPECT_EQ(body.at("run").at("config").at("draft"), 22);
+        EXPECT_EQ(body.at("run").at("config").at("transport"), "webtransport");
+        const auto id = body.at("run").at("id").get<std::string>();
+        EXPECT_TRUE(publish_setup(port, 22, store, id));
+        EXPECT_TRUE(last_connect_accepted);
+        stop(id);
+        const auto record = store->load(id);
+        EXPECT_EQ(record.config.draft, app::DraftVersion::Draft22);
+        EXPECT_EQ(record.config.transport, app::TransportKind::WebTransport);
+        std::size_t stamped = 0;
+        for (const auto& event : record.events) {
+            if (!event.scenario_id || event.scenario_id->empty()) continue;
+            ++stamped;
+            EXPECT_TRUE(event.scenario_id->starts_with("d22-")) << event.kind << " " << *event.scenario_id;
+        }
+        EXPECT_GT(stamped, 0u);
+        const std::array records{record};
+        const auto audit = requirements::audit_execution(
+            *draft22, requirements::draft22_executable_bindings(), records);
+        EXPECT_TRUE(audit.consistent());
+        for (const auto& finding : audit.findings)
+            ADD_FAILURE() << finding.code << " " << finding.requirement_id << " " << finding.detail;
+        // The run is reported like any WebTransport run: completeness counts it under draft 22's webtransport.
+        const auto completeness = api.Get("/results/completeness.json");
+        ASSERT_TRUE(completeness);
+        ASSERT_EQ(completeness->status, 200);
+        const auto summary = Json::parse(completeness->body);
+        const auto entry = std::find_if(summary.at("drafts").begin(), summary.at("drafts").end(),
+                                        [](const Json& value) { return value.at("draft") == 22; });
+        ASSERT_NE(entry, summary.at("drafts").end());
+        const auto transport = std::find_if(entry->at("transports").begin(), entry->at("transports").end(),
+                                            [](const Json& value) { return value.at("transport") == "webtransport"; });
+        ASSERT_NE(transport, entry->at("transports").end());
+        EXPECT_EQ(transport->at("run_count"), 1);
+        EXPECT_TRUE(transport->at("execution_consistent")) << transport->at("execution_findings").dump();
+    }
+
+    // A publisher offering moqt-21 never gets a session on a draft 22 run: its CONNECT is refused.
+    {
+        const auto body = start(1000);
+        ASSERT_FALSE(body.empty());
+        const auto id = body.at("run").at("id").get<std::string>();
+        const auto port = body.at("publisher_endpoint").at("port").get<unsigned>();
+        EXPECT_FALSE(publish_setup(port, 21, store, id));
+        EXPECT_FALSE(last_connect_accepted) << "the listener accepted a CONNECT offering moqt-21";
+        const auto record = store->load(id);
+        EXPECT_FALSE(std::any_of(record.events.begin(), record.events.end(), [](const auto& event) {
+            return event.kind == "peer_setup_received";
+        }));
+        stop(id);
     }
 }
 

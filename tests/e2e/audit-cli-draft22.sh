@@ -12,6 +12,12 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 test_dir=$(mktemp -d /tmp/moq-interop-audit22.XXXXXX)
 runner_pid=
 cleanup() {
+    local status=$?
+    # A failure after the runner started shows its log.
+    if [[ "$status" -ne 0 && -s "$test_dir/runner.log" ]]; then
+        printf 'runner.log:\n' >&2
+        sed -n '1,120p' "$test_dir/runner.log" >&2
+    fi
     if [[ -n "$runner_pid" ]]; then
         kill "$runner_pid" 2>/dev/null || true
         wait "$runner_pid" 2>/dev/null || true
@@ -70,14 +76,16 @@ openssl req -x509 -newkey rsa:2048 -nodes \
     --tls-cert "$test_dir/cert.pem" --tls-key "$test_dir/key.pem" \
     >"$test_dir/runner.log" 2>&1 &
 runner_pid=$!
+ready=
 for attempt in {1..50}; do
-    if curl --fail --silent --output /dev/null "http://127.0.0.1:$http_port/healthz"; then break; fi
+    if curl --fail --silent --output /dev/null "http://127.0.0.1:$http_port/healthz"; then ready=1; break; fi
     if ! kill -0 "$runner_pid" 2>/dev/null; then
-        sed -n '1,120p' "$test_dir/runner.log" >&2
+        echo "runner exited before answering /healthz" >&2
         exit 1
     fi
     sleep 0.1
 done
+[[ -n "$ready" ]] || { echo "runner did not answer /healthz on port $http_port within 5 s" >&2; exit 1; }
 curl --fail --silent --show-error "http://127.0.0.1:$http_port/healthz" |
     jq -e '.supported_drafts == [18, 21, 22] and
         ([.executable_profiles[] | select(.draft == 22 and .mode == "observed" and .configured)] | length) > 0' \

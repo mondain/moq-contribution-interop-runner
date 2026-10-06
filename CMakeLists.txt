@@ -534,7 +534,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-execution-audit httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-d22-http-run-live-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
+        PICOQUIC_FAMILY_DRIVER_PATH="$<TARGET_FILE:moq-interop-raw-family-driver-peer>")
+    add_dependencies(moq-interop-d22-http-run-live-tests moq-interop-raw-family-driver-peer)
     target_compile_options(moq-interop-d22-http-run-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-http-run-live COMMAND moq-interop-d22-http-run-live-tests)
@@ -1038,13 +1040,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-smoke.sh"
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>")
-    set_tests_properties(audit-cli-smoke PROPERTIES RESOURCE_LOCK "audit-cli-port")
     add_test(NAME audit-cli-draft22
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-draft22.sh"
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>"
                      "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
-    set_tests_properties(audit-cli-draft22 PROPERTIES RESOURCE_LOCK "audit-cli-port")
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
                      --check-only)
@@ -1094,6 +1094,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     target_link_libraries(moq-interop-webtransport-run-api-tests PRIVATE
                           moq-interop-http moq-interop-execution-audit
+                          moq-interop-draft22-evaluators
                           httplib::httplib
                           nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME webtransport-run-api COMMAND moq-interop-webtransport-run-api-tests)
