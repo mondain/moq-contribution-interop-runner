@@ -151,6 +151,25 @@ TEST_F(Draft22NamespaceDiscovery, ProbeAsksWithEmptyThenMatchingAndNonmatchingPr
     for (const auto& write : p.writes) EXPECT_FALSE(write.fin);
 }
 
+// The prefixes are cut from the first namespace field: a fixture without one is refused (the run manager turns
+// the std::invalid_argument into an invalid configuration), never dereferenced.
+TEST_F(Draft22NamespaceDiscovery, AFixtureWithoutANamespaceFieldIsRefused) {
+    EXPECT_THROW(draft22_namespace_discovery_probe(1000ms, {}, b({'t'})), std::invalid_argument);
+    EXPECT_THROW(draft22_namespace_discovery_probe(1000ms, {}, {}), std::invalid_argument);
+    EXPECT_NO_THROW(draft22_namespace_discovery_probe(1000ms, {b({'n'})}, {}));
+}
+
+// A transcript whose SUBSCRIBE names an empty namespace was never this probe's: no verdict, no exception.
+TEST_F(Draft22NamespaceDiscovery, ASubscribeWithAnEmptyNamespaceGivesNoVerdict) {
+    auto t = exchange({});
+    // SUBSCRIBE (0x3), Request ID 1, no namespace field, track t, FORWARD=0.
+    t.writes[0].write.bytes = b({3, 0, 7, 1, 0, 1, 't', 1, 0x10, 0});
+    t.writes[0].accepted = t.writes[0].write.bytes.size();
+    std::optional<bool> result;
+    EXPECT_NO_THROW(result = verdict(t));
+    EXPECT_EQ(result, std::nullopt);
+}
+
 TEST(Draft22NamespaceDiscoveryWire, ProbeIsBuiltOnTheDraft22WireOnly) {
     const ScopedWireDraft wire(21);
     EXPECT_THROW(probe(), std::logic_error);

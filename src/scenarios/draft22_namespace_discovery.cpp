@@ -55,6 +55,8 @@ Bytes subscribe_namespace(std::uint64_t id, const Namespace& prefix) {
     return frame(kSubscribeNamespace, body);
 }
 
+// Both prefixes need a namespace field: `fixture` always has one here (build and the evaluator refuse a fixture
+// without).
 Namespace matching_prefix(const Fixture& fixture) { return {fixture.ns.front()}; }
 
 Namespace nonmatching_prefix(const Fixture& fixture) {
@@ -212,6 +214,10 @@ RawProbeDefinition build(std::chrono::milliseconds deadline, const Fixture& fixt
     require_draft22_wire("draft 22 namespace discovery");
     if (deadline.count() <= 0 || !fetch_first_object_fixture_valid(fixture.ns, fixture.name))
         throw std::invalid_argument("invalid draft 22 namespace discovery fixture or deadline");
+    // The matching and non-matching prefixes are cut from the first namespace field: a fixture with no field
+    // cannot carry this probe (the run refuses it as an invalid configuration).
+    if (fixture.ns.empty())
+        throw std::invalid_argument("draft 22 namespace discovery needs a track namespace with at least one field");
     RawProbeDefinition definition;
     definition.id = std::string(kDraft22DiscoverNamespaces);
     definition.setup_bytes = setup_message();
@@ -255,7 +261,8 @@ std::optional<bool> evaluate_draft22_namespace_discovery(const RawProbeTranscrip
     // The stimulus is rebuilt on the draft 22 wire; on any other wire nothing is judged.
     if (current_wire_draft() != 22 || t.writes.empty() || t.harness_failed) return std::nullopt;
     const auto fixture = recover_fixture(t.writes.front().write.bytes, kSubscribe, request_id(0));
-    if (!fixture) return std::nullopt;
+    // A recovered fixture with no namespace field was never this probe's (build refuses it): nothing is judged.
+    if (!fixture || fixture->ns.empty()) return std::nullopt;
     const auto expected = build(kRebuildDeadline, *fixture);
     // The probe settles on its evidence; a context that timed out is judged on what it holds.
     if (const auto proven = prove(t, expected, true)) {

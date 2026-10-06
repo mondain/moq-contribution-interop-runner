@@ -1402,5 +1402,87 @@ TEST(NativeRunManagerDraft22Identity, AllSkippedSharedSelectionNamesTheRequested
     }
     EXPECT_EQ(store->list({10,0}).total,0u);
 }
+// Degenerate track fixtures: what the API's fixture parser can hand the manager (an empty namespace, an empty
+// track name), the bounds valid_fixture refuses (33 fields, a field or name over 4096 bytes, an empty field),
+// and the largest fixture it accepts. Each name says which.
+std::vector<std::pair<std::string,app::TrackFixture>> degenerate_fixtures() {
+    return {
+        {"empty namespace",app::TrackFixture{{},"t"}},
+        {"empty namespace and name",app::TrackFixture{{},""}},
+        {"empty name",app::TrackFixture{{"n"},""}},
+        {"empty field",app::TrackFixture{{""},"t"}},
+        {"33 fields",app::TrackFixture{std::vector<std::string>(33,"n"),"t"}},
+        {"field over 4096 bytes",app::TrackFixture{{std::string(4097,'n')},"t"}},
+        {"name over 4096 bytes",app::TrackFixture{{"n"},std::string(4097,'t')}},
+        {"largest accepted",app::TrackFixture{std::vector<std::string>(32,std::string(120,'n')),std::string(256,'t')}},
+    };
+}
+
+// Fills both of lineage_manager's run slots, so every selection that passes validation answers PortExhausted:
+// start() then builds every probe (where a fixture could crash it) but binds and stores nothing more.
+std::vector<app::RunId> fill_run_slots(app::NativeRunManager& manager) {
+    std::vector<app::RunId> blockers;
+    for (unsigned index = 0; index < 2; ++index) {
+        const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+            app::RunMode::Observed,{"d21-duplicate-request-goaway"},60000ms,app::TrackFixture{{"n"},"t"}});
+        EXPECT_EQ(started.status,app::RunStartStatus::Started);
+        blockers.push_back(started.id);
+    }
+    return blockers;
+}
+
+// No fixture crashes an own draft 22 probe (or an unscored one): each answers InvalidConfig before anything is
+// bound or stored, or passes validation. An own probe needs a fixture fetch_first_object_fixture_valid accepts;
+// the namespace discovery probe also needs a namespace field (its prefixes are cut from the first one).
+TEST(NativeRunManagerDraft22Fixtures, OwnProbesRefuseFixturesTheyCannotBuildInsteadOfCrashing) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto blockers=fill_run_slots(manager);
+    std::vector<std::string_view> ids;
+    for (const auto& traits : app::kOwnScenarioTraits22) ids.push_back(traits.id);
+    for (const auto& traits : app::kUnscoredProbeTraits22) ids.push_back(traits.id);
+    ASSERT_EQ(ids.size(),10u);
+    for (const auto id : ids) {
+        for (const auto& [name,fixture] : degenerate_fixtures()) {
+            SCOPED_TRACE(std::string(id)+" / "+name);
+            const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(id)},1000ms,fixture});
+            const bool out_of_bounds=name=="empty field" || name=="33 fields" || name.find("over 4096")!=std::string::npos;
+            const bool discovery_without_prefix=id==std::string_view("d22-discover-original-publisher-namespaces") &&
+                fixture.namespace_fields.empty();
+            if (out_of_bounds || discovery_without_prefix)
+                EXPECT_EQ(started.status,app::RunStartStatus::InvalidConfig);
+            else
+                EXPECT_EQ(started.status,app::RunStartStatus::PortExhausted) << "the fixture is buildable";
+        }
+    }
+    EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
+    for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
+}
+
+// A shared draft 22 scenario runs its draft 21 implementation, so it answers every degenerate fixture exactly
+// as that draft 21 scenario does (and neither crashes).
+TEST(NativeRunManagerDraft22Fixtures, SharedScenariosAnswerDegenerateFixturesLikeTheirDraft21Implementations) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto blockers=fill_run_slots(manager);
+    std::size_t compared=0;
+    for (const auto id : app::executable_scenarios(22)) {
+        const auto implementation=app::implementation_scenario_id(id);
+        if (!implementation) continue;
+        for (const auto& [name,fixture] : degenerate_fixtures()) {
+            SCOPED_TRACE(std::string(id)+" / "+name);
+            const auto draft21=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(*implementation)},1000ms,fixture});
+            const auto draft22=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(id)},1000ms,fixture});
+            EXPECT_EQ(draft22.status,draft21.status);
+            ++compared;
+        }
+    }
+    EXPECT_GT(compared,0u);
+    EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
+    for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
+}
 }
 }
