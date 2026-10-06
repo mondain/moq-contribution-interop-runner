@@ -52,6 +52,8 @@ out=$(run_adapter)
 # Refusals (exit 64, publisher never started).
 make_request 16 native_quic moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000
 expect_refused 'draft 16 is not a runner draft'
+make_request 22 native_quic moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000
+expect_refused 'draft 22 is a runner draft that moq5 does not speak'
 make_request 18 native_quic https://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000
 expect_refused 'native QUIC with an https endpoint'
 make_request 18 webtransport moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000

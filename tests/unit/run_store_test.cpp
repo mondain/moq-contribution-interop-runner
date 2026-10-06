@@ -585,8 +585,7 @@ TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
 }
 
 TEST(RunStoreTest, RoundTripsDraft22AndRejectsOutOfRangeStoredDrafts) {
-    // Draft 22 is not runnable yet, but every schema version 4 database (new or migrated)
-    // stores it; this one is new.
+    // Every schema version 4 database (new or migrated) stores draft 22 runs; this one is new.
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());
     auto config = sample_config();

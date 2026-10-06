@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft22.err"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -92,6 +92,16 @@ if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
     printf 'unsupported draft unexpectedly accepted\n' >&2
     exit 1
 fi
+# Draft 22 is in the driver contract, but moqxr does not speak it: the adapter refuses (exit 64) before
+# starting the publisher.
+make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+set +e
+MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft22.err"
+status=$?
+set -e
+[[ "$status" -eq 64 ]] || { printf 'draft 22 request not refused (status %s)\n' "$status" >&2; exit 1; }
+grep -q 'moqxr adapter: unsupported or malformed request' "$test_dir/draft22.err"
 make_request 18 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem" \
     "https://127.0.0.1:4443/moq"
 if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \

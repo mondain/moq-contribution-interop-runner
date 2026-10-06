@@ -361,8 +361,8 @@ protected:
     std::unique_ptr<httplib::Client> client_;
 };
 
-// The draft 22 catalog is complete since D3; draft 22 stays not runnable until D4.
-TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownCompleteAndNotRunnable) {
+// The draft 22 catalog is complete since D3 and draft 22 is runnable since D4.
+TEST_F(HttpApiDraft22Test, ListsDraft22AsCompleteAndRunnable) {
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 3u);
     EXPECT_EQ(drafts.at("drafts").at(0).at("draft"), 18);
@@ -370,11 +370,11 @@ TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownCompleteAndNotRunnable) {
     EXPECT_EQ(drafts.at("drafts").at(1).at("draft"), 21);
     EXPECT_TRUE(drafts.at("drafts").at(1).at("runnable"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("draft"), 22);
-    EXPECT_FALSE(drafts.at("drafts").at(2).at("runnable"));
+    EXPECT_TRUE(drafts.at("drafts").at(2).at("runnable"));
     EXPECT_TRUE(drafts.at("drafts").at(2).at("complete"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("requirement_count"), 613);
-    // With the draft 22 catalog configured, healthz lists draft 22 and its profiles (runs stay refused
-    // by the draft_not_runnable gate until runnable(Draft22) flips).
+    // With the draft 22 catalog configured, healthz lists draft 22 and its profiles: the API accepts draft 22
+    // runs exactly when it lists the draft.
     const auto health = get_json("/healthz");
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21, 22}));
     EXPECT_TRUE(std::any_of(health.at("executable_profiles").begin(), health.at("executable_profiles").end(),
@@ -455,20 +455,40 @@ TEST(HttpServerConfigTest, RejectsADraft22CatalogThatIsNotDraft22) {
                  std::invalid_argument);
 }
 
-TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
+// With the draft 22 catalog, a draft 22 run request is validated like a draft 18 or 21 one: an id the draft
+// cannot execute is the same 422, a valid selection reaches the run manager (none here: 503, as for 18/21).
+TEST_F(HttpApiDraft22Test, Draft22RunsAreValidatedLikeDraft18And21Runs) {
     const auto post = [&](const Json& request) {
         auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
         EXPECT_TRUE(response);
         return response;
     };
-    // Even a nonsense scenario list gets the draft error, not a scenario error.
-    const auto response = post({{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
-                                {"scenarios", Json::array({"no-such-scenario"})}, {"timeout_ms", 1000}});
-    ASSERT_TRUE(response);
-    EXPECT_EQ(response->status, 422);
-    const auto error = Json::parse(response->body).at("error");
-    EXPECT_EQ(error.at("code"), "draft_not_runnable");
-    EXPECT_EQ(error.at("message"), "Draft 22 is not runnable through the API yet.");
+    const auto request = [](unsigned draft, const std::string& id) {
+        return Json{{"draft", draft}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", Json::array({"6e"})}, {"name_hex", "74"}}}};
+    };
+    for (const auto& [draft, id] : std::vector<std::pair<unsigned, std::string>>{
+             {18, "no-such-scenario"}, {21, "d21-no-such-scenario"}, {22, "d22-no-such-scenario"},
+             {22, "d21-publisher-request-stream-placement"}}) {
+        SCOPED_TRACE(id);
+        const auto response = post(request(draft, id));
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 422) << response->body;
+        const auto error = Json::parse(response->body).at("error");
+        EXPECT_EQ(error.at("code"), "unsupported_run_config");
+        EXPECT_EQ(error.at("message"), "Scenario '" + id + "' is not an executable scenario for draft " +
+                                           std::to_string(draft) + ".");
+    }
+    for (const auto& [draft, id] : std::vector<std::pair<unsigned, std::string>>{
+             {21, "d21-publisher-request-stream-placement"}, {22, "d22-publisher-request-stream-placement"},
+             {22, "d22-request-stream-before-peer-setup"}}) {
+        SCOPED_TRACE(id);
+        const auto response = post(request(draft, id));
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 503) << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "publisher_listener_unavailable");
+    }
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
     // Draft 23 is still a malformed run configuration.
     const auto invalid = post({{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},
@@ -478,6 +498,8 @@ TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
     EXPECT_EQ(Json::parse(invalid->body).at("error").at("code"), "invalid_run_config");
 }
 
+// A runner without the draft 22 catalog does not list draft 22 and refuses its runs before scenario validation:
+// it could neither score nor present them.
 TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2u);
@@ -485,6 +507,7 @@ TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
     const auto error = get_json("/api/v1/requirements?draft=22", 400);
     EXPECT_EQ(error.at("error").at("code"), "unsupported_draft");
     EXPECT_EQ(error.at("error").at("message"), "draft must be 18 or 21.");
+    EXPECT_EQ(get_json("/healthz").at("supported_drafts"), Json::array({18, 21}));
     const auto response = client_->Post(
         "/api/v1/runs",
         Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
@@ -492,7 +515,10 @@ TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
         "application/json");
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 422);
-    EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "draft_not_runnable");
+    const auto refused = Json::parse(response->body).at("error");
+    EXPECT_EQ(refused.at("code"), "draft_not_runnable");
+    EXPECT_EQ(refused.at("message"), "Draft 22 is not runnable on this runner.");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
 }
 
 TEST_F(HttpApiTest, ValidatesPublisherCapabilityDeclarations) {
@@ -1277,8 +1303,34 @@ TEST_F(HttpApiDraft22Test, Draft22FetchNotifyScenarioPreflightsItsFixture) {
     EXPECT_EQ(Json::parse(invalid->body).at("error").at("message"), "Invalid FETCH track namespace or name.");
     const auto valid = client_->Post("/api/v1/runs", request(Json::array({"6e"}), "74").dump(), "application/json");
     ASSERT_TRUE(valid);
-    EXPECT_EQ(valid->status, 422) << valid->body;
-    EXPECT_EQ(Json::parse(valid->body).at("error").at("code"), "draft_not_runnable");
+    EXPECT_EQ(valid->status, 503) << valid->body;
+    EXPECT_EQ(Json::parse(valid->body).at("error").at("code"), "publisher_listener_unavailable");
+}
+
+// Every own draft 22 scenario builds its requests from the track fixture and refuses the fixtures the FETCH
+// check refuses, so the HTTP preflight names the fixture instead of answering a generic invalid configuration.
+TEST_F(HttpApiDraft22Test, OwnDraft22ScenariosPreflightTheirFixture) {
+    const auto request = [](const std::string& id, Json fields, const char* name) {
+        return Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", std::move(fields)}, {"name_hex", name}}}};
+    };
+    std::size_t own = 0;
+    for (const auto id : app::executable_scenarios(22)) {
+        if (!app::own_scenario_22(id)) continue;
+        ++own;
+        SCOPED_TRACE(std::string(id));
+        const auto invalid = client_->Post("/api/v1/runs", request(std::string(id), Json::array({"2e"}), "78").dump(),
+                                           "application/json");
+        ASSERT_TRUE(invalid);
+        EXPECT_EQ(invalid->status, 400) << invalid->body;
+        EXPECT_EQ(Json::parse(invalid->body).at("error").at("message"), "Invalid FETCH track namespace or name.");
+        const auto valid = client_->Post("/api/v1/runs", request(std::string(id), Json::array({"6e"}), "74").dump(),
+                                         "application/json");
+        ASSERT_TRUE(valid);
+        EXPECT_EQ(valid->status, 503) << valid->body;
+    }
+    EXPECT_EQ(own, 8u);
 }
 
 }  // namespace moq::interop::http

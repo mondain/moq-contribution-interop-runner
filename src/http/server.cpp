@@ -234,6 +234,9 @@ app::RunConfig parse_run_config(const httplib::Request& request,
                 app::object_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 (draft == 21 && id == "d21-publish-state-notify-on-fetch") ||
                 (draft == 22 && app::implementation_scenario_id(id) == "d21-publish-state-notify-on-fetch") ||
+                // Every own draft 22 scenario builds its requests from the fixture and refuses the fixtures
+                // this check refuses (draft22_*.cpp build()), so name the fixture instead of a generic 400.
+                (draft == 22 && app::own_scenario_22(id).has_value()) ||
                 app::gap_raw_scenario(static_cast<unsigned>(draft),id) ||
                 app::subscriber_notify_scenario(static_cast<unsigned>(draft),id) ||
                 app::established_update_scenario(static_cast<unsigned>(draft),id);
@@ -694,13 +697,14 @@ public:
                         append_profile(21, profile.definition.id, "webtransport");
                     }
                 }
-                // Draft 22, only with its catalog configured: every executable draft 22 scenario
-                // (executable_scenarios(22): the lineage-shared ids with a draft 21 implementation, then the
-                // implemented own ids). A shared id is listed on the transports its draft 21 implementation's
+                // Draft 22, only when this server accepts draft 22 runs (its catalog is configured): every
+                // executable draft 22 scenario (executable_scenarios(22): the lineage-shared ids with a draft 21
+                // implementation, then the implemented own ids). A shared id is listed on the transports its draft 21 implementation's
                 // profiles above list (same family, same transport limits); an own scenario is a raw probe on
                 // both transports. Unscored probes are executable by id but are not listed (no catalog row
-                // names them).
-                if (config.draft22_catalog) {
+                // names them). `configured` says whether this runner's manager executes the profile now,
+                // as for drafts 18 and 21.
+                if (accepts_runs(app::DraftVersion::Draft22)) {
                     std::map<std::string, std::vector<std::string>> draft21_transports;
                     for (const auto& profile : profiles) {
                         if (profile.at("draft") != 21) continue;
@@ -736,9 +740,7 @@ public:
                 json_response(response, {{"schema_version", 1},
                                          {"status", "ok"},
                                          {"database", {{"ready", true}}},
-                                         {"supported_drafts", config.draft22_catalog
-                                                                  ? Json::array({18, 21, 22})
-                                                                  : Json::array({18, 21})},
+                                         {"supported_drafts", supported_drafts()},
                                          {"executable_profiles", std::move(profiles)},
                                          {"publisher_capability_defaults",
                                           {{"fetch", config.default_publisher_capabilities.fetch}}},
@@ -793,10 +795,10 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities);
-                if (!app::runnable(requested.draft))
+                if (!accepts_runs(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
                         "Draft " + std::to_string(app::draft_number(requested.draft)) +
-                        " is not runnable through the API yet."};
+                        " is not runnable on this runner."};
                 {
                     // Say which part of the selection is unsupported, and why, so the caller
                     // does not have to bisect a long scenario list.
@@ -1002,6 +1004,26 @@ public:
                 error_response(response, {404, "not_found", "The requested resource was not found."});
             }
         });
+    }
+
+    // Whether POST /api/v1/runs takes runs for `draft`: it must be runnable and this server must have its
+    // catalog to present and score them (a runner without the draft 22 catalog refuses draft 22 runs).
+    // /healthz lists exactly these drafts as supported_drafts.
+    bool accepts_runs(app::DraftVersion draft) const {
+        if (!app::runnable(draft)) return false;
+        switch (draft) {
+            case app::DraftVersion::Draft18: return true;
+            case app::DraftVersion::Draft21: return true;
+            case app::DraftVersion::Draft22: return config.draft22_catalog != nullptr;
+        }
+        return false;
+    }
+
+    Json supported_drafts() const {
+        Json drafts = Json::array();
+        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22})
+            if (accepts_runs(draft)) drafts.push_back(app::draft_number(draft));
+        return drafts;
     }
 
     // The catalog a stored run is presented with, chosen by the run's (wire) draft. A stored draft 22 run on a

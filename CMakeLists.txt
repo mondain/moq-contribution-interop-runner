@@ -518,6 +518,26 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-pre-setup-request-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-pre-setup-request-live COMMAND moq-interop-d22-pre-setup-request-live-tests)
+    # Writes draft 22 run databases for tests/e2e/audit-cli-draft22.sh.
+    add_executable(moq-interop-draft22-audit-fixture tests/support/draft22_audit_fixture.cpp)
+    target_link_libraries(moq-interop-draft22-audit-fixture PRIVATE
+        moq-interop-runs moq-interop-test-client moq-interop-draft22-evaluators)
+    target_compile_definitions(moq-interop-draft22-audit-fixture PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-draft22-audit-fixture PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_executable(moq-interop-d22-http-run-live-tests
+                   tests/integration/draft22_http_run_live_test.cpp)
+    target_link_libraries(moq-interop-d22-http-run-live-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client moq-interop-draft22-evaluators
+        moq-interop-execution-audit httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-http-run-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-http-run-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-http-run-live COMMAND moq-interop-d22-http-run-live-tests)
     add_executable(moq-interop-d22-location-filter-probes-live-tests
                    tests/integration/draft22_location_filter_probes_live_test.cpp)
     target_link_libraries(moq-interop-d22-location-filter-probes-live-tests PRIVATE
@@ -1021,7 +1041,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     set_tests_properties(audit-cli-smoke PROPERTIES RESOURCE_LOCK "audit-cli-port")
     add_test(NAME audit-cli-draft22
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-draft22.sh"
-                     "$<TARGET_FILE:moq-interop-audit>")
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-audit>"
+                     "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
+    set_tests_properties(audit-cli-draft22 PROPERTIES RESOURCE_LOCK "audit-cli-port")
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
                      --check-only)
