@@ -1602,33 +1602,39 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         return {RunStartStatus::Unsupported, {}, {}};
     if (requested.scenario_ids.empty() || requested.scenario_ids.size() > 100)
         return {RunStartStatus::InvalidConfig, {}, {}};
-    // The selection's ids are validated before they are planned, the same way for every draft: an empty or
-    // duplicate id is InvalidConfig whatever else the selection holds. plan_run refuses (Unsupported) a draft
-    // 22 selection it cannot plan, so checking after it would answer a draft 22 selection differently from
-    // the same selection on drafts 18 and 21. Distinct requested ids stay distinct execution ids (the
-    // stored_scenario_id check below maps each execution id back to its requested id).
-    {
-        std::set<std::string_view> selected;
-        for (const auto& id : requested.scenario_ids)
-            if (id.empty() || !selected.insert(id).second) return {RunStartStatus::InvalidConfig, {}, {}};
+    // The selection's ids are judged in selection order, the first defect deciding, the same way for every
+    // draft: that is the per-id loop below (an empty or repeated id is InvalidConfig, an id the draft cannot
+    // run is Unsupported, and an earlier id's other defects come first). plan_run cannot plan a draft 22 id
+    // the draft cannot run (it would refuse the whole selection before the loop judged the ids ahead of it),
+    // so only the ids before the first such id are planned: `refused` is that id's position, found here in
+    // one ordered pass with the requested draft's registry (for draft 22, exactly plan_run's criterion), and
+    // the loop answers for it after judging the ids ahead of it. For drafts 18 and 21, plan_run plans every
+    // id and this reproduces the loop's own answer for the refused id, so their answers are unchanged.
+    std::size_t refused = requested.scenario_ids.size();
+    for (std::size_t index = 0; index < requested.scenario_ids.size(); ++index) {
+        if (!executable_scenario(draft_number(requested.draft), requested.scenario_ids[index])) {
+            refused = index;
+            break;
+        }
     }
-    // An unknown, unimplemented own or not yet executable draft 22 scenario has no run; an implemented
-    // own draft 22 scenario bypasses lineage_run and is dispatched natively below.
-    auto plan = plan_run(requested);
+    RunConfig planned = requested;
+    planned.scenario_ids.resize(refused);
+    // An implemented own draft 22 scenario bypasses lineage_run and is dispatched natively below.
+    auto plan = plan_run(planned);
     if (!plan) return {RunStartStatus::Unsupported, {}, {}};
     const RunConfig& execution = plan->execution;
     // Every stored event and driver request names the requested scenario (stored_scenario_id): it must lead back
     // from each execution id to the id requested at the same position, or the run would store evidence under
     // a scenario it did not select. Checked here, before anything is stored, so the worker never meets it.
-    if (execution.scenario_ids.size() != requested.scenario_ids.size())
+    if (execution.scenario_ids.size() != planned.scenario_ids.size())
         throw std::logic_error("run plan changed the number of selected scenarios");
     for (std::size_t index = 0; index < execution.scenario_ids.size(); ++index) {
         if (stored_scenario_id(*plan, execution.scenario_ids[index]) != requested.scenario_ids[index])
             throw std::logic_error("scenario " + execution.scenario_ids[index] + " is not stored as the requested " +
                                    requested.scenario_ids[index]);
     }
-    if (execution.scenario_ids.empty() || execution.scenario_ids.size() > 100 ||
-        execution.timeout < 2ms || execution.timeout > 3600000ms ||
+    // The selection's size was checked above (the planned ids may be fewer than the selected ones).
+    if (execution.timeout < 2ms || execution.timeout > 3600000ms ||
         (execution.track_fixture && !valid_fixture(*execution.track_fixture)))
         return {RunStartStatus::InvalidConfig, {}, {}};
     std::vector<scenarios::RawProbeDefinition> definitions;
@@ -1642,8 +1648,12 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     // Behavior: every `draft`/`execution.draft` test in this loop is the execution draft, checked against an
     // execution id (a shared draft 22 scenario is checked as its draft 21 implementation).
     const auto draft = static_cast<unsigned>(behavior_draft(*plan));
+    std::set<std::string> selected;
     for (std::size_t index = 0; index < execution.scenario_ids.size(); ++index) {
         const auto& id = execution.scenario_ids[index];
+        // Distinct planned requested ids are distinct execution ids (stored_scenario_id maps each back).
+        if (id.empty() || !selected.insert(id).second)
+            return {RunStartStatus::InvalidConfig, {}, {}};
         // Identity: own scenarios exist only on the draft 22 wire, and keep their draft 22 id in execution.
         if (identity_draft(*plan) == DraftVersion::Draft22 && own_scenario_22(id)) {
             // An own draft 22 scenario: a raw probe on the draft 22 wire, scored by own evaluators.
@@ -1671,8 +1681,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             }
             continue;
         }
+        // The selection's size, not the planned prefix's.
         if (!executable_scenario(draft, id) ||
-            (execution.scenario_ids.size() > 1 && !raw_probe_scenario(draft, id)))
+            (requested.scenario_ids.size() > 1 && !raw_probe_scenario(draft, id)))
             return {RunStartStatus::Unsupported, {}, {}};
         if (auto reason = scenario_skip_reason(draft, id, execution.publisher_capabilities)) {
             if (skipped.empty()) {
@@ -1754,6 +1765,16 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
                 return {RunStartStatus::InvalidConfig, {}, {}};
             }
         }
+    }
+    if (refused != requested.scenario_ids.size()) {
+        // Every id ahead of it passed: the refused id is judged as the loop judges an id the draft cannot run
+        // (an empty or repeated id is InvalidConfig before it is Unsupported). Repeats are compared in requested
+        // ids, the ones the selection names.
+        const auto& id = requested.scenario_ids[refused];
+        const auto ahead = requested.scenario_ids.begin() + static_cast<std::ptrdiff_t>(refused);
+        if (id.empty() || std::find(requested.scenario_ids.begin(), ahead, id) != ahead)
+            return {RunStartStatus::InvalidConfig, {}, {}};
+        return {RunStartStatus::Unsupported, {}, {}};
     }
     if (skipped.size() == execution.scenario_ids.size()) {
         RunStartResult rejected{RunStartStatus::ScenarioRequiresCapability, {}, {}};

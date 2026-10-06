@@ -693,11 +693,13 @@ TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
     EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
 }
 
-// A selection is validated before it is planned, the same way for every draft: an empty or duplicate id is
-// InvalidConfig (400 invalid_run_config) whatever else the selection holds; an unknown id or a shared scenario
-// whose implementation is not executable is Unsupported (422 unsupported_run_config). Draft 22 answers exactly
-// as draft 21 does for the same selection in its own ids.
-TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsLikeDraft21BeforePlanning) {
+// The selection's ids are judged in selection order, the first defect deciding, the same way for every draft
+// (drafts 18 and 21 exactly as before draft 22 ran): an empty id or a repeat of an earlier id is InvalidConfig
+// (400 invalid_run_config), an id the draft cannot run (unknown, or a shared scenario whose implementation is
+// not executable) is Unsupported (422 unsupported_run_config), and an earlier id's other defect (a typed
+// scenario in a multi-scenario selection) wins over a later one. Draft 22 answers exactly as draft 21 does for
+// the same selection in its own ids. Characterization: the draft 18 and 21 rows pass against cb23ec3.
+TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsInOrderLikeDrafts18And21) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
     // A shared draft 22 scenario whose draft 21 implementation exists but is not executable.
@@ -710,26 +712,46 @@ TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsLikeDraft21BeforePlannin
         break;
     }
     ASSERT_FALSE(unimplemented22.empty());
-    struct Draft { app::DraftVersion version; std::string valid; std::string unimplemented; };
-    for (const auto& [version,valid,unimplemented] : {
-             Draft{app::DraftVersion::Draft21,"d21-duplicate-request-goaway",unimplemented21},
-             Draft{app::DraftVersion::Draft22,"d22-duplicate-request-goaway",unimplemented22}}) {
-        const std::vector<std::pair<std::vector<std::string>,app::RunStartStatus>> rejected{
-            {{valid,valid},app::RunStartStatus::InvalidConfig},
-            {{valid,""},app::RunStartStatus::InvalidConfig},
-            {{""},app::RunStartStatus::InvalidConfig},
-            {{},app::RunStartStatus::InvalidConfig},
-            // Empty and duplicate ids are found before any id is planned.
-            {{"does-not-exist",""},app::RunStartStatus::InvalidConfig},
-            {{unimplemented,unimplemented},app::RunStartStatus::InvalidConfig},
-            {{"does-not-exist","does-not-exist"},app::RunStartStatus::InvalidConfig},
-            {{"does-not-exist"},app::RunStartStatus::Unsupported},
-            {{valid,"does-not-exist"},app::RunStartStatus::Unsupported},
-            {{unimplemented},app::RunStartStatus::Unsupported},
-            {{valid,unimplemented},app::RunStartStatus::Unsupported},
+    struct Draft { app::DraftVersion version; std::string valid; std::string typed; std::string unimplemented; };
+    const std::vector<Draft> drafts{
+        {app::DraftVersion::Draft18,"receive-setup-with-duplicate-unknown-options","subscribe-namespace-at-publisher",
+         "d21-duplicate-request-goaway"},
+        {app::DraftVersion::Draft21,"d21-duplicate-request-goaway","d21-setup-duplicate-unknown-options",
+         unimplemented21},
+        {app::DraftVersion::Draft22,"d22-duplicate-request-goaway","d22-setup-duplicate-unknown-options",
+         unimplemented22}};
+    using Status=app::RunStartStatus;
+    for (const auto& [version,valid,typed,unimplemented] : drafts) {
+        const auto number=app::draft_number(version);
+        ASSERT_TRUE(app::executable_scenario(number,valid) && app::raw_probe_scenario(number,valid)) << valid;
+        ASSERT_TRUE(app::executable_scenario(number,typed) && !app::raw_probe_scenario(number,typed)) << typed;
+        ASSERT_FALSE(app::executable_scenario(number,unimplemented)) << unimplemented;
+        const std::string unknown="does-not-exist";
+        const std::vector<std::pair<std::vector<std::string>,Status>> rejected{
+            // One defect.
+            {{},Status::InvalidConfig},
+            {{""},Status::InvalidConfig},
+            {{valid,""},Status::InvalidConfig},
+            {{valid,valid},Status::InvalidConfig},
+            {{unknown},Status::Unsupported},
+            {{valid,unknown},Status::Unsupported},
+            {{unimplemented},Status::Unsupported},
+            {{valid,unimplemented},Status::Unsupported},
+            // Several defects: the first in selection order decides.
+            {{"",unknown},Status::InvalidConfig},
+            {{"",""},Status::InvalidConfig},
+            {{unknown,""},Status::Unsupported},
+            {{unknown,unknown},Status::Unsupported},
+            {{unimplemented,unimplemented},Status::Unsupported},
+            {{valid,unknown,""},Status::Unsupported},
+            {{valid,"",unknown},Status::InvalidConfig},
+            {{valid,valid,unknown},Status::InvalidConfig},
+            // A typed scenario in a multi-scenario selection is refused before a later repeat is seen.
+            {{typed,typed},Status::Unsupported},
+            {{typed,""},Status::Unsupported},
         };
         for (const auto& [ids,status] : rejected) {
-            SCOPED_TRACE(::testing::PrintToString(static_cast<unsigned>(version))+" "+::testing::PrintToString(ids));
+            SCOPED_TRACE(std::to_string(number)+" "+::testing::PrintToString(ids));
             const auto started=manager.start({version,app::TransportKind::NativeQuic,
                 app::RunMode::Observed,ids,1000ms,app::TrackFixture{{"n"},"t"}});
             EXPECT_EQ(started.status,status);
