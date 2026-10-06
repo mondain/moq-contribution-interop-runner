@@ -170,7 +170,7 @@ set(MOQ_INTEROP_HTTP_SOURCES
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
-                      moq-interop-storage moq-interop-execution-audit)
+                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 target_compile_options(moq-interop-http PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 

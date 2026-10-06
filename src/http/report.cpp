@@ -230,6 +230,18 @@ std::string render_run_detail(const storage::RunRecord& run,
                    << "</code></th><td>" << escape_html(entry.at("detail").get<std::string>()) << "</td></tr>";
         output << "</tbody></table>";
     }
+    if (document.contains("unscored_probes")) {
+        output << "<table><caption>Unscored probes (verdicts recorded as evidence; not part of any score)</caption>"
+                  "<thead><tr><th scope=\"col\">Scenario</th><th scope=\"col\">Verdict</th>"
+                  "<th scope=\"col\">Reason</th></tr></thead><tbody>";
+        for (const auto& entry : document.at("unscored_probes"))
+            output << "<tr><th scope=\"row\"><code>"
+                   << escape_html(entry.at("scenario_id").is_null() ? std::string{}
+                                                                     : entry.at("scenario_id").get<std::string>())
+                   << "</code></th><td>" << escape_html(entry.at("verdict").get<std::string>()) << "</td><td>"
+                   << escape_html(entry.at("reason").get<std::string>()) << "</td></tr>";
+        output << "</tbody></table>";
+    }
     output << "<form method=\"get\" action=\"/results/" << escape_html(run.id)
            << "\"><fieldset><legend>Filter requirements</legend>"
               "<label>Strength <input name=\"strength\" value=\""

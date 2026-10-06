@@ -2,6 +2,7 @@
 
 #include "detail.h"
 #include "moq/interop/app/publisher_capabilities.h"
+#include "moq/interop/app/unscored_probe_event_22.h"
 
 #include <nlohmann/json.hpp>
 
@@ -103,13 +104,27 @@ nlohmann::json serialize_result(const storage::RunRecord& run,
                                                           run.config.publisher_capabilities))
             skipped.push_back({{"scenario_id", scenario}, {"reason", *reason}});
     }
-    return {{"schema_version", 1},
+    // Unscored draft 22 probes: their verdicts are evidence only, listed apart from the rows and never scored.
+    nlohmann::json unscored = nlohmann::json::array();
+    for (const auto& event : run.events) {
+        if (event.kind != app::kUnscoredProbeVerdictEvent) continue;
+        const auto fields = app::parse_unscored_probe_detail_22(event.detail);
+        if (!fields) continue;
+        unscored.push_back({{"scenario_id", event.scenario_id ? nlohmann::json(*event.scenario_id) : nlohmann::json(nullptr)},
+                            {"verdict", fields->verdict},
+                            {"reason", fields->reason}});
+    }
+    nlohmann::json result = {{"schema_version", 1},
             {"draft_source_sha256", catalog.source_sha256},
             {"run", detail::run_json(run)},
             {"publisher_capabilities", {{"fetch", run.config.publisher_capabilities.fetch}}},
             {"skipped_scenarios", std::move(skipped)},
             {"requirements", std::move(rows)},
             {"evidence", std::move(evidence)}};
+    // Present only when the run recorded such a verdict, so a result without one (every draft 18/21 result) is
+    // unchanged.
+    if (!unscored.empty()) result["unscored_probes"] = std::move(unscored);
+    return result;
 }
 
 }  // namespace moq::interop::http

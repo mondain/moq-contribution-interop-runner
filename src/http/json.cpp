@@ -1,4 +1,5 @@
 #include "detail.h"
+#include "moq/interop/app/unscored_probe_event_22.h"
 
 #include <nlohmann/json.hpp>
 
@@ -174,7 +175,7 @@ Json requirement_json(const requirements::Requirement& requirement) {
 }
 
 Json event_json(const storage::EvidenceEvent& event) {
-    return {{"sequence", event.sequence},
+    Json result = {{"sequence", event.sequence},
             {"monotonic_time_ns", event.monotonic_time_ns},
             {"wall_time_unix_ns", event.wall_time_unix_ns},
             {"kind", event.kind},
@@ -184,6 +185,15 @@ Json event_json(const storage::EvidenceEvent& event) {
             {"request_id", event.request_id},
             {"scenario_id", event.scenario_id},
             {"requirement_id", event.requirement_id}};
+    // An unscored draft 22 probe's verdict, read back from its detail as structured fields (only this kind
+    // carries them, so every other event, and every draft 18/21 event, is unchanged).
+    if (event.kind == app::kUnscoredProbeVerdictEvent) {
+        if (const auto fields = app::parse_unscored_probe_detail_22(event.detail)) {
+            result["verdict"] = fields->verdict;
+            result["reason"] = fields->reason;
+        }
+    }
+    return result;
 }
 
 Json run_summary_json(const storage::RunSummary& run) {
