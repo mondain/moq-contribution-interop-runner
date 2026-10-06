@@ -103,7 +103,7 @@ have the runner launch your publisher for you, follow the
 | Path | Contents |
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
-| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, and `draft22.json`, which is incomplete: draft 22 is known but not runnable yet), the draft 21 to 22 delta audit, schema and draft digests |
+| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, and `draft22.json`, which is complete: draft 22 is known but not runnable yet), the draft 21 to 22 delta audit, schema and draft digests |
 | `adapters/` | Driver contract schema and the bundled `moqxr` adapter |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
 | `docs/` | Documentation and the two draft texts |

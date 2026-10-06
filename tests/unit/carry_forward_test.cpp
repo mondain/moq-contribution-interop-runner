@@ -345,6 +345,41 @@ TEST_F(CarryEmitTest, RefusesToOverwriteWithoutForceAndMergeRebuildsFromParts) {
     EXPECT_EQ(merged.requirements.size(), 5u);
 }
 
+TEST_F(CarryEmitTest, MergeKeepsTheCompleteFlagOfTheCatalogItReplaces) {
+    const auto old_source = source_from_text(21, kOld);
+    const auto old_catalog = catalog_for(old_source);
+    const auto new_source = source_from_text(22, kNew);
+    const auto result = carry_forward(old_source, old_catalog, new_source);
+    write_catalog_outputs(result, old_catalog, new_source, {}, EmitOptions{dir_, 6, false});
+    const auto merged_path = dir_ / "draft22.json";
+    const auto read_json = [](const std::filesystem::path& path) {
+        std::ifstream input(path);
+        return nlohmann::json::parse(input);
+    };
+    const auto set_complete = [&](bool value) {
+        auto document = read_json(merged_path);
+        document["complete"] = value;
+        std::ofstream output(merged_path, std::ios::trunc);
+        output << document.dump(2) << "\n";
+    };
+
+    set_complete(true);
+    merge_partitions(new_source, dir_);
+    auto merged = read_json(merged_path);
+    EXPECT_TRUE(merged.at("complete").get<bool>());
+    EXPECT_EQ(merged.at("requirements").size(), 5u);
+
+    set_complete(false);
+    merge_partitions(new_source, dir_);
+    EXPECT_FALSE(read_json(merged_path).at("complete").get<bool>());
+
+    std::filesystem::remove(merged_path);
+    merge_partitions(new_source, dir_);
+    merged = read_json(merged_path);
+    EXPECT_FALSE(merged.at("complete").get<bool>());
+    EXPECT_EQ(merged.at("requirements").size(), 5u);
+}
+
 TEST_F(CarryEmitTest, TagsLocationFilterRowsAndLeavesThemUnreviewed) {
     const char* text = "1.  Filters\n\n   A Location Filter MUST be explicit.\n";
     const auto old_source = source_from_text(21, text);

@@ -148,12 +148,29 @@ TEST(LineageRunOutcomes, ATranslatedNotApplicableNeverDropsAnApplicableTestableR
     EXPECT_EQ(found->state, requirements::OutcomeState::NotRun);
 }
 
-TEST(LineageRunOutcomes, ScoresAgainstTheDraft22CatalogWithoutEverClaimingAPass) {
+// The outcomes of a run in which every scored row of `catalog` passed: Pass for each applicable testable row,
+// the row's own class otherwise.
+std::vector<requirements::Outcome> all_passed(const requirements::RequirementCatalog& catalog) {
+    auto outcomes = unobserved(catalog);
+    for (auto& outcome : outcomes)
+        if (outcome.state == requirements::OutcomeState::NotRun) outcome.state = requirements::OutcomeState::Pass;
+    return outcomes;
+}
+
+bool is_required_scored(const requirements::Requirement& row) {
+    return row.applicability == requirements::Applicability::Applicable &&
+           row.testability == requirements::Testability::Testable &&
+           (row.strength == requirements::Strength::Must || row.strength == requirements::Strength::MustNot);
+}
+
+// requirements/draft22.json is complete (D3), so a draft 22 run is scored by requirements::score like drafts 18
+// and 21: nothing observed is Incomplete with the full denominators.
+TEST(LineageRunOutcomes, ScoresAgainstTheCompleteDraft22Catalog) {
     const auto d21 = catalog(21);
     const auto d22 = catalog(22);
-    ASSERT_FALSE(d22->complete) << "update this test when sub-project D3 completes the draft 22 catalog";
+    ASSERT_TRUE(d22->complete);
     const auto outcomes = lineage_outcomes(*d22, unobserved(*d21));
-    const auto summary = score_lineage(*d22, outcomes);
+    const auto summary = requirements::score(*d22, outcomes);
     EXPECT_EQ(summary.verdict, requirements::RunVerdict::Incomplete);
     std::uint64_t required = 0;
     std::uint64_t weighted = 0;
@@ -169,16 +186,85 @@ TEST(LineageRunOutcomes, ScoresAgainstTheDraft22CatalogWithoutEverClaimingAPass)
     EXPECT_EQ(summary.required.possible, required);
     EXPECT_EQ(summary.coverage.earned, 0u);
 
-    // A catalog that is not complete never yields a Pass, even when every scored row passed.
+    // Without the complete flag score() refuses the catalog outright (Error, no denominators): the flag, not a
+    // lineage-specific scorer, is what lets a draft 22 run be scored.
     requirements::RequirementCatalog small{22, "test", false, {}};
     small.requirements.push_back({"D22-1-MUST-001", requirements::Strength::Must, {}, "", "",
                                   requirements::Applicability::Applicable, requirements::Testability::Testable,
                                   {"d22-x"}, {"d22-y"}, ""});
     const std::vector<requirements::Outcome> all_pass{{"D22-1-MUST-001", requirements::OutcomeState::Pass}};
-    EXPECT_EQ(score_lineage(small, all_pass).verdict, requirements::RunVerdict::Incomplete);
-    EXPECT_EQ(score_lineage(small, all_pass).required.earned, 10u);
+    EXPECT_EQ(requirements::score(small, all_pass).verdict, requirements::RunVerdict::Error);
+    EXPECT_EQ(requirements::score(small, all_pass).required.possible, 0u);
     small.complete = true;
-    EXPECT_EQ(score_lineage(small, all_pass).verdict, requirements::RunVerdict::Pass);
+    EXPECT_EQ(requirements::score(small, all_pass).verdict, requirements::RunVerdict::Pass);
+    EXPECT_EQ(requirements::score(small, all_pass).required.earned, 10u);
+}
+
+// With the catalog complete: every scored row passing is a Pass, one required Fail fails the run, and one
+// required row left unexecuted (NotRun) keeps it Incomplete, never a Pass.
+TEST(LineageRunOutcomes, AFullPassPassesAFailFailsAndAnUnexecutedRequiredRowIsIncomplete) {
+    const auto d22 = catalog(22);
+    ASSERT_TRUE(d22->complete);
+    const auto passed = all_passed(*d22);
+    const auto pass = requirements::score(*d22, passed);
+    EXPECT_EQ(pass.verdict, requirements::RunVerdict::Pass);
+    EXPECT_GT(pass.required.possible, 0u);
+    EXPECT_EQ(pass.required.earned, pass.required.possible);
+    EXPECT_EQ(pass.weighted.earned, pass.weighted.possible);
+    EXPECT_EQ(pass.coverage.earned, pass.coverage.possible);
+
+    const auto required = std::find_if(d22->requirements.begin(), d22->requirements.end(), is_required_scored);
+    ASSERT_NE(required, d22->requirements.end());
+    const auto with_state = [&](requirements::OutcomeState state) {
+        auto outcomes = passed;
+        for (auto& outcome : outcomes)
+            if (outcome.requirement_id == required->id) outcome.state = state;
+        return requirements::score(*d22, outcomes);
+    };
+    const auto failed = with_state(requirements::OutcomeState::Fail);
+    EXPECT_EQ(failed.verdict, requirements::RunVerdict::Fail);
+    EXPECT_EQ(failed.required.earned, pass.required.possible - 10u);
+    EXPECT_EQ(failed.coverage.earned, pass.coverage.possible) << "a Fail was evaluated, so it counts as covered";
+    const auto unexecuted = with_state(requirements::OutcomeState::NotRun);
+    EXPECT_EQ(unexecuted.verdict, requirements::RunVerdict::Incomplete);
+    EXPECT_EQ(unexecuted.required.possible, pass.required.possible) << "a NotRun row stays in the denominator";
+    EXPECT_EQ(unexecuted.required.earned, pass.required.possible - 10u);
+    EXPECT_EQ(unexecuted.coverage.earned, pass.coverage.possible - 10u);
+}
+
+// The realistic lineage case: every draft 21 evaluator passed but the own draft 22 evaluators produced nothing.
+// The own required rows (069, 110, 424) are NotRun, so the run is Incomplete although the catalog is complete;
+// once the own rows pass too, every scored draft 22 row has passed and the run is a Pass.
+TEST(LineageRunOutcomes, AFullDraft21PassWithoutOwnOutcomesIsIncompleteNotAPass) {
+    const auto d21 = catalog(21);
+    const auto d22 = catalog(22);
+    ASSERT_TRUE(d22->complete);
+    const auto source = all_passed(*d21);
+    const auto shared_only = lineage_outcomes(*d22, source);
+    ASSERT_EQ(shared_only.size(), d22->requirements.size());
+    std::set<std::string> not_run_required;
+    for (std::size_t index = 0; index < shared_only.size(); ++index)
+        if (shared_only[index].state == requirements::OutcomeState::NotRun && is_required_scored(d22->requirements[index]))
+            not_run_required.insert(shared_only[index].requirement_id);
+    // Exactly the own rows that are required and scored (the other own MUST rows are classified not testable):
+    // every shared required row is reached by the translation and passes.
+    EXPECT_EQ(not_run_required, (std::set<std::string>{"D22-3-3-1-MUST-NOT-069", "D22-4-2-MUST-110",
+                                                        "D22-9-20-9-MUST-424"}));
+    EXPECT_EQ(requirements::score(*d22, shared_only).verdict, requirements::RunVerdict::Incomplete);
+
+    std::vector<requirements::Outcome> own;
+    for (const auto id : requirements::lineage_data::kOwnRows22) {
+        const auto row = std::find_if(d22->requirements.begin(), d22->requirements.end(),
+                                      [&](const auto& r) { return r.id == id; });
+        ASSERT_NE(row, d22->requirements.end()) << id;
+        if (row->applicability == requirements::Applicability::Applicable &&
+            row->testability == requirements::Testability::Testable)
+            own.push_back({std::string(id), requirements::OutcomeState::Pass});
+    }
+    const auto full = lineage_outcomes(*d22, source, own);
+    const auto summary = requirements::score(*d22, full);
+    EXPECT_EQ(summary.verdict, requirements::RunVerdict::Pass);
+    EXPECT_EQ(summary.required.earned, summary.required.possible);
 }
 
 // ---- Own draft 22 scenarios and outcomes (Task 8) ------------------------------------------------------
@@ -276,11 +362,12 @@ TEST(LineageRunOwn, Row069StaysNotRunAndScoredWithoutFetchEvidence) {
                                     [](const auto& outcome) { return outcome.requirement_id == "D22-3-3-1-MUST-NOT-069"; });
     ASSERT_NE(found, outcomes.end());
     EXPECT_EQ(found->state, requirements::OutcomeState::NotRun);
-    const auto with_row = score_lineage(*d22, outcomes);
+    const auto with_row = requirements::score(*d22, outcomes);
+    EXPECT_EQ(with_row.verdict, requirements::RunVerdict::Incomplete);
     auto dropped = outcomes;
     for (auto& outcome : dropped)
         if (outcome.requirement_id == "D22-3-3-1-MUST-NOT-069") outcome.state = requirements::OutcomeState::NotApplicable;
-    EXPECT_GT(with_row.required.possible, score_lineage(*d22, dropped).required.possible)
+    EXPECT_EQ(with_row.required.possible, requirements::score(*d22, dropped).required.possible + 10u)
         << "069 stays in the required denominator";
 }
 

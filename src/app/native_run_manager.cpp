@@ -398,10 +398,10 @@ public:
           draft22(std::move(supplied_draft22)),
           store(std::move(supplied_store)),
           config(std::move(supplied_config)) {
-        // The draft 22 catalog is not complete until its own rows have evaluators (D2/D3).
+        // Every catalog must be complete: requirements::score() refuses an incomplete one.
         if (!draft18 || !store || draft18->draft != 18 || !draft18->complete ||
             (draft21 && (draft21->draft != 21 || !draft21->complete)) ||
-            (draft22 && draft22->draft != 22) ||
+            (draft22 && (draft22->draft != 22 || !draft22->complete)) ||
             config.maximum_active_runs == 0 ||
             config.port_start > config.port_end ||
             (config.port_start == 0) != (config.port_end == 0) ||
@@ -723,7 +723,7 @@ public:
         // their draft 21 implementations.
         apply_publisher_capabilities(draft_number(plan.wire_draft), *catalog,
                                      run_config.publisher_capabilities, outcomes);
-        auto summary = lineage ? score_lineage(*catalog, outcomes) : requirements::score(*catalog, outcomes);
+        auto summary = requirements::score(*catalog, outcomes);
         if (operational_error || worker->stop_requested) summary.verdict = requirements::RunVerdict::Error;
         // An errored run always says why: operational errors were recorded where they
         // happened, and a stop request is recorded here.
@@ -1499,7 +1499,7 @@ public:
         if (lineage) {
             // A draft 22 run: the same evaluation, stored and scored as draft 22 rows.
             outcomes = lineage_outcomes(*draft22, outcomes);
-            store->finalize(worker->id, score_lineage(*draft22, outcomes), outcomes);
+            store->finalize(worker->id, requirements::score(*draft22, outcomes), outcomes);
             return;
         }
         const auto summary = requirements::score(*draft21, outcomes);

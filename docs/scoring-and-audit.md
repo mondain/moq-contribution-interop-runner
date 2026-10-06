@@ -111,7 +111,7 @@ build/moq-interop-audit --draft 21 --format json
 build/moq-interop-audit --draft 18 --database /path/to/runs.sqlite3
 ```
 
-Options: `--draft 18|21` (required), `--format text|json` (default `text`),
+Options: `--draft 18|21|22` (required; `--database` is not supported with draft 22 yet), `--format text|json` (default `text`),
 `--docs DIR`, `--requirements DIR` and `--database PATH` (an existing run
 database). Without `--docs` and `--requirements` it uses the source tree, or
 `/usr/share/moq-interop` when that is absent (as in the Docker image).

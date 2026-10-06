@@ -5,6 +5,7 @@
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/storage/run_store.h"
 
@@ -42,7 +43,7 @@ struct Options {
 };
 
 void usage() {
-    std::cerr << "Usage: moq-interop-audit --draft 18|21 [--format text|json] "
+    std::cerr << "Usage: moq-interop-audit --draft 18|21|22 [--format text|json] "
                  "[--docs DIR] [--requirements DIR] [--database PATH]\n";
 }
 
@@ -55,7 +56,8 @@ Options parse(int argc, char* argv[]) {
         if (flag == "--draft") {
             if (value == "18") result.draft = 18;
             else if (value == "21") result.draft = 21;
-            else throw std::invalid_argument("draft must be 18 or 21");
+            else if (value == "22") result.draft = 22;
+            else throw std::invalid_argument("draft must be 18, 21 or 22");
         } else if (flag == "--format") {
             if (value != "text" && value != "json")
                 throw std::invalid_argument("format must be text or json");
@@ -71,6 +73,9 @@ Options parse(int argc, char* argv[]) {
         }
     }
     if (result.draft == 0) throw std::invalid_argument("--draft is required");
+    // audit_execution over stored draft 22 runs is not built yet; refuse rather than audit nothing.
+    if (result.draft == 22 && result.database)
+        throw std::invalid_argument("stored draft 22 runs are not supported yet");
     return result;
 }
 
@@ -92,12 +97,18 @@ int main(int argc, char* argv[]) {
         const auto catalog =
             moq::interop::requirements::RequirementCatalog::load(
                 source, options.requirements /
-                    ("draft" + std::to_string(options.draft) + ".json"));
+                    ("draft" + std::to_string(options.draft) + ".json"),
+                moq::interop::requirements::CatalogLoadMode::RequireComplete);
         const auto source_audit =
             moq::interop::requirements::audit_normative_occurrences(source, catalog);
-        const auto bindings = options.draft == 18
-            ? moq::interop::requirements::draft18_executable_bindings()
-            : moq::interop::requirements::draft21_executable_bindings();
+        const auto bindings = [&] {
+            switch (options.draft) {
+                case 18: return moq::interop::requirements::draft18_executable_bindings();
+                case 21: return moq::interop::requirements::draft21_executable_bindings();
+                case 22: return moq::interop::requirements::draft22_executable_bindings();
+                default: throw std::invalid_argument("draft must be 18, 21 or 22");
+            }
+        }();
         const auto report =
             moq::interop::requirements::audit_completeness(
                 catalog, bindings,

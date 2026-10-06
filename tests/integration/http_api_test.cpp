@@ -353,7 +353,8 @@ protected:
     std::unique_ptr<httplib::Client> client_;
 };
 
-TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownIncompleteAndNotRunnable) {
+// The draft 22 catalog is complete since D3; draft 22 stays not runnable until D4.
+TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownCompleteAndNotRunnable) {
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 3u);
     EXPECT_EQ(drafts.at("drafts").at(0).at("draft"), 18);
@@ -362,7 +363,7 @@ TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownIncompleteAndNotRunnable) {
     EXPECT_TRUE(drafts.at("drafts").at(1).at("runnable"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("draft"), 22);
     EXPECT_FALSE(drafts.at("drafts").at(2).at("runnable"));
-    EXPECT_FALSE(drafts.at("drafts").at(2).at("complete"));
+    EXPECT_TRUE(drafts.at("drafts").at(2).at("complete"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("requirement_count"), 613);
     // Healthz still reports only the runnable drafts and lists no draft 22 profile.
     const auto health = get_json("/healthz");

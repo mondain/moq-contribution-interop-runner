@@ -15,7 +15,7 @@ The examples below assume the runner listens on `127.0.0.1:8080`.
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | Database readiness and the list of executable profiles |
-| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as an optional third entry (`complete: false`, `runnable: false`) when the service loaded its catalog |
+| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as an optional third entry (`complete: true`, `runnable: false`) when the service loaded its catalog |
 | `GET /api/v1/requirements?draft=18\|21\|22` | Requirement catalog rows with draft line citations (paginated) |
 | `POST /api/v1/runs` | Create a run |
 | `GET /api/v1/runs` | List runs, newest first (paginated) |
