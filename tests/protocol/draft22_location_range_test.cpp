@@ -287,5 +287,129 @@ TEST_F(Draft22LocationRange, ResponseReadyStopsEarlyOnlyOnAViolation) {
     EXPECT_TRUE(p.response_ready(t));
 }
 
+// ------------------------------------------------------------------ update
+
+RawProbeDefinition update_probe() {
+    return draft22_update_location_range_probe(std::chrono::milliseconds(1000), {b({'n'})}, b({'t'}));
+}
+
+// REQUEST_OK (REQUEST_UPDATE_OK, Section 9.3) with LARGEST_OBJECT when given.
+Bytes request_ok(std::optional<std::pair<unsigned, unsigned>> largest = std::pair{7u, 9u}) {
+    if (!largest) return b({7, 0, 1, 0});
+    return b({7, 0, 4, 1, 9, largest->first, largest->second});
+}
+
+// Five SUBSCRIBEs answered with `oks`, then the five updates answered with `updates` (empty: no answer),
+// then the subgroup streams.
+RawProbeTranscript updated(const RawProbeDefinition& p, const std::vector<Bytes>& oks,
+                           const std::vector<Bytes>& updates, const std::vector<Delivery>& deliveries,
+                           bool window_ended = true) {
+    auto t = start(p);
+    for (std::size_t index = 0; index < 5; ++index) accept(t, p, index, request_stream(index));
+    for (std::size_t index = 0; index < 5; ++index) data(t, request_stream(index), oks[index]);
+    for (std::size_t index = 0; index < 5; ++index) accept(t, p, 5 + index, request_stream(index));
+    for (std::size_t index = 0; index < updates.size(); ++index)
+        if (!updates[index].empty()) data(t, request_stream(index), updates[index]);
+    transport::StreamId stream = 6;
+    for (const auto& delivery : deliveries) {
+        data(t, stream, subgroup(delivery.alias, delivery.group, delivery.objects), true);
+        stream += 4;
+    }
+    t.timed_out = window_ended;
+    t.complete = !window_ended;
+    return t;
+}
+
+std::vector<Bytes> acknowledged() { return {request_ok(), request_ok(), request_ok(), request_ok(), request_ok()}; }
+
+TEST_F(Draft22LocationRange, UpdateProbeSetsEachTypeByRequestUpdateOnItsSubscription) {
+    const auto p = update_probe();
+    EXPECT_EQ(p.id, kDraft22UpdateLocationRange);
+    ASSERT_EQ(p.writes.size(), 10u);
+    // SUBSCRIBEs with FORWARD=0 and no filter, so nothing is sent before the update.
+    for (std::size_t index = 0; index < 5; ++index) {
+        EXPECT_EQ(p.writes[index].bytes, b({3, 0, 9, static_cast<unsigned>(1 + 2 * index), 1, 1, 'n', 1, 't', 1,
+                                            0x10, 0}));
+        EXPECT_FALSE(p.writes[index].reuse_write_stream.has_value());
+    }
+    // REQUEST_UPDATE (0x2), Request IDs 11..19, FORWARD=1 and the draft 22 LOCATION_FILTER.
+    EXPECT_EQ(p.writes[5].bytes, b({2, 0, 7, 11, 2, 0x10, 1, 0x11, 0x01, 1}));
+    EXPECT_EQ(p.writes[6].bytes, b({2, 0, 8, 13, 2, 0x10, 1, 0x11, 0x02, 7, 9}));
+    EXPECT_EQ(p.writes[7].bytes, b({2, 0, 9, 15, 2, 0x10, 1, 0x11, 0x03, 7, 9, 0}));
+    EXPECT_EQ(p.writes[8].bytes, b({2, 0, 10, 17, 2, 0x10, 1, 0x11, 0x04, 7, 9, 0, 9}));
+    EXPECT_EQ(p.writes[9].bytes, b({2, 0, 6, 19, 2, 0x10, 1, 0x11, 0x05}));
+    for (std::size_t index = 0; index < 5; ++index) {
+        const auto& update = p.writes[5 + index];
+        EXPECT_EQ(update.reuse_write_stream, std::optional<std::size_t>{index});
+        ASSERT_TRUE(update.peer_response_ready);
+        EXPECT_TRUE(update.peer_response_ready(subscribe_ok(1)));
+        EXPECT_FALSE(update.peer_response_ready(request_error()));
+    }
+    const ScopedWireDraft draft21(21);
+    EXPECT_THROW(update_probe(), std::logic_error);
+}
+
+TEST_F(Draft22LocationRange, UpdatedObjectsInsideEveryRange) {
+    const auto p = update_probe();
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(p, distinct_oks(), acknowledged(), conforming())),
+              std::optional<bool>{true});
+}
+
+TEST_F(Draft22LocationRange, UpdatedObjectOutsideEitherBoundaryOfAnyTypeFails) {
+    const auto p = update_probe();
+    for (const auto& violation : std::vector<Delivery>{
+             {1, 6, {5}}, {2, 7, {8}}, {3, 7, {8}}, {3, 8, {0}}, {4, 7, {8}}, {4, 7, {10}}, {5, 7, {9}}}) {
+        SCOPED_TRACE(::testing::Message() << "alias " << violation.alias << " group " << violation.group);
+        auto deliveries = conforming();
+        deliveries.push_back(violation);
+        EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(p, distinct_oks(), acknowledged(), deliveries)),
+                  std::optional<bool>{false});
+    }
+}
+
+TEST_F(Draft22LocationRange, UpdatedRelativeRangesFollowTheUpdatesLargestObject) {
+    const auto p = update_probe();
+    // SUBSCRIBE_OK reported {7, 9}; by the update the Largest Object is {9, 3}, which the REQUEST_OK carries.
+    auto updates = acknowledged();
+    updates[0] = request_ok(std::pair{9u, 3u});
+    updates[4] = request_ok(std::pair{9u, 3u});
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(p, distinct_oks(), updates, {{1, 9, {0}}, {4, 7, {9}}, {5, 9, {4}}})),
+              std::optional<bool>{true});
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(p, distinct_oks(), updates, {{1, 7, {9}}, {4, 7, {9}}})),
+              std::optional<bool>{false});
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(p, distinct_oks(), updates, {{4, 7, {9}}, {5, 9, {3}}})),
+              std::optional<bool>{false});
+}
+
+TEST_F(Draft22LocationRange, AnUpdateMustBeAcknowledgedBeforeItsObjectsAreJudged) {
+    const auto p = update_probe();
+    // A refused update never applied: its Type is unexercised.
+    auto refused = acknowledged();
+    refused[3] = request_error();
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(p, distinct_oks(), refused, conforming())),
+              std::nullopt);
+    // An update still unanswered at the window's end: its alias is not judged, the others are.
+    auto unanswered = acknowledged();
+    unanswered[3].clear();
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(p, distinct_oks(), unanswered, conforming())),
+              std::nullopt);
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(p, distinct_oks(), unanswered, {{4, 7, {10}}, {2, 7, {9}}})),
+              std::nullopt);
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(p, distinct_oks(), unanswered, {{4, 7, {10}}, {2, 7, {8}}})),
+              std::optional<bool>{false});
+    // Nothing delivered under the updated filters: no verdict.
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(p, distinct_oks(), acknowledged(), {})),
+              std::nullopt);
+    // The stimulus is the update probe's own: a subscribe transcript is not mistaken for it.
+    auto other = updated(p, distinct_oks(), acknowledged(), conforming());
+    other.scenario_id = std::string(kDraft22SubscribeLocationRange);
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(other), std::nullopt);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

@@ -11,7 +11,8 @@
 // publisher and retains Group 7 from its first Object, including Object 9. The ranges that are relative
 // to the Largest Object (Types 0x01 and 0x05) are resolved with the LARGEST_OBJECT the publisher reports
 // in its SUBSCRIBE_OK (Section 9.20.17), which Section 9.6 says lets the subscriber "determine the start
-// group/object when not explicitly specified".
+// group/object when not explicitly specified", or for a filter set by REQUEST_UPDATE in the REQUEST_OK
+// (REQUEST_UPDATE_OK) that acknowledges it (Sections 9.3 and 9.5.1).
 //
 // Probes are built on the draft 22 wire only (scenarios::current_wire_draft() == 22); building one on
 // another wire throws std::logic_error. The evaluators judge nothing on another wire.
@@ -28,6 +29,7 @@
 namespace moq::interop::scenarios {
 
 inline constexpr std::string_view kDraft22SubscribeLocationRange = "d22-subscribe-bounded-location-range";
+inline constexpr std::string_view kDraft22UpdateLocationRange = "d22-update-subscription-location-range";
 inline constexpr std::string_view kDraft22SubscriptionRangeEvaluator =
     "d22-subscription-objects-within-effective-location-range";
 
@@ -40,9 +42,18 @@ RawProbeDefinition draft22_subscribe_location_range_probe(
     std::chrono::milliseconds deadline, std::vector<std::vector<std::byte>> track_namespace,
     std::vector<std::byte> track_name);
 
+// One session, five SUBSCRIBEs (Request IDs 1..9, FORWARD=0, no filter), then on each request stream, once
+// its SUBSCRIBE_OK arrived, a REQUEST_UPDATE (Request IDs 11..19) setting FORWARD=1 and one filter above.
+// Relative ranges use the LARGEST_OBJECT of that update's REQUEST_OK. Draft 21 counterpart:
+// d21-update-subscription-location-range (one subscription, the 0x04 filter).
+RawProbeDefinition draft22_update_location_range_probe(
+    std::chrono::milliseconds deadline, std::vector<std::vector<std::byte>> track_namespace,
+    std::vector<std::byte> track_name);
+
 // Verdict of d22-subscription-objects-within-effective-location-range on one transcript: false when an
 // Object fits no range of the subscriptions it can belong to, true when the observation window ended
-// with every subscription established, every range known and at least one Object judged inside, and no
+// (both subscription scenarios) with every subscription established (for the update scenario: its
+// update acknowledged with REQUEST_OK), every range known and at least one Object judged inside, and no
 // value otherwise (another scenario, a stimulus that cannot be proven, missing or insufficient evidence).
 std::optional<bool> evaluate_draft22_subscription_location_range(const RawProbeTranscript& transcript);
 

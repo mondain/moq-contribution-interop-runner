@@ -33,6 +33,7 @@ struct OwnScenarioTraits22 {
 // asks a registry predicate links without the scenarios library).
 inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>({
     {"d22-subscribe-bounded-location-range", true},
+    {"d22-update-subscription-location-range", true},
 });
 
 // An own scenario implementation: its traits and the probe the run manager drives. `probe` is called

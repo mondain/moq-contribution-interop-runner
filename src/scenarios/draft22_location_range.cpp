@@ -33,13 +33,15 @@ constexpr std::uint64_t kLargestValue = std::numeric_limits<std::uint64_t>::max(
 constexpr std::chrono::milliseconds kRebuildDeadline{1000};
 
 // Section 9 message and parameter types.
+constexpr std::uint64_t kRequestUpdate = 0x02;
 constexpr std::uint64_t kSubscribe = 0x03;
 constexpr std::uint64_t kSubscribeOk = 0x04;
+constexpr std::uint64_t kRequestOk = 0x07;
 constexpr std::uint64_t kLargestObject = 0x09;
 constexpr std::uint64_t kForward = 0x10;
 constexpr std::uint64_t kLocationFilter = 0x21;
 
-enum class Kind { Subscribe };
+enum class Kind { Subscribe, Update };
 
 struct Fixture {
     Namespace ns;
@@ -121,6 +123,26 @@ Bytes subscribe(std::uint64_t request_id, const Fixture& fixture, bool forwardin
     integer(body, filter ? 2 : 1);
     body.insert(body.end(), params.begin(), params.end());
     return frame(kSubscribe, body);
+}
+
+// Section 9.5: REQUEST_UPDATE setting FORWARD=1 and `filter` in one message, so the subscription (opened
+// with FORWARD=0) sends nothing before the filter applies.
+Bytes request_update(std::uint64_t request_id, const d22::LocationFilter& filter) {
+    Bytes body;
+    integer(body, request_id);
+    Bytes params;
+    forward(params, 1);
+    location_filter(params, kForward, filter);
+    integer(body, 2);
+    body.insert(body.end(), params.begin(), params.end());
+    return frame(kRequestUpdate, body);
+}
+
+bool subscribe_ok_ready(std::span<const std::byte> input) {
+    wire::Cursor cursor(input);
+    const auto type = wire::read_vi64(cursor);
+    const auto* value = std::get_if<std::uint64_t>(&type);
+    return value && *value == kSubscribeOk;
 }
 
 // Request IDs of the server-parity requests: 1, 3, 5, ...
@@ -350,9 +372,10 @@ struct Subscription {
     std::optional<Range> range;  // the effective range; empty when it cannot be known
 };
 
-// The subscription opened by write `index` with `filter`.
+// The subscription opened by write `index`, whose filter is `filter` from the SUBSCRIBE (Kind::Subscribe)
+// or from the REQUEST_UPDATE that follows it on the same stream (Kind::Update).
 Subscription subscription_of(const RawProbeTranscript& t, const Collected& collected, std::size_t index,
-                             const d22::LocationFilter& filter) {
+                             const d22::LocationFilter& filter, Kind kind) {
     Subscription result;
     const auto response = response_of(t, collected, index);
     if (!response.stream || response.messages.malformed) return result;
@@ -369,9 +392,24 @@ Subscription subscription_of(const RawProbeTranscript& t, const Collected& colle
     wire::Cursor body(first.body);
     const auto alias = number(body);
     if (!alias) return result;
-    result.answer = Answer::Established;
     result.alias = *alias;
-    result.range = subscription_range(filter, largest_of(first, d21::ResponseContext::Subscribe));
+    if (kind == Kind::Subscribe) {
+        result.answer = Answer::Established;
+        result.range = subscription_range(filter, largest_of(first, d21::ResponseContext::Subscribe));
+        return result;
+    }
+    // The filter applies only once the update succeeded: REQUEST_OK follows SUBSCRIBE_OK (Section 9.5).
+    // Its LARGEST_OBJECT is the Largest Object the publisher resolved the updated filter against.
+    if (response.messages.complete.size() < 2) {
+        // Awaiting the update's answer: the alias is known, the range is not (yet), so Objects carrying
+        // this alias are not judged and no pass is possible, while other aliases still are.
+        result.answer = response.stream->fin || response.stream->reset ? Answer::Rejected : Answer::Established;
+        return result;
+    }
+    const auto& update = response.messages.complete[1];
+    if (update.type != kRequestOk) return result;  // REQUEST_ERROR: the update never applied
+    result.answer = Answer::Established;
+    result.range = subscription_range(filter, largest_of(update, d21::ResponseContext::RequestUpdate));
     return result;
 }
 
@@ -399,7 +437,10 @@ std::vector<Delivered> delivered_objects(const RawProbeTranscript& t, const Coll
     return result;
 }
 
-std::size_t request_count(Kind) { return draft22_location_range_filters().size(); }
+std::size_t subscription_count() { return draft22_location_range_filters().size(); }
+
+// The writes a probe makes: one request per filter, and for Kind::Update one REQUEST_UPDATE each.
+std::size_t write_count(Kind kind) { return subscription_count() * (kind == Kind::Update ? 2 : 1); }
 
 // Section 3.3.1 over every subscription of the probe. Subscriptions to one Track may share a Track
 // Alias (Section 3.1: "the subscriber re-applies each subscription's filter to determine which
@@ -412,11 +453,11 @@ State observe(const RawProbeTranscript& t, Kind kind, bool window_ended) {
     const auto collected = collect(t.events);
     if (!collected.bounded) return State::Inconclusive;
     const auto filters = draft22_location_range_filters();
-    const auto count = request_count(kind);
-    if (t.writes.size() < count) return State::Pending;
+    // Until every write went out (an update waits for its SUBSCRIBE_OK) nothing can be settled.
+    if (t.writes.size() < write_count(kind)) return State::Pending;
     std::vector<Subscription> subscriptions;
-    for (std::size_t index = 0; index < count; ++index)
-        subscriptions.push_back(subscription_of(t, collected, index, filters[index]));
+    for (std::size_t index = 0; index < subscription_count(); ++index)
+        subscriptions.push_back(subscription_of(t, collected, index, filters[index], kind));
     const auto any = [&](auto predicate) {
         return std::any_of(subscriptions.begin(), subscriptions.end(), predicate);
     };
@@ -468,6 +509,22 @@ RawProbeDefinition build(Kind kind, std::chrono::milliseconds deadline, const Fi
         for (std::size_t index = 0; index < filters.size(); ++index)
             definition.writes.push_back({RawProbeChannel::NewBidi,
                                          subscribe(request_id(index), fixture, true, &filters[index]), false});
+        break;
+    case Kind::Update:
+        // Section 3.3.1 and 9.5.1: each subscription opens with FORWARD=0 and no filter, so nothing is sent
+        // before its REQUEST_UPDATE sets the filter and FORWARD=1 together; every Object seen was sent
+        // under the updated filter (the draft 21 counterpart's argument, per subscription).
+        definition.id = std::string(kDraft22UpdateLocationRange);
+        for (std::size_t index = 0; index < filters.size(); ++index)
+            definition.writes.push_back({RawProbeChannel::NewBidi,
+                                         subscribe(request_id(index), fixture, false, nullptr), false});
+        for (std::size_t index = 0; index < filters.size(); ++index) {
+            RawProbeWrite update{RawProbeChannel::NewBidi,
+                                 request_update(request_id(filters.size() + index), filters[index]), false, index,
+                                 {}};
+            update.peer_response_ready = subscribe_ok_ready;
+            definition.writes.push_back(std::move(update));
+        }
         break;
     }
     // The whole window is needed unless the evidence already settles the verdict.
@@ -545,9 +602,17 @@ RawProbeDefinition draft22_subscribe_location_range_probe(std::chrono::milliseco
     return build(Kind::Subscribe, deadline, {std::move(track_namespace), std::move(track_name)});
 }
 
+RawProbeDefinition draft22_update_location_range_probe(std::chrono::milliseconds deadline,
+                                                       std::vector<std::vector<std::byte>> track_namespace,
+                                                       std::vector<std::byte> track_name) {
+    return build(Kind::Update, deadline, {std::move(track_namespace), std::move(track_name)});
+}
+
 std::optional<bool> evaluate_draft22_subscription_location_range(const RawProbeTranscript& transcript) {
     if (transcript.scenario_id == kDraft22SubscribeLocationRange)
         return evaluate(transcript, Kind::Subscribe, kSubscribe);
+    if (transcript.scenario_id == kDraft22UpdateLocationRange)
+        return evaluate(transcript, Kind::Update, kSubscribe);
     return std::nullopt;
 }
 

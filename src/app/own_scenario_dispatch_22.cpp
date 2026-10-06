@@ -48,6 +48,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_subscribe_location_range_probe(execution.timeout, std::move(track.name_space),
                                                                       std::move(track.name));
          }},
+        {scenarios::kDraft22UpdateLocationRange, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_update_location_range_probe(execution.timeout, std::move(track.name_space),
+                                                                   std::move(track.name));
+         }},
     };
     return table;
 }

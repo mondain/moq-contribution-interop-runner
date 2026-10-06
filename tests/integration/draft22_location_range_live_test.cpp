@@ -90,11 +90,14 @@ requirements::OutcomeState state_of(const storage::RunRecord& run, std::string_v
     return found == run.outcomes.end() ? requirements::OutcomeState::NotRun : found->state;
 }
 
-// The publisher's half: one answer per request stream (in request order; empty means no answer), then
-// each data stream with FIN on the publisher's unidirectional streams 6, 10, ...
+// The publisher's half: one answer per request stream (in request order; empty means no answer); then,
+// when `follow_ups` is set, waits for each follow-up request on the same streams and sends
+// `follow_up_answers`; then each data stream with FIN on the publisher's unidirectional streams 6, 10, ...
 struct Script {
     std::vector<Bytes> answers;
     std::vector<Bytes> data;
+    std::vector<Bytes> follow_ups{};
+    std::vector<Bytes> follow_up_answers{};
 };
 
 // Plays `script` once every expected request has arrived; returns what the runner wrote on each request
@@ -122,10 +125,30 @@ std::vector<Bytes> play(const std::shared_ptr<storage::SqliteRunStore>& store, c
         const auto stream = client->stream(request_stream(index));
         written.push_back(stream ? stream->data : Bytes{});
     }
-    for (std::size_t index = 0; index < script.answers.size(); ++index) {
-        if (!script.answers[index].empty()) {
-            EXPECT_TRUE(client->send_stream(request_stream(index), script.answers[index], false));
+    const auto answer = [&](const std::vector<Bytes>& answers) {
+        for (std::size_t index = 0; index < answers.size(); ++index) {
+            if (!answers[index].empty()) {
+                EXPECT_TRUE(client->send_stream(request_stream(index), answers[index], false));
+            }
         }
+    };
+    answer(script.answers);
+    if (!script.follow_ups.empty()) {
+        EXPECT_TRUE(pump_until(*client, [&] {
+            for (std::size_t index = 0; index < script.follow_ups.size(); ++index) {
+                const auto stream = client->stream(request_stream(index));
+                if (!stream || stream->data.size() < expected[index].size() + script.follow_ups[index].size())
+                    return false;
+            }
+            return true;
+        })) << "every follow-up request arrives";
+        for (std::size_t index = 0; index < script.follow_ups.size(); ++index) {
+            const auto stream = client->stream(request_stream(index));
+            written.push_back(stream ? Bytes(stream->data.begin() + static_cast<std::ptrdiff_t>(expected[index].size()),
+                                             stream->data.end())
+                                     : Bytes{});
+        }
+        answer(script.follow_up_answers);
     }
     std::uint64_t stream = 6;
     for (const auto& payload : script.data) {
@@ -195,31 +218,56 @@ struct Played {
     std::vector<std::optional<bool>> verdicts;
 };
 
-Played run_subscribe(const Script& script) {
-    const VerdictRecorder recorder(scenarios::kDraft22SubscriptionRangeEvaluator,
-                                   scenarios::kDraft22SubscribeLocationRange,
+// SUBSCRIBEs with FORWARD=0 and no filter, then the REQUEST_UPDATEs that set Types 0x01..0x05.
+std::vector<Bytes> update_subscribes() {
+    std::vector<Bytes> result;
+    for (unsigned id : {1u, 3u, 5u, 7u, 9u}) result.push_back(b({3, 0, 9, id, 1, 1, 'n', 1, 't', 1, 0x10, 0}));
+    return result;
+}
+std::vector<Bytes> update_requests() {
+    return {b({2, 0, 7, 11, 2, 0x10, 1, 0x11, 0x01, 1}), b({2, 0, 8, 13, 2, 0x10, 1, 0x11, 0x02, 7, 9}),
+            b({2, 0, 9, 15, 2, 0x10, 1, 0x11, 0x03, 7, 9, 0}), b({2, 0, 10, 17, 2, 0x10, 1, 0x11, 0x04, 7, 9, 0, 9}),
+            b({2, 0, 6, 19, 2, 0x10, 1, 0x11, 0x05})};
+}
+
+// REQUEST_OK with LARGEST_OBJECT {7, 9}.
+Bytes request_ok() { return b({7, 0, 4, 1, 9, 7, 9}); }
+
+Played run_one(std::string_view scenario, const std::vector<Bytes>& requests, const Script& script) {
+    const VerdictRecorder recorder(scenarios::kDraft22SubscriptionRangeEvaluator, scenario,
                                    scenarios::evaluate_draft22_subscription_location_range);
     auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
     auto manager = manager_for(store);
-    const std::string id(scenarios::kDraft22SubscribeLocationRange);
+    const std::string id(scenario);
     const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
         app::RunMode::Observed, {id}, 1500ms, app::TrackFixture{{"n"}, "t"}});
     EXPECT_EQ(started.status, app::RunStartStatus::Started);
     if (started.status != app::RunStartStatus::Started) return {};
     EXPECT_TRUE(context_ready(store, started.id));
     Played played;
-    played.written = play(store, started, subscribe_requests(), script);
+    played.written = play(store, started, requests, script);
     played.run = store->load(started.id);
     played.verdicts = recorder.verdicts();
     EXPECT_TRUE(manager.stop(started.id));
     return played;
 }
 
-TEST(Draft22LocationRangeLive, SubscribeScenarioIsImplementedAndNeedsATrack) {
-    EXPECT_TRUE(app::executable_scenario(22, scenarios::kDraft22SubscribeLocationRange));
-    EXPECT_TRUE(app::raw_probe_scenario(22, scenarios::kDraft22SubscribeLocationRange));
-    EXPECT_TRUE(app::scenario_requires_track(22, scenarios::kDraft22SubscribeLocationRange));
-    EXPECT_FALSE(app::scenario_requires_fetch(22, scenarios::kDraft22SubscribeLocationRange));
+Played run_subscribe(const Script& script) {
+    return run_one(scenarios::kDraft22SubscribeLocationRange, subscribe_requests(), script);
+}
+
+Played run_update(Script script) {
+    script.follow_ups = update_requests();
+    return run_one(scenarios::kDraft22UpdateLocationRange, update_subscribes(), script);
+}
+
+TEST(Draft22LocationRangeLive, SubscriptionScenariosAreImplementedAndNeedATrack) {
+    for (const auto id : {scenarios::kDraft22SubscribeLocationRange, scenarios::kDraft22UpdateLocationRange}) {
+        EXPECT_TRUE(app::executable_scenario(22, id)) << id;
+        EXPECT_TRUE(app::raw_probe_scenario(22, id)) << id;
+        EXPECT_TRUE(app::scenario_requires_track(22, id)) << id;
+        EXPECT_FALSE(app::scenario_requires_fetch(22, id)) << id;
+    }
 }
 
 TEST(Draft22LocationRangeLive, ConformingPublisherPassesTheSubscribeScenario) {
@@ -251,6 +299,37 @@ TEST(Draft22LocationRangeLive, NextObjectSubscriptionReceivingTheLargestObjectFa
     const auto played = run_subscribe({{subscribe_ok(1), subscribe_ok(2), subscribe_ok(3), subscribe_ok(4),
                                         subscribe_ok(5)},
                                        {subgroup(4, 7, {9}), subgroup(5, 7, {9})}});
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
+}
+
+std::vector<Bytes> five_subscribe_oks() {
+    return {subscribe_ok(1), subscribe_ok(2), subscribe_ok(3), subscribe_ok(4), subscribe_ok(5)};
+}
+std::vector<Bytes> five_request_oks() { return {request_ok(), request_ok(), request_ok(), request_ok(), request_ok()}; }
+
+TEST(Draft22LocationRangeLive, ConformingPublisherPassesTheUpdateScenario) {
+    Script script{five_subscribe_oks(),
+                  {subgroup(1, 7, {0, 9}), subgroup(2, 7, {9, 10}), subgroup(3, 7, {9, 12}), subgroup(4, 7, {9}),
+                   subgroup(5, 7, {10})}};
+    script.follow_up_answers = five_request_oks();
+    const auto played = run_update(script);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    auto expected = update_subscribes();
+    for (const auto& update : update_requests()) expected.push_back(update);
+    EXPECT_EQ(played.written, expected) << "each update carries its draft 22 Location Filter Type";
+    EXPECT_FALSE(std::any_of(played.run.events.begin(), played.run.events.end(),
+                             [](const auto& event) { return event.kind == "harness_error"; }));
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::NotRun);
+}
+
+TEST(Draft22LocationRangeLive, DeviatingPublisherFailsTheUpdateScenario) {
+    // The Relative Start (0x01, StartGroup 1) update starts at {7, 0}; Group 6 is before it.
+    Script script{five_subscribe_oks(), {subgroup(4, 7, {9}), subgroup(1, 6, {3})}};
+    script.follow_up_answers = five_request_oks();
+    const auto played = run_update(script);
     ASSERT_EQ(played.run.state, storage::RunState::Finalized);
     EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
     EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
