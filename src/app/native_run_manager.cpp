@@ -88,8 +88,11 @@ std::optional<LineageRun> plan_run(const RunConfig& requested) {
 // - its IDENTITY draft (the requested, wire draft): the ALPN its listeners offer, its stored row, the catalog it
 //   is scored against, the scenario and requirement ids it stores, DriverRequest::draft, API answers;
 // - its BEHAVIOR draft (the execution draft, `plan.execution.draft`, the draft 21 family for a draft 22 run):
-//   which probes, profiles, controllers and evaluators run. Every by_draft(...) and draft test in this file
-//   reads either the plan through these accessors or a `run_config` that is `plan.execution`.
+//   which probes, profiles, controllers and evaluators run. On every run path, each by_draft(...) and draft
+//   test in this file reads either the plan through these accessors or a `run_config` that is
+//   `plan.execution`. The exception is the public static NativeRunManager::resolve_probe (used by tests),
+//   which takes its caller's RunConfig as the execution config: a draft 22 RunConfig is not one, and its raw
+//   ids reach by_draft(22), which throws std::logic_error.
 // Never switch a behavior site to the identity draft unless it chooses identity.
 DraftVersion identity_draft(const LineageRun& plan) { return plan.wire_draft; }
 DraftVersion behavior_draft(const LineageRun& plan) { return plan.execution.draft; }
@@ -1609,7 +1612,8 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     // so only the ids before the first such id are planned: `refused` is that id's position, found here in
     // one ordered pass with the requested draft's registry (for draft 22, exactly plan_run's criterion), and
     // the loop answers for it after judging the ids ahead of it. For drafts 18 and 21, plan_run plans every
-    // id and this reproduces the loop's own answer for the refused id, so their answers are unchanged.
+    // id it is given (the identity on the prefix), and the answer for the refused id is the one their loop
+    // gave it, so their answers are unchanged.
     std::size_t refused = requested.scenario_ids.size();
     for (std::size_t index = 0; index < requested.scenario_ids.size(); ++index) {
         if (!executable_scenario(draft_number(requested.draft), requested.scenario_ids[index])) {
@@ -1768,12 +1772,9 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     }
     if (refused != requested.scenario_ids.size()) {
         // Every id ahead of it passed: the refused id is judged as the loop judges an id the draft cannot run
-        // (an empty or repeated id is InvalidConfig before it is Unsupported). Repeats are compared in requested
-        // ids, the ones the selection names.
-        const auto& id = requested.scenario_ids[refused];
-        const auto ahead = requested.scenario_ids.begin() + static_cast<std::ptrdiff_t>(refused);
-        if (id.empty() || std::find(requested.scenario_ids.begin(), ahead, id) != ahead)
-            return {RunStartStatus::InvalidConfig, {}, {}};
+        // (an empty id is InvalidConfig, anything else Unsupported). It cannot repeat an id ahead of it: those
+        // are all executable and it is not, so the loop's repeat check has nothing to find here.
+        if (requested.scenario_ids[refused].empty()) return {RunStartStatus::InvalidConfig, {}, {}};
         return {RunStartStatus::Unsupported, {}, {}};
     }
     if (skipped.size() == execution.scenario_ids.size()) {

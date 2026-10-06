@@ -90,7 +90,10 @@ public:
     RunStartResult start(const RunConfig& config);
     bool stop(const RunId& id);
     // The raw-probe definition a run would execute for `id`, or nothing when `id`
-    // is not a raw probe. Used by tests that inspect what a scenario sends.
+    // is not a raw probe. Used by tests that inspect what a scenario sends. `run_config` is an execution
+    // config (draft 18 or 21, as start() hands the scenario layer): a draft 22 config with a family raw id
+    // throws std::logic_error; resolve a draft 22 shared scenario as its draft 21 implementation with
+    // `wire_draft` 22 (below).
     static std::optional<scenarios::RawProbeDefinition> resolve_probe(
         const NativeRunManagerConfig& manager_config, const RunConfig& run_config,
         std::string_view id);

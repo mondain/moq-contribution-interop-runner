@@ -699,7 +699,7 @@ TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
 // not executable) is Unsupported (422 unsupported_run_config), and an earlier id's other defect (a typed
 // scenario in a multi-scenario selection) wins over a later one. Draft 22 answers exactly as draft 21 does for
 // the same selection in its own ids. Characterization: the draft 18 and 21 rows pass against cb23ec3.
-TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsInOrderLikeDrafts18And21) {
+TEST(NativeRunManagerIdValidation, EveryDraftJudgesTheSelectionInOrderLikeDrafts18And21) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
     // A shared draft 22 scenario whose draft 21 implementation exists but is not executable.
@@ -757,6 +757,41 @@ TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsInOrderLikeDrafts18And21
             EXPECT_EQ(started.status,status);
             EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
         }
+        // The selection-level checks come before any id is judged: a refused id under a 1 ms timeout is
+        // InvalidConfig.
+        {
+            SCOPED_TRACE(std::to_string(number)+" unknown id, 1 ms timeout");
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{unknown},1ms,
+                app::TrackFixture{{"n"},"t"}}).status,Status::InvalidConfig);
+        }
+        // A scenario the publisher's declaration skips does not stop the ids after it from being judged: a
+        // refused id after it is Unsupported, not ScenarioRequiresCapability.
+        std::string fetch;
+        for (const auto id : app::executable_scenarios(number)) {
+            if (!app::scenario_requires_fetch(number,id) || !app::raw_probe_scenario(number,id)) continue;
+            fetch=std::string(id);
+            break;
+        }
+        ASSERT_FALSE(fetch.empty());
+        {
+            SCOPED_TRACE(std::to_string(number)+" "+fetch+" skipped, then an unknown id");
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{fetch,unknown},
+                1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}}).status,Status::Unsupported);
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{fetch,""},
+                1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}}).status,Status::InvalidConfig);
+        }
+    }
+    // A draft 22 own scenario (dispatched natively, not by lineage) is judged in order like any other id.
+    const std::string own="d22-discover-original-publisher-namespaces";
+    for (const auto& [ids,status] : std::vector<std::pair<std::vector<std::string>,app::RunStartStatus>>{
+             {{own,""},app::RunStartStatus::InvalidConfig},
+             {{"",own},app::RunStartStatus::InvalidConfig},
+             {{own,own},app::RunStartStatus::InvalidConfig},
+             {{own,"does-not-exist"},app::RunStartStatus::Unsupported},
+             {{own,"does-not-exist",""},app::RunStartStatus::Unsupported}}) {
+        SCOPED_TRACE("22 "+::testing::PrintToString(ids));
+        EXPECT_EQ(manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,app::RunMode::Observed,
+            ids,1000ms,app::TrackFixture{{"n"},"t"}}).status,status);
     }
     EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
 }
