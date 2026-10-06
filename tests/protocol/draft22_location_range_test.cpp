@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -409,6 +410,219 @@ TEST_F(Draft22LocationRange, AnUpdateMustBeAcknowledgedBeforeItsObjectsAreJudged
     auto other = updated(p, distinct_oks(), acknowledged(), conforming());
     other.scenario_id = std::string(kDraft22SubscribeLocationRange);
     EXPECT_EQ(evaluate_draft22_subscription_location_range(other), std::nullopt);
+}
+
+// ------------------------------------------------------------------- FETCH
+
+RawProbeDefinition fetch_probe() {
+    return draft22_fetch_location_range_probe(std::chrono::milliseconds(1000), {b({'n'})}, b({'t'}));
+}
+
+// FETCH_OK (Section 9.12): End Of Track 0, End Location, no parameters, no Track Properties.
+Bytes fetch_ok(unsigned group, unsigned object) { return b({0x18, 0, 4, 0, group, object, 0}); }
+
+struct At {
+    unsigned group;
+    unsigned object;
+};
+
+// FETCH data stream (Section 11.4.1): FETCH_HEADER, then Objects in Ascending order. The first carries
+// absolute Group and Object IDs and its priority (flags 0x1c); later ones use deltas.
+Bytes fetch_stream(unsigned request_id, const std::vector<At>& objects) {
+    Bytes result = b({5, request_id});
+    std::optional<At> prior;
+    for (const auto& at : objects) {
+        if (!prior) {
+            const auto first = b({0x1c, at.group, at.object, 99});
+            result.insert(result.end(), first.begin(), first.end());
+        } else if (at.group == prior->group) {
+            const auto next = b({0x04, at.object - prior->object});
+            result.insert(result.end(), next.begin(), next.end());
+        } else {
+            const auto next = b({0x0c, at.group - prior->group - 1, at.object});
+            result.insert(result.end(), next.begin(), next.end());
+        }
+        result.push_back(std::byte{1});
+        result.push_back(std::byte{42});
+        prior = at;
+    }
+    return result;
+}
+
+// The five FETCHes accepted, answered with `answers` (empty: no answer), then one data stream per entry
+// of `streams` (Request ID, Objects, FIN).
+struct FetchData {
+    unsigned request_id;
+    std::vector<At> objects;
+    bool fin{true};
+};
+RawProbeTranscript fetched(const RawProbeDefinition& p, const std::vector<Bytes>& answers,
+                           const std::vector<FetchData>& streams, bool window_ended = false) {
+    auto t = start(p);
+    for (std::size_t index = 0; index < p.writes.size(); ++index) accept(t, p, index, request_stream(index));
+    for (std::size_t index = 0; index < answers.size(); ++index)
+        if (!answers[index].empty()) data(t, request_stream(index), answers[index], true);
+    transport::StreamId stream = 6;
+    for (const auto& entry : streams) {
+        data(t, stream, fetch_stream(entry.request_id, entry.objects), entry.fin);
+        stream += 4;
+    }
+    t.timed_out = window_ended;
+    t.complete = !window_ended;
+    return t;
+}
+
+// Largest Object {7, 9}: 0x01 and 0x02 end there (FETCH_OK End Location {7, 9}), 0x03 and 0x04 report
+// their own end, 0x05 is refused (INVALID_RANGE).
+std::vector<Bytes> fetch_answers() {
+    return {fetch_ok(7, 9), fetch_ok(7, 9), fetch_ok(7, 9), fetch_ok(7, 9), request_error()};
+}
+
+// 0x01 {7, 0}..{7, 9}, 0x02 {7, 9}..{7, 9}, 0x03 {7, 9}..end of Group 7, 0x04 {7, 9}: boundaries delivered.
+std::vector<FetchData> fetch_conforming() {
+    return {{1, {{7, 0}, {7, 9}}}, {3, {{7, 9}}}, {5, {{7, 9}}}, {7, {{7, 9}}}};
+}
+
+TEST_F(Draft22LocationRange, FetchProbeCarriesEachTypeAsItsRange) {
+    const auto p = fetch_probe();
+    EXPECT_EQ(p.id, kDraft22FetchLocationRange);
+    ASSERT_EQ(p.writes.size(), 5u);
+    // FETCH (0x16), Request IDs 1..9, track (n)/t, one parameter: LOCATION_FILTER (0x21) as Type + fields.
+    EXPECT_EQ(p.writes[0].bytes, b({0x16, 0, 10, 1, 1, 1, 'n', 1, 't', 1, 0x21, 0x01, 1}));
+    EXPECT_EQ(p.writes[1].bytes, b({0x16, 0, 11, 3, 1, 1, 'n', 1, 't', 1, 0x21, 0x02, 7, 9}));
+    EXPECT_EQ(p.writes[2].bytes, b({0x16, 0, 12, 5, 1, 1, 'n', 1, 't', 1, 0x21, 0x03, 7, 9, 0}));
+    EXPECT_EQ(p.writes[3].bytes, b({0x16, 0, 13, 7, 1, 1, 'n', 1, 't', 1, 0x21, 0x04, 7, 9, 0, 9}));
+    EXPECT_EQ(p.writes[4].bytes, b({0x16, 0, 9, 9, 1, 1, 'n', 1, 't', 1, 0x21, 0x05}));
+    for (const auto& write : p.writes) {
+        EXPECT_EQ(write.channel, RawProbeChannel::NewBidi);
+        EXPECT_TRUE(write.fin);
+    }
+    const ScopedWireDraft draft21(21);
+    EXPECT_THROW(fetch_probe(), std::logic_error);
+}
+
+TEST_F(Draft22LocationRange, FetchedObjectsInsideEveryRequestedRangePass) {
+    const auto p = fetch_probe();
+    // Every FETCH settled: no need to wait for the window.
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), fetch_conforming())),
+              std::optional<bool>{true});
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), fetch_conforming(), true)),
+              std::optional<bool>{true});
+    // A FETCH_OK for 0x05 is not this row's concern as long as nothing is delivered for it.
+    auto accepted = fetch_answers();
+    accepted[4] = fetch_ok(7, 9);
+    auto streams = fetch_conforming();
+    streams.push_back({9, {}});
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, accepted, streams)), std::optional<bool>{true});
+    // The subscription evaluator says nothing about a FETCH transcript, and the reverse.
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(fetched(p, fetch_answers(), fetch_conforming())),
+              std::nullopt);
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(subscribed(subscribe_probe(), distinct_oks(), conforming())),
+              std::nullopt);
+}
+
+TEST_F(Draft22LocationRange, AFetchedObjectOutsideEitherBoundaryOfAnyTypeFails) {
+    const auto p = fetch_probe();
+    struct Case {
+        const char* name;
+        std::size_t index;
+        At extra;
+    };
+    for (const auto& violation : std::vector<Case>{
+             {"0x01 before the Largest Object's Group", 0, {6, 5}},
+             {"0x01 past the Largest Object", 0, {7, 10}},
+             {"0x02 before the start", 1, {7, 8}},
+             {"0x02 past the Largest Object", 1, {7, 10}},
+             {"0x03 before the start", 2, {7, 8}},
+             {"0x03 after the end Group", 2, {8, 0}},
+             {"0x04 before the start", 3, {7, 8}},
+             {"0x04 after the end", 3, {7, 10}},
+         }) {
+        SCOPED_TRACE(violation.name);
+        auto streams = fetch_conforming();
+        auto& objects = streams[violation.index].objects;
+        objects.push_back(violation.extra);
+        std::sort(objects.begin(), objects.end(), [](const At& left, const At& right) {
+            return left.group != right.group ? left.group < right.group : left.object < right.object;
+        });
+        EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), streams)),
+                  std::optional<bool>{false});
+    }
+    // Next Object selects nothing: any Object delivered for it is outside, answered or not.
+    auto accepted = fetch_answers();
+    accepted[4] = fetch_ok(7, 9);
+    auto streams = fetch_conforming();
+    streams.push_back({9, {{7, 9}}});
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, accepted, streams)), std::optional<bool>{false});
+    auto unanswered = fetch_answers();
+    unanswered[4].clear();
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, unanswered, streams, true)),
+              std::optional<bool>{false});
+}
+
+TEST_F(Draft22LocationRange, FetchRangesEndingAtTheLargestObjectFollowTheFetchOk) {
+    const auto p = fetch_probe();
+    // Largest Object {9, 3}: 0x01 is {9, 0}..{9, 3}, 0x02 {7, 9}..{9, 3}.
+    auto answers = fetch_answers();
+    answers[0] = fetch_ok(9, 3);
+    answers[1] = fetch_ok(9, 3);
+    auto streams = fetch_conforming();
+    streams[0].objects = {{9, 0}, {9, 3}};
+    streams[1].objects = {{7, 9}, {8, 0}, {9, 3}};
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, answers, streams)), std::optional<bool>{true});
+    streams[0].objects = {{8, 7}, {9, 0}};
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, answers, streams)), std::optional<bool>{false});
+}
+
+TEST_F(Draft22LocationRange, MissingOrInsufficientFetchEvidenceHasNoVerdict) {
+    const auto p = fetch_probe();
+    // Nothing delivered at all.
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(
+                  fetched(p, fetch_answers(), {{1, {}}, {3, {}}, {5, {}}, {7, {}}})),
+              std::nullopt);
+    // A refused bounded FETCH leaves its Type unexercised.
+    auto refused = fetch_answers();
+    refused[3] = request_error();
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, refused, fetch_conforming())), std::nullopt);
+    // An unanswered FETCH: its relative range is unknown, so its Objects are not judged...
+    auto unanswered = fetch_answers();
+    unanswered[0].clear();
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, unanswered, fetch_conforming(), true)), std::nullopt);
+    auto early = fetch_conforming();
+    early[0].objects = {{2, 0}};
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, unanswered, early, true)), std::nullopt);
+    // ... but an Absolute start is known from the request alone.
+    unanswered[1].clear();
+    early[1].objects = {{7, 8}};
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, unanswered, early, true)),
+              std::optional<bool>{false});
+    // A data stream that has not ended before the context stopped.
+    auto open = fetch_conforming();
+    open[2].fin = false;
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), open)), std::nullopt);
+    // ... is judged once the window ended.
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), open, true)),
+              std::optional<bool>{true});
+    // Altered stimulus, failed harness, other wire.
+    auto altered = fetched(p, fetch_answers(), fetch_conforming());
+    altered.writes[2].write.bytes.back() = std::byte{1};
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(altered), std::nullopt);
+    auto failed = fetched(p, fetch_answers(), fetch_conforming());
+    failed.harness_failed = true;
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(failed), std::nullopt);
+    const ScopedWireDraft draft21(21);
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(fetched(p, fetch_answers(), fetch_conforming())), std::nullopt);
+}
+
+TEST_F(Draft22LocationRange, FetchResponseReadyStopsOnceEveryFetchSettledOrOnAViolation) {
+    const auto p = fetch_probe();
+    ASSERT_TRUE(p.response_ready);
+    auto open = fetch_conforming();
+    open[0].fin = false;
+    EXPECT_FALSE(p.response_ready(fetched(p, fetch_answers(), open)));
+    EXPECT_TRUE(p.response_ready(fetched(p, fetch_answers(), fetch_conforming())));
+    open[1].objects = {{7, 8}};
+    EXPECT_TRUE(p.response_ready(fetched(p, fetch_answers(), open)));
 }
 
 }  // namespace

@@ -37,11 +37,14 @@ constexpr std::uint64_t kRequestUpdate = 0x02;
 constexpr std::uint64_t kSubscribe = 0x03;
 constexpr std::uint64_t kSubscribeOk = 0x04;
 constexpr std::uint64_t kRequestOk = 0x07;
+constexpr std::uint64_t kFetch = 0x16;
+constexpr std::uint64_t kFetchOk = 0x18;
+constexpr std::uint64_t kFetchHeader = 0x05;
 constexpr std::uint64_t kLargestObject = 0x09;
 constexpr std::uint64_t kForward = 0x10;
 constexpr std::uint64_t kLocationFilter = 0x21;
 
-enum class Kind { Subscribe, Update };
+enum class Kind { Subscribe, Update, Fetch };
 
 struct Fixture {
     Namespace ns;
@@ -143,6 +146,18 @@ bool subscribe_ok_ready(std::span<const std::byte> input) {
     const auto type = wire::read_vi64(cursor);
     const auto* value = std::get_if<std::uint64_t>(&type);
     return value && *value == kSubscribeOk;
+}
+
+// Section 9.11: FETCH whose range is the LOCATION_FILTER, its only parameter.
+Bytes fetch(std::uint64_t request_id, const Fixture& fixture, const d22::LocationFilter& filter) {
+    Bytes body;
+    integer(body, request_id);
+    track(body, fixture);
+    Bytes params;
+    location_filter(params, 0, filter);
+    integer(body, 1);
+    body.insert(body.end(), params.begin(), params.end());
+    return frame(kFetch, body);
 }
 
 // Request IDs of the server-parity requests: 1, 3, 5, ...
@@ -439,7 +454,8 @@ std::vector<Delivered> delivered_objects(const RawProbeTranscript& t, const Coll
 
 std::size_t subscription_count() { return draft22_location_range_filters().size(); }
 
-// The writes a probe makes: one request per filter, and for Kind::Update one REQUEST_UPDATE each.
+// The writes a probe makes: one request per filter (SUBSCRIBE or FETCH), and for Kind::Update one
+// REQUEST_UPDATE each.
 std::size_t write_count(Kind kind) { return subscription_count() * (kind == Kind::Update ? 2 : 1); }
 
 // Section 3.3.1 over every subscription of the probe. Subscriptions to one Track may share a Track
@@ -448,10 +464,8 @@ std::size_t write_count(Kind kind) { return subscription_count() * (kind == Kind
 // requested range only when it fits none of the subscriptions that carry its alias. No failure is
 // claimed while any subscription is unanswered (its alias is unknown) or for an Object whose alias is
 // shared with a subscription whose range cannot be known.
-State observe(const RawProbeTranscript& t, Kind kind, bool window_ended) {
-    if (t.writes.empty() || !t.stimulus_delivered) return State::Pending;
-    const auto collected = collect(t.events);
-    if (!collected.bounded) return State::Inconclusive;
+State observe_subscriptions(const RawProbeTranscript& t, const Collected& collected, Kind kind,
+                            bool window_ended) {
     const auto filters = draft22_location_range_filters();
     // Until every write went out (an update waits for its SUBSCRIBE_OK) nothing can be settled.
     if (t.writes.size() < write_count(kind)) return State::Pending;
@@ -485,6 +499,168 @@ State observe(const RawProbeTranscript& t, Kind kind, bool window_ended) {
         return window_ended ? State::Inconclusive : State::Pending;
     if (!window_ended) return State::Pending;
     return in_range != 0 ? State::Pass : State::Inconclusive;
+}
+
+// --------------------------------------------------------------------- FETCH
+
+// One FETCH of the probe: how it was answered and the range it requested.
+struct FetchRequest {
+    Answer answer{Answer::Unanswered};
+    // The part of the requested range that is known: an Object outside it is outside the range. Empty
+    // when nothing of it is known; `range_complete` when it is the whole requested range.
+    std::optional<Range> range;
+    bool range_complete{false};
+    // The requested range is empty (the Next Object lies past the Largest Object): no Object is in it.
+    bool empty{false};
+};
+
+// Sections 3.2 and 9.20.9: the range a filter selects on a FETCH. An omitted end is the Largest Object at
+// the time the request was processed, which the FETCH_OK End Location reports (Section 9.12: the
+// requested End Location "unless the requested range extends beyond Largest Object").
+FetchRequest fetch_request(const d22::LocationFilter& filter, std::optional<Location> end_location) {
+    FetchRequest request;
+    const Location start{filter.start_group, filter.start_object};
+    switch (filter.type) {
+    case FilterType::RelativeGroup:
+        // {Largest Object.Group + 1 - StartGroup, 0} up to the Largest Object.
+        if (end_location) {
+            if (auto relative = subscription_range(filter, {true, end_location})) {
+                relative->end = end_location;
+                request.range = relative;
+                request.range_complete = true;
+            }
+        }
+        break;
+    case FilterType::Absolute:
+    case FilterType::None:
+        // The start is known at once, the end once FETCH_OK reports it.
+        request.range = Range{filter.type == FilterType::None ? Location{0, 0} : start, end_location};
+        request.range_complete = end_location.has_value();
+        break;
+    case FilterType::AbsoluteBounded:
+    case FilterType::AbsoluteRange:
+        // Fully given by the request (Objects past the Largest Object are not retrieved at all).
+        request.range = subscription_range(filter, {});
+        request.range_complete = true;
+        break;
+    case FilterType::NextObject:
+        // Starts after the Largest Object and ends at it: Section 3.2 requires FETCH_ERROR INVALID_RANGE
+        // ("Start Location is greater than the Largest Object"), and no Object lies in the range.
+        request.empty = true;
+        request.range_complete = true;
+        break;
+    }
+    return request;
+}
+
+// The FETCH of write `index` with `filter`, as answered on its request stream.
+FetchRequest fetch_of(const RawProbeTranscript& t, const Collected& collected, std::size_t index,
+                      const d22::LocationFilter& filter) {
+    const auto response = response_of(t, collected, index);
+    std::optional<Location> end_location;
+    auto answer = Answer::Unanswered;
+    if (response.stream && !response.messages.malformed) {
+        if (!response.messages.complete.empty()) {
+            const auto& first = response.messages.complete.front();
+            answer = Answer::Rejected;  // REQUEST_ERROR, or anything that is not a FETCH_OK
+            if (first.type == kFetchOk) {
+                answer = Answer::Established;
+                wire::Cursor cursor(first.frame);
+                const auto decoded = d21::decode_successful_response(cursor, d21::ResponseContext::Fetch);
+                const auto* ok = std::get_if<d21::SuccessfulResponse>(&decoded);
+                if (ok && ok->end_location && cursor.remaining() == 0)
+                    end_location = Location{ok->end_location->group, ok->end_location->object};
+            }
+        } else if (response.stream->fin || response.stream->reset) {
+            answer = Answer::Rejected;
+        }
+    }
+    auto request = fetch_request(filter, end_location);
+    request.answer = answer;
+    return request;
+}
+
+struct FetchDelivery {
+    std::vector<Location> objects;
+    bool finished{false};  // FIN or reset: nothing more arrives on it
+};
+
+// The FETCH data streams (Section 11.4) the publisher opened after the first request was accepted, by
+// the Request ID of their FETCH_HEADER. Only complete Objects are reported; End of Range indicators are
+// not Objects. Without GROUP_ORDER the order is Ascending (Section 9.20.8).
+std::map<std::uint64_t, FetchDelivery> fetch_deliveries(const RawProbeTranscript& t, const Collected& collected) {
+    std::map<std::uint64_t, FetchDelivery> result;
+    if (t.writes.empty() || !t.writes.front().delivery_event_count) return result;
+    const auto marker = *t.writes.front().delivery_event_count;
+    for (const auto& [id, stream] : collected.streams) {
+        if ((id & 3u) != 2u || stream.first_event < marker) continue;
+        wire::Cursor cursor(stream.bytes);
+        if (number(cursor) != kFetchHeader) continue;
+        d21::FetchDecoder decoder([](std::uint64_t request) -> std::optional<d21::FetchGroupOrder> {
+            for (std::size_t index = 0; index < subscription_count(); ++index)
+                if (request == request_id(index)) return d21::FetchGroupOrder::Ascending;
+            return std::nullopt;
+        });
+        const auto decoded = decoder.push(stream.bytes, false);
+        if (!decoded.header) continue;
+        auto& delivery = result[decoded.header->request_id];
+        delivery.finished = delivery.finished || stream.fin || stream.reset;
+        for (const auto& event : decoded.events)
+            if (const auto* object = std::get_if<d21::ObjectEvent>(&event))
+                delivery.objects.push_back({object->group_id, object->object_id});
+    }
+    return result;
+}
+
+// Section 3.3.1 over the probe's FETCHes. Each FETCH has its own data stream naming its Request ID, so
+// every Object is attributed exactly and judged at once. A FETCH is settled once rejected (for Next
+// Object the required INVALID_RANGE answer) or once its data stream ended; FETCH being finite, a probe
+// whose FETCHes all settled needs no more of the window.
+State observe_fetches(const RawProbeTranscript& t, const Collected& collected, bool window_ended) {
+    const auto filters = draft22_location_range_filters();
+    if (t.writes.size() < write_count(Kind::Fetch)) return State::Pending;
+    const auto deliveries = fetch_deliveries(t, collected);
+    std::size_t in_range = 0;
+    bool unexercised = false;
+    bool open = false;
+    for (std::size_t index = 0; index < filters.size(); ++index) {
+        const auto request = fetch_of(t, collected, index, filters[index]);
+        const auto found = deliveries.find(request_id(index));
+        const auto* delivery = found == deliveries.end() ? nullptr : &found->second;
+        if (delivery) {
+            for (const auto& object : delivery->objects) {
+                if (request.empty) return State::Fail;
+                if (!request.range) continue;
+                if (!request.range->contains(object)) return State::Fail;
+                if (request.range_complete) ++in_range;
+            }
+        }
+        switch (request.answer) {
+        case Answer::Unanswered:
+            open = true;
+            unexercised = true;
+            break;
+        case Answer::Rejected:
+            // The required answer for the empty Next Object range; elsewhere the Type went unexercised.
+            if (!request.empty) unexercised = true;
+            break;
+        case Answer::Established:
+            if (!request.range_complete) unexercised = true;
+            if (!delivery || !delivery->finished) open = true;
+            break;
+        }
+    }
+    if (open && !window_ended) return State::Pending;
+    if (unexercised) return State::Inconclusive;
+    return in_range != 0 ? State::Pass : State::Inconclusive;
+}
+
+State observe(const RawProbeTranscript& t, Kind kind, bool window_ended) {
+    if (t.writes.empty() || !t.stimulus_delivered) return State::Pending;
+    const auto collected = collect(t.events);
+    if (!collected.bounded) return State::Inconclusive;
+    if (kind == Kind::Fetch) return observe_fetches(t, collected, window_ended);
+    return observe_subscriptions(t, collected, kind, window_ended);
 }
 
 // ------------------------------------------------------------------ probes
@@ -525,6 +701,14 @@ RawProbeDefinition build(Kind kind, std::chrono::milliseconds deadline, const Fi
             update.peer_response_ready = subscribe_ok_ready;
             definition.writes.push_back(std::move(update));
         }
+        break;
+    case Kind::Fetch:
+        // Section 3.3.1: "Fetch requests can also specify a Location filter (see Section 3.2)"; Section
+        // 9.20.9 lists FETCH among LOCATION_FILTER's carriers without restricting the Type.
+        definition.id = std::string(kDraft22FetchLocationRange);
+        for (std::size_t index = 0; index < filters.size(); ++index)
+            definition.writes.push_back(
+                {RawProbeChannel::NewBidi, fetch(request_id(index), fixture, filters[index]), true});
         break;
     }
     // The whole window is needed unless the evidence already settles the verdict.
@@ -606,6 +790,17 @@ RawProbeDefinition draft22_update_location_range_probe(std::chrono::milliseconds
                                                        std::vector<std::vector<std::byte>> track_namespace,
                                                        std::vector<std::byte> track_name) {
     return build(Kind::Update, deadline, {std::move(track_namespace), std::move(track_name)});
+}
+
+RawProbeDefinition draft22_fetch_location_range_probe(std::chrono::milliseconds deadline,
+                                                      std::vector<std::vector<std::byte>> track_namespace,
+                                                      std::vector<std::byte> track_name) {
+    return build(Kind::Fetch, deadline, {std::move(track_namespace), std::move(track_name)});
+}
+
+std::optional<bool> evaluate_draft22_fetch_location_range(const RawProbeTranscript& transcript) {
+    if (transcript.scenario_id == kDraft22FetchLocationRange) return evaluate(transcript, Kind::Fetch, kFetch);
+    return std::nullopt;
 }
 
 std::optional<bool> evaluate_draft22_subscription_location_range(const RawProbeTranscript& transcript) {

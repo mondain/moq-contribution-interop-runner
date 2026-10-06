@@ -71,13 +71,20 @@ bool pump_until(Client& client, Predicate predicate, std::chrono::milliseconds l
     return false;
 }
 
-bool context_ready(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunId& id) {
+// Whether the run's context `ordinal` (1-based) is listening.
+bool context_started(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunId& id, unsigned ordinal) {
+    const auto suffix = " ordinal=" + std::to_string(ordinal);
+    const auto run = store->load(id);
+    return std::any_of(run.events.begin(), run.events.end(), [&](const auto& event) {
+        return event.kind == "context_ready" && event.detail.ends_with(suffix);
+    });
+}
+
+bool context_ready(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunId& id,
+                   unsigned ordinal = 1) {
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     while (std::chrono::steady_clock::now() < deadline) {
-        const auto run = store->load(id);
-        if (std::any_of(run.events.begin(), run.events.end(),
-                        [](const auto& event) { return event.kind == "context_ready"; }))
-            return true;
+        if (context_started(store, id, ordinal)) return true;
         std::this_thread::sleep_for(1ms);
     }
     return false;
@@ -101,9 +108,9 @@ struct Script {
 };
 
 // Plays `script` once every expected request has arrived; returns what the runner wrote on each request
-// stream, and keeps the session open until the run is finalized.
+// stream, and keeps the session open until the run is finalized or its next context (`ordinal` + 1) starts.
 std::vector<Bytes> play(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunStartResult& started,
-                        const std::vector<Bytes>& expected, const Script& script) {
+                        const std::vector<Bytes>& expected, const Script& script, unsigned ordinal = 1) {
     std::vector<Bytes> written;
     auto client = Client::create({.port = started.endpoint.port, .alpn = alpn_of("moqt-22")});
     EXPECT_NE(client, nullptr);
@@ -155,8 +162,13 @@ std::vector<Bytes> play(const std::shared_ptr<storage::SqliteRunStore>& store, c
         EXPECT_TRUE(client->send_stream(stream, payload, true));
         stream += 4;
     }
-    EXPECT_TRUE(pump_until(*client, [&] { return store->load(started.id).state == storage::RunState::Finalized; },
-                           10s));
+    // The runner may close the connection when the context ends; only the run's progress matters here.
+    (void)pump_until(*client, [&] {
+        return store->load(started.id).state == storage::RunState::Finalized ||
+               context_started(store, started.id, ordinal + 1);
+    }, 10s);
+    EXPECT_TRUE(store->load(started.id).state == storage::RunState::Finalized ||
+                context_started(store, started.id, ordinal + 1));
     return written;
 }
 
@@ -233,9 +245,37 @@ std::vector<Bytes> update_requests() {
 // REQUEST_OK with LARGEST_OBJECT {7, 9}.
 Bytes request_ok() { return b({7, 0, 4, 1, 9, 7, 9}); }
 
+// The FETCHes for track (n)/t, one per Type 0x01..0x05, each the only parameter.
+std::vector<Bytes> fetch_requests() {
+    return {b({0x16, 0, 10, 1, 1, 1, 'n', 1, 't', 1, 0x21, 0x01, 1}),
+            b({0x16, 0, 11, 3, 1, 1, 'n', 1, 't', 1, 0x21, 0x02, 7, 9}),
+            b({0x16, 0, 12, 5, 1, 1, 'n', 1, 't', 1, 0x21, 0x03, 7, 9, 0}),
+            b({0x16, 0, 13, 7, 1, 1, 'n', 1, 't', 1, 0x21, 0x04, 7, 9, 0, 9}),
+            b({0x16, 0, 9, 9, 1, 1, 'n', 1, 't', 1, 0x21, 0x05})};
+}
+
+// FETCH_OK with End Location {group, object}; REQUEST_ERROR INVALID_RANGE.
+Bytes fetch_ok(unsigned group, unsigned object) { return b({0x18, 0, 4, 0, group, object, 0}); }
+Bytes invalid_range() { return b({5, 0, 3, 0x05, 0, 0}); }
+
+// FETCH data stream: FETCH_HEADER for `request_id`, then Objects of Group 7 in Ascending order.
+Bytes fetch_stream(unsigned request_id, const std::vector<unsigned>& objects) {
+    Bytes result = b({5, request_id});
+    std::optional<unsigned> prior;
+    for (const auto object : objects) {
+        const auto record = prior ? b({0x04, object - *prior, 1, 42}) : b({0x1c, 7, object, 99, 1, 42});
+        result.insert(result.end(), record.begin(), record.end());
+        prior = object;
+    }
+    return result;
+}
+
 Played run_one(std::string_view scenario, const std::vector<Bytes>& requests, const Script& script) {
-    const VerdictRecorder recorder(scenarios::kDraft22SubscriptionRangeEvaluator, scenario,
-                                   scenarios::evaluate_draft22_subscription_location_range);
+    const bool fetch = scenario == scenarios::kDraft22FetchLocationRange;
+    const VerdictRecorder recorder(
+        fetch ? scenarios::kDraft22FetchRangeEvaluator : scenarios::kDraft22SubscriptionRangeEvaluator, scenario,
+        fetch ? scenarios::evaluate_draft22_fetch_location_range
+              : scenarios::evaluate_draft22_subscription_location_range);
     auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
     auto manager = manager_for(store);
     const std::string id(scenario);
@@ -261,12 +301,17 @@ Played run_update(Script script) {
     return run_one(scenarios::kDraft22UpdateLocationRange, update_subscribes(), script);
 }
 
-TEST(Draft22LocationRangeLive, SubscriptionScenariosAreImplementedAndNeedATrack) {
-    for (const auto id : {scenarios::kDraft22SubscribeLocationRange, scenarios::kDraft22UpdateLocationRange}) {
+Played run_fetch(const Script& script) {
+    return run_one(scenarios::kDraft22FetchLocationRange, fetch_requests(), script);
+}
+
+TEST(Draft22LocationRangeLive, ScenariosAreImplementedAndNeedATrack) {
+    for (const auto id : {scenarios::kDraft22SubscribeLocationRange, scenarios::kDraft22UpdateLocationRange,
+                          scenarios::kDraft22FetchLocationRange}) {
         EXPECT_TRUE(app::executable_scenario(22, id)) << id;
         EXPECT_TRUE(app::raw_probe_scenario(22, id)) << id;
         EXPECT_TRUE(app::scenario_requires_track(22, id)) << id;
-        EXPECT_FALSE(app::scenario_requires_fetch(22, id)) << id;
+        EXPECT_EQ(app::scenario_requires_fetch(22, id), id == scenarios::kDraft22FetchLocationRange) << id;
     }
 }
 
@@ -333,6 +378,98 @@ TEST(Draft22LocationRangeLive, DeviatingPublisherFailsTheUpdateScenario) {
     ASSERT_EQ(played.run.state, storage::RunState::Finalized);
     EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
     EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
+}
+
+// A publisher with Largest Object {7, 9}: 0x01 and 0x02 end there, 0x05 is refused with INVALID_RANGE.
+Script conforming_fetch() {
+    return {{fetch_ok(7, 9), fetch_ok(7, 9), fetch_ok(7, 9), fetch_ok(7, 9), invalid_range()},
+            {fetch_stream(1, {0, 9}), fetch_stream(3, {9}), fetch_stream(5, {9}), fetch_stream(7, {9})}};
+}
+
+TEST(Draft22LocationRangeLive, ConformingPublisherPassesTheFetchScenario) {
+    const auto played = run_fetch(conforming_fetch());
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.written, fetch_requests()) << "each FETCH carries its draft 22 Location Filter Type";
+    EXPECT_FALSE(std::any_of(played.run.events.begin(), played.run.events.end(),
+                             [](const auto& event) { return event.kind == "harness_error"; }));
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::NotRun);
+}
+
+TEST(Draft22LocationRangeLive, PublisherDeliveringForANextObjectFetchFails) {
+    // The Next Object range starts past the Largest Object it ends at: nothing may be delivered for it.
+    auto script = conforming_fetch();
+    script.answers[4] = fetch_ok(7, 9);
+    script.data.push_back(fetch_stream(9, {9}));
+    const auto played = run_fetch(script);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
+}
+
+TEST(Draft22LocationRangeLive, PublisherFetchingPastTheBoundedEndFails) {
+    // 0x04 {7, 9}..{7, 9} also returns {7, 10}.
+    auto script = conforming_fetch();
+    script.data[3] = fetch_stream(7, {9, 10});
+    const auto played = run_fetch(script);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
+}
+
+// Row 069 end to end: all three scenarios in one draft 22 run, each context on its own connection.
+storage::RunRecord run_row(const Script& subscribe, Script update, const Script& fetch) {
+    update.follow_ups = update_requests();
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const std::vector<std::string> ids{std::string(scenarios::kDraft22SubscribeLocationRange),
+                                       std::string(scenarios::kDraft22UpdateLocationRange),
+                                       std::string(scenarios::kDraft22FetchLocationRange)};
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, ids, 1500ms, app::TrackFixture{{"n"}, "t"}});
+    EXPECT_EQ(started.status, app::RunStartStatus::Started);
+    if (started.status != app::RunStartStatus::Started) return {};
+    const std::vector<std::vector<Bytes>> requests{subscribe_requests(), update_subscribes(), fetch_requests()};
+    const std::vector<const Script*> scripts{&subscribe, &update, &fetch};
+    for (unsigned ordinal = 1; ordinal <= 3; ++ordinal) {
+        SCOPED_TRACE(ids[ordinal - 1]);
+        EXPECT_TRUE(context_ready(store, started.id, ordinal));
+        (void)play(store, started, requests[ordinal - 1], *scripts[ordinal - 1], ordinal);
+    }
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (store->load(started.id).state != storage::RunState::Finalized && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    auto run = store->load(started.id);
+    EXPECT_TRUE(manager.stop(started.id));
+    return run;
+}
+
+Script conforming_subscribe() {
+    return {five_subscribe_oks(),
+            {subgroup(1, 7, {0, 9}), subgroup(2, 7, {9, 10}), subgroup(3, 7, {9, 12}), subgroup(4, 7, {9}),
+             subgroup(5, 7, {10})}};
+}
+
+Script conforming_update() {
+    auto script = conforming_subscribe();
+    script.follow_up_answers = five_request_oks();
+    return script;
+}
+
+TEST(Draft22LocationRangeLive, Row069PassesWhenAllThreeScenariosConform) {
+    const auto run = run_row(conforming_subscribe(), conforming_update(), conforming_fetch());
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(std::any_of(run.events.begin(), run.events.end(),
+                             [](const auto& event) { return event.kind == "harness_error"; }));
+    EXPECT_EQ(state_of(run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft22LocationRangeLive, Row069FailsWhenOnlyTheFetchDeviates) {
+    auto fetch = conforming_fetch();
+    fetch.data[2] = fetch_stream(5, {8, 9});  // 0x03 starts at {7, 9}
+    const auto run = run_row(conforming_subscribe(), conforming_update(), fetch);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
 }
 
 }  // namespace

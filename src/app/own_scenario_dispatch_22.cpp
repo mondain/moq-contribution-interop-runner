@@ -53,6 +53,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_update_location_range_probe(execution.timeout, std::move(track.name_space),
                                                                    std::move(track.name));
          }},
+        {scenarios::kDraft22FetchLocationRange, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_fetch_location_range_probe(execution.timeout, std::move(track.name_space),
+                                                                  std::move(track.name));
+         }},
     };
     return table;
 }
@@ -61,6 +66,7 @@ const std::vector<OwnProbe22>& production_probes() {
 const std::vector<OwnEvaluator22>& production_evaluators() {
     static const std::vector<OwnEvaluator22> table{
         {scenarios::kDraft22SubscriptionRangeEvaluator, scenarios::evaluate_draft22_subscription_location_range},
+        {scenarios::kDraft22FetchRangeEvaluator, scenarios::evaluate_draft22_fetch_location_range},
     };
     return table;
 }
