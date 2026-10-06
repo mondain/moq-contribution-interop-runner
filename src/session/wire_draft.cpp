@@ -9,8 +9,11 @@ namespace moq::interop::scenarios {
 namespace {
 
 thread_local unsigned t_wire_draft = 21;
+// The first adapter refusal on this thread since the last take (or the enclosing ScopedWireDraft).
+thread_local std::optional<std::string> t_adapter_refusal;
 
 wire::DecodeError unrepresentable(std::size_t offset) {
+    note_adapter_refusal(kUnrepresentableLocationFilterDetail);
     return {wire::DecodeErrorCode::ProtocolViolation, offset, std::string(kUnrepresentableLocationFilterDetail)};
 }
 
@@ -53,8 +56,23 @@ bool filter_payload(const wire::draft22::LocationFilter& filter, std::vector<std
 
 unsigned current_wire_draft() noexcept { return t_wire_draft; }
 
-ScopedWireDraft::ScopedWireDraft(unsigned draft) noexcept : previous_(t_wire_draft) { t_wire_draft = draft; }
-ScopedWireDraft::~ScopedWireDraft() { t_wire_draft = previous_; }
+// Moving an optional<string> and assigning nullopt do not throw, so both stay noexcept.
+ScopedWireDraft::ScopedWireDraft(unsigned draft) noexcept
+    : previous_(t_wire_draft), previous_refusal_(std::exchange(t_adapter_refusal, std::nullopt)) {
+    t_wire_draft = draft;
+}
+
+ScopedWireDraft::~ScopedWireDraft() {
+    t_wire_draft = previous_;
+    // The enclosing scope's refusal came first; otherwise this scope's refusal (if any) stays recorded.
+    if (previous_refusal_) t_adapter_refusal = std::move(previous_refusal_);
+}
+
+void note_adapter_refusal(std::string_view detail) {
+    if (!t_adapter_refusal) t_adapter_refusal = std::string(detail);
+}
+
+std::optional<std::string> take_adapter_refusal() { return std::exchange(t_adapter_refusal, std::nullopt); }
 
 wire::DecodeResult<wire::draft21::PublishMessage> decode_publish_for_wire(wire::Cursor& input) {
     if (t_wire_draft != 22) return wire::draft21::decode_publish(input);

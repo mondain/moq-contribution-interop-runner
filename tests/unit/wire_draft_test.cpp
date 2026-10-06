@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <string>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -256,6 +257,132 @@ TEST(WireDraft, Draft22AbsoluteZeroZeroIsRefusedLoudlyAndTheCursorStays) {
     EXPECT_EQ(std::get<wire::DecodeError>(d).detail, "draft-22 Absolute {0,0} filter has no draft-21 form");
     EXPECT_EQ(std::get<wire::DecodeError>(d).offset, 0u);
     EXPECT_EQ(c.offset(), 0u);
+}
+
+// ---- Adapter refusals (the run manager fails a run that saw one) ----------------------------------------
+
+// A refusal recorded inside a scope outlives it on its thread, so other tests may leave one behind: each
+// refusal test starts and ends with this thread's record empty.
+class WireDraftRefusal : public ::testing::Test {
+protected:
+    void SetUp() override { (void)take_adapter_refusal(); }
+    void TearDown() override { (void)take_adapter_refusal(); }
+};
+
+TEST_F(WireDraftRefusal, Draft22AbsoluteZeroZeroRecordsTheRefusalOnce) {
+    ScopedWireDraft scope(22);
+    const auto w = publish_with(1, {0x21, 0x02, 0x00, 0x00});
+    wire::Cursor c(w);
+    const auto d = decode_publish_for_wire(c);
+    ASSERT_TRUE(std::holds_alternative<wire::DecodeError>(d));
+    EXPECT_EQ(std::get<wire::DecodeError>(d).code, wire::DecodeErrorCode::ProtocolViolation);
+    EXPECT_EQ(std::get<wire::DecodeError>(d).detail, kUnrepresentableLocationFilterDetail);
+    EXPECT_EQ(take_adapter_refusal(), std::optional<std::string>(std::string(kUnrepresentableLocationFilterDetail)));
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt) << "taking clears it";
+}
+
+TEST_F(WireDraftRefusal, RepeatedRefusalsKeepTheFirstDetail) {
+    ScopedWireDraft scope(22);
+    note_adapter_refusal("first");
+    const auto w = publish_with(1, {0x21, 0x02, 0x00, 0x00});
+    wire::Cursor c(w);
+    (void)decode_publish_for_wire(c);
+    note_adapter_refusal("third");
+    EXPECT_EQ(take_adapter_refusal(), std::optional<std::string>("first"));
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+}
+
+TEST_F(WireDraftRefusal, RepresentableDraft22FiltersAndOtherDecodeErrorsRecordNothing) {
+    ScopedWireDraft scope(22);
+    for (const auto& filter : {std::vector<unsigned>{0x21, 0x05}, std::vector<unsigned>{0x21, 0x02, 0x00, 0x05},
+                               std::vector<unsigned>{0x21, 0x02, 0x05, 0x00}, std::vector<unsigned>{0x21, 0x00}}) {
+        auto w = publish_with(1, {});
+        // publish_with takes an initializer list: append the filter and fix the (one-byte) length.
+        for (const auto value : filter) w.push_back(static_cast<std::byte>(value));
+        w[2] = static_cast<std::byte>(w.size() - 3);
+        wire::Cursor c(w);
+        EXPECT_TRUE(std::holds_alternative<wire::draft21::PublishMessage>(decode_publish_for_wire(c)));
+        EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+    }
+    // A malformed PUBLISH is the peer's fault, not the adapter's limit.
+    const auto bad = publish_with(1, {0x21, 0x06});
+    wire::Cursor c(bad);
+    EXPECT_TRUE(std::holds_alternative<wire::DecodeError>(decode_publish_for_wire(c)));
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+    const std::vector<std::byte> partial = {std::byte{0x1d}, std::byte{0x00}, std::byte{0x0f}};
+    wire::Cursor p(partial);
+    EXPECT_TRUE(std::holds_alternative<wire::NeedMore>(decode_publish_for_wire(p)));
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+}
+
+TEST_F(WireDraftRefusal, Draft21DecodesNeverRecordARefusal) {
+    // The draft 22 refusal's bytes read under draft 21 as LOCATION_FILTER Length 2 {0,0}: a valid PUBLISH.
+    const auto w = publish_with(1, {0x21, 0x02, 0x00, 0x00});
+    for (const bool scoped : {false, true}) {
+        std::optional<ScopedWireDraft> scope;
+        if (scoped) scope.emplace(21);
+        EXPECT_EQ(current_wire_draft(), 21u);
+        wire::Cursor c(w);
+        EXPECT_TRUE(std::holds_alternative<wire::draft21::PublishMessage>(decode_publish_for_wire(c)));
+        EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+    }
+}
+
+TEST_F(WireDraftRefusal, ScopedWireDraftConstructionClearsAStaleRefusal) {
+    note_adapter_refusal("left over by an earlier run");
+    {
+        ScopedWireDraft scope(22);
+        EXPECT_EQ(take_adapter_refusal(), std::nullopt) << "a run never inherits a refusal";
+    }
+    (void)take_adapter_refusal();
+    note_adapter_refusal("stale");
+    {
+        ScopedWireDraft scope(21);
+        EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+    }
+    (void)take_adapter_refusal();
+}
+
+TEST_F(WireDraftRefusal, NestedScopesNeverDropARefusal) {
+    {
+        ScopedWireDraft outer(22);
+        note_adapter_refusal("outer");
+        {
+            ScopedWireDraft inner(22);
+            EXPECT_EQ(take_adapter_refusal(), std::nullopt) << "the inner scope starts clean";
+            note_adapter_refusal("inner");
+        }
+        // The outer refusal came first and is kept.
+        EXPECT_EQ(take_adapter_refusal(), std::optional<std::string>("outer"));
+    }
+    {
+        ScopedWireDraft outer(22);
+        {
+            ScopedWireDraft inner(22);
+            note_adapter_refusal("inner");
+        }
+        // A refusal inside a nested scope reaches the enclosing run.
+        EXPECT_EQ(take_adapter_refusal(), std::optional<std::string>("inner"));
+    }
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt);
+}
+
+TEST_F(WireDraftRefusal, TheRefusalIsPerThread) {
+    ScopedWireDraft scope(22);
+    const auto w = publish_with(1, {0x21, 0x02, 0x00, 0x00});
+    wire::Cursor c(w);
+    ASSERT_TRUE(std::holds_alternative<wire::DecodeError>(decode_publish_for_wire(c)));
+    std::optional<std::string> seen = "unset";
+    std::thread other([&] { seen = take_adapter_refusal(); });
+    other.join();
+    EXPECT_EQ(seen, std::nullopt) << "another thread never sees this thread's refusal";
+    std::thread refusing([] {
+        ScopedWireDraft wire22(22);
+        note_adapter_refusal("elsewhere");
+    });
+    refusing.join();
+    EXPECT_EQ(take_adapter_refusal(), std::optional<std::string>(std::string(kUnrepresentableLocationFilterDetail)));
+    EXPECT_EQ(take_adapter_refusal(), std::nullopt);
 }
 
 TEST(WireDraft, Draft22ErrorsAndPartialFramesAreTransactional) {

@@ -1028,6 +1028,161 @@ TEST(NativeRunManagerDraft22Lineage, TypedAnnouncementScenarioOnDraft22MatchesIt
     EXPECT_GT(run22.score->coverage.earned,0u);
 }
 
+// ---- Adapter refusals: a draft 22 PUBLISH the draft 21 family cannot be shown fails the run loudly -------
+
+// A PUBLISH (Request ID 0, namespace {"media"}, name "test", alias 2) with one LOCATION_FILTER parameter
+// whose bytes after the 0x21 type are `filter`. With {0x02,0x00,0x00} draft 22 reads Absolute {0,0} (the
+// adapter refuses it) and draft 21 reads Length 2 {0,0} (a valid Next Object filter).
+std::vector<std::byte> publish_with_filter(std::initializer_list<unsigned> filter) {
+    std::vector<unsigned> body={0x00,0x01,0x05,'m','e','d','i','a',0x04,'t','e','s','t',0x02,0x01,0x21};
+    body.insert(body.end(),filter.begin(),filter.end());
+    std::vector<std::byte> wire={std::byte{0x1d},std::byte{0},static_cast<std::byte>(body.size())};
+    for (const auto value : body) wire.push_back(static_cast<std::byte>(value));
+    return wire;
+}
+constexpr std::initializer_list<unsigned> kAbsoluteZeroZero={0x02,0x00,0x00};
+constexpr std::initializer_list<unsigned> kNextObject22={0x05};
+
+const std::vector<std::byte> kPlainServerSetup={std::byte{0xaf},std::byte{0},std::byte{0},std::byte{0}};
+const std::vector<std::byte> kDuplicateOptionsServerSetup=wire_bytes({0xaf,0x00,0x00,0x07,0x80,0x9d,0x01,0xaa,0x00,0x01,0xbb});
+
+// A publisher that answers the runner's SETUP, opens a request stream with `publish` and stays until the run
+// ends (the runner closes the session, or the scenario times out).
+void publish_and_wait(std::uint16_t port,std::string_view alpn,const std::vector<std::byte>& server_setup,
+                      const std::vector<std::byte>& publish,
+                      const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id) {
+    auto client=Client::create({.port=port,.alpn=alpn_of(alpn)});
+    ASSERT_NE(client,nullptr);
+    ASSERT_TRUE(pump_until(*client,[&] { const auto setup=client->stream(3); return setup && setup->data==server_setup; }));
+    ASSERT_TRUE(client->send_stream(2,wire_bytes({0xaf,0,0,0}),false));
+    ASSERT_TRUE(client->send_stream(0,publish,false));
+    (void)pump_until(*client,[&] { return store->load(id).state==storage::RunState::Finalized; },5s);
+}
+
+std::vector<storage::EvidenceEvent> events_of(const storage::RunRecord& run,std::string_view kind) {
+    std::vector<storage::EvidenceEvent> result;
+    for (const auto& event : run.events) if (event.kind==kind) result.push_back(event);
+    return result;
+}
+
+// Every stored event, for a failure message.
+std::string describe_events(const storage::RunRecord& run) {
+    std::string text;
+    for (const auto& event : run.events)
+        text+="\n  "+event.kind+" ["+event.scenario_id.value_or("")+"] "+event.detail.substr(0,200);
+    return text;
+}
+
+std::vector<storage::EvidenceEvent> refusal_events(const storage::RunRecord& run) {
+    std::vector<storage::EvidenceEvent> result;
+    for (const auto& event : events_of(run,"harness_error"))
+        if (event.detail.find(scenarios::kUnrepresentableLocationFilterDetail)!=std::string::npos) result.push_back(event);
+    return result;
+}
+
+struct RefusalRun {
+    app::DraftVersion draft;
+    std::vector<std::string> ids;
+    std::string_view alpn;
+    const std::vector<std::byte>* server_setup;
+};
+
+storage::RunRecord play_publish(app::NativeRunManager& manager,const std::shared_ptr<storage::SqliteRunStore>& store,
+                                const RefusalRun& spec,const std::vector<std::byte>& publish) {
+    const auto started=manager.start({spec.draft,app::TransportKind::NativeQuic,app::RunMode::Observed,
+        spec.ids,800ms,app::TrackFixture{{"media"},"test"}});
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    if (started.status!=app::RunStartStatus::Started) return {};
+    // Raw contexts announce themselves; the typed path listens from start().
+    if (app::raw_probe_scenario(app::draft_number(spec.draft),spec.ids.front())) {
+        EXPECT_TRUE(context_ready(store,started.id,1));
+    }
+    publish_and_wait(started.endpoint.port,spec.alpn,*spec.server_setup,publish,store,started.id);
+    auto run=finalized(store,started.id);
+    EXPECT_TRUE(manager.stop(started.id));
+    return run;
+}
+
+const RefusalRun kTyped22{app::DraftVersion::Draft22,{"d22-setup-duplicate-unknown-options"},"moqt-22",
+                          &kDuplicateOptionsServerSetup};
+// d21-subscriber-update-on-publish gates its REQUEST_OK on draft21_response.cpp's publish_ready, one of the
+// raw sites that drop the adapter's DecodeError (the context would just wait for a PUBLISH it never sees).
+const RefusalRun kRaw22{app::DraftVersion::Draft22,{"d22-subscriber-update-on-publish","d22-duplicate-request-goaway"},
+                        "moqt-22",&kPlainServerSetup};
+
+TEST(NativeRunManagerDraft22Refusal, TheTypedPathFailsTheRunAndNamesTheRefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto run=play_publish(manager,store,kTyped22,publish_with_filter(kAbsoluteZeroZero));
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto refusals=refusal_events(run);
+    ASSERT_EQ(refusals.size(),1u) << "exactly one harness_error names the refusal" << describe_events(run);
+    EXPECT_EQ(refusals.front().scenario_id,"d22-setup-duplicate-unknown-options");
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    expect_draft22_identity(run);
+}
+
+TEST(NativeRunManagerDraft22Refusal, ARawSiteThatDropsTheDecodeErrorStillFailsTheRun) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    for (const auto& id : kRaw22.ids) ASSERT_TRUE(app::raw_probe_scenario(22,id)) << id;
+    const auto run=play_publish(manager,store,kRaw22,publish_with_filter(kAbsoluteZeroZero));
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto refusals=refusal_events(run);
+    ASSERT_EQ(refusals.size(),1u) << "exactly one harness_error names the refusal" << describe_events(run);
+    // Stamped with the requested id of the context that was running when the adapter refused.
+    EXPECT_EQ(refusals.front().scenario_id,"d22-subscriber-update-on-publish");
+    EXPECT_NE(refusals.front().detail.find(" ordinal=1"),std::string::npos) << refusals.front().detail;
+    // Like any harness error of a raw run, the contexts after it never run and are named.
+    const auto aborted=events_of(run,"run_aborted");
+    ASSERT_EQ(aborted.size(),1u);
+    EXPECT_NE(aborted.front().detail.find("contexts not run: d22-duplicate-request-goaway"),std::string::npos)
+        << aborted.front().detail;
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="context_ready" && event.scenario_id=="d22-duplicate-request-goaway";
+    }));
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    expect_draft22_identity(run);
+}
+
+TEST(NativeRunManagerDraft22Refusal, ARepresentablePublishFilterRaisesNoRefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const RefusalRun raw{app::DraftVersion::Draft22,{"d22-subscriber-update-on-publish"},"moqt-22",&kPlainServerSetup};
+    for (const auto& spec : {kTyped22,raw}) {
+        SCOPED_TRACE(spec.ids.front());
+        const auto run=play_publish(manager,store,spec,publish_with_filter(kNextObject22));
+        ASSERT_EQ(run.state,storage::RunState::Finalized);
+        EXPECT_TRUE(events_of(run,"harness_error").empty());
+        ASSERT_TRUE(run.score);
+        EXPECT_NE(run.score->verdict,requirements::RunVerdict::Error);
+    }
+}
+
+TEST(NativeRunManagerDraft22Refusal, Draft21RunsReadingTheSameBytesNeverRecordARefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const RefusalRun typed{app::DraftVersion::Draft21,{"d21-setup-duplicate-unknown-options"},"moqt-21",
+                           &kDuplicateOptionsServerSetup};
+    const RefusalRun raw{app::DraftVersion::Draft21,{"d21-subscriber-update-on-publish"},"moqt-21",&kPlainServerSetup};
+    for (const auto& spec : {typed,raw}) {
+        SCOPED_TRACE(spec.ids.front());
+        const auto run=play_publish(manager,store,spec,publish_with_filter(kAbsoluteZeroZero));
+        ASSERT_EQ(run.state,storage::RunState::Finalized);
+        EXPECT_TRUE(events_of(run,"harness_error").empty());
+        ASSERT_TRUE(run.score);
+        EXPECT_NE(run.score->verdict,requirements::RunVerdict::Error);
+        // The draft 21 decoder read the PUBLISH: the raw context saw it and answered.
+        if (spec.ids.front()=="d21-subscriber-update-on-publish") {
+            EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+                return event.kind=="raw_probe_stimulus" && event.detail.find(" bytes=07000100 ")!=std::string::npos;
+            }));
+        }
+    }
+}
+
 // ---- Own draft 22 scenarios (Task 8 dispatch seam) ----------------------------------------------------
 // A test-only stub stands in for an own scenario: it drives the duplicate request-GOAWAY probe under an
 // own id, so the fake publisher harness above can play it. No production table is touched.

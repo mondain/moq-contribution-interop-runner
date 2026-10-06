@@ -100,6 +100,19 @@ DraftVersion behavior_draft(const LineageRun& plan) { return plan.execution.draf
 // draft's rows and scored against its catalog.
 bool runs_by_lineage(const LineageRun& plan) { return identity_draft(plan) != behavior_draft(plan); }
 
+// Adapter refusals. Draft 21-family scenario code reads a draft 22 peer's PUBLISH through
+// scenarios::decode_publish_for_wire, which refuses what draft 21 has no form for (an Absolute {0,0}
+// LOCATION_FILTER) and records the refusal on the calling thread. Several scenario sites drop that
+// DecodeError (the scenario just never sees the PUBLISH), so the manager reads the record instead: a refusal
+// is a harness error of the run (verdict Error), recorded as a `harness_error` event with this detail. Every
+// decode of a run happens on its worker thread (contexts run one after another on it, inside run()'s
+// ScopedWireDraft), which is where the record is read. Draft 18 and 21 runs never record one.
+std::string adapter_refusal_message(std::string_view detail) {
+    return "the draft 22 wire adapter refused a publisher message (" + std::string(detail) +
+           "): the scenario code cannot be shown it, so the run cannot judge this publisher because of the "
+           "runner's own limit, not a publisher fault";
+}
+
 constexpr std::string_view kDuplicateSubscribeScenario =
     "subscribe-again-to-established-publisher-track";
 constexpr std::string_view kFetchScenario = "fetch-publisher-track-range";
@@ -422,6 +435,8 @@ public:
         std::size_t context_ordinal{0};
         std::string connection_id;
         std::vector<scenarios::RawProbeTranscript> transcripts;
+        // A raw run already recorded an adapter refusal's harness_error (see adapter_refusal_message).
+        bool adapter_refused{false};
     };
 
     Impl(std::shared_ptr<const requirements::RequirementCatalog> supplied_draft18,
@@ -763,6 +778,15 @@ public:
             outcomes = lineage_outcomes(*draft22, outcomes, own);
             catalog = draft22.get();
         }
+        // A refusal met while evaluating that no context recorded (each context's own decodes, judges
+        // included, were checked when it ended): it cannot be tied to one context, so it is recorded under
+        // the run's last context, like a stop request.
+        if (const auto refusal = scenarios::take_adapter_refusal()) {
+            if (!worker->adapter_refused)
+                append_context_event(worker, plan, last_scenario_id, "harness_error", adapter_refusal_message(*refusal));
+            worker->adapter_refused = true;
+            operational_error = true;
+        }
         // Rows whose every scenario needs a capability the publisher declared absent are
         // not applicable to this run (they leave the score denominators). The draft number is
         // the catalog's: draft 22 rows name draft 22 scenarios, which the registry forwards to
@@ -872,6 +896,19 @@ public:
                     if (transcript.harness_failure_reason.empty())
                         transcript.harness_failure_reason = "publisher process failed";
                     append_context_event(worker, plan, current_id, "harness_error", "publisher process failed");
+                }
+                // An adapter refusal during this context fails it like any harness error (the contexts after
+                // it do not run). Gates and courtesy answers decode while the context runs; judges decode
+                // when evaluated, so a draft 22 run evaluates this transcript now, on this thread, to meet
+                // theirs here (finalize_raw_family evaluates every transcript again).
+                if (runs_by_lineage(plan))
+                    (void)requirements::evaluate_draft21_raw_probes(*draft21, std::span(&transcript, 1));
+                if (const auto refusal = scenarios::take_adapter_refusal()) {
+                    transcript.complete = false;
+                    transcript.harness_failed = true;
+                    transcript.harness_failure_reason = adapter_refusal_message(*refusal);
+                    append_context_event(worker, plan, current_id, "harness_error", transcript.harness_failure_reason);
+                    worker->adapter_refused = true;
                 }
                 if (worker->stop_requested) transcript.complete = false;
                 operational_error = operational_error || transcript.harness_failed;
@@ -986,6 +1023,9 @@ public:
                 storage::EvidenceEvent reason;
                 reason.kind = "harness_error";
                 reason.detail = error.what();
+                // A refusal no path took yet (another error ended the run first) is named here too.
+                if (const auto refusal = scenarios::take_adapter_refusal())
+                    reason.detail += "; " + adapter_refusal_message(*refusal);
                 reason.scenario_id = run_config.scenario_ids.empty()
                     ? std::string{} : stored_scenario_id(plan, run_config.scenario_ids.front());
                 reason.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1514,7 +1554,7 @@ public:
             }
             controller.configure_scenario(scenario, std::move(uri));
         }
-        // The evidence is stored under the requested scenario id (the harness_error below copies it).
+        // The evidence is stored under the requested scenario id.
         const std::string stored_id = stored_scenario_id(plan, run_config.scenario_ids.front());
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
@@ -1526,18 +1566,6 @@ public:
                 batch.reserve(evidence.size() - recorded);
                 for (; recorded < evidence.size(); ++recorded) {
                     batch.push_back(stored_draft21_evidence(evidence[recorded], started, stored_id));
-                    // The draft 22 PUBLISH adapter refused what it cannot present in draft 21's
-                    // form; the session close that follows is the runner's limit, not a verdict.
-                    if (lineage &&
-                        evidence[recorded].kind == scenarios::Draft21AnnouncementEventKind::MalformedPublisherMessage &&
-                        evidence[recorded].detail == scenarios::kUnrepresentableLocationFilterDetail) {
-                        auto limit = batch.back();
-                        limit.kind = "harness_error";
-                        limit.detail = "draft 22 lineage run: the PUBLISH adapter cannot present an Absolute {0,0} "
-                                       "LOCATION_FILTER in draft 21's form; the runner closed the session with "
-                                       "PROTOCOL_VIOLATION because of its own limit, not a publisher fault";
-                        batch.push_back(std::move(limit));
-                    }
                 }
                 store->append_events(worker->id, batch);
             }
@@ -1557,6 +1585,10 @@ public:
         if (worker->stop_requested) context.complete = false;
         auto outcomes = requirements::evaluate_draft21_announcement(
             *draft21, context);
+        // An adapter refusal (the controller then closed the session with PROTOCOL_VIOLATION) is a harness
+        // error of this path: run() records it and finalizes the run as Error.
+        if (const auto refusal = scenarios::take_adapter_refusal())
+            throw std::runtime_error(adapter_refusal_message(*refusal));
         if (lineage) {
             // A draft 22 run: the same evaluation, stored and scored as draft 22 rows.
             outcomes = lineage_outcomes(*draft22, outcomes);
