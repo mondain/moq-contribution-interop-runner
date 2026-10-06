@@ -336,6 +336,10 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
     // builder. Draft 22 cannot represent the filter (filter_param_value throws std::logic_error), so under
     // wire 22 the two overflow probes are left out of the list rather than failing every other probe. These
     // ids stay own (never run as shared); their draft 22 replacements are separate scenarios.
+    // The omission is safe because it is never observed on a wire-21 thread: draft21_executable_bindings()
+    // and the server's scenario listings build this list on wire-21 threads, so the two ids never vanish from
+    // a draft 21 binding or listing. The draft 22 replacements are the own scenarios in
+    // draft22_location_filter_probes.cpp.
     const bool overflow_representable = current_wire_draft() != 22;
     Bytes filter;
     if (overflow_representable) {

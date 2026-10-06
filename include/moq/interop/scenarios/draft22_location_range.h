@@ -13,6 +13,10 @@
 // in its SUBSCRIBE_OK (Section 9.20.17), which Section 9.6 says lets the subscriber "determine the start
 // group/object when not explicitly specified", or for a filter set by REQUEST_UPDATE in the REQUEST_OK
 // (REQUEST_UPDATE_OK) that acknowledges it (Sections 9.3 and 9.5.1).
+// A publisher that omits LARGEST_OBJECT there (Section 9.20.17 makes it mandatory only once Objects were
+// published) leaves the 0x01 range unknown, so that subscription's Objects are not judged and the scenario
+// cannot pass (NotRun); 0x05 then starts at {0, 0} (Section 3.1.4). Status-only Objects (End of Group, End
+// of Track) are not judged against any range (see delivered_objects in the source).
 //
 // Probes are built on the draft 22 wire only (scenarios::current_wire_draft() == 22); building one on
 // another wire throws std::logic_error. The evaluators judge nothing on another wire.

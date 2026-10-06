@@ -682,5 +682,48 @@ TEST_F(Draft22LocationRange, UpdatedSubscriptionsSharingAnAliasNeverPass) {
               std::optional<bool>{false});
 }
 
+// --------------------------------------------------------- status Objects
+
+// Subgroup stream for `alias`, Group 7: Object `last` with payload 'x', then Object `last + 1` with an empty
+// payload and Object Status `status` (Section 11.1.1: 0x0 Normal, 0x3 End of Group, 0x4 End of Track).
+Bytes closed_subgroup(unsigned alias, unsigned last, unsigned status) {
+    return b({0x30, alias, 7, last, 1, 'x', 0, 0, status});
+}
+
+TEST_F(Draft22LocationRange, AStatusObjectPastARangeIsNotAnObjectSentOutsideIt) {
+    for (const bool update : {false, true}) {
+        SCOPED_TRACE(update ? "update" : "subscribe");
+        const auto p = update ? update_probe() : subscribe_probe();
+        const auto with = [&](Bytes stream) {
+            auto t = update ? updated(p, distinct_oks(), acknowledged(), conforming())
+                            : subscribed(p, distinct_oks(), conforming());
+            data(t, 50, std::move(stream), true);
+            return evaluate_draft22_subscription_location_range(t);
+        };
+        // 0x04 {7, 9}..{7, 9}: End of Group at {7, 10} closes the Group, it is not an Object from outside.
+        EXPECT_EQ(with(closed_subgroup(4, 9, 3)), std::optional<bool>{true});
+        EXPECT_EQ(with(closed_subgroup(4, 9, 4)), std::optional<bool>{true}) << "End of Track";
+        // An empty Object with Normal status at the same Location is a data Object: it fails.
+        EXPECT_EQ(with(closed_subgroup(4, 9, 0)), std::optional<bool>{false});
+        // A status Object inside a range (0x03 runs to the end of Group 7) is fine.
+        EXPECT_EQ(with(closed_subgroup(3, 12, 3)), std::optional<bool>{true});
+    }
+}
+
+TEST_F(Draft22LocationRange, FetchObjectsHaveNoStatusSoAnEmptyOneOutsideTheRangeFails) {
+    // Section 11.1.1: Object Status "is absent in Objects delivered via a FETCH". An empty FETCH Object at
+    // {7, 10} for 0x04 {7, 9}..{7, 9} is a data Object outside the range.
+    const auto p = fetch_probe();
+    auto streams = fetch_conforming();
+    streams.pop_back();  // 0x04's stream is written by hand below
+    auto t = fetched(p, fetch_answers(), streams);
+    data(t, 50, b({5, 7, 0x1c, 7, 9, 99, 1, 42, 0x04, 1, 0}), true);
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(t), std::optional<bool>{false});
+    // Without the empty Object the same stream passes.
+    auto clean = fetched(p, fetch_answers(), streams);
+    data(clean, 50, b({5, 7, 0x1c, 7, 9, 99, 1, 42}), true);
+    EXPECT_EQ(evaluate_draft22_fetch_location_range(clean), std::optional<bool>{true});
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

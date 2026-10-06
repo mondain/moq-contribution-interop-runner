@@ -251,7 +251,11 @@ std::optional<RawResult> raw_result(
             return std::nullopt;
         }
     }
-    // Contribution profiles: evaluated against their own canonical stimulus.
+    // Contribution profiles: evaluated against their own canonical stimulus. The cached list is used for id
+    // matching only (requirement, scenario and evaluator ids, plus the deadline and whether a probe writes at
+    // all, none of which a wire draft changes): its bytes are never compared, because
+    // evaluate_draft21_contribution_probe rebuilds the expected stimulus on each call under the current wire
+    // draft. Caching it under whichever thread's wire draft came first is harmless.
     static const auto contribution = scenarios::draft21_contribution_probes();
     for (const auto& profile : contribution) {
         if (row.id == profile.requirement_id && transcript.scenario_id == profile.definition.id &&

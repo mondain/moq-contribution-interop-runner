@@ -269,6 +269,12 @@ struct Delivered {
 
 // Every complete Object on a subgroup stream the publisher opened after the first request was accepted
 // (Section 11.3). Datagrams are not read, as in the draft 21 counterpart.
+//
+// Status-only Objects (Object Status other than Normal: End of Group 0x3, End of Track 0x4, Section 11.1.1)
+// are left out. They carry no payload (Section 16.9) and only state that "no objects with the specified
+// Group ID and the Object ID that is greater than or equal to the one specified exist", so an End of Group
+// at {g, last + 1} closing a range that ends at {g, last} is not an Object sent from outside the range.
+// Zero-length Objects with an explicit Normal status are data Objects and are judged.
 std::vector<Delivered> delivered_objects(const RawProbeTranscript& t, const Collected& collected) {
     std::vector<Delivered> result;
     if (t.writes.empty() || !t.writes.front().delivery_event_count) return result;
@@ -280,8 +286,10 @@ std::vector<Delivered> delivered_objects(const RawProbeTranscript& t, const Coll
         // Objects are reported once complete, so a truncated tail is never judged.
         const auto decoded = decoder.push(stream.bytes, false);
         if (!decoded.header) continue;
-        for (const auto& object : decoded.objects)
+        for (const auto& object : decoded.objects) {
+            if (object.status && *object.status != 0) continue;  // status-only: not judged
             result.push_back({decoded.header->track_alias, {object.group_id, object.object_id}});
+        }
     }
     return result;
 }
@@ -461,7 +469,9 @@ struct FetchDelivery {
 
 // The FETCH data streams (Section 11.4) the publisher opened after the first request was accepted, by
 // the Request ID of their FETCH_HEADER. Only complete Objects are reported; End of Range indicators are
-// not Objects. Without GROUP_ORDER the order is Ascending (Section 9.20.8).
+// not Objects. Without GROUP_ORDER the order is Ascending (Section 9.20.8). FETCH Objects carry no Object
+// Status (Section 11.1.1: it "is absent in Objects delivered via a FETCH"), so every Object here, a
+// zero-length one included, is a data Object and is judged.
 std::map<std::uint64_t, FetchDelivery> fetch_deliveries(const RawProbeTranscript& t, const Collected& collected) {
     std::map<std::uint64_t, FetchDelivery> result;
     if (t.writes.empty() || !t.writes.front().delivery_event_count) return result;
