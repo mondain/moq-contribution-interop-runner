@@ -1,6 +1,7 @@
 #include "moq/interop/scenarios/request_goaway.h"
 #include "moq/interop/scenarios/draft18_response.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/request_error.h"
 #include "moq/interop/wire/draft21/request_frame.h"
 #include "moq/interop/wire/draft21/setup.h"
@@ -33,6 +34,41 @@ Bytes namespace_request(std::uint64_t id, char field) {
         !wire::write_vi64(1,body) || !body.append_byte(static_cast<std::byte>(field)) ||
         !wire::write_vi64(0,body)) throw std::invalid_argument("unencodable namespace request");
     return frame(0x50,body);
+}
+// SUBSCRIBE_NAMESPACE (0x50) or SUBSCRIBE_TRACKS (0x51) for the prefix `fields`, no parameters.
+Bytes prefix_request(std::uint64_t type, std::uint64_t id, const Namespace& fields) {
+    wire::ByteWriter body(65535);
+    bool success = wire::write_vi64(id,body) && wire::write_vi64(fields.size(),body);
+    for (const auto& field : fields) success = success && wire::write_length_prefixed_bytes(field,body);
+    if (!success || !wire::write_vi64(0,body)) throw std::invalid_argument("unencodable namespace request");
+    return frame(type,body);
+}
+// The prefix of a delivered SUBSCRIBE_NAMESPACE with Request ID 1, when it is exactly what prefix_request
+// builds for it.
+std::optional<Namespace> recover_prefix(std::span<const std::byte> input) {
+    if (input.size() > kMaximumBytes) return std::nullopt;
+    wire::Cursor cursor(input);
+    const auto decoded = d21::decode_request_frame(cursor,true);
+    const auto* parsed = std::get_if<d21::RequestFrame>(&decoded);
+    if (!parsed || parsed->type.type != 0x50 || cursor.remaining()) return std::nullopt;
+    wire::Cursor body(parsed->body);
+    const auto id = wire::read_vi64(body), count = wire::read_vi64(body);
+    const auto* request = std::get_if<std::uint64_t>(&id);
+    const auto* fields = std::get_if<std::uint64_t>(&count);
+    if (!request || *request != 1 || !fields || *fields == 0 || *fields > 32) return std::nullopt;
+    Namespace result;
+    for (std::uint64_t i = 0; i < *fields; ++i) {
+        const auto field = wire::read_length_prefixed_bytes(body,4096);
+        const auto* value = std::get_if<std::span<const std::byte>>(&field);
+        if (!value || value->empty()) return std::nullopt;
+        result.emplace_back(value->begin(),value->end());
+    }
+    try {
+        if (prefix_request(0x50,1,result) != Bytes(input.begin(),input.end())) return std::nullopt;
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    }
+    return result;
 }
 Bytes goaway() {
     wire::ByteWriter body(65535);
@@ -82,12 +118,13 @@ bool namespace_tail(wire::Cursor& cursor) {
     }
     return true;
 }
-bool typed_response(unsigned draft, std::span<const std::byte> bytes, bool allow_error) {
+bool typed_response(unsigned draft, std::span<const std::byte> bytes, bool allow_error,
+                    d21::ResponseContext context = d21::ResponseContext::SubscribeNamespace) {
     if (bytes.empty() || bytes.size() > kMaximumBytes) return false;
     wire::Cursor cursor(bytes);
     if (draft == 21) {
         if (std::holds_alternative<d21::SuccessfulResponse>(
-                d21::decode_successful_response(cursor,d21::ResponseContext::SubscribeNamespace)))
+                d21::decode_successful_response(cursor,context)))
             return namespace_tail(cursor);
         if (!allow_error) return false;
         cursor = wire::Cursor(bytes);
@@ -143,7 +180,10 @@ bool active_request(unsigned draft, const RawProbeGateInput& input, std::size_t 
         *write.delivery_event_count > input.events.size() || write.write.fin || write.fin_accepted ||
         write.accepted != write.write.bytes.size()) return false;
     const auto observed = stream_response(input.events,*write.stream_id,*write.delivery_event_count,true);
-    return !observed.invalid && typed_response(draft,observed.bytes,false);
+    // Only a draft 22 run with a track fixture sends SUBSCRIBE_TRACKS here (see definition()).
+    const bool tracks = !write.write.bytes.empty() && write.write.bytes.front() == std::byte{0x51};
+    return !observed.invalid && typed_response(draft,observed.bytes,false,
+        tracks ? d21::ResponseContext::SubscribeTracks : d21::ResponseContext::SubscribeNamespace);
 }
 bool first_goaways_accepted(const RawProbeGateInput& input) {
     if (input.prior_writes.size() != 4 || input.events.size() > kMaximumEvents ||
@@ -168,12 +208,21 @@ bool barrier_response(unsigned draft, const RawProbeTranscript& transcript) {
     const auto observed = stream_response(transcript.events,*barrier.stream_id,*barrier.delivery_event_count,false);
     return !observed.invalid && typed_response(draft,observed.bytes,true);
 }
+// `fixture` (draft 22 wire only, see profiles()) is the run's namespace. A publisher that serves only that
+// namespace refuses the probe's own prefixes, so the requests name it instead. Two prefixes of one namespace
+// always overlap, so the second active request of the distinct-streams probe is a SUBSCRIBE_TRACKS for the
+// same prefix: SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS have independent overlap spaces (draft 22 Section
+// 12.3, PREFIX_OVERLAP). The publisher answers SUBSCRIBE_TRACKS with a PUBLISH per track and may wait for
+// the answer, so that probe accepts it (courtesy, not part of the stimulus).
 RawProbeDefinition definition(unsigned draft, const std::string& id, bool duplicate,
-                              std::chrono::milliseconds deadline) {
+                              std::chrono::milliseconds deadline, const Namespace* fixture = nullptr) {
     RawProbeDefinition result{id,{std::byte{0xaf},std::byte{0},std::byte{0},std::byte{0}}, {},true,
         [draft](auto bytes) { return setup_ready(draft,bytes); },deadline};
-    result.writes.push_back({RawProbeChannel::NewBidi,namespace_request(1,'a'),false});
-    if (!duplicate) result.writes.push_back({RawProbeChannel::NewBidi,namespace_request(3,'b'),false});
+    result.writes.push_back({RawProbeChannel::NewBidi,
+        fixture ? prefix_request(0x50,1,*fixture) : namespace_request(1,'a'),false});
+    if (!duplicate) result.writes.push_back({RawProbeChannel::NewBidi,
+        fixture ? prefix_request(0x51,3,*fixture) : namespace_request(3,'b'),false});
+    if (fixture && !duplicate) result.courtesy.publish = RawProbePublishResponse::Accept;
     RawProbeWrite first{RawProbeChannel::NewBidi,goaway(),false,0};
     first.evidence_ready = [draft,duplicate](const auto& input) {
         return active_request(draft,input,0) && (duplicate || active_request(draft,input,1));
@@ -195,16 +244,21 @@ RawProbeDefinition definition(unsigned draft, const std::string& id, bool duplic
     };
     return result;
 }
-std::vector<RequestGoawayProbe> profiles(unsigned draft, std::chrono::milliseconds deadline) {
+std::vector<RequestGoawayProbe> profiles(unsigned draft, std::chrono::milliseconds deadline,
+                                         const Namespace& track_namespace = {}) {
     if (deadline.count() <= 0) throw std::invalid_argument("invalid request GOAWAY deadline");
+    // Draft 22 runs share the draft 21 probes; draft 21 itself is frozen and keeps its own prefixes.
+    const Namespace* fixture = draft == 21 && current_wire_draft() == 22 && !track_namespace.empty()
+        ? &track_namespace : nullptr;
     const std::string requirement = draft == 18 ? "D18-10-4-MUST-003" : "D21-9-2-MUST-328";
     const std::string evaluator = draft == 18 ? "session-closed-protocol-violation"
         : "d21-duplicate-request-goaway-protocol-violation";
     const std::string duplicate = draft == 18 ? "receive-two-goaways-on-same-request-stream"
         : "d21-duplicate-request-goaway";
-    std::vector<RequestGoawayProbe> result{{requirement,evaluator,draft,definition(draft,duplicate,true,deadline),true}};
+    std::vector<RequestGoawayProbe> result{{requirement,evaluator,draft,
+        definition(draft,duplicate,true,deadline,fixture),true}};
     if (draft == 21) result.push_back({requirement,evaluator,draft,
-        definition(draft,"d21-goaway-on-distinct-request-streams",false,deadline),false});
+        definition(draft,"d21-goaway-on-distinct-request-streams",false,deadline,fixture),false});
     // Only the duplicate GOAWAY on one request stream requires a close.
     apply_liveness_policy(result.front().definition,draft);
     return result;
@@ -214,20 +268,37 @@ std::vector<RequestGoawayProbe> profiles(unsigned draft, std::chrono::millisecon
 std::vector<RequestGoawayProbe> draft18_request_goaway_probes(std::chrono::milliseconds deadline) {
     return profiles(18,deadline);
 }
-std::vector<RequestGoawayProbe> draft21_request_goaway_probes(std::chrono::milliseconds deadline) {
-    return profiles(21,deadline);
+std::vector<RequestGoawayProbe> draft21_request_goaway_probes(std::chrono::milliseconds deadline,
+                                                              Namespace track_namespace) {
+    return profiles(21,deadline,track_namespace);
 }
 std::optional<bool> evaluate_request_goaway_probe(
     const RawProbeTranscript& transcript, const RequestGoawayProbe& profile) {
     if ((profile.draft != 18 && profile.draft != 21) || profile.definition.deadline.count() <= 0)
         return std::nullopt;
-    const auto known = profiles(profile.draft,profile.definition.deadline);
-    const auto found = std::find_if(known.begin(),known.end(),[&](const auto& candidate) {
-        return candidate.definition.id == profile.definition.id &&
-            candidate.requirement_id == profile.requirement_id &&
-            candidate.evaluator_id == profile.evaluator_id && candidate.duplicate == profile.duplicate;
-    });
+    const auto matching = [&](const std::vector<RequestGoawayProbe>& candidates) {
+        return std::find_if(candidates.begin(),candidates.end(),[&](const auto& candidate) {
+            return candidate.definition.id == profile.definition.id &&
+                candidate.requirement_id == profile.requirement_id &&
+                candidate.evaluator_id == profile.evaluator_id && candidate.duplicate == profile.duplicate;
+        });
+    };
+    auto known = profiles(profile.draft,profile.definition.deadline);
+    auto found = matching(known);
     if (found == known.end()) return std::nullopt;
+    if (profile.draft == 21 && current_wire_draft() == 22 && !transcript.writes.empty() &&
+        !raw_probe_stimulus_valid(transcript,found->definition)) {
+        // On the draft 22 wire the requests named the run's namespace: prove the stimulus against the
+        // definition rebuilt for the prefix the first request carried (only an exact rebuild is accepted).
+        if (const auto prefix = recover_prefix(transcript.writes.front().write.bytes)) {
+            auto rebuilt = profiles(profile.draft,profile.definition.deadline,*prefix);
+            const auto candidate = matching(rebuilt);
+            if (candidate != rebuilt.end() && raw_probe_stimulus_valid(transcript,candidate->definition)) {
+                known = std::move(rebuilt);
+                found = matching(known);
+            }
+        }
+    }
     if (profile.duplicate) return evaluate_raw_probe_close(transcript,found->definition,3);
     if (!raw_probe_stimulus_valid(transcript,found->definition)) return std::nullopt;
     return barrier_response(profile.draft,transcript) ? std::optional<bool>{true} : std::nullopt;

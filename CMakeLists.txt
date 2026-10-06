@@ -508,6 +508,16 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-publisher-location-filter-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-publisher-location-filter-live COMMAND moq-interop-d22-publisher-location-filter-live-tests)
+    add_executable(moq-interop-d22-fixture-probes-live-tests
+                   tests/integration/draft22_fixture_probes_live_test.cpp)
+    target_link_libraries(moq-interop-d22-fixture-probes-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-fixture-probes-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-d22-fixture-probes-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-fixture-probes-live COMMAND moq-interop-d22-fixture-probes-live-tests)
     add_executable(moq-interop-d22-pre-setup-request-live-tests
                    tests/integration/draft22_pre_setup_request_live_test.cpp)
     target_link_libraries(moq-interop-d22-pre-setup-request-live-tests PRIVATE
@@ -697,6 +707,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
         moq-interop-requirements moq-interop-draft18-evaluators moq-interop-draft21-evaluators GTest::gtest_main)
     target_compile_definitions(moq-interop-discovery-overlap-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME discovery-overlap COMMAND moq-interop-discovery-overlap-tests)
+    add_executable(moq-interop-d22-fixture-probes-tests tests/protocol/draft22_fixture_probes_test.cpp)
+    target_link_libraries(moq-interop-d22-fixture-probes-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
+    add_test(NAME d22-fixture-probes COMMAND moq-interop-d22-fixture-probes-tests)
 
     add_executable(moq-interop-draft18-session-tests
                    tests/protocol/draft18_session_test.cpp)

@@ -7,7 +7,9 @@
 #include "moq/interop/wire/draft21/setup.h"
 #include "moq/interop/wire/draft21/successful_response.h"
 
+#include <algorithm>
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 namespace moq::interop::scenarios {
@@ -181,9 +183,61 @@ bool response_ready(const RawProbeTranscript& transcript,
         (result.valid_ok || result.valid_error) && !result.malformed &&
         !result.incomplete && !result.invalid_chronology;
 }
+
+// SUBSCRIBE (Request ID 1, no parameters) for `track_namespace`/`track_name`.
+Bytes encode_subscribe(const std::vector<Bytes>& track_namespace, const Bytes& track_name) {
+    wire::ByteWriter body(65535);
+    bool success = wire::write_vi64(1, body) && wire::write_vi64(track_namespace.size(), body);
+    for (const auto& field : track_namespace) success = success && wire::write_length_prefixed_bytes(field, body);
+    success = success && wire::write_length_prefixed_bytes(track_name, body) && wire::write_vi64(0, body);
+    wire::ByteWriter output(kMaximumResponseBytes);
+    success = success && wire::write_vi64(3, output) &&
+        output.append_byte(static_cast<std::byte>(body.size() >> 8u)) &&
+        output.append_byte(static_cast<std::byte>(body.size() & 255u)) && output.append_bytes(body.bytes());
+    if (!success) throw std::invalid_argument("unencodable draft 21 response probe SUBSCRIBE");
+    return {output.bytes().begin(), output.bytes().end()};
+}
+
+// The track a delivered SUBSCRIBE names, when it is exactly what encode_subscribe builds for it.
+std::optional<std::pair<std::vector<Bytes>, Bytes>> recover_subscribe(std::span<const std::byte> input) {
+    if (input.size() > kMaximumResponseBytes) return std::nullopt;
+    wire::Cursor cursor(input);
+    const auto decoded = wire::draft21::decode_request_frame(cursor, true);
+    const auto* frame = std::get_if<wire::draft21::RequestFrame>(&decoded);
+    if (!frame || frame->type.type != 3 || cursor.remaining() != 0) return std::nullopt;
+    wire::Cursor body(frame->body);
+    const auto id = wire::read_vi64(body);
+    const auto count = wire::read_vi64(body);
+    const auto* request = std::get_if<std::uint64_t>(&id);
+    const auto* fields = std::get_if<std::uint64_t>(&count);
+    if (!request || *request != 1 || !fields || *fields > 32) return std::nullopt;
+    std::pair<std::vector<Bytes>, Bytes> result;
+    for (std::uint64_t index = 0; index < *fields; ++index) {
+        const auto field = wire::read_length_prefixed_bytes(body, 4096);
+        const auto* value = std::get_if<std::span<const std::byte>>(&field);
+        if (!value) return std::nullopt;
+        result.first.emplace_back(value->begin(), value->end());
+    }
+    const auto name = wire::read_length_prefixed_bytes(body, 4096);
+    const auto* value = std::get_if<std::span<const std::byte>>(&name);
+    if (!value) return std::nullopt;
+    result.second.assign(value->begin(), value->end());
+    try {
+        if (encode_subscribe(result.first, result.second) != Bytes(input.begin(), input.end())) return std::nullopt;
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    }
+    return result;
+}
 }  // namespace
 
-std::vector<Draft21ResponseProbe> draft21_response_probes(std::chrono::milliseconds deadline) {
+std::vector<Draft21ResponseProbe> draft21_response_probes(std::chrono::milliseconds deadline,
+                                                         std::vector<Bytes> track_namespace, Bytes track_name) {
+    // Draft 22 runs share these probes. A publisher that serves only the run's track refuses the probe's own
+    // name, so on the draft 22 wire the SUBSCRIBE names the run's track (draft 21 is frozen: its bytes stay).
+    const bool wire22 = current_wire_draft() == 22;
+    const auto subscribe = wire22 && !track_name.empty()
+        ? encode_subscribe(track_namespace, track_name) : bytes({3,0,5,1,0,1,'x',0});
     std::vector<Draft21ResponseProbe> result;
     const auto add = [&](const char* requirement, const char* scenario, const char* evaluator,
                          Draft21ResponseExpectation expectation, bool namespace_scoped,
@@ -213,7 +267,7 @@ std::vector<Draft21ResponseProbe> draft21_response_probes(std::chrono::milliseco
     // these profiles make no assumption about UNKNOWN_AUTH_TOKEN_ALIAS's code.
     add("D21-9-5-1-MUST-346", "d21-failed-subscription-update-cleanup",
         "d21-failed-update-publish-done-update-failed", Draft21ResponseExpectation::FailedSubscriptionCleanup,
-        false, bytes({3,0,5,1,0,1,'x',0}), wire::draft21::ResponseContext::Subscribe);
+        false, subscribe, wire::draft21::ResponseContext::Subscribe);
     add("D21-9-5-1-MUST-348", "d21-failed-subscribe-namespace-update-close",
         "d21-failed-namespace-update-stream-close", Draft21ResponseExpectation::FailedDiscoveryCleanup,
         true, bytes({0x50,0,3,1,0,0}), wire::draft21::ResponseContext::SubscribeNamespace);
@@ -225,7 +279,25 @@ std::vector<Draft21ResponseProbe> draft21_response_probes(std::chrono::milliseco
 
 std::optional<bool> evaluate_draft21_response_probe(
     const RawProbeTranscript& transcript, const Draft21ResponseProbe& profile) {
-    if (!raw_probe_stimulus_valid(transcript, profile.definition)) return std::nullopt;
+    const RawProbeDefinition* expected = &profile.definition;
+    std::vector<Draft21ResponseProbe> rebuilt;
+    if (current_wire_draft() == 22 &&
+        profile.expectation == Draft21ResponseExpectation::FailedSubscriptionCleanup) {
+        // On the draft 22 wire the SUBSCRIBE named the run's track: rebuild the definition for the track the
+        // delivered SUBSCRIBE names (only an exact rebuild is accepted) and prove the stimulus against it.
+        if (transcript.writes.empty()) return std::nullopt;
+        const auto track = recover_subscribe(transcript.writes.front().write.bytes);
+        if (!track) return std::nullopt;
+        rebuilt = draft21_response_probes(profile.definition.deadline, track->first, track->second);
+        const auto found = std::find_if(rebuilt.begin(), rebuilt.end(), [&](const auto& candidate) {
+            return candidate.definition.id == profile.definition.id &&
+                candidate.requirement_id == profile.requirement_id &&
+                candidate.evaluator_id == profile.evaluator_id;
+        });
+        if (found == rebuilt.end()) return std::nullopt;
+        expected = &found->definition;
+    }
+    if (!raw_probe_stimulus_valid(transcript, *expected)) return std::nullopt;
     const auto result = observe(transcript, profile.namespace_scoped);
     if (profile.expectation == Draft21ResponseExpectation::PermittedPublishUpdate) {
         if (result.protocol_close) return false;

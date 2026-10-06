@@ -648,7 +648,16 @@ public:
                                                   std::move(close_name));
             },
             [&]() -> std::optional<scenarios::RawProbeDefinition> {
-            if (auto value = find(scenarios::draft21_response_probes(run_config.timeout))) return value;
+            // The run's track reaches the probe only on the draft 22 wire (the builder ignores it on wire 21).
+            std::vector<std::vector<std::byte>> response_namespace;
+            std::vector<std::byte> response_name;
+            if (run_config.track_fixture) {
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    response_namespace.push_back(bytes_of(field));
+                response_name = bytes_of(run_config.track_fixture->track_name);
+            }
+            if (auto value = find(scenarios::draft21_response_probes(run_config.timeout,
+                    std::move(response_namespace), std::move(response_name)))) return value;
             if (auto value = find(scenarios::draft21_peer_close_probes(run_config.timeout))) return value;
             if (auto value = find(scenarios::draft21_request_profiles(run_config.timeout))) return value;
             return find(scenarios::draft21_close_probes(run_config.timeout));
@@ -1327,9 +1336,14 @@ public:
             return std::move(found->definition);
         }
         if (request_goaway_scenario(static_cast<unsigned>(run_config.draft),id)) {
+            // The run's namespace reaches the probes only on the draft 22 wire (ignored on wire 21).
+            std::vector<std::vector<std::byte>> goaway_namespace;
+            if (run_config.track_fixture)
+                for (const auto& field : run_config.track_fixture->namespace_fields)
+                    goaway_namespace.push_back(bytes_of(field));
             auto profiles = app::by_draft(run_config.draft,
                 [&] { return scenarios::draft18_request_goaway_probes(run_config.timeout); },
-                [&] { return scenarios::draft21_request_goaway_probes(run_config.timeout); });
+                [&] { return scenarios::draft21_request_goaway_probes(run_config.timeout, goaway_namespace); });
             const auto found = std::find_if(profiles.begin(),profiles.end(),
                 [&](const auto& profile) { return profile.definition.id == id; });
             if (found == profiles.end()) throw std::invalid_argument("unknown request GOAWAY probe");
