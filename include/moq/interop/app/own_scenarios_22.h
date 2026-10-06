@@ -35,6 +35,7 @@ inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>(
     {"d22-subscribe-bounded-location-range", true},
     {"d22-update-subscription-location-range", true},
     {"d22-fetch-bounded-location-range", true},
+    {"d22-discover-original-publisher-namespaces", true},
 });
 
 // An own scenario implementation: its traits and the probe the run manager drives. `probe` is called

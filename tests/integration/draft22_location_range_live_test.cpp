@@ -1,22 +1,15 @@
 // Live draft 22 runs of the own scenarios for D22-3-3-1-MUST-NOT-069: a picoquic publisher stand-in plays
 // the publisher half (conforming or deviating) against the production NativeRunManager on moqt-22.
-#include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/own_scenario_dispatch_22.h"
-#include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/scenario_registry.h"
-#include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/scenarios/draft22_location_range.h"
-#include "moq/interop/scenarios/raw_probe.h"
-#include "moq/interop/storage/run_store.h"
-#include "support/picoquic_client.h"
+#include "support/draft22_own_live.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -25,77 +18,7 @@
 namespace moq::interop {
 namespace {
 
-using namespace std::chrono_literals;
-using Bytes = std::vector<std::byte>;
-using Client = transport::test::PicoquicTestClient;
-
-Bytes b(std::initializer_list<unsigned> values) {
-    Bytes result;
-    for (const auto value : values) result.push_back(static_cast<std::byte>(value));
-    return result;
-}
-
-Bytes alpn_of(std::string_view value) {
-    Bytes result;
-    for (const char byte : value) result.push_back(static_cast<std::byte>(byte));
-    return result;
-}
-
-std::shared_ptr<const requirements::RequirementCatalog> catalog(unsigned draft) {
-    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
-    const auto source = requirements::load_draft_source(draft, root / "docs", root / "requirements/draft-digests.json");
-    const auto path = root / ("requirements/draft" + std::to_string(draft) + ".json");
-    if (draft == 22)
-        return std::make_shared<const requirements::RequirementCatalog>(
-            requirements::RequirementCatalog::load(source, path, requirements::CatalogLoadMode::AllowIncomplete));
-    return std::make_shared<const requirements::RequirementCatalog>(requirements::RequirementCatalog::load(source, path));
-}
-
-app::NativeRunManager manager_for(const std::shared_ptr<storage::SqliteRunStore>& store) {
-    return app::NativeRunManager(catalog(18), catalog(21), store,
-        {.bind_address = "127.0.0.1", .advertised_address = "127.0.0.1",
-         .port_start = 0, .port_end = 0, .maximum_active_runs = 1,
-         .certificate_path = std::filesystem::path(PICOQUIC_TEST_CERT_DIR) / "cert.pem",
-         .private_key_path = std::filesystem::path(PICOQUIC_TEST_CERT_DIR) / "key.pem"},
-        catalog(22));
-}
-
-template <class Predicate>
-bool pump_until(Client& client, Predicate predicate, std::chrono::milliseconds limit = 4s) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (!client.pump()) return false;
-        if (predicate()) return true;
-        std::this_thread::sleep_for(1ms);
-    }
-    return false;
-}
-
-// Whether the run's context `ordinal` (1-based) is listening.
-bool context_started(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunId& id, unsigned ordinal) {
-    const auto suffix = " ordinal=" + std::to_string(ordinal);
-    const auto run = store->load(id);
-    return std::any_of(run.events.begin(), run.events.end(), [&](const auto& event) {
-        return event.kind == "context_ready" && event.detail.ends_with(suffix);
-    });
-}
-
-bool context_ready(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunId& id,
-                   unsigned ordinal = 1) {
-    const auto deadline = std::chrono::steady_clock::now() + 3s;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (context_started(store, id, ordinal)) return true;
-        std::this_thread::sleep_for(1ms);
-    }
-    return false;
-}
-
-requirements::OutcomeState state_of(const storage::RunRecord& run, std::string_view id) {
-    const auto found = std::find_if(run.outcomes.begin(), run.outcomes.end(),
-                                    [&](const auto& outcome) { return outcome.requirement_id == id; });
-    EXPECT_NE(found, run.outcomes.end()) << id;
-    return found == run.outcomes.end() ? requirements::OutcomeState::NotRun : found->state;
-}
+using namespace live22;
 
 // The publisher's half: one answer per request stream (in request order; empty means no answer); then,
 // when `follow_ups` is set, waits for each follow-up request on the same streams and sends
@@ -120,7 +43,6 @@ std::vector<Bytes> play(const std::shared_ptr<storage::SqliteRunStore>& store, c
         return setup && setup->data == b({0xaf, 0, 0, 0});
     }));
     EXPECT_TRUE(client->send_stream(2, b({0xaf, 0, 0, 0}), false));
-    const auto request_stream = [](std::size_t index) { return static_cast<std::uint64_t>(1 + 4 * index); };
     EXPECT_TRUE(pump_until(*client, [&] {
         for (std::size_t index = 0; index < expected.size(); ++index) {
             const auto stream = client->stream(request_stream(index));
@@ -162,40 +84,9 @@ std::vector<Bytes> play(const std::shared_ptr<storage::SqliteRunStore>& store, c
         EXPECT_TRUE(client->send_stream(stream, payload, true));
         stream += 4;
     }
-    // The runner may close the connection when the context ends; only the run's progress matters here.
-    (void)pump_until(*client, [&] {
-        return store->load(started.id).state == storage::RunState::Finalized ||
-               context_started(store, started.id, ordinal + 1);
-    }, 10s);
-    EXPECT_TRUE(store->load(started.id).state == storage::RunState::Finalized ||
-                context_started(store, started.id, ordinal + 1));
+    pump_until_context_ends(*client, store, started.id, ordinal);
     return written;
 }
-
-// Records the production evaluator's verdict while keeping it in charge (an overlay shadows it by id).
-class VerdictRecorder {
-public:
-    VerdictRecorder(std::string_view evaluator, std::string_view scenario,
-                    std::optional<bool> (*production)(const scenarios::RawProbeTranscript&))
-        : scope_({evaluator, [this, scenario, production](const scenarios::RawProbeTranscript& transcript) {
-              const auto verdict = production(transcript);
-              if (transcript.scenario_id == scenario) {
-                  const std::lock_guard lock(mutex_);
-                  verdicts_.push_back(verdict);
-              }
-              return verdict;
-          }}) {}
-
-    std::vector<std::optional<bool>> verdicts() const {
-        const std::lock_guard lock(mutex_);
-        return verdicts_;
-    }
-
-private:
-    mutable std::mutex mutex_;
-    std::vector<std::optional<bool>> verdicts_;
-    app::ScopedOwnEvaluator22 scope_;
-};
 
 // Subgroup stream: flags 0x30 (Subgroup ID 0, default priority), alias, group, then Objects.
 Bytes subgroup(unsigned alias, unsigned group, const std::vector<unsigned>& object_ids) {
