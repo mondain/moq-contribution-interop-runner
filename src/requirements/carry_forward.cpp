@@ -204,10 +204,10 @@ Json row_json(const std::string& id, Strength strength, const OccurrenceContext&
                 {"rationale", rationale}};
 }
 
-Json catalog_json(const DraftSource& source, Json rows) {
+Json catalog_json(const DraftSource& source, Json rows, bool complete = false) {
     return Json{{"draft", source.number},
                 {"source_sha256", source.sha256},
-                {"complete", false},
+                {"complete", complete},
                 {"requirements", std::move(rows)}};
 }
 
@@ -662,8 +662,21 @@ void merge_partitions(const DraftSource& new_source, const std::filesystem::path
             rows.push_back(row);
         }
     }
-    write_json(requirements_dir / ("draft" + std::to_string(new_source.number) + ".json"),
-               catalog_json(new_source, std::move(rows)));
+    // Keep the complete flag of the catalog being replaced: completeness is set by
+    // hand once the draft's gate passes, and rebuilding the rows from the parts must
+    // not silently undo it. A fresh draft (no file) or an unreadable file stays false.
+    const auto merged_path =
+        requirements_dir / ("draft" + std::to_string(new_source.number) + ".json");
+    bool complete = false;
+    if (std::filesystem::exists(merged_path)) {
+        std::ifstream existing(merged_path);
+        const auto previous = Json::parse(existing, nullptr, false);
+        if (!previous.is_discarded() && previous.is_object() && previous.contains("complete") &&
+            previous.at("complete").is_boolean()) {
+            complete = previous.at("complete").get<bool>();
+        }
+    }
+    write_json(merged_path, catalog_json(new_source, std::move(rows), complete));
 }
 
 }  // namespace moq::interop::requirements
