@@ -30,6 +30,8 @@
 set -euo pipefail
 # A refused request must stop the script, also inside command_line's command substitution.
 shopt -s inherit_errexit
+# Byte-order sorting (sort -u of the ids, comm, list comparisons): the golden must not depend on locale.
+export LC_ALL=C
 
 update=0
 [[ "${1:-}" == --update || "${MOQ_UPDATE_GOLDEN:-}" == 1 ]] && update=1
@@ -149,6 +151,8 @@ announce_overrides=(
 # imquic's reverse override: moqxr runs it --forward 0, imquic must publish first (run.sh).
 publish_overrides=(
     d22-publish-update-ok-with-track-properties
+    d22-publish-established-subscriber-sends-publish-state-notify
+    d22-subscribe-tracks-publish-skipped-then-capacity-recovers
 )
 same_list d22_moqxr_paced_overrides "${moqxr_paced_overrides[@]}"
 same_list d22_announce_overrides "${announce_overrides[@]}"

@@ -15,9 +15,11 @@
 #                path cannot be conveyed (it is dropped) and a moqt query is refused.
 #   -X           publish-first: PUBLISH right after SETUP, Objects only after PUBLISH_OK; it sends no
 #                PUBLISH_NAMESPACE and answers every SUBSCRIBE with REQUEST_ERROR DUPLICATE_SUBSCRIPTION.
-#                Without -X (announce-and-wait): PUBLISH_NAMESPACE right after SETUP, then the first
-#                SUBSCRIBE for the track is accepted (one subscriber at a time) and Objects flow only
-#                if that SUBSCRIBE carries FORWARD=1. A refused PUBLISH or PUBLISH_NAMESPACE ends it.
+#                Without -X (announce-and-wait): PUBLISH_NAMESPACE right after SETUP, then a SUBSCRIBE
+#                for the track is accepted and Objects flow only if it carries FORWARD=1. Once delivery
+#                has started, a further SUBSCRIBE is refused (DUPLICATE_SUBSCRIPTION); SUBSCRIBEs without
+#                FORWARD=1 start nothing, so later ones are still accepted. A refused PUBLISH or
+#                PUBLISH_NAMESPACE ends it.
 #   -D datagram  send Objects as datagrams instead of subgroup streams.
 #   -d 4         log level (0-7, 4 = info), to standard output.
 # It has no timeout or input option (the payload is a clock: one Object per second, one Group per
@@ -284,11 +286,26 @@ d22_announce_overrides=(
     d22-publish-namespace-redirect-nonempty-track-name
     d22-publisher-namespace-routing-announcement
 )
-#   d22- id (moqxr --forward 0 -> here -X)          why
+#   d22- id (moqxr --forward 0 -> here -X)          why: the stimulus waits for the publisher's PUBLISH
 #   publish-update-ok-with-track-properties        its first write answers the publisher's PUBLISH
-#                                                  (peer_request_ready waits for PUBLISH Request ID 0)
+#                                                  (peer_request_ready waits for PUBLISH Request ID 0;
+#                                                  draft21_peer_close)
+#   publish-established-subscriber-sends-publish-state-notify
+#                                                  answers PUBLISH Request ID 0 with REQUEST_OK, then sends
+#                                                  PUBLISH_STATE_NOTIFY on it (peer_request_ready =
+#                                                  publish_track; draft21_close)
+#   subscribe-tracks-publish-skipped-then-capacity-recovers
+#                                                  grants one peer bidi stream and writes its SUBSCRIBE_TRACKS
+#                                                  only once a PUBLISH arrived (peer_request_ready;
+#                                                  draft21_contribution_residual_subscription)
+# Every other probe gated on, or answering, a publisher PUBLISH (observing(...), publish_ready,
+# publish_track, the peer_close publish probes) already runs -X by the derivation; the courtesy
+# PUBLISH answers of the SUBSCRIBE_TRACKS probes (discovery_overlap, request_goaway, draft21_response)
+# do not gate a stimulus.
 d22_publish_overrides=(
     d22-publish-update-ok-with-track-properties
+    d22-publish-established-subscriber-sends-publish-state-notify
+    d22-subscribe-tracks-publish-skipped-then-capacity-recovers
 )
 
 # The own draft 22 scenarios and the two unscored probes have no d21- twin; they are matched by their

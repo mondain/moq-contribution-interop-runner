@@ -249,7 +249,8 @@ verifies no certificate, so `fixture` and `tls_ca` are not used.
 
 The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
 is refused with DUPLICATE_SUBSCRIPTION) or announce-and-wait (no `-X`: PUBLISH_NAMESPACE,
-then the first SUBSCRIBE is accepted and Objects flow if it carries FORWARD=1). It is
+then a SUBSCRIBE is accepted and Objects flow if it carries FORWARD=1; once delivery has
+started, a further SUBSCRIBE is refused with DUPLICATE_SUBSCRIPTION). It is
 derived from the moqxr adapter: moqxr `--forward 1` gives `-X`, `--forward 0` (paced or not)
 gives none, and the own scenarios and probes follow the moqxr table above. Where imquic's
 modes differ from moqxr's, these shared scenarios deviate from the derivation:
@@ -263,6 +264,8 @@ modes differ from moqxr's, these shared scenarios deviate from the derivation:
 | `request-update-overrun`, `request-update-independent-streams` | no `-X` | `--forward 1` | REQUEST_UPDATEs on the runner's own subscriptions |
 | `publish-namespace-redirect-nonempty-track-name`, `publisher-namespace-routing-announcement` | no `-X` | `--forward 1` | need the publisher's PUBLISH_NAMESPACE |
 | `publish-update-ok-with-track-properties` | `-X` | `--forward 0 --paced` | its first write answers the publisher's PUBLISH |
+| `publish-established-subscriber-sends-publish-state-notify` | `-X` | `--forward 0 --paced` | answers the publisher's PUBLISH, then sends PUBLISH_STATE_NOTIFY on it |
+| `subscribe-tracks-publish-skipped-then-capacity-recovers` | `-X` | `--forward 0` | sends its SUBSCRIBE_TRACKS only after the publisher's PUBLISH |
 
 `tests/e2e/imquic-adapter-cmdlines.sh` pins every command line in
 `tests/golden/imquic-cmdlines-d22.txt` and checks the derivation and these exceptions;
