@@ -1106,6 +1106,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
                  COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-cmdlines.sh"
                          ${moqxr_cmdline_draft})
     endforeach()
+    add_test(NAME imquic-adapter-contract
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-adapter-contract.sh")
+    add_test(NAME imquic-adapter-cmdlines-d22
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-adapter-cmdlines.sh")
     add_executable(moq-interop-executable-ids-golden-tests tests/unit/executable_ids_golden_test.cpp)
     target_compile_definitions(moq-interop-executable-ids-golden-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

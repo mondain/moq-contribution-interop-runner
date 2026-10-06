@@ -173,7 +173,7 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter") |
+| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21) |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -232,6 +232,42 @@ its twin-equality check:
 | `unknown-unidirectional-stream-type` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 | `unknown-control-message` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 | `successful-subscribe-object-delivery` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+
+#### The imquic adapter (draft 22)
+
+`adapters/imquic/run.sh` drives imquic's example publisher (`examples/moq-pub.c`, built as
+`imquic-moq-pub`), named by `IMQUIC_PUB_BIN`, at draft 22 only. It passes `-M 22 -n media
+-N vide_1 -d 4`, translates the endpoint into `-r HOST -R PORT` plus `-q` (native QUIC) or
+`-w -H PATH` (WebTransport; the path and any query become the HTTP/3 `:path` unchanged, `/` if
+empty; IPv6 literals lose their brackets), and runs the publisher as
+`timeout --foreground --preserve-status -k 2 -s TERM <timeout+3>` with its output in
+`<log_dir>/publisher.log`. imquic's raw QUIC client sends no PATH SETUP option, so the
+`moqt://` path is dropped and a `moqt://` query is refused (exit 64), as are an empty host,
+a missing or out-of-range port, user information, a fragment and an IPv6 zone. moq-pub
+reads no fixture (it publishes a clock: one Object per second, one Group per minute) and
+verifies no certificate, so `fixture` and `tls_ca` are not used.
+
+The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
+is refused with DUPLICATE_SUBSCRIPTION) or announce-and-wait (no `-X`: PUBLISH_NAMESPACE,
+then the first SUBSCRIBE is accepted and Objects flow if it carries FORWARD=1). It is
+derived from the moqxr adapter: moqxr `--forward 1` gives `-X`, `--forward 0` (paced or not)
+gives none, and the own scenarios and probes follow the moqxr table above. Where imquic's
+modes differ from moqxr's, these shared scenarios deviate from the derivation:
+
+| `d22-` scenario | imquic | moqxr | Why |
+|---|---|---|---|
+| `complete-subgroup-fin`, `subgroup-start-location-fin` | no `-X` | `--forward 1` | the runner subscribes and judges Subgroup FINs |
+| `object-datagram-flags` | no `-X`, `-D datagram` | `--forward 1` | the runner subscribes and judges Object datagrams |
+| `original-publisher-opens-new-subgroup`, `publish-track-with-mandatory-property`, `subscribe-single-subgroup` | no `-X` | `--forward 1` | the runner subscribes and judges the Objects |
+| `subscribe-accepted` | no `-X` | `--forward 1` | scores the SUBSCRIBE_OK branch (`subscribe-rejected` keeps `-X`) |
+| `request-update-overrun`, `request-update-independent-streams` | no `-X` | `--forward 1` | REQUEST_UPDATEs on the runner's own subscriptions |
+| `publish-namespace-redirect-nonempty-track-name`, `publisher-namespace-routing-announcement` | no `-X` | `--forward 1` | need the publisher's PUBLISH_NAMESPACE |
+| `publish-update-ok-with-track-properties` | `-X` | `--forward 0 --paced` | its first write answers the publisher's PUBLISH |
+
+`tests/e2e/imquic-adapter-cmdlines.sh` pins every command line in
+`tests/golden/imquic-cmdlines-d22.txt` and checks the derivation and these exceptions;
+`tests/e2e/imquic-adapter-contract.sh` checks validation, endpoint translation and the
+`timeout` wrapper.
 
 A real request file from a run:
 
