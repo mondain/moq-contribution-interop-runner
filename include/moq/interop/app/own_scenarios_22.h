@@ -31,7 +31,9 @@ struct OwnScenarioTraits22 {
 // Own draft 22 scenarios with a production implementation. Each entry needs a probe in
 // src/app/own_scenario_dispatch_22.cpp (the header stays free of scenario code so every target that
 // asks a registry predicate links without the scenarios library).
-inline constexpr std::array<OwnScenarioTraits22, 0> kOwnScenarioTraits22{};
+inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>({
+    {"d22-subscribe-bounded-location-range", true},
+});
 
 // An own scenario implementation: its traits and the probe the run manager drives. `probe` is called
 // on the run's execution config (draft 21 family) under ScopedWireDraft(22).

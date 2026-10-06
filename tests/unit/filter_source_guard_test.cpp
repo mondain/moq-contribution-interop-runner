@@ -42,6 +42,8 @@ const std::map<std::string, Allowed> kAllowed{
     {"fetch_first_object.cpp", {1, 1, "FETCH: delta 0x21, then filter_param_value"}},
     {"fetch_group_order.cpp", {1, 1, "FETCH: delta 0x21, then filter_param_value"}},
     {"immutable_repeat.cpp", {1, 1, "FETCH: delta 0x21, then filter_param_value"}},
+    {"draft22_location_range.cpp",
+     {1, 1, "kLocationFilter: delta, then filter_param_value or (Types 0x01, 0x05) the draft 22 encoder"}},
     // draft21_close: the overflow probe's type byte before filter_param_value, and a reader of a
     // received PUBLISH (decode_publish_for_wire presents it in draft 21 form).
     {"draft21_close.cpp", {2, 1, "std::byte{0x21} + filter_param_value; parameter.type == 0x21 reader"}},

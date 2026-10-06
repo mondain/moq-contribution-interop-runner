@@ -1,6 +1,8 @@
 #include "moq/interop/app/lineage.h"
 #include "moq/interop/app/scenario_registry.h"
 
+#include <algorithm>
+
 #include <gtest/gtest.h>
 
 #include <stdexcept>
@@ -8,6 +10,12 @@
 
 namespace moq::interop::app {
 namespace {
+
+// Own draft 22 scenarios implemented in production (kOwnScenarioTraits22).
+bool production_own(std::string_view id) {
+    return std::any_of(kOwnScenarioTraits22.begin(), kOwnScenarioTraits22.end(),
+                       [&](const auto& traits) { return traits.id == id; });
+}
 
 TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21ImplementationRuns) {
     const auto ids = executable_scenarios(22);
@@ -22,8 +30,13 @@ TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21Impl
         expected += runs ? 1 : 0;
         EXPECT_EQ(executable_scenario(22, d22), runs) << d22;
     }
-    EXPECT_EQ(ids.size(), expected);
+    // Followed by the own scenarios implemented in production, which have no draft 21 implementation.
+    EXPECT_EQ(ids.size(), expected + kOwnScenarioTraits22.size());
     for (const auto id : ids) {
+        if (production_own(id)) {
+            EXPECT_FALSE(implementation_scenario_id(id).has_value()) << id;
+            continue;
+        }
         const auto implementation = implementation_scenario_id(id);
         ASSERT_TRUE(implementation.has_value()) << id;
         EXPECT_TRUE(executable_scenario(21, *implementation)) << id;
@@ -31,10 +44,12 @@ TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21Impl
 }
 
 // Pinned so a lineage change that moves executable scenarios is a visible event: 167 before D2 shared the
-// 46 draft 21 LOCATION_FILTER scenarios, all of which have an executable draft 21 implementation.
+// 46 draft 21 LOCATION_FILTER scenarios, all of which have an executable draft 21 implementation. The own
+// scenarios implemented in production follow them (D2 Tasks 9-10 add them one at a time).
 TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
     EXPECT_EQ(shared_scenario_ids_22().size(), 307u);
-    EXPECT_EQ(executable_scenarios(22).size(), 213u);
+    EXPECT_EQ(kOwnScenarioTraits22.size(), 1u);
+    EXPECT_EQ(executable_scenarios(22).size(), 213u + kOwnScenarioTraits22.size());
 }
 
 TEST(LineageRegistry, OwnAndUnknownIdsAreNotExecutableForDraft22) {
@@ -74,7 +89,8 @@ void expect_forwards(std::string_view id, std::string_view impl) {
 }  // namespace
 
 TEST(LineageRegistry, Draft22PredicatesForwardToDraft21WithTheImplementationId) {
-    for (const auto id : executable_scenarios(22)) expect_forwards(id, *implementation_scenario_id(id));
+    for (const auto id : executable_scenarios(22))
+        if (!production_own(id)) expect_forwards(id, *implementation_scenario_id(id));
 }
 
 TEST(LineageRegistry, Draft22PredicatesForwardForSharedButUnimplementedIdsToo) {
@@ -103,23 +119,26 @@ TEST(LineageRegistry, Draft18And21RegistriesAreUnchanged) {
 
 constexpr std::string_view kStubOwn = "d22-request-stream-before-peer-setup";
 
-TEST(LineageRegistryOwn, NoOwnScenarioIsImplementedInProductionYet) {
-    EXPECT_TRUE(own_scenario_ids_22().empty());
+TEST(LineageRegistryOwn, OnlyTheProductionOwnScenariosAreImplemented) {
+    EXPECT_EQ(own_scenario_ids_22().size(), kOwnScenarioTraits22.size());
     for (const auto id : requirements::lineage_data::kOwnScenarios22) {
-        EXPECT_FALSE(own_scenario_22(id).has_value()) << id;
-        EXPECT_FALSE(executable_scenario(22, id)) << id;
-        EXPECT_FALSE(raw_probe_scenario(22, id)) << id;
+        const bool production = production_own(id);
+        EXPECT_EQ(own_scenario_22(id).has_value(), production) << id;
+        EXPECT_EQ(executable_scenario(22, id), production) << id;
+        EXPECT_EQ(raw_probe_scenario(22, id), production) << id;
         EXPECT_FALSE(implementation_scenario_id(id).has_value()) << id;
     }
 }
 
 TEST(LineageRegistryOwn, ARegisteredOwnScenarioIsExecutableOnlyWhileRegistered) {
     const auto before = executable_scenarios(22).size();
+    const auto own_before = own_scenario_ids_22().size();
     EXPECT_FALSE(executable_scenario(22, kStubOwn));
     {
         const ScopedOwnScenario22 stub({{kStubOwn, false}, {}});
-        ASSERT_EQ(own_scenario_ids_22().size(), 1u);
-        EXPECT_EQ(own_scenario_ids_22().front(), kStubOwn);
+        ASSERT_EQ(own_scenario_ids_22().size(), own_before + 1);
+        const auto own = own_scenario_ids_22();
+        EXPECT_NE(std::find(own.begin(), own.end(), kStubOwn), own.end());
         EXPECT_TRUE(executable_scenario(22, kStubOwn));
         EXPECT_TRUE(raw_probe_scenario(22, kStubOwn));
         EXPECT_FALSE(scenario_requires_track(22, kStubOwn));
@@ -127,14 +146,20 @@ TEST(LineageRegistryOwn, ARegisteredOwnScenarioIsExecutableOnlyWhileRegistered) 
         EXPECT_FALSE(implementation_scenario_id(kStubOwn).has_value()) << "an own id has no draft 21 implementation";
         const auto ids = executable_scenarios(22);
         EXPECT_EQ(ids.size(), before + 1);
-        EXPECT_EQ(ids.back(), kStubOwn) << "own ids follow the shared ones";
+        const auto shared = shared_scenario_ids_22();
+        const auto first_own = std::find_if(ids.begin(), ids.end(), [&](std::string_view id) {
+            return std::find(shared.begin(), shared.end(), id) == shared.end();
+        });
+        EXPECT_NE(std::find(first_own, ids.end(), kStubOwn), ids.end()) << "own ids follow the shared ones";
+        EXPECT_TRUE(std::all_of(first_own, ids.end(), [](std::string_view id) { return own_scenario_22(id).has_value(); }));
         // Other own ids and draft 18/21 are untouched.
-        EXPECT_FALSE(executable_scenario(22, "d22-fetch-bounded-location-range"));
+        for (const auto id : requirements::lineage_data::kOwnScenarios22)
+            if (id != kStubOwn) EXPECT_EQ(executable_scenario(22, id), production_own(id)) << id;
         EXPECT_FALSE(executable_scenario(21, kStubOwn));
         EXPECT_FALSE(executable_scenario(18, kStubOwn));
     }
     EXPECT_FALSE(executable_scenario(22, kStubOwn));
-    EXPECT_TRUE(own_scenario_ids_22().empty());
+    EXPECT_EQ(own_scenario_ids_22().size(), own_before);
     EXPECT_EQ(executable_scenarios(22).size(), before);
 }
 

@@ -1,10 +1,14 @@
 #include "moq/interop/app/own_scenario_dispatch_22.h"
 
+#include "moq/interop/scenarios/draft22_location_range.h"
+
 #include <algorithm>
 #include <functional>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace moq::interop::app {
 namespace {
@@ -16,15 +20,43 @@ struct OwnProbe22 {
     std::function<scenarios::RawProbeDefinition(const RunConfig&)> probe;
 };
 
+std::vector<std::byte> bytes_of(std::string_view value) {
+    std::vector<std::byte> result;
+    for (const char byte : value) result.push_back(static_cast<std::byte>(byte));
+    return result;
+}
+
+struct Track {
+    std::vector<std::vector<std::byte>> name_space;
+    std::vector<std::byte> name;
+};
+
+// The track fixture of a probe that needs one.
+Track track_of(const RunConfig& execution) {
+    if (!execution.track_fixture) throw std::invalid_argument("track probe requires a track fixture");
+    Track track;
+    for (const auto& field : execution.track_fixture->namespace_fields) track.name_space.push_back(bytes_of(field));
+    track.name = bytes_of(execution.track_fixture->track_name);
+    return track;
+}
+
 // Production probes for the ids in kOwnScenarioTraits22 (Tasks 9-10 add them together).
 const std::vector<OwnProbe22>& production_probes() {
-    static const std::vector<OwnProbe22> table;
+    static const std::vector<OwnProbe22> table{
+        {scenarios::kDraft22SubscribeLocationRange, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_subscribe_location_range_probe(execution.timeout, std::move(track.name_space),
+                                                                      std::move(track.name));
+         }},
+    };
     return table;
 }
 
 // Production own draft 22 evaluators (Tasks 9-10).
 const std::vector<OwnEvaluator22>& production_evaluators() {
-    static const std::vector<OwnEvaluator22> table;
+    static const std::vector<OwnEvaluator22> table{
+        {scenarios::kDraft22SubscriptionRangeEvaluator, scenarios::evaluate_draft22_subscription_location_range},
+    };
     return table;
 }
 

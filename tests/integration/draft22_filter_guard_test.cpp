@@ -240,8 +240,10 @@ TEST(Draft22FilterGuard, OnlyTheUnrepresentableOverflowProbesStayOwnByFilter) {
     for (const auto& id : listed) {
         const auto d22 = "d22-" + id.substr(4);
         const bool own = residual.contains(id) || own_by_row.contains(id);
-        EXPECT_EQ(executable_scenario(22, d22), !own) << d22;
+        // An own id runs only once it has its own draft 22 implementation (D2 Tasks 9-10), never the draft 21 one.
+        EXPECT_EQ(executable_scenario(22, d22), !own || own_scenario_22(d22).has_value()) << d22;
         if (!own) EXPECT_EQ(implementation_scenario_id(d22), std::optional<std::string_view>(id)) << d22;
+        else EXPECT_FALSE(implementation_scenario_id(d22).has_value()) << d22;
     }
 }
 
