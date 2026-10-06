@@ -161,6 +161,77 @@ private:
     bool committed_ = false;
 };
 
+bool foreign_keys_on(sqlite3* database) {
+    Statement query(database, "PRAGMA foreign_keys");
+    return query.row() && sqlite3_column_int(query.get(), 0) == 1;
+}
+
+// Turns foreign key enforcement off for a table rebuild and back on afterwards, also when
+// the rebuild fails. The pragma is a no-op inside a transaction, so this must be
+// constructed before the Transaction (and is therefore destroyed after its rollback).
+class ForeignKeysSuspended {
+public:
+    ForeignKeysSuspended(sqlite3* database, std::string_view operation)
+        : database_(database), operation_(operation) {
+        execute(database_, "PRAGMA foreign_keys=OFF", operation_ + " disable foreign keys");
+        if (foreign_keys_on(database_)) {
+            restore();
+            throw std::runtime_error(operation_ + " disable foreign keys: pragma remained enabled");
+        }
+    }
+
+    ~ForeignKeysSuspended() {
+        if (!restored_) sqlite3_exec(database_, "PRAGMA foreign_keys=ON", nullptr, nullptr, nullptr);
+    }
+
+    ForeignKeysSuspended(const ForeignKeysSuspended&) = delete;
+    ForeignKeysSuspended& operator=(const ForeignKeysSuspended&) = delete;
+
+    void restore() {
+        restored_ = true;
+        execute(database_, "PRAGMA foreign_keys=ON", operation_ + " enable foreign keys");
+        if (!foreign_keys_on(database_)) {
+            throw std::runtime_error(operation_ + " enable foreign keys: pragma remained disabled");
+        }
+    }
+
+private:
+    sqlite3* database_;
+    std::string operation_;
+    bool restored_ = false;
+};
+
+// Schema version 3 to 4: SQLite cannot alter a CHECK, so `runs` is rebuilt with the
+// version 4 definition from schema.sql (the draft CHECK accepts 22), keeping every column
+// and rowid. Child tables reference `runs` by name, so after the rename they reference the
+// new table; recreating runs_newest_idx restores the only index on `runs` (there are no
+// triggers). Must run with foreign keys off, or DROP TABLE would cascade into the children.
+constexpr const char* kMigrateVersionThreeToFour =
+    "CREATE TABLE runs_new (\n"
+    "    id TEXT PRIMARY KEY,\n"
+    "    draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22)),\n"
+    "    transport INTEGER NOT NULL CHECK (transport IN (0, 1)),\n"
+    "    mode INTEGER NOT NULL CHECK (mode IN (0, 1)),\n"
+    "    timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),\n"
+    "    state INTEGER NOT NULL CHECK (state IN (0, 1)),\n"
+    "    created_at_unix_ns INTEGER NOT NULL,\n"
+    "    finalized_at_unix_ns INTEGER,\n"
+    "    CHECK ((state = 0 AND finalized_at_unix_ns IS NULL) OR\n"
+    "           (state = 1 AND finalized_at_unix_ns IS NOT NULL AND\n"
+    "            finalized_at_unix_ns > created_at_unix_ns))\n"
+    ");"
+    "INSERT INTO runs_new(rowid,id,draft,transport,mode,timeout_ms,state,"
+    "created_at_unix_ns,finalized_at_unix_ns) "
+    "SELECT rowid,id,draft,transport,mode,timeout_ms,state,"
+    "created_at_unix_ns,finalized_at_unix_ns FROM runs;"
+    "DROP TABLE runs;"
+    "ALTER TABLE runs_new RENAME TO runs;"
+    "CREATE INDEX runs_newest_idx ON runs(created_at_unix_ns DESC, id DESC);"
+    "CREATE TABLE schema_meta_v4 (version INTEGER NOT NULL CHECK (version = 4));"
+    "INSERT INTO schema_meta_v4(version) VALUES (4);"
+    "DROP TABLE schema_meta;"
+    "ALTER TABLE schema_meta_v4 RENAME TO schema_meta;";
+
 std::string text(sqlite3_stmt* statement, int column) {
     const auto* value = sqlite3_column_text(statement, column);
     if (value == nullptr) return {};
@@ -296,10 +367,7 @@ public:
         last_timestamp = sqlite3_column_int64(latest.get(), 0);
     }
 
-    bool foreign_keys_enabled_unlocked() const {
-        Statement query(database.get(), "PRAGMA foreign_keys");
-        return query.row() && sqlite3_column_int(query.get(), 0) == 1;
-    }
+    bool foreign_keys_enabled_unlocked() const { return foreign_keys_on(database.get()); }
 
     int schema_version_unlocked() const {
         Statement query(database.get(), "SELECT version FROM schema_meta");
@@ -330,8 +398,8 @@ public:
             if (table_count != 0) {
                 throw std::runtime_error("open SQLite run store: non-empty database has no schema version");
             }
-            Transaction transaction(database.get(), "create SQLite schema version 3");
-            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 3");
+            Transaction transaction(database.get(), "create SQLite schema version 4");
+            execute(database.get(), detail::kSchemaSql, "create SQLite schema version 4");
             transaction.commit();
         }
 
@@ -370,9 +438,28 @@ public:
             transaction.commit();
             version = 3;
         }
-        // New databases get schema.sql (draft CHECK accepts 22); databases migrated up to
-        // here keep CHECK (draft IN (18, 21)) until a version 4 rebuild of `runs` exists.
-        if (version != 3) {
+        if (version == 3) {
+            // Migrated version 3 databases still have CHECK (draft IN (18, 21)) on `runs`;
+            // the rebuild gives every database the schema.sql definition, which accepts 22.
+            const std::string operation = "migrate SQLite schema version 3 to 4";
+            ForeignKeysSuspended foreign_keys(database.get(), operation);
+            {
+                Transaction transaction(database.get(), operation);
+                execute(database.get(), kMigrateVersionThreeToFour, operation);
+                {
+                    Statement violations(database.get(), "PRAGMA foreign_key_check");
+                    if (violations.row()) {
+                        throw std::runtime_error(operation +
+                                                 ": foreign key check failed for table " +
+                                                 text(violations.get(), 0));
+                    }
+                }
+                transaction.commit();
+            }
+            foreign_keys.restore();
+            version = 4;
+        }
+        if (version != 4) {
             throw std::runtime_error("open SQLite run store: unsupported schema version " +
                                      std::to_string(version));
         }
