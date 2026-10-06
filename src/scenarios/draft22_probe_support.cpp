@@ -128,6 +128,7 @@ Collected collect(std::span<const transport::TransportEvent> events, CollectLimi
             auto* stream = entry(data->stream_id, index);
             if (!stream) { result.bounded = false; return result; }
             total += data->data.size();
+            if (!stream->first_data_event) stream->first_data_event = index;
             if (stream->fin || stream->reset) { stream->overrun = true; continue; }
             stream->bytes.insert(stream->bytes.end(), data->data.begin(), data->data.end());
             stream->fin = data->fin;

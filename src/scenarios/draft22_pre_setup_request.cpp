@@ -62,7 +62,8 @@ State observe(const RawProbeTranscript& t, bool window_ended) {
     // session could be established.
     const bool reset_early = (stream.reset && stream.reset_event < completed_at) ||
                              (stream.stop_sending && stream.stop_event < completed_at);
-    const bool answered_early = !stream.bytes.empty() && stream.first_event < completed_at;
+    // An answer is data; a STOP_SENDING before it is not an answer.
+    const bool answered_early = stream.first_data_event && *stream.first_data_event < completed_at;
     if (reset_early && !answered_early) return State::Pass;
     if (answered_early || stream.reset || stream.stop_sending || response.messages.malformed)
         return State::Inconclusive;

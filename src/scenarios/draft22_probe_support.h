@@ -69,7 +69,8 @@ Messages parse_messages(std::span<const std::byte> input);
 
 struct StreamData {
     Bytes bytes;
-    std::size_t first_event{0};
+    std::size_t first_event{0};  // first event of any kind (data, reset, STOP_SENDING)
+    std::optional<std::size_t> first_data_event;  // first event that carried bytes or FIN
     bool fin{false};
     bool reset{false};
     std::size_t reset_event{0};

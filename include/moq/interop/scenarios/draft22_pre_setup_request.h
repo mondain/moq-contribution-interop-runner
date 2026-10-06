@@ -45,7 +45,10 @@ RawProbeDefinition draft22_pre_setup_request_probe(std::chrono::milliseconds dea
 // behaviour of the publisher fails this permission, so the evaluator never returns false. No value
 // otherwise: another scenario, an unproven stimulus, an answer that began before the SETUP was complete
 // (the request was processed before setup, which is neither), a reset after it (a cancellation under
-// Section 6.4.2.3, not this permission), a session close, or nothing by the end of the window.
+// Section 6.4.2.3, not this permission), a session close with no earlier reset (a reset before completion
+// still passes when the session closes after it), or nothing by the end of the window. The hold is a limit:
+// an eager answer whose flight exceeds it, or a request retransmitted after the SETUP tail, looks like
+// buffering.
 std::optional<bool> evaluate_draft22_pre_setup_request(const RawProbeTranscript& transcript);
 
 }  // namespace moq::interop::scenarios

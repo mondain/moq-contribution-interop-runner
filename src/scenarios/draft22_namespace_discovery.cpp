@@ -74,6 +74,9 @@ struct Discovery {
     bool exact{false};      // a NAMESPACE for exactly the track namespace
     bool covering{false};   // a NAMESPACE for a shorter namespace the track namespace lies in
     bool ignored_prefix{false};  // a suffix showing the prefix was ignored or matched by bytes
+    // A NAMESPACE whose suffix could not be read (it breaks the Section 8.7 limits or has bytes after the
+    // suffix). It may name the track's namespace, so no failure can rest on its absence.
+    bool unparsed_namespace{false};
 };
 
 bool is_prefix(const Namespace& prefix, const Namespace& of) {
@@ -101,10 +104,13 @@ Discovery discovery_of(const RawProbeTranscript& t, const Collected& collected, 
     for (const auto& message : response.messages.complete) {
         if (message.type != kNamespace) continue;
         // Section 9.16: the body is exactly a Track Namespace Suffix. One that breaks the Track Namespace
-        // limits is another row's concern and is skipped.
+        // limits is malformed (another row's concern); it cannot be read, so it is noted, not judged.
         wire::Cursor body(message.body);
         auto suffix = read_namespace(body);
-        if (!suffix || body.remaining() != 0) continue;
+        if (!suffix || body.remaining() != 0) {
+            result.unparsed_namespace = true;
+            continue;
+        }
         if (*suffix == ns || *suffix == without_first) result.ignored_prefix = true;
         Namespace full = prefix;
         full.insert(full.end(), suffix->begin(), suffix->end());
@@ -132,6 +138,8 @@ State matched(const Discovery& discovery, std::optional<bool> serves) {
     if (discovery.exact) return State::Pass;
     if (discovery.reset) return State::Inconclusive;
     if (!discovery.finished) return State::Pending;
+    // A NAMESPACE the evaluator could not read may have been the one owed: never fail on its absence.
+    if (discovery.unparsed_namespace) return State::Inconclusive;
     if (discovery.covering) return State::Inconclusive;
     if (!serves) return State::Pending;
     return *serves ? State::Fail : State::Inconclusive;
@@ -140,7 +148,8 @@ State matched(const Discovery& discovery, std::optional<bool> serves) {
 // The nonmatching prefix: any answer settles it, a suffix that shows the prefix was not compared field by
 // field blocks a pass (sending a NAMESPACE is not what this row forbids, so it is not a failure).
 State unmatched(const Discovery& discovery) {
-    if (discovery.unreadable || discovery.ignored_prefix) return State::Inconclusive;
+    if (discovery.unreadable || discovery.ignored_prefix || discovery.unparsed_namespace)
+        return State::Inconclusive;
     if (discovery.answer != Discovery::Answer::Unanswered) return State::Pass;
     return discovery.finished || discovery.reset ? State::Pass : State::Pending;
 }

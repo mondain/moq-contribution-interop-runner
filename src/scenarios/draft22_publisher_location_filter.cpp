@@ -65,6 +65,11 @@ bool same_filter(const d22::LocationFilter& left, const d22::LocationFilter& rig
            left.end_object == right.end_object;
 }
 
+// "Subscriber controlled" is not defined in draft 22 (it appears only in Section 9.10). The row 422
+// rationale reads the Location Filter of a SUBSCRIBE-initiated subscription as one ("Section 9.10 forbids
+// changing subscriber-controlled values without subscriber request"), and Section 3.3.1 has the subscriber
+// specify it; this evaluator follows that reading, only for the probe's own subscription.
+//
 // Reads a parameter block (count, then parameters) from `body` and judges its LOCATION_FILTER. With
 // `requested`, the block is a PUBLISH_STATE_NOTIFY on the probe's subscription and must report that filter.
 void judge_parameters(wire::Cursor& body, Seen& seen, const d22::LocationFilter* requested) {

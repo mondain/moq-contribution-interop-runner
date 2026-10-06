@@ -198,6 +198,55 @@ TEST_F(Draft22NamespaceDiscovery, NoFailureWithoutProofThePublisherServesTheTrac
     EXPECT_EQ(verdict(exchange(unanswered)), std::nullopt);
 }
 
+TEST_F(Draft22NamespaceDiscovery, AnUnreadableNamespaceNeverLetsAFinFail) {
+    // A NAMESPACE that cannot be read (a byte after the suffix; a zero-length field, which Section 8.7
+    // forbids) may be the one owed: the FIN after it is not proof that none was sent.
+    for (const auto& unreadable : {b({8, 0, 4, 1, 1, 'n', 0}), b({8, 0, 2, 1, 0})}) {
+        SCOPED_TRACE(::testing::PrintToString(unreadable));
+        Answers matching;
+        matching.matching = {request_ok(), unreadable};
+        matching.matching_fin = true;
+        EXPECT_EQ(verdict(exchange(matching)), std::nullopt);
+        Answers empty;
+        empty.empty = {request_ok(), unreadable};
+        empty.empty_fin = true;
+        empty.cancelled = false;
+        EXPECT_EQ(verdict(exchange(empty)), std::nullopt);
+        Answers nonmatching;
+        nonmatching.nonmatching = {request_ok(), unreadable};
+        EXPECT_EQ(verdict(exchange(nonmatching)), std::nullopt) << "it could carry an ignored prefix";
+    }
+    // A readable response that omits the track's namespace and ends still fails.
+    Answers omits;
+    omits.matching = {request_ok(), b({8, 0, 3, 1, 1, 'z'})};
+    omits.matching_fin = true;
+    EXPECT_EQ(verdict(exchange(omits)), std::optional<bool>{false});
+}
+
+TEST_F(Draft22NamespaceDiscovery, AProbeStoppedShortNeverPasses) {
+    // The empty prefix is answered correctly and then ended, so its cancellation (and the other prefixes)
+    // never go out: the delivered writes can show a failure only.
+    Answers exact_then_fin;
+    exact_then_fin.empty_fin = true;
+    exact_then_fin.cancelled = false;
+    EXPECT_EQ(verdict(exchange(exact_then_fin)), std::nullopt);
+}
+
+TEST_F(Draft22NamespaceDiscovery, TamperedDeliveredWritesGiveNoVerdict) {
+    Answers empty_fin;
+    empty_fin.empty = {request_ok()};
+    empty_fin.empty_fin = true;
+    empty_fin.cancelled = false;
+    const auto t = exchange(empty_fin);
+    ASSERT_EQ(verdict(t), std::optional<bool>{false});
+    auto prefix = t;
+    prefix.writes[1].write.bytes.back() = std::byte{1};  // the empty prefix's parameter count
+    EXPECT_EQ(verdict(prefix), std::nullopt);
+    auto forward = t;
+    forward.writes[0].write.bytes.back() = std::byte{1};  // the SUBSCRIBE's FORWARD value
+    EXPECT_EQ(verdict(forward), std::nullopt);
+}
+
 TEST_F(Draft22NamespaceDiscovery, OnlyACoveringNamespaceNeitherPassesNorFails) {
     // NAMESPACE (moq): a shorter namespace that the track's lies in.
     Answers covering;

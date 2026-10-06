@@ -101,6 +101,15 @@ TEST_F(Draft22PreSetupRequest, AnswerAfterTheSetupCompletesPasses) {
     EXPECT_EQ(verdict(transcript({}, {answer(request_error())})), std::optional<bool>{true});
 }
 
+TEST_F(Draft22PreSetupRequest, EarlyStopSendingFollowedByALateAnswerPasses) {
+    // STOP_SENDING before the SETUP completed is the permitted reset; an answer after it is not early.
+    EXPECT_EQ(verdict(transcript({stop()}, {answer(request_error())})), std::optional<bool>{true});
+    EXPECT_EQ(verdict(transcript({stop()}, {answer(subscribe_ok())})), std::optional<bool>{true});
+    // A reset before completion still passes when the session closes after it.
+    EXPECT_EQ(verdict(transcript({reset()}, {transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 3, {}}})),
+              std::optional<bool>{true});
+}
+
 TEST_F(Draft22PreSetupRequest, NoBehaviourFailsThePermission) {
     // Processed before the session existed, cancelled after it, another first message, or a close.
     for (const auto& t : {transcript({answer(subscribe_ok())}, {}), transcript({}, {reset()}),

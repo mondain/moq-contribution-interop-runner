@@ -90,6 +90,10 @@ Played run(const Publisher& publisher) {
     EXPECT_TRUE(client->send_stream(request_stream(1), publisher.empty_answer, publisher.empty_fin));
     if (publisher.asks_others) {
         receive(*client, 2, {matching(), nonmatching()}, played.written);
+        // The empty prefix was cancelled with STOP_SENDING (CANCELLED) before the later prefixes.
+        const auto stopped = client->try_send_stream(request_stream(1), {}, false);
+        EXPECT_EQ(stopped.status, transport::test::ClientStreamSendStatus::PeerStopped);
+        EXPECT_EQ(stopped.application_error, 1u);
         EXPECT_TRUE(client->send_stream(request_stream(2), publisher.matching_answer, publisher.matching_fin));
         EXPECT_TRUE(client->send_stream(request_stream(3), request_error(), true));
     }
