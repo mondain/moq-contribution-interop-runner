@@ -270,5 +270,63 @@ TEST(Draft22FixtureProbes, Wire22GoawayProofRebuildsTheRunsNamespace) {
     }
 }
 
+// --- A5: the PUBLISH that SUBSCRIBE_TRACKS draws is answered on the draft 22 wire --------------------------
+
+bool sends_subscribe_tracks(const RawProbeDefinition& definition) {
+    return std::any_of(definition.writes.begin(), definition.writes.end(), [](const auto& write) {
+        return !write.bytes.empty() && write.bytes.front() == std::byte{0x51};
+    });
+}
+
+TEST(Draft22FixtureProbes, Wire22SubscribeTracksResponseProbeAcceptsThePublish) {
+    const ScopedWireDraft wire(22);
+    for (const auto& profiles : {draft21_response_probes(), draft21_response_probes(std::chrono::milliseconds{1000},
+                                                                                     kNamespace, kName)}) {
+        for (const auto& profile : profiles) {
+            SCOPED_TRACE(profile.definition.id);
+            const bool tracks = profile.definition.id == "d21-failed-subscribe-tracks-update-close";
+            EXPECT_EQ(sends_subscribe_tracks(profile.definition), tracks);
+            EXPECT_EQ(profile.definition.courtesy.publish,
+                      tracks ? RawProbePublishResponse::Accept : RawProbePublishResponse::Ignore);
+            EXPECT_EQ(profile.definition.courtesy.update, RawProbeUpdateResponse::Ignore);
+        }
+    }
+}
+
+TEST(Draft22FixtureProbes, Wire22OverlapProbesWithSubscribeTracksAcceptThePublish) {
+    const ScopedWireDraft wire(22);
+    const auto profiles = draft21_discovery_overlap_probes(std::chrono::milliseconds{1000}, kNamespace);
+    std::size_t accepting = 0;
+    for (const auto& profile : profiles) {
+        SCOPED_TRACE(profile.definition.id);
+        const bool tracks = sends_subscribe_tracks(profile.definition);
+        accepting += tracks;
+        EXPECT_EQ(profile.definition.courtesy.publish,
+                  tracks ? RawProbePublishResponse::Accept : RawProbePublishResponse::Ignore);
+        EXPECT_EQ(profile.definition.courtesy.update, RawProbeUpdateResponse::Ignore);
+        // Only the courtesy differs from draft 21: the requests are the same bytes.
+        auto pinned = kOverlapPins.at(profile.definition.id);
+        if (tracks) pinned.replace(pinned.size() - 3, 1, "1");
+        EXPECT_EQ(shape(profile.definition), pinned);
+    }
+    // d21-subscribe-tracks-overlap, d21-track-prefix-update-overlap, and both independent-spaces probes
+    // (listed once per row they score).
+    EXPECT_EQ(accepting, 6u);
+}
+
+TEST(Draft22FixtureProbes, Wire22SubscribeTracksCloseIsJudgedWithTheCourtesyAnswerRecorded) {
+    const ScopedWireDraft wire(22);
+    const auto profiles = draft21_response_probes();
+    const auto* profile = find(profiles, "d21-failed-subscribe-tracks-update-close");
+    ASSERT_NE(profile, nullptr);
+    auto t = delivered(profile->definition, {{0, kRequestOk}});
+    // The publisher's PUBLISH arrives on its own request stream and the runner answers it; neither is part
+    // of the stimulus. The update was already delivered at that point.
+    t.events.push_back(transport::StreamDataEvent{0, from_hex("1d0008000101" "6e01740100"), false});
+    t.courtesy_writes.push_back({0, t.events.size(), RawProbeCourtesyKind::PublishOk});
+    answer(t, from_hex("050003010000"), true);
+    EXPECT_EQ(evaluate_draft21_response_probe(t, *profile), true);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

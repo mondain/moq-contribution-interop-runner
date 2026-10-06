@@ -18,6 +18,8 @@ using namespace live22;
 Bytes subscribe() { return b({3, 0, 7, 1, 1, 1, 'n', 1, 't', 0}); }
 Bytes subscribe_namespace() { return b({0x50, 0, 5, 1, 1, 1, 'n', 0}); }
 Bytes subscribe_tracks_n() { return b({0x51, 0, 5, 3, 1, 1, 'n', 0}); }
+// SUBSCRIBE_TRACKS with the empty prefix, Request ID 1, no parameters.
+Bytes subscribe_tracks_empty() { return b({0x51, 0, 3, 1, 0, 0}); }
 Bytes barrier() { return b({0x50, 0, 5, 5, 1, 1, 'c', 0}); }
 // REQUEST_UPDATE with an AUTHORIZATION TOKEN USE_ALIAS 0 (unregistered), and GOAWAY with no URI.
 Bytes failing_update() { return b({2, 0, 6, 3, 1, 3, 2, 2, 0}); }
@@ -170,6 +172,25 @@ TEST(Draft22FixtureProbesLive, GoawayProbesNameTheRunsNamespaceAndReachTheirGoaw
     const auto run = finish(manager, store, started.id);
     EXPECT_FALSE(harness_error(run));
     EXPECT_EQ(state_of(run, "D22-9-2-MUST-339"), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft22FixtureProbesLive, SubscribeTracksUpdateCloseAnswersThePublishAndReachesItsUpdate) {
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-failed-subscribe-tracks-update-close"}, 1500ms, app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = connect(store, started, 1);
+    ASSERT_NE(client, nullptr);
+    if (answer(*client, request_stream(0), subscribe_tracks_empty(), request_ok()) && publish_answered(*client)) {
+        EXPECT_TRUE(follows(*client, request_stream(0), subscribe_tracks_empty().size(), failing_update(), true))
+            << "the REQUEST_UPDATE reaches the publisher";
+        EXPECT_TRUE(client->send_stream(request_stream(0), request_error(), true));
+    }
+    pump_until_context_ends(*client, store, started.id);
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-9-5-1-MUST-360"), requirements::OutcomeState::Pass);
 }
 
 }  // namespace

@@ -250,11 +250,16 @@ std::vector<Draft21ResponseProbe> draft21_response_probes(std::chrono::milliseco
         if (!permitted) update.peer_response_ready = [context](auto input) {
             return initial_response_ready(input, context);
         };
+        const bool subscribe_tracks = !initial.empty() && initial.front() == std::byte{0x51};
         RawProbeDefinition definition{scenario, bytes({0xaf,0,0,0}),
             {{channel,std::move(initial),false},std::move(update)}, true, setup_ready, deadline,
             [expectation,namespace_scoped](const auto& transcript) {
                 return response_ready(transcript,expectation,namespace_scoped);
             }, permitted ? publish_ready : std::function<bool(std::span<const std::byte>)>{}};
+        // A successful SUBSCRIBE_TRACKS makes the publisher send PUBLISH for its tracks (draft 22 Section
+        // 3.6), and a publisher may read nothing more until that PUBLISH is answered, so on the draft 22 wire
+        // the runner accepts it (a courtesy answer, not part of the stimulus). Draft 21 is frozen.
+        if (wire22 && subscribe_tracks) definition.courtesy.publish = RawProbePublishResponse::Accept;
         result.push_back({requirement,evaluator,expectation,namespace_scoped,std::move(definition)});
     };
     // Sections9.5/9.20.17: a parameterless subscriber update is legal after
