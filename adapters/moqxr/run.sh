@@ -77,6 +77,36 @@ scenario_id=$(jq -r '.scenario_id' "$request_file")
 # publisher-location-filter-parameter keeps --forward 1: it answers moqxr's PUBLISH (courtesy Accept)
 # and judges the LOCATION_FILTER moqxr sends on it. This chooses moqxr CLI options; it never changes
 # what a scenario expects.
+#
+# Draft 22 overrides of the draft 21 option lists. These shared draft 22 scenarios get
+# --forward 0 --paced, timeout+3 although their d21- twin runs with --forward 1. In each the runner
+# is the subscriber and never answers moqxr's own PUBLISH, so with --forward 1 moqxr blocks on that
+# PUBLISH, gives up after about 2 seconds and closes with code 0 inside the reaction window, which
+# the runner reads as a wrong-code reaction to the stimulus (false FAILs, or rows left not_run).
+# Draft 21 command lines are frozen, so the twins keep --forward 1 at draft 21; only draft 22
+# changes. They are matched by their d22- id before the d22- to d21- mapping. Evidence: the draft 22
+# moqxr sweep of 2026-10-06 (moqxr 4b615f4, task 4 triage group A1): run with --forward 1 every one
+# ended on moqxr's code 0 close with the liveness follow-up unanswered; run paced every one reached
+# its stimulus (D22-8-7-MUST-269..272, D22-8-9-MUST-279, -289, D22-9-20-15-MUST-432,
+# D22-9-20-8-MUST-421, D22-6-4-1-MUST-167, D22-9-6-MUST-366 pass; D22-9-MUST-295 is scored and
+# fails on moqxr's own behavior). tests/e2e/moqxr-adapter-cmdlines.sh reads this list (one id per
+# line) as the only exceptions to its draft 22 twin-equality check.
+d22_paced_overrides=(
+    d22-subscribe-empty-namespace-field
+    d22-subscribe-33-namespace-fields
+    d22-subscribe-tracks-oversized-namespace
+    d22-subscribe-oversized-full-track-name
+    d22-request-undecodable-authorization-token
+    d22-request-token-cache-overflow
+    d22-request-alias-registration-with-default-zero-cache
+    d22-fill-forbidden-nested-authorization
+    d22-fill-forbidden-track-property-filter
+    d22-fill-recursive-parameter
+    d22-fill-invalid-group-order
+    d22-unknown-unidirectional-stream-type
+    d22-unknown-control-message
+    d22-successful-subscribe-object-delivery
+)
 impl_id=$scenario_id
 own22=
 if [[ "$draft" == 22 ]]; then
@@ -91,6 +121,11 @@ if [[ "$draft" == 22 ]]; then
             own22=await-paced ;;
         d22-*) impl_id="d21-${scenario_id#d22-}" ;;
     esac
+    for override_id in "${d22_paced_overrides[@]}"; do
+        if [[ "$scenario_id" == "$override_id" ]]; then
+            own22=await-paced
+        fi
+    done
 fi
 # These options describe moqxr's CLI, not MOQT conformance expectations.
 args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
@@ -216,7 +251,7 @@ if [[ "$draft" == 21 || "$draft" == 22 ]]; then
             ;;
     esac
 fi
-# The own draft 22 scenarios and probes (table above).
+# The own draft 22 scenarios and probes (table above), and the draft 22 overrides.
 case "$own22" in
     push)
         args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"

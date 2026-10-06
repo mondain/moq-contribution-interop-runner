@@ -124,6 +124,23 @@ mv "$test_dir/request.next" "$test_dir/request.json"
 output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
     MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
 [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
+# A draft 22 override of the draft 21 option lists: the shared d22- id runs paced while its d21- twin
+# keeps --forward 1 at draft 21 (moqxr blocks on its own PUBLISH; draft 21 is frozen).
+for transport in native_quic webtransport; do
+    make_request 21 "$transport" 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+    jq '.scenario_id = "d21-subscribe-empty-namespace-field"' "$test_dir/request.json" >"$test_dir/request.next"
+    mv "$test_dir/request.next" "$test_dir/request.json"
+    output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+    [[ "$output" == *"<--draft>"$'\n'"<21>"$'\n'"<--forward>"$'\n'"<1>"$'\n'"<--timeout>"$'\n'"<3>"* ]]
+    [[ "$output" != *"<--paced>"* ]]
+    make_request 22 "$transport" 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+    jq '.scenario_id = "d22-subscribe-empty-namespace-field"' "$test_dir/request.json" >"$test_dir/request.next"
+    mv "$test_dir/request.next" "$test_dir/request.json"
+    output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+    [[ "$output" == *"<--draft>"$'\n'"<22>"$'\n'"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
+done
 # A draft the adapter does not list is refused (exit 64) before the publisher starts.
 make_request 23 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
 set +e

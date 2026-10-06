@@ -19,6 +19,11 @@
 # `--draft` value. The lineage twin must be the id with `d22-` replaced by `d21-` (run.sh relies on
 # that), and every other executable id must be one of the own scenarios (kOwnScenarios22), whose
 # command lines, like those of the two unscored probes, are pinned by the golden only.
+#
+# The only shared ids exempt from that equality are the draft 22 overrides enumerated in
+# paced_overrides below (run.sh: "Draft 22 overrides of the draft 21 option lists"). The list must
+# equal run.sh's d22_paced_overrides, and each of them must get exactly its twin's command line with
+# `--forward 1 --timeout T` replaced by `--forward 0 --paced --timeout T+3` (and `--draft 22`).
 set -euo pipefail
 # A refused request must stop the script, also inside command_line's command substitution.
 shopt -s inherit_errexit
@@ -93,9 +98,46 @@ if [[ "$draft" == 22 ]]; then
         { printf 'could not read the lineage table %s\n' "$lineage" >&2; exit 1; }
 fi
 
+# Shared draft 22 ids whose command line deliberately differs from the draft 21 twin's (moqxr
+# blocks on its own PUBLISH with --forward 1; draft 21 is frozen). Kept equal to run.sh's list.
+paced_overrides=(
+    d22-subscribe-empty-namespace-field
+    d22-subscribe-33-namespace-fields
+    d22-subscribe-tracks-oversized-namespace
+    d22-subscribe-oversized-full-track-name
+    d22-request-undecodable-authorization-token
+    d22-request-token-cache-overflow
+    d22-request-alias-registration-with-default-zero-cache
+    d22-fill-forbidden-nested-authorization
+    d22-fill-forbidden-track-property-filter
+    d22-fill-recursive-parameter
+    d22-fill-invalid-group-order
+    d22-unknown-unidirectional-stream-type
+    d22-unknown-control-message
+    d22-successful-subscribe-object-delivery
+)
+declare -A paced_override=()
+if [[ "$draft" == 22 ]]; then
+    adapter_overrides=$(sed -n '/^d22_paced_overrides=(/,/^)/p' "$adapter" |
+                        sed -n 's/^ *\(d22-[a-z0-9-]*\)$/\1/p' | sort)
+    if [[ "$adapter_overrides" != "$(printf '%s\n' "${paced_overrides[@]}" | sort)" ]]; then
+        printf 'the draft 22 override list differs from d22_paced_overrides in %s:\n' "$adapter" >&2
+        diff <(printf '%s\n' "${paced_overrides[@]}" | sort) <(printf '%s\n' "$adapter_overrides") >&2 || true
+        exit 1
+    fi
+    for id in "${paced_overrides[@]}"; do
+        [[ -n "${twin_of[$id]:-}" ]] ||
+            { printf 'draft 22 override %s is not a shared scenario\n' "$id" >&2; exit 1; }
+        grep -qxF -- "$id" "$ids_file" ||
+            { printf 'draft 22 override %s is not executable\n' "$id" >&2; exit 1; }
+        paced_override[$id]=1
+    done
+fi
+
 live="$work/live.txt"
 : >"$live"
 shared_checked=0
+overrides_checked=0
 own_checked=0
 while IFS= read -r id; do
     [[ -n "$id" ]] || continue
@@ -109,6 +151,13 @@ while IFS= read -r id; do
         if [[ "$draft" == 22 && -n "${twin_of[$id]:-}" ]]; then
             expected=$(command_line 21 "${twin_of[$id]}" "$transport")
             expected=${expected/"<--draft> <21>"/"<--draft> <22>"}
+            if [[ -n "${paced_override[$id]:-}" ]]; then
+                [[ "$expected" == *"<--forward> <1> <--timeout> <3>"* ]] ||
+                    { printf 'draft 21 twin %s %s no longer runs --forward 1 --timeout 3: %s\n' \
+                          "${twin_of[$id]}" "$transport" "$expected" >&2; exit 1; }
+                expected=${expected/"<--forward> <1> <--timeout> <3>"/"<--forward> <0> <--paced> <--timeout> <6>"}
+                overrides_checked=$((overrides_checked + 1))
+            fi
             if [[ "$args" != "$expected" ]]; then
                 printf 'draft 22 %s %s does not match its draft 21 twin %s:\n  got:  %s\n  want: %s\n' \
                     "$id" "$transport" "${twin_of[$id]}" "$args" "$expected" >&2
@@ -122,8 +171,12 @@ while IFS= read -r id; do
     done
 done <<<"$ids"
 if [[ "$draft" == 22 ]]; then
-    printf 'draft 22: %s shared command lines equal their draft 21 twin; %s own or probe lines pinned\n' \
-        "$shared_checked" "$own_checked"
+    if ((overrides_checked != 2 * ${#paced_overrides[@]})); then
+        printf 'checked %s override lines, expected %s\n' "$overrides_checked" "$((2 * ${#paced_overrides[@]}))" >&2
+        exit 1
+    fi
+    printf 'draft 22: %s shared command lines equal their draft 21 twin (%s of them the paced overrides); %s own or probe lines pinned\n' \
+        "$shared_checked" "$overrides_checked" "$own_checked"
 fi
 
 if ((update)); then

@@ -184,7 +184,8 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `process_timeout_ms` | integer | Hard limit for the process: `scenario_timeout_ms` plus 1000 |
 
 For a draft 22 request, the bundled moqxr adapter gives a scenario shared with draft 21
-(`d22-X` paired with `d21-X`) exactly the moqxr options of `d21-X`, with `--draft 22`.
+(`d22-X` paired with `d21-X`) exactly the moqxr options of `d21-X`, with `--draft 22`,
+except for the draft 22 overrides listed after the table below.
 The draft 22 own scenarios and the two unscored probes have no draft 21 twin; their
 options are listed in `adapters/moqxr/run.sh` and pinned by
 `tests/golden/moqxr-cmdlines-d22.txt` (timeout+3 is the scenario timeout plus 3 seconds).
@@ -205,6 +206,32 @@ probe in which the runner is the subscriber and does not answer that PUBLISH get
 | `fill-location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
 | `location-filter-unknown-type` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
 | `location-filter-absolute-origin` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
+
+Draft 22 overrides of the draft 21 option lists: these shared scenarios run with
+`--forward 0 --paced`, timeout+3 at draft 22, while their `d21-` twin keeps `--forward 1` at
+draft 21 (draft 21 command lines are frozen). In each the runner is the subscriber and never
+answers moqxr's own PUBLISH; with `--forward 1` moqxr blocks on it and closes with code 0 about
+2 seconds later, inside the reaction window, which the runner reads as the reaction to the
+stimulus. The draft 22 moqxr sweep of 2026-10-06 showed every one reaching its stimulus when
+paced. `tests/e2e/moqxr-adapter-cmdlines.sh` enumerates the same ids as the only exceptions to
+its twin-equality check:
+
+| `d22-` scenario | Draft 22 moqxr options | `d21-` twin at draft 21 |
+|---|---|---|
+| `subscribe-empty-namespace-field` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-33-namespace-fields` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-tracks-oversized-namespace` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-oversized-full-track-name` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-undecodable-authorization-token` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-token-cache-overflow` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-alias-registration-with-default-zero-cache` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-forbidden-nested-authorization` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-forbidden-track-property-filter` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-recursive-parameter` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-invalid-group-order` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `unknown-unidirectional-stream-type` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `unknown-control-message` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `successful-subscribe-object-delivery` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 
 A real request file from a run:
 
