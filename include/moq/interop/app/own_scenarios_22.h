@@ -42,6 +42,25 @@ inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>(
     {"d22-fill-location-filter-end-group-overflow", true},
 });
 
+// Unscored draft 22 probes: executable own-style scenarios that no catalog row names (they are neither in
+// lineage_data::kOwnScenarios22 nor in requirements/draft22.json). They run like own scenarios (raw probes on
+// the draft 22 wire, a probe each in src/app/own_scenario_dispatch_22.cpp) and are executable by id
+// (executable_scenario, raw_probe_scenario, scenario_requires_track), but are not listed by
+// executable_scenarios(22), which lists the catalog's scenarios. Their evaluators (kUnscoredEvaluators22,
+// one per probe) produce no requirement outcome: the run records each verdict as an
+// "unscored_probe_verdict" event only, so scoring never sees them.
+inline constexpr auto kUnscoredProbeTraits22 = std::to_array<OwnScenarioTraits22>({
+    {"d22-location-filter-unknown-type", true},
+});
+inline constexpr auto kUnscoredEvaluators22 = std::to_array<std::string_view>({
+    "d22-location-filter-unknown-type-protocol-violation",
+});
+
+inline bool unscored_probe_22(std::string_view id) {
+    return std::any_of(kUnscoredProbeTraits22.begin(), kUnscoredProbeTraits22.end(),
+                       [&](const auto& entry) { return entry.id == id; });
+}
+
 // An own scenario implementation: its traits and the probe the run manager drives. `probe` is called
 // on the run's execution config (draft 21 family) under ScopedWireDraft(22).
 struct OwnScenario22 {
@@ -71,6 +90,8 @@ public:
         for (const auto& entry : scenarios_)
             if (entry.traits.id == id) return entry.traits;
         for (const auto& entry : kOwnScenarioTraits22)
+            if (entry.id == id) return entry;
+        for (const auto& entry : kUnscoredProbeTraits22)
             if (entry.id == id) return entry;
         return std::nullopt;
     }
@@ -201,7 +222,7 @@ inline std::span<const std::string_view> own_scenario_ids_22() {
     return OwnScenarioRegistry22::instance().ids();
 }
 
-// The traits of an implemented own draft 22 scenario; nothing for any other id.
+// The traits of an implemented own draft 22 scenario or of an unscored probe; nothing for any other id.
 inline std::optional<OwnScenarioTraits22> own_scenario_22(std::string_view id) {
     return OwnScenarioRegistry22::instance().traits(id);
 }

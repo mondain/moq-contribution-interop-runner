@@ -837,6 +837,15 @@ public:
                     " timed_out=" + (completed.timed_out ? "true" : "false") +
                     " event_limit=" + (completed.event_limit_reached ? "true" : "false") +
                     " cancelled=" + (worker->stop_requested ? "true" : "false"));
+                // An unscored draft 22 probe: its verdict is evidence only, never a requirement outcome.
+                if (plan.wire_draft == DraftVersion::Draft22) {
+                    if (const auto unscored = evaluate_unscored_probe_22(completed)) {
+                        const char* verdict = !unscored->verdict ? "not_run" : *unscored->verdict ? "pass" : "fail";
+                        append_context_event(worker, current_id, "unscored_probe_verdict",
+                            "evaluator=" + std::string(unscored->evaluator) + " verdict=" + verdict +
+                            " scored=false (no catalog row names this probe)");
+                    }
+                }
                 if (operational_error || worker->stop_requested) {
                     // Contexts that never ran are named, so the run explains its own end.
                     std::string not_run;

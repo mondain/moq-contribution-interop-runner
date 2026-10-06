@@ -87,6 +87,12 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_fill_location_filter_overflow_probe(
                  execution.timeout, std::move(track.name_space), std::move(track.name));
          }},
+        // Unscored probes (kUnscoredProbeTraits22).
+        {scenarios::kDraft22LocationFilterUnknownType, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_location_filter_unknown_type_probe(
+                 execution.timeout, std::move(track.name_space), std::move(track.name));
+         }},
     };
     return table;
 }
@@ -100,6 +106,19 @@ const std::vector<OwnEvaluator22>& production_evaluators() {
         {scenarios::kDraft22PublisherLocationFilterEvaluator, scenarios::evaluate_draft22_publisher_location_filter},
         {scenarios::kDraft22PreSetupResetEvaluator, scenarios::evaluate_draft22_pre_setup_request},
         {scenarios::kDraft22LocationFilterOverflowEvaluator, scenarios::evaluate_draft22_location_filter_overflow},
+    };
+    return table;
+}
+
+// The evaluator of each unscored probe (kUnscoredProbeTraits22), keyed by the probe's id.
+struct UnscoredEvaluator22 {
+    std::string_view probe;
+    OwnEvaluator22 evaluator;
+};
+const std::vector<UnscoredEvaluator22>& unscored_evaluators() {
+    static const std::vector<UnscoredEvaluator22> table{
+        {scenarios::kDraft22LocationFilterUnknownType,
+         {scenarios::kDraft22LocationFilterUnknownTypeEvaluator, scenarios::evaluate_draft22_location_filter_unknown_type}},
     };
     return table;
 }
@@ -133,6 +152,22 @@ bool has_own_probe_22(std::string_view id) {
 std::vector<std::string_view> production_own_evaluator_ids_22() {
     std::vector<std::string_view> ids;
     for (const auto& entry : production_evaluators()) ids.push_back(entry.id);
+    return ids;
+}
+
+std::optional<UnscoredVerdict22> evaluate_unscored_probe_22(const scenarios::RawProbeTranscript& transcript) {
+    for (const auto& entry : unscored_evaluators()) {
+        if (entry.probe != transcript.scenario_id) continue;
+        // Evidence cut at a recording limit is never judged (as for rows).
+        if (transcript.event_limit_reached || !entry.evaluator.evaluate) return UnscoredVerdict22{entry.evaluator.id, {}};
+        return UnscoredVerdict22{entry.evaluator.id, entry.evaluator.evaluate(transcript)};
+    }
+    return std::nullopt;
+}
+
+std::vector<std::pair<std::string_view, std::string_view>> unscored_probe_evaluators_22() {
+    std::vector<std::pair<std::string_view, std::string_view>> ids;
+    for (const auto& entry : unscored_evaluators()) ids.emplace_back(entry.probe, entry.evaluator.id);
     return ids;
 }
 

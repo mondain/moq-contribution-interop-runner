@@ -13,6 +13,11 @@
 // in FILL_PARAMETERS (Section 9.20.15: a sequence of Parameters with no count, evaluated with the rules of
 // Section 9.20.9), so the row is passed only when both Types are rejected.
 //
+// Unscored probes (no catalog row names them; app::kUnscoredProbeTraits22): their verdicts are recorded as
+// run events and never scored.
+// - d22-location-filter-unknown-type: Section 9.20.9 "Any other Location Filter Type is a
+//   PROTOCOL_VIOLATION" (no BCP 14 keyword, hence no row).
+//
 // Probes are built on the draft 22 wire only; building one on another wire throws std::logic_error. The
 // evaluators judge nothing on another wire.
 
@@ -30,6 +35,9 @@ inline constexpr std::string_view kDraft22LocationFilterOverflow = "d22-location
 inline constexpr std::string_view kDraft22FillLocationFilterOverflow = "d22-fill-location-filter-end-group-overflow";
 inline constexpr std::string_view kDraft22LocationFilterOverflowEvaluator =
     "d22-location-filter-overflow-protocol-violation";
+inline constexpr std::string_view kDraft22LocationFilterUnknownType = "d22-location-filter-unknown-type";
+inline constexpr std::string_view kDraft22LocationFilterUnknownTypeEvaluator =
+    "d22-location-filter-unknown-type-protocol-violation";
 
 // The LOCATION_FILTER value an overflow scenario sends (the bytes after the parameter's type delta): Type
 // 0x03 {StartGroup 2^64 - 1, StartObject 0, EndGroupDelta 1} at the top level, Type 0x04 {2^64 - 1, 0, 1,
@@ -59,5 +67,16 @@ RawProbeDefinition draft22_fill_location_filter_overflow_probe(std::chrono::mill
 // transport-level, early or late close, no close and no liveness proof (a REQUEST_ERROR alone is not the
 // required reaction and proves nothing either way).
 std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTranscript& transcript);
+
+// Unscored. One session: a SUBSCRIBE (Request ID 1) for the track whose only parameter is LOCATION_FILTER
+// with the undefined Type 0x06 (no fields). No liveness follow-up (see the source).
+RawProbeDefinition draft22_location_filter_unknown_type_probe(std::chrono::milliseconds deadline,
+                                                              std::vector<std::vector<std::byte>> track_namespace,
+                                                              std::vector<std::byte> track_name);
+
+// Verdict of d22-location-filter-unknown-type-protocol-violation (unscored): true for a close with
+// PROTOCOL_VIOLATION within the reaction window, false for one with any other code there, no value otherwise
+// (in particular a publisher that never closes: without the follow-up nothing proves it kept serving).
+std::optional<bool> evaluate_draft22_location_filter_unknown_type(const RawProbeTranscript& transcript);
 
 }  // namespace moq::interop::scenarios

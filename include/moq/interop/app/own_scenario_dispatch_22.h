@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace moq::interop::app {
@@ -22,6 +23,20 @@ bool has_own_probe_22(std::string_view id);
 
 // The ids of the production own evaluators (tests check them against kOwnEvaluators22).
 std::vector<std::string_view> production_own_evaluator_ids_22();
+
+// The verdict of an unscored probe's evaluator (kUnscoredEvaluators22) on one transcript.
+struct UnscoredVerdict22 {
+    std::string_view evaluator;
+    std::optional<bool> verdict;  // no value: not run (no verdict, or evidence cut at a recording limit)
+};
+
+// The verdict on a transcript of an unscored probe (kUnscoredProbeTraits22); nothing for any other
+// scenario. Never an outcome: the caller records it as evidence. Call under ScopedWireDraft(22).
+std::optional<UnscoredVerdict22> evaluate_unscored_probe_22(const scenarios::RawProbeTranscript& transcript);
+
+// The (probe, evaluator) ids of the production unscored evaluators (tests check them against
+// kUnscoredProbeTraits22 and kUnscoredEvaluators22).
+std::vector<std::pair<std::string_view, std::string_view>> unscored_probe_evaluators_22();
 
 // The own draft 22 evaluators' outcomes over a run's transcripts, keyed by draft 22 row ids: one outcome
 // for every applicable, testable row of `draft22` that names an implemented own evaluator. A row passes

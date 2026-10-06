@@ -55,8 +55,9 @@ TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
 }
 
 TEST(LineageRegistry, OwnAndUnknownIdsAreNotExecutableForDraft22) {
+    // d22-location-filter-unknown-type was listed here until Task 10 made it an executable unscored probe.
     for (const char* id : {"", "no-such-scenario", "d21-setup-unknown-options", "d22-no-such-scenario",
-                           "d22-location-filter-unknown-type"}) {
+                           "d22-location-filter-no-such-probe"}) {
         EXPECT_FALSE(executable_scenario(22, id)) << id;
         EXPECT_FALSE(implementation_scenario_id(id).has_value()) << id;
         EXPECT_FALSE(raw_probe_scenario(22, id)) << id;
@@ -183,6 +184,7 @@ TEST(LineageRegistryOwn, TrackRequirementComesFromTheRegisteredTraits) {
 }
 
 TEST(LineageRegistryOwn, OnlyOwnIdsCanBeRegisteredAndOnlyOnce) {
+    // An unscored probe is not an own scenario either: the overlay refuses it.
     EXPECT_THROW(ScopedOwnScenario22({{"d22-location-filter-unknown-type", false}, {}}), std::invalid_argument);
     EXPECT_THROW(ScopedOwnScenario22({{"d22-duplicate-request-goaway", false}, {}}), std::invalid_argument)
         << "a shared id runs through its draft 21 implementation";
@@ -204,6 +206,38 @@ TEST(LineageRegistryOwn, TheOwnFetchScenarioNeedsFetchWhetherOrNotItIsImplemente
     // Draft 18/21 FETCH lists know nothing of it.
     EXPECT_FALSE(scenario_requires_fetch(21, fetch));
     EXPECT_FALSE(scenario_requires_fetch(18, fetch));
+}
+
+// ---- Unscored draft 22 probes (Task 10) ----------------------------------------------------------------
+
+TEST(LineageRegistryUnscored, ProbesAreExecutableByIdButAreNeitherCatalogNorLineageScenarios) {
+    ASSERT_FALSE(kUnscoredProbeTraits22.empty());
+    EXPECT_EQ(kUnscoredEvaluators22.size(), kUnscoredProbeTraits22.size()) << "one evaluator per probe";
+    const auto& own = requirements::lineage_data::kOwnScenarios22;
+    const auto& own_evaluators = requirements::lineage_data::kOwnEvaluators22;
+    const auto listed = executable_scenarios(22);
+    const auto shared = shared_scenario_ids_22();
+    for (const auto& traits : kUnscoredProbeTraits22) {
+        const auto id = traits.id;
+        EXPECT_TRUE(id.starts_with("d22-")) << id;
+        EXPECT_TRUE(unscored_probe_22(id)) << id;
+        EXPECT_TRUE(executable_scenario(22, id)) << id;
+        EXPECT_TRUE(raw_probe_scenario(22, id)) << id;
+        EXPECT_EQ(scenario_requires_track(22, id), traits.requires_track) << id;
+        EXPECT_FALSE(scenario_requires_fetch(22, id)) << id;
+        EXPECT_FALSE(implementation_scenario_id(id).has_value()) << id;
+        EXPECT_EQ(std::find(own.begin(), own.end(), id), own.end()) << id << " is a lineage own scenario";
+        EXPECT_EQ(std::find(shared.begin(), shared.end(), id), shared.end()) << id << " is a shared scenario";
+        EXPECT_EQ(std::find(listed.begin(), listed.end(), id), listed.end())
+            << id << ": executable_scenarios(22) lists catalog scenarios only";
+        EXPECT_FALSE(executable_scenario(21, id)) << id;
+        EXPECT_FALSE(executable_scenario(18, id)) << id;
+    }
+    for (const auto id : kUnscoredEvaluators22)
+        EXPECT_EQ(std::find(own_evaluators.begin(), own_evaluators.end(), id), own_evaluators.end()) << id;
+    // They do not count among the implemented own scenarios.
+    for (const auto id : own_scenario_ids_22()) EXPECT_FALSE(unscored_probe_22(id)) << id;
+    EXPECT_FALSE(unscored_probe_22("d22-location-filter-end-group-overflow"));
 }
 
 }  // namespace

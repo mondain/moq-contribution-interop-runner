@@ -636,7 +636,8 @@ TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
     const std::string shared(app::executable_scenarios(22).front());
-    for (const auto& ids : {std::vector<std::string>{"d22-location-filter-unknown-type"},
+    // d22-location-filter-unknown-type served as the refused id until Task 10 made it an unscored probe.
+    for (const auto& ids : {std::vector<std::string>{"d22-location-filter-no-such-probe"},
                             std::vector<std::string>{"no-such-scenario"},
                             std::vector<std::string>{"d21-duplicate-request-goaway"},
                             std::vector<std::string>{shared,"no-such-scenario"}}) {
@@ -1009,6 +1010,27 @@ TEST(OwnScenarioTables22, ProductionProbesAndTraitsNameTheSameIds) {
         EXPECT_TRUE(std::find(requirements::lineage_data::kOwnEvaluators22.begin(),
                               requirements::lineage_data::kOwnEvaluators22.end(),id)!=
                     requirements::lineage_data::kOwnEvaluators22.end()) << id;
+    // Unscored probes: a probe and exactly one listed evaluator each, never a catalog row's scenario.
+    const auto unscored=app::unscored_probe_evaluators_22();
+    EXPECT_EQ(unscored.size(),app::kUnscoredProbeTraits22.size());
+    const auto draft22=catalog22();
+    for (const auto& traits : app::kUnscoredProbeTraits22) {
+        EXPECT_TRUE(app::has_own_probe_22(traits.id)) << traits.id;
+        EXPECT_TRUE(app::own_scenario_22(traits.id).has_value()) << traits.id;
+        EXPECT_EQ(std::count_if(unscored.begin(),unscored.end(),[&](const auto& entry) { return entry.first==traits.id; }),1)
+            << traits.id;
+        for (const auto& row : draft22->requirements)
+            EXPECT_EQ(std::find(row.scenarios.begin(),row.scenarios.end(),traits.id),row.scenarios.end())
+                << row.id << " names " << traits.id;
+    }
+    for (const auto& [probe,evaluator] : unscored) {
+        EXPECT_TRUE(app::unscored_probe_22(probe)) << probe;
+        EXPECT_NE(std::find(app::kUnscoredEvaluators22.begin(),app::kUnscoredEvaluators22.end(),evaluator),
+                  app::kUnscoredEvaluators22.end()) << evaluator;
+        for (const auto& row : draft22->requirements)
+            EXPECT_EQ(std::find(row.evaluators.begin(),row.evaluators.end(),evaluator),row.evaluators.end())
+                << row.id << " names " << evaluator;
+    }
 }
 
 app::OwnEvaluator22 passing_own_evaluator(std::string_view id,std::atomic<unsigned>& calls) {

@@ -1,7 +1,7 @@
-// Draft 22 own scenarios for D22-9-20-9-MUST-424 (Section 9.20.9, StartGroup + EndGroupDelta overflow): the
-// bytes each probe sends, tied to the draft 22 codec, and the evaluator's verdict on transcripts recorded by
-// a RawProbeController against a scripted publisher (with a manual clock, so the reaction window and the
-// liveness follow-up are exercised as in a run).
+// Draft 22 own scenarios for D22-9-20-9-MUST-424 (Section 9.20.9, StartGroup + EndGroupDelta overflow) and
+// the unscored Location Filter probes: the bytes each probe sends, tied to the draft 22 codec, and the
+// evaluators' verdicts on transcripts recorded by a RawProbeController against a scripted publisher (with a
+// manual clock, so the reaction window and the liveness follow-up are exercised as in a run).
 #include "moq/interop/scenarios/draft22_location_filter_probes.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/scenarios/wire_draft.h"
@@ -183,6 +183,29 @@ TEST_F(Draft22LocationFilterProbes, AnInvalidFixtureOrDeadlineIsRefused) {
     EXPECT_THROW(draft22_location_filter_overflow_probe(1000ms, {Bytes{}}, b({'t'})), std::invalid_argument);
 }
 
+// ------------------------------------------------------------------ unscored: undefined Type
+
+RawProbeDefinition unknown_type_probe(std::chrono::milliseconds deadline = 5000ms) {
+    return draft22_location_filter_unknown_type_probe(deadline, {b({'n'})}, b({'t'}));
+}
+
+TEST_F(Draft22LocationFilterProbes, UnknownTypeProbeSendsType6WithNoFields) {
+    const auto p = unknown_type_probe();
+    EXPECT_EQ(p.id, kDraft22LocationFilterUnknownType);
+    ASSERT_EQ(p.writes.size(), 1u);
+    // SUBSCRIBE, Length 9: Request ID 1, (n), t, one parameter: 0x21, Type 06.
+    EXPECT_EQ(hex(p.writes[0].bytes), "03" "0009" "01" "01016e" "0174" "01" "21" "06");
+    const auto decoded = decode(b({0x06}));
+    const auto* error = std::get_if<wire::DecodeError>(&decoded);
+    ASSERT_NE(error, nullptr) << "Section 9.20.9: any other Location Filter Type is a PROTOCOL_VIOLATION";
+    EXPECT_EQ(error->code, wire::DecodeErrorCode::ProtocolViolation);
+    // Type 0x05, the last defined one, decodes (Next Object, no field).
+    EXPECT_TRUE(std::holds_alternative<d22::LocationFilter>(decode(b({0x05}))));
+    EXPECT_FALSE(p.liveness.has_value()) << "no BCP 14 MUST close behind the follow-up's argument";
+    const ScopedWireDraft wire21(21);
+    EXPECT_THROW(unknown_type_probe(), std::logic_error);
+}
+
 // ------------------------------------------------------------------ recorded sessions
 
 class ScriptedPeer : public transport::SessionTransport {
@@ -361,6 +384,51 @@ TEST_F(Draft22LocationFilterProbes, EachScenarioIsProvenAgainstItsOwnStimulus) {
     ASSERT_EQ(evaluate_draft22_location_filter_overflow(done), std::optional<bool>{true});
     done.scenario_id = std::string(kDraft22FillLocationFilterOverflow);
     EXPECT_FALSE(evaluate_draft22_location_filter_overflow(done).has_value());
+}
+
+class UnknownTypeVerdicts : public ::testing::Test {
+protected:
+    ScopedWireDraft wire{22};
+    static std::optional<bool> verdict(const RawProbeTranscript& t) {
+        return evaluate_draft22_location_filter_unknown_type(t);
+    }
+    static std::optional<bool> close_after(std::chrono::milliseconds after, std::uint64_t code) {
+        Session session(unknown_type_probe());
+        session.poll(0ms);
+        session.close(code);
+        return verdict(session.poll(after));
+    }
+};
+
+TEST_F(UnknownTypeVerdicts, CloseWithProtocolViolationPassesAndAnyOtherCodeFails) {
+    EXPECT_EQ(close_after(10ms, 0x3), std::optional<bool>{true});
+    EXPECT_EQ(close_after(10ms, 0x1), std::optional<bool>{false});
+    EXPECT_FALSE(close_after(1600ms, 0x3).has_value()) << "beyond the reaction window";
+}
+
+TEST_F(UnknownTypeVerdicts, APublisherThatNeverClosesIsNotJudged) {
+    // Even a SUBSCRIBE_OK on the request proves nothing the draft forbids with a MUST.
+    Session session(unknown_type_probe());
+    session.poll(0ms);
+    session.send(transport::StreamDataEvent{kStimulus, kSubscribeOk, false});
+    const auto& end = session.poll(5001ms);
+    ASSERT_TRUE(end.timed_out);
+    EXPECT_FALSE(end.liveness.has_value());
+    EXPECT_FALSE(verdict(end).has_value());
+}
+
+TEST_F(UnknownTypeVerdicts, OnlyItsOwnScenarioIsJudged) {
+    Session session(unknown_type_probe());
+    session.poll(0ms);
+    session.close(0x3);
+    auto done = session.poll(10ms);
+    ASSERT_EQ(verdict(done), std::optional<bool>{true});
+    EXPECT_FALSE(evaluate_draft22_location_filter_overflow(done).has_value()) << "not an overflow scenario";
+    auto altered = done;
+    altered.writes[0].write.bytes.back() = std::byte{0x07};
+    EXPECT_FALSE(verdict(altered).has_value());
+    const ScopedWireDraft wire21(21);
+    EXPECT_FALSE(verdict(done).has_value());
 }
 
 }  // namespace

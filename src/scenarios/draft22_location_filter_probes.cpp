@@ -56,17 +56,35 @@ Bytes subscribe(const Fixture& fixture, std::uint64_t count, const Bytes& parame
     return frame(kSubscribe, body);
 }
 
+// Section 9.20.9: "Any other Location Filter Type is a PROTOCOL_VIOLATION." Type 0x06 is the first value
+// after the six defined ones (0x00-0x05); no field follows, since none is defined for it.
+constexpr std::uint64_t kUndefinedType = 0x06;
+
+bool overflow(std::string_view id) {
+    return id == kDraft22LocationFilterOverflow || id == kDraft22FillLocationFilterOverflow;
+}
+
+// The LOCATION_FILTER value the scenario sends.
+Bytes filter_value(std::string_view id) {
+    if (id == kDraft22LocationFilterUnknownType) {
+        Bytes value;
+        integer(value, kUndefinedType);
+        return value;
+    }
+    return draft22_overflow_filter_value(id);
+}
+
 // The LOCATION_FILTER parameter as a first parameter (its type delta is the type).
 Bytes filter_parameter(std::string_view id) {
     Bytes parameter;
     integer(parameter, kLocationFilter);
-    const auto value = draft22_overflow_filter_value(id);
+    const auto value = filter_value(id);
     parameter.insert(parameter.end(), value.begin(), value.end());
     return parameter;
 }
 
 Bytes stimulus(std::string_view id, const Fixture& fixture) {
-    if (id == kDraft22LocationFilterOverflow) return subscribe(fixture, 1, filter_parameter(id));
+    if (id != kDraft22FillLocationFilterOverflow) return subscribe(fixture, 1, filter_parameter(id));
     // Section 9.20.15: FILL_PARAMETERS is length-prefixed and holds Parameters encoded as for a separate
     // message (Section 16.7: no count, the first type delta is the type).
     const auto nested = filter_parameter(id);
@@ -87,6 +105,10 @@ RawProbeDefinition build(std::string_view id, std::chrono::milliseconds deadline
     definition.peer_setup_ready = setup_ready;
     definition.deadline = deadline;
     definition.writes.push_back({RawProbeChannel::NewBidi, stimulus(id, fixture), false});
+    // No follow-up for the undefined Type: Section 9.20.9 names the PROTOCOL_VIOLATION without a BCP 14
+    // keyword, so the unconditional MUST close the follow-up's argument needs is not stated there (a
+    // publisher that keeps serving is not shown to break a MUST). Only its close code is judged.
+    if (!overflow(id)) return definition;
     // The liveness follow-up of the draft 21 counterparts (both listed in raw_probe_liveness.cpp): the row
     // is an unconditional MUST close, the stimulus is one complete message on a reliable stream, and a
     // SUBSCRIBE_OK on a fresh request after it shows the session kept serving. Draft 22 SUBSCRIBE and
@@ -125,9 +147,17 @@ RawProbeDefinition draft22_fill_location_filter_overflow_probe(std::chrono::mill
                  fixture_of(std::move(track_namespace), std::move(track_name)));
 }
 
-std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTranscript& t) {
-    if (t.scenario_id != kDraft22LocationFilterOverflow && t.scenario_id != kDraft22FillLocationFilterOverflow)
-        return std::nullopt;
+RawProbeDefinition draft22_location_filter_unknown_type_probe(std::chrono::milliseconds deadline,
+                                                              std::vector<std::vector<std::byte>> track_namespace,
+                                                              std::vector<std::byte> track_name) {
+    return build(kDraft22LocationFilterUnknownType, deadline,
+                 fixture_of(std::move(track_namespace), std::move(track_name)));
+}
+
+namespace {
+
+// The draft 21 close rule (evaluate_raw_probe_close) on the stimulus rebuilt for the transcript's fixture.
+std::optional<bool> judge_close(const RawProbeTranscript& t) {
     // The stimulus is rebuilt on the draft 22 wire; on any other wire nothing is judged.
     if (current_wire_draft() != 22 || t.writes.empty() || t.harness_failed) return std::nullopt;
     const auto fixture = recover_fixture(t.writes.front().write.bytes, kSubscribe, request_id(0));
@@ -135,6 +165,18 @@ std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTran
     auto expected = build(t.scenario_id, kRebuildDeadline, *fixture);
     bind_liveness_track(expected, fixture->ns, fixture->name);
     return evaluate_raw_probe_close(t, expected, kProtocolViolation);
+}
+
+}  // namespace
+
+std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTranscript& t) {
+    if (!overflow(t.scenario_id)) return std::nullopt;
+    return judge_close(t);
+}
+
+std::optional<bool> evaluate_draft22_location_filter_unknown_type(const RawProbeTranscript& t) {
+    if (t.scenario_id != kDraft22LocationFilterUnknownType) return std::nullopt;
+    return judge_close(t);
 }
 
 }  // namespace moq::interop::scenarios
