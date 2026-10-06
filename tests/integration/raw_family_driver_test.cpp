@@ -899,18 +899,29 @@ app::OwnEvaluator22 stub_own_evaluator(StubObservations& seen) {
     }};
 }
 
-TEST(NativeRunManagerDraft22Lineage, AnUnregisteredOwnScenarioIsRefused) {
-    // An own id with no production implementation. kStubOwnScenario served until Task 9b implemented it in
-    // production (the stub tests below shadow that implementation), d22-location-filter-end-group-overflow
-    // until Task 10 did.
-    constexpr std::string_view unimplemented="d22-fill-location-filter-end-group-overflow";
-    ASSERT_FALSE(app::own_scenario_22(unimplemented).has_value());
+// Was "AnUnregisteredOwnScenarioIsRefused" (on an own id with no implementation) until Task 10 implemented the
+// last own scenarios. An own id whose implementation supplies no probe is refused the same way.
+TEST(NativeRunManagerDraft22Lineage, AnOwnScenarioWithoutAProbeIsRefused) {
+    constexpr std::string_view probeless="d22-fill-location-filter-end-group-overflow";
+    const app::ScopedOwnScenario22 stub({{probeless,true},{}});
+    ASSERT_TRUE(app::own_scenario_22(probeless).has_value());
+    ASSERT_FALSE(app::has_own_probe_22(probeless));
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
     const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
-        app::RunMode::Observed,{std::string(unimplemented)},1000ms,app::TrackFixture{{"n"},"t"}});
+        app::RunMode::Observed,{std::string(probeless)},1000ms,app::TrackFixture{{"n"},"t"}});
     EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
     EXPECT_EQ(store->list({10,0}).total,0u);
+}
+
+// Every lineage-own draft 22 scenario has a production probe, and every own evaluator a production
+// implementation (Task 10 completed the set).
+TEST(NativeRunManagerDraft22Lineage, EveryOwnScenarioAndEvaluatorHasAProductionImplementation) {
+    ASSERT_TRUE(app::own_scenario_ids_22().size()==app::kOwnScenarioTraits22.size()) << "no overlay may be registered";
+    for (const auto id : requirements::lineage_data::kOwnScenarios22) EXPECT_TRUE(app::has_own_probe_22(id)) << id;
+    const auto evaluators=app::production_own_evaluator_ids_22();
+    for (const auto id : requirements::lineage_data::kOwnEvaluators22)
+        EXPECT_NE(std::find(evaluators.begin(),evaluators.end(),id),evaluators.end()) << id;
 }
 
 TEST(NativeRunManagerDraft22Lineage, ARegisteredOwnScenarioRunsNativelyAndIsScoredByItsOwnEvaluator) {

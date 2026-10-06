@@ -56,6 +56,9 @@ protected:
 RawProbeDefinition overflow_probe(std::chrono::milliseconds deadline = 5000ms) {
     return draft22_location_filter_overflow_probe(deadline, {b({'n'})}, b({'t'}));
 }
+RawProbeDefinition fill_overflow_probe(std::chrono::milliseconds deadline = 5000ms) {
+    return draft22_fill_location_filter_overflow_probe(deadline, {b({'n'})}, b({'t'}));
+}
 
 // The definition as the run hands it to the controller: liveness bound to the fixture.
 RawProbeDefinition bound(RawProbeDefinition definition) {
@@ -84,6 +87,40 @@ TEST_F(Draft22LocationFilterProbes, TopLevelProbeSendsTheType3OverflowAsTheOnlyS
     EXPECT_EQ(hex(p.writes[0].bytes), "03" "0014" "01" "01016e" "0174" "01" "21" "03" "ffffffffffffffffff" "00" "01");
     EXPECT_EQ(draft22_overflow_filter_value(kDraft22LocationFilterOverflow),
               cat(cat(b({0x03}), kMaxVi), b({0, 1})));
+}
+
+TEST_F(Draft22LocationFilterProbes, FillProbeNestsTheType4OverflowInFillParameters) {
+    const auto p = fill_overflow_probe();
+    EXPECT_EQ(p.id, kDraft22FillLocationFilterOverflow);
+    ASSERT_EQ(p.writes.size(), 1u);
+    // SUBSCRIBE, Length 23: Request ID 1, (n), t, one parameter: FILL_PARAMETERS 0x23, Length 14, then
+    // LOCATION_FILTER 0x21 (no count, Section 9.20.15) Type 04 {2^64 - 1, 0, 1, 0}.
+    EXPECT_EQ(hex(p.writes[0].bytes),
+              "03" "0017" "01" "01016e" "0174" "01" "23" "0e" "21" "04" "ffffffffffffffffff" "00" "01" "00");
+    EXPECT_EQ(draft22_overflow_filter_value(kDraft22FillLocationFilterOverflow),
+              cat(cat(b({0x04}), kMaxVi), b({0, 1, 0})));
+    EXPECT_TRUE(draft22_overflow_filter_value("d22-no-such-scenario").empty());
+}
+
+TEST_F(Draft22LocationFilterProbes, TheDecoderRejectsExactlyTheNestedBytesTheFillProbeSends) {
+    const auto p = fill_overflow_probe();
+    const auto value = draft22_overflow_filter_value(kDraft22FillLocationFilterOverflow);
+    const auto& write = p.writes[0].bytes;
+    // FILL_PARAMETERS' value is the nested LOCATION_FILTER parameter and nothing else.
+    ASSERT_GT(write.size(), value.size() + 3);
+    const auto tail = write.end() - static_cast<std::ptrdiff_t>(value.size());
+    EXPECT_TRUE(std::equal(value.begin(), value.end(), tail));
+    EXPECT_EQ(Bytes(tail - 3, tail), b({0x23, static_cast<unsigned>(value.size() + 1), 0x21}));
+    const auto decoded = decode(value);
+    const auto* error = std::get_if<wire::DecodeError>(&decoded);
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->code, wire::DecodeErrorCode::ProtocolViolation);
+    wire::ByteWriter output(64);
+    EXPECT_EQ(d22::encode_location_filter({d22::LocationFilterType::AbsoluteRange, kLargest, 0, 1, 0}, output),
+              d22::LocationFilterEncodeError::InvalidValue);
+    // The boundary 2^64 - 2 + 1 decodes for Type 0x04 as well.
+    const auto boundary = b({0x04, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0, 1, 0});
+    EXPECT_TRUE(std::holds_alternative<d22::LocationFilter>(decode(boundary)));
 }
 
 TEST_F(Draft22LocationFilterProbes, TheDecoderRejectsExactlyTheBytesTheProbeSends) {
@@ -123,19 +160,22 @@ TEST_F(Draft22LocationFilterProbes, OnlyTheOverflowIsTheViolation) {
 
 TEST_F(Draft22LocationFilterProbes, ProbesCarryTheLivenessFollowUpOfTheirDraft21Counterparts) {
     ASSERT_TRUE(liveness_follow_up_sound(21, "d21-location-filter-end-group-overflow"));
-    const auto p = overflow_probe();
-    ASSERT_TRUE(p.liveness.has_value());
-    EXPECT_EQ(p.liveness->draft, 21u) << "draft 22 SUBSCRIBE_OK keeps the draft 21 encoding";
-    EXPECT_TRUE(p.liveness->request.empty()) << "bound to the track fixture by the run";
-    EXPECT_GT(p.liveness->request_id, 1u);
-    EXPECT_TRUE(liveness_definition_eligible(p));
-    const auto definition = bound(p);
-    EXPECT_TRUE(liveness_request_valid(*definition.liveness));
+    ASSERT_TRUE(liveness_follow_up_sound(21, "d21-fill-location-filter-end-group-overflow"));
+    for (const auto& p : {overflow_probe(), fill_overflow_probe()}) {
+        ASSERT_TRUE(p.liveness.has_value());
+        EXPECT_EQ(p.liveness->draft, 21u) << "draft 22 SUBSCRIBE_OK keeps the draft 21 encoding";
+        EXPECT_TRUE(p.liveness->request.empty()) << "bound to the track fixture by the run";
+        EXPECT_GT(p.liveness->request_id, 1u);
+        EXPECT_TRUE(liveness_definition_eligible(p));
+        const auto definition = bound(p);
+        EXPECT_TRUE(liveness_request_valid(*definition.liveness));
+    }
 }
 
 TEST(Draft22LocationFilterProbesWire, ProbesAreBuiltOnTheDraft22WireOnly) {
     const ScopedWireDraft wire(21);
     EXPECT_THROW(overflow_probe(), std::logic_error);
+    EXPECT_THROW(fill_overflow_probe(), std::logic_error);
 }
 
 TEST_F(Draft22LocationFilterProbes, AnInvalidFixtureOrDeadlineIsRefused) {
@@ -286,9 +326,9 @@ TEST_P(OverflowVerdicts, AnUnprovenOrForeignTranscriptIsNotJudged) {
     session.close(0x3);
     const auto done = session.poll(10ms);
     ASSERT_EQ(verdict(done), std::optional<bool>{true});
-    // An altered stimulus byte (EndGroupDelta 1 -> 0: no overflow).
+    // An altered stimulus byte (the last field of the filter).
     auto altered = done;
-    altered.writes[0].write.bytes.back() = std::byte{0};
+    altered.writes[0].write.bytes.back() ^= std::byte{1};
     EXPECT_FALSE(verdict(altered).has_value());
     // Another scenario's transcript, a harness failure, a close before the stimulus was accepted.
     auto other = done;
@@ -306,7 +346,22 @@ TEST_P(OverflowVerdicts, AnUnprovenOrForeignTranscriptIsNotJudged) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Overflow, OverflowVerdicts,
-                         ::testing::Values(+[](std::chrono::milliseconds deadline) { return overflow_probe(deadline); }));
+                         ::testing::Values(+[](std::chrono::milliseconds deadline) { return overflow_probe(deadline); },
+                                           +[](std::chrono::milliseconds deadline) {
+                                               return fill_overflow_probe(deadline);
+                                           }));
+
+// One scenario's transcript is never judged as the other's: the evaluator rebuilds the stimulus of the
+// scenario the transcript names.
+TEST_F(Draft22LocationFilterProbes, EachScenarioIsProvenAgainstItsOwnStimulus) {
+    Session session(bound(overflow_probe()));
+    session.poll(0ms);
+    session.close(0x3);
+    auto done = session.poll(10ms);
+    ASSERT_EQ(evaluate_draft22_location_filter_overflow(done), std::optional<bool>{true});
+    done.scenario_id = std::string(kDraft22FillLocationFilterOverflow);
+    EXPECT_FALSE(evaluate_draft22_location_filter_overflow(done).has_value());
+}
 
 }  // namespace
 }  // namespace moq::interop::scenarios

@@ -82,6 +82,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_location_filter_overflow_probe(
                  execution.timeout, std::move(track.name_space), std::move(track.name));
          }},
+        {scenarios::kDraft22FillLocationFilterOverflow, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_fill_location_filter_overflow_probe(
+                 execution.timeout, std::move(track.name_space), std::move(track.name));
+         }},
     };
     return table;
 }

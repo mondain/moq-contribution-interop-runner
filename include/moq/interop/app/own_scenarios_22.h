@@ -39,6 +39,7 @@ inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>(
     {"d22-publisher-location-filter-parameter", true},
     {"d22-request-stream-before-peer-setup", true},
     {"d22-location-filter-end-group-overflow", true},
+    {"d22-fill-location-filter-end-group-overflow", true},
 });
 
 // An own scenario implementation: its traits and the probe the run manager drives. `probe` is called

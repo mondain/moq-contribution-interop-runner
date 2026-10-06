@@ -112,14 +112,15 @@ inline bool harness_error(const storage::RunRecord& run) {
                        [](const auto& event) { return event.kind == "harness_error"; });
 }
 
-// Records the production evaluator's verdict while keeping it in charge (an overlay shadows it by id).
+// Records the production evaluator's verdict while keeping it in charge (an overlay shadows it by id). An
+// empty `scenario` records the verdicts on every scenario the evaluator is asked about, in run order.
 class VerdictRecorder {
 public:
     VerdictRecorder(std::string_view evaluator, std::string_view scenario,
                     std::optional<bool> (*production)(const scenarios::RawProbeTranscript&))
         : scope_({evaluator, [this, scenario, production](const scenarios::RawProbeTranscript& transcript) {
               const auto verdict = production(transcript);
-              if (transcript.scenario_id == scenario) {
+              if (scenario.empty() || transcript.scenario_id == scenario) {
                   const std::lock_guard lock(mutex_);
                   verdicts_.push_back(verdict);
               }

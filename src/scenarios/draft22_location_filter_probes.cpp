@@ -19,6 +19,7 @@ using namespace d22support;
 // Section 9 message type and Section 9.20 parameter types.
 constexpr std::uint64_t kSubscribe = 0x03;
 constexpr std::uint64_t kLocationFilter = 0x21;
+constexpr std::uint64_t kFillParameters = 0x23;
 // Section 16.11.1: the session close code the row requires.
 constexpr std::uint64_t kProtocolViolation = 0x3;
 
@@ -37,6 +38,14 @@ Bytes bounded_overflow() {
     return value;
 }
 
+// Type 0x04: the same fields, then EndObject.
+Bytes range_overflow() {
+    auto value = bounded_overflow();
+    value.front() = std::byte{0x04};
+    integer(value, 0);  // EndObject
+    return value;
+}
+
 // Section 9.6: SUBSCRIBE (Request ID 1) for the track, carrying `parameters` (already delta encoded).
 Bytes subscribe(const Fixture& fixture, std::uint64_t count, const Bytes& parameters) {
     Bytes body;
@@ -47,11 +56,24 @@ Bytes subscribe(const Fixture& fixture, std::uint64_t count, const Bytes& parame
     return frame(kSubscribe, body);
 }
 
-Bytes stimulus(std::string_view id, const Fixture& fixture) {
-    Bytes parameters;
-    integer(parameters, kLocationFilter);  // the first parameter: its type delta is the type
+// The LOCATION_FILTER parameter as a first parameter (its type delta is the type).
+Bytes filter_parameter(std::string_view id) {
+    Bytes parameter;
+    integer(parameter, kLocationFilter);
     const auto value = draft22_overflow_filter_value(id);
-    parameters.insert(parameters.end(), value.begin(), value.end());
+    parameter.insert(parameter.end(), value.begin(), value.end());
+    return parameter;
+}
+
+Bytes stimulus(std::string_view id, const Fixture& fixture) {
+    if (id == kDraft22LocationFilterOverflow) return subscribe(fixture, 1, filter_parameter(id));
+    // Section 9.20.15: FILL_PARAMETERS is length-prefixed and holds Parameters encoded as for a separate
+    // message (Section 16.7: no count, the first type delta is the type).
+    const auto nested = filter_parameter(id);
+    Bytes parameters;
+    integer(parameters, kFillParameters);
+    integer(parameters, nested.size());
+    parameters.insert(parameters.end(), nested.begin(), nested.end());
     return subscribe(fixture, 1, parameters);
 }
 
@@ -85,6 +107,7 @@ Fixture fixture_of(std::vector<std::vector<std::byte>> track_namespace, std::vec
 
 std::vector<std::byte> draft22_overflow_filter_value(std::string_view scenario_id) {
     if (scenario_id == kDraft22LocationFilterOverflow) return bounded_overflow();
+    if (scenario_id == kDraft22FillLocationFilterOverflow) return range_overflow();
     return {};
 }
 
@@ -95,8 +118,16 @@ RawProbeDefinition draft22_location_filter_overflow_probe(std::chrono::milliseco
                  fixture_of(std::move(track_namespace), std::move(track_name)));
 }
 
+RawProbeDefinition draft22_fill_location_filter_overflow_probe(std::chrono::milliseconds deadline,
+                                                               std::vector<std::vector<std::byte>> track_namespace,
+                                                               std::vector<std::byte> track_name) {
+    return build(kDraft22FillLocationFilterOverflow, deadline,
+                 fixture_of(std::move(track_namespace), std::move(track_name)));
+}
+
 std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTranscript& t) {
-    if (t.scenario_id != kDraft22LocationFilterOverflow) return std::nullopt;
+    if (t.scenario_id != kDraft22LocationFilterOverflow && t.scenario_id != kDraft22FillLocationFilterOverflow)
+        return std::nullopt;
     // The stimulus is rebuilt on the draft 22 wire; on any other wire nothing is judged.
     if (current_wire_draft() != 22 || t.writes.empty() || t.harness_failed) return std::nullopt;
     const auto fixture = recover_fixture(t.writes.front().write.bytes, kSubscribe, request_id(0));

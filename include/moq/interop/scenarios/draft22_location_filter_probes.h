@@ -27,11 +27,13 @@
 namespace moq::interop::scenarios {
 
 inline constexpr std::string_view kDraft22LocationFilterOverflow = "d22-location-filter-end-group-overflow";
+inline constexpr std::string_view kDraft22FillLocationFilterOverflow = "d22-fill-location-filter-end-group-overflow";
 inline constexpr std::string_view kDraft22LocationFilterOverflowEvaluator =
     "d22-location-filter-overflow-protocol-violation";
 
-// The LOCATION_FILTER value an overflow scenario sends (the bytes after the parameter's type delta):
-// Type 0x03 {StartGroup 2^64 - 1, StartObject 0, EndGroupDelta 1}. Empty for any other id.
+// The LOCATION_FILTER value an overflow scenario sends (the bytes after the parameter's type delta): Type
+// 0x03 {StartGroup 2^64 - 1, StartObject 0, EndGroupDelta 1} at the top level, Type 0x04 {2^64 - 1, 0, 1,
+// EndObject 0} inside FILL_PARAMETERS. Empty for any other id.
 std::vector<std::byte> draft22_overflow_filter_value(std::string_view scenario_id);
 
 // One session: a SUBSCRIBE (Request ID 1) for the track whose only parameter is the overflowing filter
@@ -40,6 +42,13 @@ std::vector<std::byte> draft22_overflow_filter_value(std::string_view scenario_i
 RawProbeDefinition draft22_location_filter_overflow_probe(std::chrono::milliseconds deadline,
                                                           std::vector<std::vector<std::byte>> track_namespace,
                                                           std::vector<std::byte> track_name);
+
+// The same with FILL_PARAMETERS (0x23) as the only parameter: Length, then LOCATION_FILTER (0x21) Type
+// 0x04 as the only nested parameter. The subscription itself has no Location Filter and is not paused, so
+// the publisher has to evaluate the fill range (Sections 3.4 and 3.4.1).
+RawProbeDefinition draft22_fill_location_filter_overflow_probe(std::chrono::milliseconds deadline,
+                                                               std::vector<std::vector<std::byte>> track_namespace,
+                                                               std::vector<std::byte> track_name);
 
 // Verdict of d22-location-filter-overflow-protocol-violation on a transcript of either overflow scenario,
 // with the draft 21 counterpart's rules (scenarios::evaluate_raw_probe_close with PROTOCOL_VIOLATION 0x3):

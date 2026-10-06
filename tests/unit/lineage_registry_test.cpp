@@ -49,8 +49,8 @@ TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
     EXPECT_EQ(shared_scenario_ids_22().size(), 307u);
     // Task 9a: the three row 069 scenarios; Task 9b: d22-discover-original-publisher-namespaces (row 110),
     // d22-publisher-location-filter-parameter (row 422) and d22-request-stream-before-peer-setup (row 159);
-    // Task 10: d22-location-filter-end-group-overflow (row 424).
-    EXPECT_EQ(kOwnScenarioTraits22.size(), 7u);
+    // Task 10: d22-location-filter-end-group-overflow and d22-fill-location-filter-end-group-overflow (row 424).
+    EXPECT_EQ(kOwnScenarioTraits22.size(), 8u);
     EXPECT_EQ(executable_scenarios(22).size(), 213u + kOwnScenarioTraits22.size());
 }
 
@@ -119,9 +119,16 @@ TEST(LineageRegistry, Draft18And21RegistriesAreUnchanged) {
 
 // ---- Own draft 22 scenarios (Task 8 dispatch seam) ----------------------------------------------------
 
-// An own id without a production implementation. d22-request-stream-before-peer-setup served until Task 9b
-// implemented it, d22-location-filter-end-group-overflow until Task 10 did.
+// The own id the overlay tests register a stub for. Since Task 10 every own id has a production
+// implementation, so the stub shadows one (an overlay entry wins over a production entry with the same id).
 constexpr std::string_view kStubOwn = "d22-fill-location-filter-end-group-overflow";
+
+// Task 10 implemented the last own scenarios: every lineage-own draft 22 scenario now has a production
+// implementation (its probe and evaluator tables are checked in raw_family_driver_test.cpp).
+TEST(LineageRegistryOwn, EveryOwnScenarioHasAProductionImplementation) {
+    ASSERT_EQ(requirements::lineage_data::kOwnScenarios22.size(), kOwnScenarioTraits22.size());
+    for (const auto id : requirements::lineage_data::kOwnScenarios22) EXPECT_TRUE(production_own(id)) << id;
+}
 
 TEST(LineageRegistryOwn, OnlyTheProductionOwnScenariosAreImplemented) {
     EXPECT_EQ(own_scenario_ids_22().size(), kOwnScenarioTraits22.size());
@@ -134,22 +141,25 @@ TEST(LineageRegistryOwn, OnlyTheProductionOwnScenariosAreImplemented) {
     }
 }
 
-TEST(LineageRegistryOwn, ARegisteredOwnScenarioIsExecutableOnlyWhileRegistered) {
+// Was "ARegisteredOwnScenarioIsExecutableOnlyWhileRegistered" while an own id lacked an implementation. Now
+// the stub shadows a production one: its traits apply only while registered, and the id is listed once.
+TEST(LineageRegistryOwn, ARegisteredOwnScenarioShadowsTheProductionOneOnlyWhileRegistered) {
     const auto before = executable_scenarios(22).size();
     const auto own_before = own_scenario_ids_22().size();
-    EXPECT_FALSE(executable_scenario(22, kStubOwn));
+    ASSERT_TRUE(production_own(kStubOwn));
+    EXPECT_TRUE(scenario_requires_track(22, kStubOwn));
     {
         const ScopedOwnScenario22 stub({{kStubOwn, false}, {}});
-        ASSERT_EQ(own_scenario_ids_22().size(), own_before + 1);
+        EXPECT_EQ(own_scenario_ids_22().size(), own_before) << "listed once";
         const auto own = own_scenario_ids_22();
-        EXPECT_NE(std::find(own.begin(), own.end(), kStubOwn), own.end());
+        EXPECT_EQ(std::count(own.begin(), own.end(), kStubOwn), 1);
         EXPECT_TRUE(executable_scenario(22, kStubOwn));
         EXPECT_TRUE(raw_probe_scenario(22, kStubOwn));
-        EXPECT_FALSE(scenario_requires_track(22, kStubOwn));
+        EXPECT_FALSE(scenario_requires_track(22, kStubOwn)) << "the overlay's traits win";
         EXPECT_FALSE(scenario_requires_fetch(22, kStubOwn));
         EXPECT_FALSE(implementation_scenario_id(kStubOwn).has_value()) << "an own id has no draft 21 implementation";
         const auto ids = executable_scenarios(22);
-        EXPECT_EQ(ids.size(), before + 1);
+        EXPECT_EQ(ids.size(), before);
         const auto shared = shared_scenario_ids_22();
         const auto first_own = std::find_if(ids.begin(), ids.end(), [&](std::string_view id) {
             return std::find(shared.begin(), shared.end(), id) == shared.end();
@@ -162,7 +172,7 @@ TEST(LineageRegistryOwn, ARegisteredOwnScenarioIsExecutableOnlyWhileRegistered) 
         EXPECT_FALSE(executable_scenario(21, kStubOwn));
         EXPECT_FALSE(executable_scenario(18, kStubOwn));
     }
-    EXPECT_FALSE(executable_scenario(22, kStubOwn));
+    EXPECT_TRUE(scenario_requires_track(22, kStubOwn)) << "the production traits again";
     EXPECT_EQ(own_scenario_ids_22().size(), own_before);
     EXPECT_EQ(executable_scenarios(22).size(), before);
 }

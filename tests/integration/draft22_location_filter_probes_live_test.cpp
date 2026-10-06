@@ -72,8 +72,8 @@ void play(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunI
 }
 
 Played run(std::vector<std::string> scenarios, std::vector<Behaviour> behaviours) {
-    const VerdictRecorder recorder(scenarios::kDraft22LocationFilterOverflowEvaluator,
-                                   scenarios::kDraft22LocationFilterOverflow,
+    // Both scenarios share the evaluator; the recorder keeps the verdicts of either, in run order.
+    const VerdictRecorder recorder(scenarios::kDraft22LocationFilterOverflowEvaluator, "",
                                    scenarios::evaluate_draft22_location_filter_overflow);
     auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
     auto manager = manager_for(store);
@@ -97,9 +97,18 @@ Played run_top_level(Behaviour behaviour) {
 // SUBSCRIBE, Request ID 1, (n), t, LOCATION_FILTER Type 03 {2^64 - 1, 0, 1}.
 const Bytes kTopLevel = b({3, 0, 0x14, 1, 1, 1, 'n', 1, 't', 1, 0x21, 3,
                            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 1});
+// SUBSCRIBE, Request ID 1, (n), t, FILL_PARAMETERS {LOCATION_FILTER Type 04 {2^64 - 1, 0, 1, 0}}.
+const Bytes kFill = b({3, 0, 0x17, 1, 1, 1, 'n', 1, 't', 1, 0x23, 0x0e, 0x21, 4,
+                       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 1, 0});
+
+Played run_both(Behaviour top_level, Behaviour fill) {
+    return run({std::string(scenarios::kDraft22LocationFilterOverflow),
+                std::string(scenarios::kDraft22FillLocationFilterOverflow)},
+               {top_level, fill});
+}
 
 TEST(Draft22LocationFilterProbesLive, ScenarioIsImplementedAndNeedsATrack) {
-    for (const auto id : {scenarios::kDraft22LocationFilterOverflow}) {
+    for (const auto id : {scenarios::kDraft22LocationFilterOverflow, scenarios::kDraft22FillLocationFilterOverflow}) {
         EXPECT_TRUE(app::executable_scenario(22, id)) << id;
         EXPECT_TRUE(app::raw_probe_scenario(22, id)) << id;
         EXPECT_TRUE(app::scenario_requires_track(22, id)) << id;
@@ -130,6 +139,31 @@ TEST(Draft22LocationFilterProbesLive, PublisherThatKeepsServingFails) {
     EXPECT_FALSE(harness_error(played.run));
     EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{false}));
     EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::Fail);
+}
+
+TEST(Draft22LocationFilterProbesLive, PublisherRejectingBothOverflowsPassesTheRow) {
+    const auto played = run_both(Behaviour::CloseProtocolViolation, Behaviour::CloseProtocolViolation);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.written, (std::vector<Bytes>{kTopLevel, kFill}));
+    EXPECT_FALSE(harness_error(played.run));
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true, true}));
+    EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft22LocationFilterProbesLive, PublisherIgnoringTheNestedOverflowFailsTheRow) {
+    const auto played = run_both(Behaviour::CloseProtocolViolation, Behaviour::Serve);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.written, (std::vector<Bytes>{kTopLevel, kFill}));
+    EXPECT_FALSE(harness_error(played.run));
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true, false}));
+    EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::Fail);
+}
+
+TEST(Draft22LocationFilterProbesLive, ASilentFillContextLeavesTheRowNotRun) {
+    const auto played = run_both(Behaviour::CloseProtocolViolation, Behaviour::Silent);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true, std::nullopt}));
+    EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::NotRun);
 }
 
 TEST(Draft22LocationFilterProbesLive, SilentPublisherIsNotScored) {
