@@ -175,8 +175,11 @@ the Docker and publisher stages as `missing`, which fails the gate.
 Required stages, all of which must be `pass` for `check` to succeed:
 `native_suite` (ctest), `asan_ubsan`, `fuzz_smoke`, `docker_d18_native`,
 `docker_d18_webtransport`, `docker_d21_native`, `docker_d21_webtransport`,
-`moqxr_d18_webtransport`, `moqxr_d21_webtransport`, `audit_d18` and
-`audit_d21`. The artifact (`release-audit.json`) also stores the source revision,
+`moqxr_d18_webtransport`, `moqxr_d21_webtransport`, `moqxr_d22_native`,
+`moqxr_d22_webtransport`, `audit_d18`, `audit_d21` and `audit_d22`. The draft 18 and 21
+moqxr stages run `tests/e2e/repeatability.sh`; the draft 22 stages run the
+`tests/e2e/moqxr-matrix.sh --pair 22` pair on each transport. There are no Docker stages
+for draft 22: the container image carries no draft 22 peer. The moqxr draft 22 stages are smoke tests: each runs one reference scenario and passes when the run finishes with publisher evidence, whatever the verdict; they do not assert that any row passes. The artifact (`release-audit.json`) also stores the source revision,
 the draft source digests, the static gate result for each draft, the external
 publisher version, executable SHA-256 and fixture SHA-256, plus logs, Docker
 run results and the repeat databases. `check` rejects revision drift, digest

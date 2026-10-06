@@ -18,11 +18,14 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - name: Build
         run: cmake --build build --parallel 2
+      # The full ctest run includes audit-cli-draft22 (tests/e2e/audit-cli-draft22.sh with the
+      # runner, the audit program and moq-interop-draft22-audit-fixture, all built above), so the
+      # draft 22 audit CLI needs no separate step here.
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 2
       - name: Audit draft release gates
         run: |
-          for draft in 18 21; do
+          for draft in 18 21 22; do
             set +e
             ./build/moq-interop-audit --draft "$draft" --format json \
               >"$RUNNER_TEMP/audit-$draft.json"

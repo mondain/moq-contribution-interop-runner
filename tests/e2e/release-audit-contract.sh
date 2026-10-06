@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 draft18_digest=$(jq -r '."18"' "$root_dir/requirements/draft-digests.json")
 draft21_digest=$(jq -r '."21"' "$root_dir/requirements/draft-digests.json")
+draft22_digest=$(jq -r '."22"' "$root_dir/requirements/draft-digests.json")
 source_revision=$(git -C "$root_dir" rev-parse --verify 'HEAD^{commit}')
 test_dir=$(mktemp -d /tmp/moq-interop-release-contract.XXXXXX)
 cleanup() {
@@ -18,7 +19,7 @@ make_report() {
     local stages=$2
     jq -n --argjson complete "$static_complete" --argjson stages "$stages" \
         --arg digest18 "$draft18_digest" --arg digest21 "$draft21_digest" \
-        --arg revision "$source_revision" '{
+        --arg digest22 "$draft22_digest" --arg revision "$source_revision" '{
         schema_version: 1,
         source_revision: $revision,
         publisher: {version: "openmoq-publisher test-build",
@@ -26,7 +27,8 @@ make_report() {
                     fixture_sha256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
         drafts: [
             {draft: 18, source_sha256: $digest18, static_complete: $complete},
-            {draft: 21, source_sha256: $digest21, static_complete: $complete}
+            {draft: 21, source_sha256: $digest21, static_complete: $complete},
+            {draft: 22, source_sha256: $digest22, static_complete: $complete}
         ],
         stages: $stages
     }' >"$test_dir/report.json"
@@ -40,13 +42,22 @@ if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json" \
 fi
 rg -q 'missing stage: native_suite' "$test_dir/check.log"
 rg -q 'missing stage: docker_d21_webtransport' "$test_dir/check.log"
+rg -q 'missing stage: moqxr_d22_native' "$test_dir/check.log"
+rg -q 'missing stage: moqxr_d22_webtransport' "$test_dir/check.log"
+rg -q 'missing stage: audit_d22' "$test_dir/check.log"
+# Draft 22 has no Docker stages: the container image carries no draft 22 peer.
+if rg -q 'missing stage: docker_d22' "$test_dir/check.log"; then
+    printf 'draft 22 Docker stages are required but the image has no draft 22 peer\n' >&2
+    exit 1
+fi
 
 stages=$(jq -n '[
     "native_suite", "asan_ubsan", "fuzz_smoke",
     "docker_d18_native", "docker_d18_webtransport",
     "docker_d21_native", "docker_d21_webtransport",
     "moqxr_d18_webtransport", "moqxr_d21_webtransport",
-    "audit_d18", "audit_d21"
+    "moqxr_d22_native", "moqxr_d22_webtransport",
+    "audit_d18", "audit_d21", "audit_d22"
 ] | map({id: ., command: "verified-command", status: "pass", exit_code: 0})')
 make_report false "$stages"
 if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json" \
@@ -56,6 +67,7 @@ if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json" \
 fi
 rg -q 'draft 18 static gate incomplete' "$test_dir/check.log"
 rg -q 'draft 21 static gate incomplete' "$test_dir/check.log"
+rg -q 'draft 22 static gate incomplete' "$test_dir/check.log"
 
 make_report true "$stages"
 bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/report.json"
@@ -90,6 +102,15 @@ if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/drifted.json" \
     exit 1
 fi
 rg -q 'draft 18 digest drift' "$test_dir/check.log"
+
+jq '.drafts |= map(select(.draft != 22))' "$test_dir/report.json" \
+    >"$test_dir/no-draft22.json"
+if bash "$root_dir/tests/e2e/release-audit.sh" check "$test_dir/no-draft22.json" \
+    >"$test_dir/check.log" 2>&1; then
+    printf 'release report without draft 22 was accepted\n' >&2
+    exit 1
+fi
+rg -q 'missing or duplicate draft: 22' "$test_dir/check.log"
 
 jq '.source_revision = "dddddddddddddddddddddddddddddddddddddddd"' \
     "$test_dir/report.json" >"$test_dir/revision-drift.json"
@@ -129,7 +150,7 @@ if bash "$root_dir/tests/e2e/release-audit.sh" run "$test_dir/run" \
     printf 'incomplete live release audit was accepted\n' >&2
     exit 1
 fi
-jq -e '.drafts | length == 2' "$test_dir/run/release-audit.json" >/dev/null
+jq -e '.drafts | length == 3' "$test_dir/run/release-audit.json" >/dev/null
 jq -e '.stages | any(.[]; .id == "audit_d18" and .status == "fail")' \
     "$test_dir/run/release-audit.json" >/dev/null
 jq -e '.stages | any(.[]; .id == "native_suite" and .status == "pass" and .exit_code == 0)' \
@@ -141,5 +162,9 @@ jq -e '.stages | any(.[]; .id == "fuzz_smoke" and .status == "pass" and .exit_co
 jq -e '.stages | any(.[]; .id == "docker_d21_webtransport" and .status == "missing")' \
     "$test_dir/run/release-audit.json" >/dev/null
 rg -q 'stage docker_d21_webtransport: missing' "$test_dir/run.log"
+jq -e '.stages | any(.[]; .id == "moqxr_d22_native" and .status == "missing")' \
+    "$test_dir/run/release-audit.json" >/dev/null
+jq -e '.stages | any(.[]; .id == "audit_d22")' \
+    "$test_dir/run/release-audit.json" >/dev/null
 
 printf 'release audit contract passed\n'

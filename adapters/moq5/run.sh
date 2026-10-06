@@ -19,6 +19,10 @@ request_file=${MOQ_INTEROP_DRIVER_REQUEST_FILE:-}
 publisher_bin=${MOQ5_MEDIA_SEND_BIN:-}
 [[ -n "$publisher_bin" && -x "$publisher_bin" ]] ||
     fail 'MOQ5_MEDIA_SEND_BIN must name the media_send executable'
+# Draft 22 is a runner draft that media_send does not speak: say so rather than "malformed".
+if jq -e '.draft == 22' "$request_file" >/dev/null 2>&1; then
+    fail 'draft 22 is not supported by this adapter'
+fi
 
 jq -e '
     .schema_version == 1 and

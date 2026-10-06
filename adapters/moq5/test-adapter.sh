@@ -54,6 +54,10 @@ make_request 16 native_quic moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655
 expect_refused 'draft 16 is not a runner draft'
 make_request 22 native_quic moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000
 expect_refused 'draft 22 is a runner draft that moq5 does not speak'
+message=$(MOQ5_MEDIA_SEND_BIN="$work/media send stub" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$work/request.json" "$adapter" 2>&1 >/dev/null || true)
+[[ "$message" == 'moq5 adapter: draft 22 is not supported by this adapter' ]] ||
+    { echo "FAIL: draft 22 refusal message: $message"; exit 1; }
 make_request 18 native_quic https://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000
 expect_refused 'native QUIC with an https endpoint'
 make_request 18 webtransport moqt://127.0.0.1:4443/moq '["6d65646961"]' 766964655f31 1000

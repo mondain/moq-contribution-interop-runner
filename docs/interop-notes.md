@@ -10,8 +10,9 @@ changes; every entry names the build it was made against.
 ## Standing rule
 
 No implementation defines expected behavior. Expected behavior comes only from the
-checked-in drafts, `docs/draft-ietf-moq-transport-18.txt` and
-`docs/draft-ietf-moq-transport-21.txt`, through the requirement catalogs. A
+checked-in drafts, `docs/draft-ietf-moq-transport-18.txt`,
+`docs/draft-ietf-moq-transport-21.txt` and `docs/draft-ietf-moq-transport-22.txt`, through
+the requirement catalogs. A
 publisher's quirk is never a reason to relax a scenario, bypass the QUIC DATAGRAM
 requirement, or change an evaluator. Known publisher limitations appear as
 ordinary `fail` or `not_run` rows. A result against one publisher build says
@@ -36,7 +37,7 @@ MoQT expectations):
 | `fixture` | `--input` |
 | `endpoint` | `--endpoint` (`moqt://...` for native QUIC, `https://...` for WebTransport) |
 | `transport` `native_quic` / `webtransport` | `--transport raw` / `--transport webtransport` |
-| `draft` | `--draft 18` or `--draft 21` |
+| `draft` | `--draft 18`, `--draft 21` or `--draft 22` |
 | namespace (fixed) | `--namespace media` |
 | `tls_ca` | `--ca` |
 | `scenario_timeout_ms` | `--timeout`, rounded up to whole seconds |
@@ -44,6 +45,8 @@ MoQT expectations):
 | draft 21, most scenarios | `--forward 1` (moqxr pushes its own PUBLISH) |
 | draft 21, scenarios where the runner subscribes (overlapping subscriptions, forward and range-filter conjunction, fill, publish-skipped recovery, withheld acknowledgments, invalid and expired token) | `--forward 0` |
 | draft 21 raw-probe scenarios where the runner acts as the subscriber (LARGEST_OBJECT, PUBLISH_DONE, redirects, notifications, padding, discovery, filters, GREASE, GOAWAY alternate URI, and similar) | `--forward 0 --paced` and `--timeout` increased by 3 seconds so the runner, not moqxr, ends the context |
+| draft 22, scenarios shared with draft 21 | the `d21-` twin's options with `--draft 22`, except 14 probes that run `--forward 0 --paced` at draft 22 only (listed in [the harness guide](publisher-harness-guide.md)) |
+| draft 22, own scenarios and the two unscored probes | `--forward 0 --paced` except `d22-publisher-location-filter-parameter` (`--forward 1`); see the harness guide |
 | `publish-track-under-single-period-namespace`, `application-publish-track-in-session-namespace`, `publish-distinct-content-tracks-in-same-scope` | `--publish-catalog` |
 
 `tests/e2e/moqxr-adapter-contract.sh` checks this mapping without starting any
@@ -68,10 +71,183 @@ reason `QUIC DATAGRAM not negotiated`).
 This is an interop observation about two publisher builds. It is not a validator
 pass and not a reason to loosen the requirement.
 
+## Draft 22 sweep against moqxr 4b615f4
+
+This is one peer at one revision on one date. It says nothing about another moqxr
+revision or another publisher, and a `pass` row is an observation of wire evidence in
+one run, not a conformance claim.
+
+| Item | Value |
+|---|---|
+| Peer | `openmoq-publisher` (moqxr) at `4b615f4874d67653035642c80a3d454db759859e` ("Add moqt draft 22", 2026-10-06), `--version` `0.4.2-dev`; built in a scratch copy with picoquic `01e124e` and picotls `f06553b`, Release, target `openmoq-publisher` |
+| Fixture | moqxr's `tests/fixtures/locmaf-publisher.mp4` (Groups 0 and 1), namespace `media`, track `vide_1` |
+| Runner | this repository at `5ca525e` (runner binary built from `6b28cca`; later commits change only tests), bundled `adapters/moqxr/run.sh` |
+| Date | 2026-10-06 (final sweep 13:10 to 13:32 -07:00) |
+
+Method (the same as the draft 18 and 21 sweeps below): every executable scenario is run
+as its own driven run on both transports, with the bundled moqxr adapter as the driver
+executable and the publisher declared cache-less. Four runners worked in parallel,
+each started as
+
+```sh
+MOQXR_BIN=<moqxr>/build/openmoq-publisher build/moq-interop-runner --bind 127.0.0.1 \
+  --port <P> --database <dir>/runs.sqlite3 --docs docs --requirements requirements \
+  --publisher-bind 127.0.0.1 --publisher-advertise 127.0.0.1 \
+  --publisher-port-start <P+1> --publisher-port-end <P+4> --tls-cert cert.pem --tls-key key.pem \
+  --driver-executable adapters/moqxr/run.sh --driver-fixture locmaf-publisher.mp4 \
+  --driver-log-root <dir>/logs --publisher-no-fetch
+```
+
+and given one `POST /api/v1/runs` per scenario (`"mode": "driven"`, `"timeout_ms": 12000`,
+the track above in hex). The draft 22 id set is `tests/golden/executable-ids-d22.txt`
+(221) plus the two unscored probes; the draft 21 baseline uses
+`tests/golden/executable-ids-d21.txt` (222). A requirement row that names several
+scenarios needs all of them in one run, so every row still `not_run` or `fail` after the
+single runs whose scenarios were all runnable got one more run with exactly those
+scenarios (row-completion groups). A row counts as `fail` if any run failed it, else
+`pass` if any run passed it, else `not_run`. `moq-interop-audit --draft 21|22` was run
+on every database.
+
+Runs (refused: HTTP refusal, nothing started; every single-scenario run is `incomplete`,
+`fail` or `error` by construction):
+
+| Sweep | ids | refused 400 | refused 422 | runs | incomplete | fail | error | group runs (incomplete / fail / error) |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| draft 21 native QUIC (baseline) | 222 | 6 | 28 | 188 | 165 | 15 | 8 | 43 (33 / 6 / 4) |
+| draft 21 WebTransport | 222 | 6 | 28 | 188 | 164 | 15 | 9 | 43 (33 / 6 / 4) |
+| draft 22 native QUIC | 223 | 6 | 29 | 188 | 175 | 6 | 7 | 41 (31 / 6 / 4) |
+| draft 22 WebTransport | 223 | 6 | 29 | 188 | 175 | 6 | 7 | 41 (31 / 6 / 4) |
+
+Requirement rows touched by the sweep:
+
+| Sweep | rows | pass | fail | not_run |
+|---|---:|---:|---:|---:|
+| draft 21 native QUIC (baseline) | 148 | 57 | 12 | 79 |
+| draft 21 WebTransport | 145 | 57 | 12 | 76 |
+| draft 22 native QUIC | 147 | 69 | 5 | 73 |
+| draft 22 WebTransport | 144 | 69 | 5 | 70 |
+
+- Refusals are the same on every sweep: 6 scenarios need a reserved-namespace fixture
+  the adapter does not accept (400 `invalid_run_config`), 22 FETCH scenarios (23 at
+  draft 22, with `d22-fetch-bounded-location-range`) are refused for the no-FETCH
+  declaration (422 `scenario_requires_publisher_capability`), and 6 transport-specific
+  scenarios are refused on the other transport (422 `unsupported_run_config`).
+- The unscored probes both recorded `pass` on both transports:
+  `d22-location-filter-unknown-type` (REQUEST_ERROR, then a PROTOCOL_VIOLATION close) and
+  `d22-location-filter-absolute-origin` (SUBSCRIBE_OK and Objects).
+- WebTransport works at drafts 21 and 22 with this build. It scores like native QUIC
+  except for the transport-specific rows: the four WebTransport SETUP rows pass on
+  WebTransport only; `D22-9-1-1-MUST-307`, `D22-9-1-2-MUST-314` and `-315`, scored only by
+  the `d22-native-publisher-*` scenarios, pass on native QUIC and are not touched on
+  WebTransport; and `D22-11-MUST-488` (unknown datagram type) passes on native QUIC only
+  (its WebTransport run is confounded, see below).
+- Audit: `Required executable coverage: 170/170` (draft 22) and `173/173` (draft 21),
+  `Static gate: PASS` on every database. The execution audit reports, at both drafts
+  alike, one `run_error` and one `stored_score_mismatch` per `error` run and
+  `scored_without_binding` for rows scored by the typed announcement scenario
+  (`D22-6-3-MUST-NOT-155`, `D22-9-MUST-294`, `D22-9-1-MUST-NOT-300`, and on WebTransport
+  the four WebTransport SETUP rows). That is pre-existing audit behavior, not a draft 22
+  change.
+
+Comparison. The draft 21 baseline equals the first sweep of the same day row for row (57
+pass, 12 fail, 79 not_run on native QUIC); draft 21 is frozen, so its command lines and
+probes were not changed. The first draft 22 sweep scored 58 pass, 10 fail, 79 not_run
+on native QUIC. Between it and this one the runner changed for draft 22 only: 14 probes
+run moqxr `--forward 0 --paced` (see [the harness guide](publisher-harness-guide.md)),
+three probes send the run's namespace and track instead of fixed names, and the
+SUBSCRIBE_TRACKS probes answer the publisher's PUBLISH. The effect, the same on both
+transports: 8 false FAIL rows became passes (`D22-8-7-MUST-269` to `-272`,
+`D22-8-9-MUST-279`, `-289`, `D22-9-20-15-MUST-432`, `D22-9-20-8-MUST-421`), 3 `not_run`
+rows passed (`D22-6-4-1-MUST-167`, `D22-9-6-MUST-366`, `D22-4-2-MUST-111`), and 3
+`not_run` rows became FAILs on moqxr's own behavior (`D22-9-MUST-295`,
+`D22-9-2-MUST-339`, `D22-3-6-MUST-083`). No shared scenario passes at draft 21 and fails
+at draft 22.
+
+The draft 21 twins of the paced probes still run `--forward 1`. With it moqxr sends its
+own PUBLISH, blocks waiting for the answer and closes with code 0 about 2 seconds later,
+inside the reaction window, so the runner reads that close as the reaction to the
+stimulus. The draft 21 FAILs `D21-8-7-MUST-251` to `-254`, `D21-8-9-MUST-267`, `-277`,
+`D21-9-20-16-MUST-447`, `D21-9-20-9-MUST-429`, `D21-9-20-10-MUST-432` and
+`D21-9-15-MUST-383` are adapter-flag artifacts, not moqxr defects: their draft 22 twins
+pass. Two have no draft 22 twin: the draft 22 row for the overflowing filter that
+`D21-9-20-10-MUST-432` covers is the own row `D22-9-20-9-MUST-424`, which passes, and
+`D21-9-15-MUST-383` passed when the same draft 21 probe ran with paced flags. The
+two remaining draft 21 FAILs, `D21-3-3-2-MUST-065` and `D21-9-1-6-MUST-315`, are moqxr
+findings (M-11).
+
+### Triage of the draft 22 non-pass rows
+
+Every `fail` and `not_run` row of the draft 22 native QUIC sweep is in exactly one line
+below: 5 fail and 73 not_run rows, 78 in all. Categories: (a) runner defect, (b) moqxr
+defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0 rows,
+(b) 15 rows (5 fail, 10 not_run), (c) 3 rows, (d) 60 rows. Line numbers are in
+`docs/draft-ietf-moq-transport-22.txt`. The 7 `error` runs are the update-overlap probes
+(T22), `d22-publisher-goaway-alternate-uri` (T9), the two REQUEST_UPDATE overrun probes
+(T13) and two SETUP token-registration probes (T12).
+
+| T | Cat | Draft 22 rows (outcome) | Scenarios | Evidence | Draft 22 text | Draft 21 twin | Action |
+|---|---|---|---|---|---|---|---|
+| T1 | b | `D22-3-3-2-MUST-077`, `D22-9-1-6-MUST-326` (fail) | `d22-range-filter-with-zero-negotiated-limit`, `d22-range-filter-default-zero-limit` (and the row's other scenarios, which stall, see T11) | SUBSCRIBE with a Range Filter while moqxr advertised no MAX_FILTER_RANGES: moqxr answers REQUEST_ERROR code 0x1 (UNAUTHORIZED) "invalid SUBSCRIBE" (`05 0014 01 00 11 ...`) instead of INVALID_FILTER (0x36) | 1501-1505, 4039-4044; codes 7929-7975 | `D21-3-3-2-MUST-065`, `D21-9-1-6-MUST-315` fail | Punch list D22-01 (M-11 open) |
+| T2 | b | `D22-9-MUST-295` (fail) | `d22-unknown-control-message` (+ `d22-unknown-request-stream-message`) | The runner writes control message type 0x7e (`7e 00 00`); moqxr keeps the session and answers the liveness SUBSCRIBE with SUBSCRIBE_OK and Objects | 3877-3878 | `D21-9-MUST-284` not_run (its twin runs `--forward 1`) | Punch list D22-02 (M-09 partly open) |
+| T3 | b | `D22-9-2-MUST-339` (fail) | `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams` | After moqxr accepts SUBSCRIBE_NAMESPACE for `media` (`07 0001 00`), two GOAWAYs (`10 0003 00 a7 10`) on that request stream draw no close and the liveness SUBSCRIBE is served: moqxr stops reading the request stream after accepting SUBSCRIBE_NAMESPACE. The distinct-streams negative control was answered (barrier REQUEST_ERROR 0x10) | 4113-4115 | `D21-9-2-MUST-328` not_run (fixed names) | Punch list D22-08 |
+| T4 | b | `D22-3-6-MUST-083` (fail) | `d22-subscribe-tracks-overlap`, `d22-discovery-independent-overlap-spaces` | A second SUBSCRIBE_TRACKS for prefix `media` while the first is established is accepted with REQUEST_OK (`07 0001 00`), as is one for the empty prefix | 1716-1719 | `D21-9-18-MUST-393` not_run (no PUBLISH answer at draft 21) | Punch list D22-09 |
+| T5 | b | `D22-9-5-1-MUST-357`, `-359`, `-360` (not_run) | `d22-failed-subscription-update-cleanup`, `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close` | The REQUEST_UPDATE meant to fail (`02 0006 03 01 03 02 02 00`: AUTHORIZATION TOKEN USE_ALIAS 0, never registered) is accepted on a SUBSCRIBE (REQUEST_OK `07 0004 01 09 00 01`) and ignored on SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS (no reply, no FIN). The update never fails, so the cleanup these rows require never comes due; the rows stay unscored | 3708-3709 (unknown alias), 4395-4401 | `D21-9-5-1-MUST-346`, `-348`, `-349` not_run (fixed names at draft 21) | Punch list D22-10 (unscored observation) |
+| T6 | b | `D22-11-5-1-MUST-541` (not_run) | `d22-inbound-padding-stream` | A padding stream (type 0x132B3E28) makes moqxr close with PROTOCOL_VIOLATION ("received unknown or malformed unidirectional stream type"); the row's evaluator scores only the liveness follow-up, so the close leaves it unscored | 2702, 6633-6647 | `D21-11-5-1-MUST-566` not_run (same close) | Punch list D22-03 |
+| T7 | b | `D22-9-5-MUST-356`, `D22-9-5-1-MUST-363` (not_run) | `d22-single-request-update-response`, `d22-coalesced-successful-update-responses`, `d22-coalesced-failed-update-response` | After an accepted SUBSCRIBE, a valid REQUEST_UPDATE (`02 0004 03 01 20 64`; three coalesced) followed by a TRACK_STATUS with FIN on a new request stream: moqxr closes 0x3 "request stream closed before a complete message" (its `read_request_stream_message`) and sends no REQUEST_OK. Which of the two requests triggers the close is not settled | 4304-4308, 4406-4408 | `D21-9-5-MUST-345`, `D21-9-5-1-MUST-352` not_run (same close) | Punch list D22-05 (medium confidence) |
+| T8 | b | `D22-4-2-MUST-110`, `D22-9-20-18-MUST-445`, `D22-9-5-MUST-355` (not_run) | `d22-discover-original-publisher-namespaces`; `d22-discovery-update-invalid-forward` (`d22-forward-value-two`, `-255` close 0x3 correctly); `d22-update-on-track-status`, `d22-responder-update-on-publish-namespace`, `d22-subscriber-update-on-publish` | Silence where the draft requires an answer or a close: no NAMESPACE for `media` after accepting SUBSCRIBE_NAMESPACE with the empty prefix; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS ignored; a REQUEST_UPDATE on moqxr's own PUBLISH_NAMESPACE (after REQUEST_OK) ignored. Not evidence: `d22-update-on-track-status` is confounded by the open runner item below (fixed track "x"; moqxr did not answer even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED, so it probably never read that stream), and in `d22-subscriber-update-on-publish` (a permitted case) moqxr reset its PUBLISH streams before the update, so nothing was observed. Silence is not proof, so the rows stay unscored | 1929-1931, 5613, 4302 | `D22-4-2-MUST-110` is a draft 22 row (no twin); `D21-9-20-19-MUST-460`, `D21-9-5-MUST-344` not_run | Punch list D22-06 (suspected) |
+| T9 | b | `D22-9-2-MUST-340` (not_run) | `d22-publisher-goaway-alternate-uri` (error run) | GOAWAY with a New Session URI on the control stream: moqxr logs "received unknown or unsupported control-stream message" and closes 0x3 instead of migrating | 4129-4130 | `D21-9-2-MUST-329` not_run (same error) | Punch list D22-04 (M-19) |
+| T10 | c | `D22-13-MUST-568`, `D22-13-MUST-NOT-569`, `D22-13-MUST-NOT-576` (not_run) | `d22-grease-request-error` (+ `-grease-setup-options`, `-auth-token-type`, `-stop-sending`) | The runner rejects moqxr's PUBLISH with GREASE code 0x9d (`05 0004 80 9d 00 00`); moqxr resets the stream and ends the session with code 0. It ends the session after any refused PUBLISH, so whether it closed because of the unknown code cannot be told; the NO_ERROR close is unscored. The other three GREASE scenarios show no close | 7025-7039 | `D21-13-MUST-593`, `-NOT-594`, `-NOT-601` not_run | Expectation question (punch list D22-C1) |
+| T11 | d | `D22-8-6-MUST-267`, `D22-3-3-2-MUST-076`, `D22-9-20-12-MUST-425`, `D22-9-20-13-MUST-427`, `D22-9-20-14-MUST-429` (not_run) | range-filter delta overflow, duplicate range-filter key, priority filter, property-filter odd type | moqxr advertises no MAX_FILTER_RANGES (its SETUP carries only PATH and AUTHORITY); these probes wait for it, so the stimulus is never sent | 3535-3536, 1493-1494, 5421-5466 | twins not_run | None (optional capability) |
+| T12 | d | `D22-8-9-MUST-276`, `-277`, `-280`, `-281`, `-282`, `-283`, `-285`, `D22-8-9-MUST-NOT-293`, `D22-9-1-4-MUST-319`, `D22-9-1-4-MUST-NOT-318` (not_run) | token registration and alias probes, `d22-setup-register-*` (2 error runs) | No token cache (no MAX_AUTH_TOKEN_CACHE_SIZE), no operator credential it understands, never registers tokens itself | 3664-3783, 4003-4004 | twins not_run | None (out of scope) |
+| T13 | d | `D22-9-1-7-MUST-328`, `D22-9-1-7-MUST-NOT-327` (not_run) | `d22-request-update-overrun`, `-independent-streams` (2 error runs), `-unlimited`; `d22-publisher-update-credit-*` | No MAX_REQUEST_UPDATES advertised; moqxr never sends a REQUEST_UPDATE of its own | 4054-4055, 4068-4069 | twins not_run | None |
+| T14 | d | `D22-11-5-MAY-536`, `-537`, `D22-11-5-1-MAY-539`, `-MUST-540`, `D22-11-5-2-MAY-544`, `-MUST-545` (not_run) | `d22-padding-stream-emission`, `d22-padding-datagram-emission` | moqxr sends no padding | 6624-6656 | twins not_run | None |
+| T15 | d | `D22-9-10-MUST-380`, `-381`, `-383`, `D22-9-10-MUST-NOT-382` (not_run) | `d22-publish-state-notify-*` | No PUBLISH_STATE_NOTIFY | 4711-4726 | twins not_run | None |
+| T16 | d | `D22-9-2-MUST-329` (not_run) | `d22-publisher-client-goaway-control`, `-request` | moqxr (the client) never sends GOAWAY | 4076-4078 | `D21-9-2-MUST-318` not_run | None |
+| T17 | d | `D22-9-1-1-MUST-305`, `D22-9-1-1-MUST-NOT-303`, `D22-9-1-2-MUST-312`, `D22-9-1-2-MUST-NOT-310` (not_run on native QUIC only) | rows naming a `d22-webtransport-*` scenario | The WebTransport scenario is refused on native QUIC; all four pass on WebTransport | 3934-3955 | same split | None |
+| T18 | d | `D22-3-3-1-MUST-NOT-069` (not_run) | `d22-subscribe-bounded-location-range`, `d22-update-subscription-location-range`, `d22-fetch-bounded-location-range` (refused) | The row also names a FETCH scenario. moqxr gives all concurrent subscriptions Track Alias 1 and no LARGEST_OBJECT (allowed, 1123-1133), so Objects cannot be attributed to one filter; every filter type 0x01 to 0x05 was accepted | 1461 | none (a draft 22 row) | None |
+| T19 | d | `D22-10-7-MUST-474`, `-475`, `D22-11-2-1-MUST-502`, `D22-11-3-2-MUST-512`, `D22-2-2-MUST-022`, `D22-2-2-MUST-NOT-020`, `D22-3-7-MUST-088`, `D22-6-4-2-2-MUST-172` (not_run) | property filters, datagram flags, subgroup FIN and restart, mandatory property, publisher FIN | Fixture content: two short Groups, no Object properties, no datagrams, nothing at Group 7 | 5815-5816, 6138-6139, 6303, 819-822, 796-798, 1779, 2755-2756 | twins not_run | None (fixture) |
+| T20 | d | `D22-11-3-2-MUST-513`, `-519`, `D22-3-1-2-MUST-047`, `D22-3-4-1-MUST-079`, `-080`, `-081`, `D22-3-6-3-MUST-NOT-086`, `D22-3-1-MUST-035`, `D22-3-1-2-MUST-NOT-049`, `D22-4-2-MUST-108`, `D22-4-2-MUST-NOT-112`, `D22-9-4-1-MUST-351`, `D22-9-20-9-MAY-422`, `D22-9-20-MUST-387`, `D22-9-3-MUST-348` (not_run) | subgroup resets, cancellation, fill, PUBLISH_SKIPPED, accepted and rejected pairs, withdrawal order, redirects, `d22-publisher-location-filter-parameter`, parameter serialization, track properties in replies | The condition never arises with this live, single-track publisher: it does not reset its short Groups, opens no fill stream (it delivers both Groups and PUBLISH_DONE at once), never refuses a valid request, never withdraws a namespace or redirects, sends PUBLISH with no parameters (so no LOCATION_FILTER for the MAY row) and no REQUEST_UPDATE for its PUBLISH | 6306, 6376, 1182-1191, 1096-1097, 1607-1615, 1769-1771, 1924-1927, 1947-1948, 4244-4246, 5275-5277, 5062-5063, 4211-4212 | twins not_run (`D22-9-20-9-MAY-422` is a draft 22 row) | None |
+| T21 | d | `D22-3-6-MUST-084`, `D22-4-2-1-MUST-115` (not_run) | `d22-track-discovery-authorization`, `d22-namespace-discovery-authorization` | Need an authorization policy that refuses a credential; moqxr has none | 1721-1722, 1974-1975 | twins not_run | None |
+| T22 | d | `D22-9-20-20-MUST-455`, `-456` (not_run) | `d22-namespace-prefix-update-overlap`, `d22-track-prefix-update-overlap`, `d22-discovery-update-independent-overlap-spaces` (error runs) | Need two prefixes accepted; moqxr refuses the second prefix `mediab` (DOES_NOT_EXIST "unsupported namespace prefix") and, on the SUBSCRIBE_TRACKS legs, exits | 5685-5686 | twins not_run | None (single-namespace publisher) |
+
+WebTransport: the same 78 rows less the four of T17 (pass there), plus
+`D22-11-MUST-488` (not_run on WebTransport, pass on native QUIC). The WebTransport run of
+`d22-unknown-datagram-type` is confounded: the adapter runs it `--forward 1`, and moqxr
+sent its PUBLISH, reset it and closed with code 0 ("timed out waiting for stream data"),
+the own-PUBLISH timeout pattern, so its `not_run` is not a datagram observation. Over
+native QUIC the same flags still drew close 0x3 "invalid MOQT datagram". The finding
+rests on moqxr's source instead: the WebTransport client ignores incoming datagrams
+(`webtransport_client.cpp` lines 666-669 return 0 for `picohttp_callback_post_datagram`)
+while the native client validates them and closes with 0x3 (`picoquic_client.cpp` lines
+581-589); lines 5955-5956 require a close; punch list D22-07, M-18 open. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+Category (b) on WebTransport is 16 rows, that one by source.
+
+`D22-3-4-1-MUST-079` (`d22-cancel-subscription-with-concurrent-fill-streams`) is
+counted under T20 for this sweep: no fill stream appeared, so the cancellation was never
+sent. The same scenario ended `error` once in the first sweep (native QUIC) and its
+draft 21 twin ended `error` once in this one (WebTransport) with moqxr closing 0x3
+"retained SUBSCRIBE stream closed with a truncated REQUEST_UPDATE" after it had answered
+the update; see D22-05.
+
+Open runner item (no row outcome depends on it): `d22-unknown-request-stream-message`
+and `d22-update-on-track-status` still send a fixed request for namespace () and track
+"x" (`03 0005 01 00 01 78 00`, `0d 0005 01 00 01 78 00`) on the draft 22 wire, and the
+first still runs moqxr `--forward 1`. Against moqxr the request-stream half of
+`D22-9-MUST-295` is therefore never exercised (moqxr refuses the unknown track or times
+out on its own PUBLISH); the row's FAIL comes from the control-message scenario. It also
+weakens the evidence for T8 / punch list D22-06: the TRACK_STATUS leg of
+`D22-9-5-MUST-355` comes from `d22-update-on-track-status`, where moqxr answered nothing,
+not even the TRACK_STATUS, so that leg says nothing about update handling. The draft 21
+twins have the same fixed names (punch list, runner-side follow-ups). Likewise
+`d22-unknown-datagram-type` still runs `--forward 1`, which confounds its WebTransport
+run (above); a later adapter change could pace it as the other 14.
+
 ## Results observed with moqxr 0993cf7
 
-The release audit pins moqxr `0993cf7d537b0d7af56f87f7017b3fc14f39b614`
-(`0.4.1-dev+g0993cf7`). Against it, three-run repeatability passed for draft 18 and
+The release audit pinned moqxr `0993cf7d537b0d7af56f87f7017b3fc14f39b614`
+(`0.4.1-dev+g0993cf7`) until the draft 22 work moved the pin to
+`4b615f4874d67653035642c80a3d454db759859e`, the revision of the draft 22 sweep. Against
+`0993cf7`, three-run repeatability passed for draft 18 and
 draft 21 over WebTransport, and the four-way driven matrix passed (draft 18 native 3,
 WebTransport 5; draft 21 native 3, WebTransport 5; no failures).
 
@@ -118,7 +294,7 @@ suite, because they need the external publisher:
 
 | Script | Purpose |
 |---|---|
-| `moqxr-matrix.sh RUNNER MOQXR MP4` | The four driven runs above |
+| `moqxr-matrix.sh RUNNER MOQXR MP4` | The adapter contract, then one driven run per draft (18, 21, 22) and transport: six pairs, each with a single reference scenario (`d22-publisher-request-stream-placement` for draft 22). It was four pairs (drafts 18 and 21) when the table above was recorded. A smoke test, not a sweep |
 | `draft18-native-moqxr.sh RUNNER MOQXR MP4 [21]` | Observed-mode diagnostic over native QUIC; the optional fourth argument `21` runs the draft-21 PUBLISH-announcement profile with `--preannounce-tracks` |
 | `draft18-webtransport-smoke.sh`, `draft21-webtransport-smoke.sh` | Observed-mode WebTransport smoke tests; they require a successful publisher exit, observed SETUP and at least one passing requirement |
 

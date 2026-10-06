@@ -16,7 +16,7 @@ publisher_bin=${MOQXR_BIN:-}
 
 jq -e '
     .schema_version == 1 and
-    (.draft == 18 or .draft == 21) and
+    (.draft == 18 or .draft == 21 or .draft == 22) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and
@@ -28,7 +28,7 @@ jq -e '
     (.process_timeout_ms | type == "number" and . == floor and . >= 1) and
     (.namespace_hex == ["6d65646961"]) and
     (.track_name_hex == "766964655f31")
-' "$request_file" >/dev/null || fail 'unsupported or malformed request'
+' "$request_file" >/dev/null || fail 'unsupported or malformed request (supported drafts: 18, 21, 22)'
 
 draft=$(jq -r '.draft' "$request_file")
 transport=$(jq -r '.transport' "$request_file")
@@ -48,17 +48,96 @@ fi
 timeout_seconds=$(((timeout_ms + 999) / 1000))
 ((timeout_seconds > 0)) || fail 'invalid scenario timeout'
 
+scenario_id=$(jq -r '.scenario_id' "$request_file")
+# Draft 22 runs moqxr with --draft 22 (typed LOCATION_FILTER, draft 21 publishing semantics) and
+# otherwise exactly as draft 21. A shared draft 22 scenario is the draft 21 scenario of the same name
+# under a d22- prefix (the lineage table pairs each d22-X with d21-X), so its d21- id, impl_id, selects
+# the draft 21 options below unchanged. The own draft 22 scenarios and the unscored probes have no
+# d21- twin: they are matched by their d22- id first and get the explicit options in this table
+# (decided from what each raw probe asks of the publisher; the closest draft 21 scenario is named):
+#
+#   d22- id                                  options                         closest d21 scenario
+#   subscribe-bounded-location-range         --forward 0 --paced, timeout+3  d21-update-subscription-location-range (*)
+#   update-subscription-location-range       --forward 0 --paced, timeout+3  d21-update-subscription-location-range
+#   fetch-bounded-location-range             --forward 0 --paced, timeout+3  d21-fetch-datagram-preference
+#   discover-original-publisher-namespaces   --forward 0 --paced, timeout+3  d21-namespace-discovery-authorization (*)
+#   publisher-location-filter-parameter      --forward 1                     d21-publisher-parameter-serialization
+#   request-stream-before-peer-setup         --forward 0 --paced, timeout+3  d21-successful-subscribe-response
+#   location-filter-end-group-overflow       --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow
+#   fill-location-filter-end-group-overflow  --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow (*)
+#   location-filter-unknown-type (probe)     --forward 0 --paced, timeout+3  d21-location-filter-end-group-overflow
+#   location-filter-absolute-origin (probe)  --forward 0 --paced, timeout+3  d21-successful-subscribe-response
+#
+# (*) The d21- namesake runs with --forward 1; these draft 22 probes deliberately do not copy that.
+# At drafts 21 and 22, --forward 1 makes moqxr send its own PUBLISH and block until it is answered,
+# giving up after about 2 seconds; while blocked it serves none of the runner's requests. So every
+# probe in which the runner is the subscriber (SUBSCRIBE, REQUEST_UPDATE, FETCH, SUBSCRIBE_NAMESPACE)
+# and does not answer that PUBLISH gets --forward 0 --paced: moqxr waits for the runner's requests,
+# keeps Subgroup streams open, and outlives the context so the runner ends it. Only
+# publisher-location-filter-parameter keeps --forward 1: it answers moqxr's PUBLISH (courtesy Accept)
+# and judges the LOCATION_FILTER moqxr sends on it. This chooses moqxr CLI options; it never changes
+# what a scenario expects.
+#
+# Draft 22 overrides of the draft 21 option lists. These shared draft 22 scenarios get
+# --forward 0 --paced, timeout+3 although their d21- twin runs with --forward 1. In each the runner
+# is the subscriber and never answers moqxr's own PUBLISH, so with --forward 1 moqxr blocks on that
+# PUBLISH, gives up after about 2 seconds and closes with code 0 inside the reaction window, which
+# the runner reads as a wrong-code reaction to the stimulus (false FAILs, or rows left not_run).
+# Draft 21 command lines are frozen, so the twins keep --forward 1 at draft 21; only draft 22
+# changes. They are matched by their d22- id before the d22- to d21- mapping. Evidence: the draft 22
+# moqxr sweep of 2026-10-06 (moqxr 4b615f4, task 4 triage group A1): run with --forward 1 every one
+# ended on moqxr's code 0 close with the liveness follow-up unanswered; run paced every one reached
+# its stimulus (D22-8-7-MUST-269..272, D22-8-9-MUST-279, -289, D22-9-20-15-MUST-432,
+# D22-9-20-8-MUST-421, D22-6-4-1-MUST-167, D22-9-6-MUST-366 pass; D22-9-MUST-295 is scored and
+# fails on moqxr's own behavior). tests/e2e/moqxr-adapter-cmdlines.sh reads this list (one id per
+# line) as the only exceptions to its draft 22 twin-equality check.
+d22_paced_overrides=(
+    d22-subscribe-empty-namespace-field
+    d22-subscribe-33-namespace-fields
+    d22-subscribe-tracks-oversized-namespace
+    d22-subscribe-oversized-full-track-name
+    d22-request-undecodable-authorization-token
+    d22-request-token-cache-overflow
+    d22-request-alias-registration-with-default-zero-cache
+    d22-fill-forbidden-nested-authorization
+    d22-fill-forbidden-track-property-filter
+    d22-fill-recursive-parameter
+    d22-fill-invalid-group-order
+    d22-unknown-unidirectional-stream-type
+    d22-unknown-control-message
+    d22-successful-subscribe-object-delivery
+)
+impl_id=$scenario_id
+own22=
+if [[ "$draft" == 22 ]]; then
+    case "$scenario_id" in
+        d22-publisher-location-filter-parameter)
+            own22=push ;;
+        d22-subscribe-bounded-location-range|d22-update-subscription-location-range|\
+        d22-fetch-bounded-location-range|d22-discover-original-publisher-namespaces|\
+        d22-request-stream-before-peer-setup|d22-location-filter-end-group-overflow|\
+        d22-fill-location-filter-end-group-overflow|d22-location-filter-unknown-type|\
+        d22-location-filter-absolute-origin)
+            own22=await-paced ;;
+        d22-*) impl_id="d21-${scenario_id#d22-}" ;;
+    esac
+    for override_id in "${d22_paced_overrides[@]}"; do
+        if [[ "$scenario_id" == "$override_id" ]]; then
+            own22=await-paced
+        fi
+    done
+fi
 # These options describe moqxr's CLI, not MOQT conformance expectations.
 args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
       --namespace media --draft "$draft" --forward 0
       --timeout "$timeout_seconds" --ca "$ca_cert")
-if [[ "$draft" == 21 ]]; then
+if [[ "$draft" == 21 || "$draft" == 22 ]]; then
     # Scenarios in which the runner subscribes to the track (rather than observing
     # the publisher's own PUBLISH) need moqxr to wait for that SUBSCRIBE: --forward 0
     # selects its await-subscribe mode, whereas --forward 1 pushes PUBLISH requests
     # the runner does not answer in those contexts.
     forward=1
-    case "$(jq -r '.scenario_id' "$request_file")" in
+    case "$impl_id" in
         d21-overlapping-subscriptions-*|d21-forward-location-and-range-filter-conjunction|\
         d21-fill-fails-before-first-object|\
         d21-cancel-subscription-with-concurrent-fill-streams|\
@@ -72,8 +151,7 @@ if [[ "$draft" == 21 ]]; then
 fi
 # Scenario-specific CLI options. These only make moqxr emit the publisher-
 # initiated messages a scenario observes; they never describe expectations.
-scenario_id=$(jq -r '.scenario_id' "$request_file")
-case "$scenario_id" in
+case "$impl_id" in
     # moqxr only originates PUBLISH for the catalog track, and only on request.
     publish-track-under-single-period-namespace|\
     application-publish-track-in-session-namespace|\
@@ -91,8 +169,8 @@ esac
 # subscriber: with --forward 1 moqxr also pushes a PUBLISH of its own that those
 # probes do not answer, so it waits and exits with a failure status.
 # This chooses moqxr CLI options; it never changes what a scenario expects.
-if [[ "$draft" == 21 ]]; then
-    case $(jq -r '.scenario_id' "$request_file") in
+if [[ "$draft" == 21 || "$draft" == 22 ]]; then
+    case "$impl_id" in
         d21-largest-object-* | d21-publish-done-* | d21-publisher-namespace-redirect | \
         d21-publisher-subscribe-tracks-redirect | d21-publish-state-notify-* | d21-padding-*-emission | \
         d21-namespace-discovery-authorization | d21-track-discovery-* | d21-subgroup-early-handoff-reset | \
@@ -173,4 +251,17 @@ if [[ "$draft" == 21 ]]; then
             ;;
     esac
 fi
+# The own draft 22 scenarios and probes (table above), and the draft 22 overrides.
+case "$own22" in
+    push)
+        args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
+              --namespace media --draft "$draft" --forward 1
+              --timeout "$timeout_seconds" --ca "$ca_cert")
+        ;;
+    await-paced)
+        args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
+              --namespace media --draft "$draft" --forward 0 --paced
+              --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
+        ;;
+esac
 exec "$publisher_bin" "${args[@]}"

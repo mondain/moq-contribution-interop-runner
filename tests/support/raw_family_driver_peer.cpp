@@ -62,8 +62,10 @@ int execute(const std::string& mode) {
     if (!wait([&] { const auto setup=client->stream(3); return setup && setup->data==bytes({0xaf,0,0,0}); }) ||
         !client->send_stream(2,bytes({0xaf,0,0,0}),false)) return 9;
     const auto opening = [](unsigned id, unsigned field) { return bytes({0x50,0,5,id,1,1,field,0}); };
-    const auto a = opening(1,'a');
-    const auto b = opening(3,'b');
+    // On draft 22 the requests name the run's namespace (n); the second active request of the distinct
+    // probe is a SUBSCRIBE_TRACKS for it, which does not overlap the SUBSCRIBE_NAMESPACE.
+    const auto a = draft == 22 ? opening(1,'n') : opening(1,'a');
+    const auto b = draft == 22 ? bytes({0x51,0,5,3,1,1,'n',0}) : opening(3,'b');
     if (!wait([&] { const auto stream=client->stream(1); return stream && stream->data==a; })) return 10;
     if (mode == "--stall-control" && !duplicate) {
         (void)wait([] { return false; });

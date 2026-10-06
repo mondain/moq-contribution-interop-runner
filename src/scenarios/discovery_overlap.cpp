@@ -1,5 +1,6 @@
 #include "moq/interop/scenarios/discovery_overlap.h"
 #include "moq/interop/scenarios/draft18_response.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/request_error.h"
 #include "moq/interop/wire/draft21/request_frame.h"
 #include "moq/interop/wire/draft21/setup.h"
@@ -244,6 +245,12 @@ RawProbeDefinition definition(unsigned draft, const std::string& id, const Names
     if (updating) { add_challenge(1,a); if (independent) add_challenge(3,a); }
     else if (independent) { add_challenge(0,a); add_challenge(1,a); }
     else { add_challenge(0,a); add_challenge(0,ancestor); add_challenge(0,descendant); }
+    // A successful SUBSCRIBE_TRACKS makes the publisher send PUBLISH for its tracks (draft 22 Section 3.6),
+    // and a publisher may read nothing more until that PUBLISH is answered, so on the draft 22 wire the
+    // runner accepts it (a courtesy answer, not part of the stimulus). Draft 21 is frozen.
+    if (draft == 21 && current_wire_draft() == 22 &&
+        std::find(layout.types.begin(),layout.types.end(),0x51u) != layout.types.end())
+        result.courtesy.publish = RawProbePublishResponse::Accept;
     for (std::size_t i = layout.initial; i < result.writes.size(); ++i)
         result.writes[i].evidence_ready = [draft,layout,challenge = i - layout.initial](const auto& input) { return established(draft,layout,input,challenge); };
     result.response_ready = [draft,layout](const auto& transcript) { return observe(draft,layout,transcript).has_value(); };

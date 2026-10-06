@@ -41,8 +41,8 @@ for what each one requires. For how outcomes and scores work see
   in the run request, or `--publisher-no-fetch` at startup). Scenarios that need
   FETCH are then skipped, not failed; see [Scenarios that need FETCH](#scenarios-that-need-fetch).
 
-List the executable scenarios (about 165 for draft 18 and 220 for draft 21 at the
-time of writing) with the `/healthz` command in [http-api.md](http-api.md). A
+List the executable scenarios (165 for draft 18, 222 for draft 21 and 221 for draft 22
+at the time of writing) with the `/healthz` command in [http-api.md](http-api.md). A
 scenario that needs a `track` and is submitted without one returns 400
 `invalid_run_config`.
 
@@ -145,9 +145,10 @@ row `NOT_RUN`).
 
 The sections below group scenarios by the feature they exercise. "Draft 18" and
 "draft 21" scenario IDs differ; draft-21 IDs start with `d21-`. This page lists
-drafts 18 and 21 only: draft 22 runs use the draft 21 IDs with `d21-` replaced by
-`d22-` for the scenarios the drafts share, plus 8 scenarios of draft 22's own
-(`/healthz` lists them all; see [http-api.md](http-api.md)).
+drafts 18 and 21 in the families: draft 22 runs use the draft 21 IDs with `d21-` replaced by
+`d22-` for the scenarios the drafts share, plus 8 scenarios of draft 22's own; every draft 22
+ID is listed in [Draft 22 scenarios](#draft-22-scenarios) (`/healthz` lists them too; see
+[http-api.md](http-api.md)).
 
 ### Session setup, SETUP options and GREASE
 
@@ -469,6 +470,9 @@ and 22 in draft 21:
 - `d21-subscription-forwarding-preference`
 - `d21-fetch-datagram-preference`
 
+and 23 in draft 22: the 22 above with `d21-` replaced by `d22-`, and the own
+`d22-fetch-bounded-location-range`.
+
 What a declaration of no FETCH changes:
 
 - Selecting only such scenarios is refused with 422
@@ -670,6 +674,259 @@ REQUEST_ERROR `0x9D`, and a request stream stopped with unknown code `0x9D`, mus
 not close the session; a follow-up SUBSCRIBE_NAMESPACE with a typed reply is the
 survival proof. `publish-two-simultaneous-tracks` accepts one PUBLISH and compares
 its Track Alias with the fixture track's SUBSCRIBE_OK alias.
+
+## Draft 22 scenarios
+
+Counts: 221 executable draft 22 scenarios (213 shared with draft 21, of the 307 shared scenario IDs, and 8 of draft 22's own) and 2 unscored probes.
+
+A shared scenario is named by its draft 21 ID with `d21-` replaced by `d22-`. The runner executes it with
+the draft 21 implementation on the draft 22 wire, so its stimulus, fixture contract, flags and `NOT_RUN`
+reasons are those of the draft 21 scenario described in the families above; it scores the draft 22
+rows listed here (the lineage maps each draft 21 row to its draft 22 row). The lineage pairs
+307 shared scenario IDs, but only the 213 whose draft 21 implementation is
+executable run; a run naming one of the others is refused with HTTP 422. A few shared scenarios
+send different bytes on the draft 22 wire, noted in the Behavior column; their draft 21 twins are
+unchanged. Own scenarios have no draft 21 twin; they exercise what draft 22 changed (LOCATION_FILTER
+and the request stream before SETUP). The list is checked against the registry by
+`tests/unit/scenario_reference_doc_test.cpp`. For the moqxr adapter's options per scenario see
+[the harness guide](publisher-harness-guide.md).
+
+### Executable draft 22 scenarios
+
+| Draft 22 ID | Kind | Draft 21 implementation | Draft 22 rows | Behavior |
+|---|---|---|---|---|
+| `d22-application-namespace-publication-under-session` | shared | `d21-application-namespace-publication-under-session` | `D22-6-5-MUST-NOT-181` | As `d21-application-namespace-publication-under-session` on the draft 22 wire |
+| `d22-application-track-publication-under-session` | shared | `d21-application-track-publication-under-session` | `D22-6-5-MUST-NOT-180` | As `d21-application-track-publication-under-session` on the draft 22 wire |
+| `d22-attempt-single-period-namespace-publication` | shared | `d21-attempt-single-period-namespace-publication` | `D22-2-4-3-MUST-NOT-032` | As `d21-attempt-single-period-namespace-publication` on the draft 22 wire |
+| `d22-attempt-single-period-namespace-use` | shared | `d21-attempt-single-period-namespace-use` | `D22-2-4-3-MUST-NOT-030` | As `d21-attempt-single-period-namespace-use` on the draft 22 wire |
+| `d22-attempt-single-period-track-publication` | shared | `d21-attempt-single-period-track-publication` | `D22-2-4-3-MUST-NOT-031` | As `d21-attempt-single-period-track-publication` on the draft 22 wire |
+| `d22-attempt-unregistered-period-namespace-publication` | shared | `d21-attempt-unregistered-period-namespace-publication` | `D22-2-4-3-MUST-NOT-028` | As `d21-attempt-unregistered-period-namespace-publication`; see [Track fixture contracts](#track-fixture-contracts) |
+| `d22-cancel-fetch-with-open-request-and-data-streams` | shared | `d21-cancel-fetch-with-open-request-and-data-streams` | `D22-3-2-4-MUST-067`, `D22-3-2-4-MUST-068` | As `d21-cancel-fetch-with-open-request-and-data-streams`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-cancel-subscribe-with-open-streams` | shared | `d21-cancel-subscribe-with-open-streams` | `D22-3-1-2-MUST-047` | As `d21-cancel-subscribe-with-open-streams` on the draft 22 wire |
+| `d22-cancel-subscription-with-concurrent-fill-streams` | shared | `d21-cancel-subscription-with-concurrent-fill-streams` | `D22-3-4-1-MUST-079` | As `d21-cancel-subscription-with-concurrent-fill-streams`; see [Filters and fill (draft 21)](#filters-and-fill-draft-21) |
+| `d22-coalesced-failed-update-response` | shared | `d21-coalesced-failed-update-response` | `D22-9-5-MUST-356` | As `d21-coalesced-failed-update-response` on the draft 22 wire |
+| `d22-coalesced-successful-update-responses` | shared | `d21-coalesced-successful-update-responses` | `D22-9-5-MUST-356`, `D22-9-5-1-MUST-363` | As `d21-coalesced-successful-update-responses` on the draft 22 wire |
+| `d22-complete-subgroup-fin` | shared | `d21-complete-subgroup-fin` | `D22-11-3-2-MUST-512` | As `d21-complete-subgroup-fin` on the draft 22 wire |
+| `d22-concurrent-distinct-track-subscriptions` | shared | `d21-concurrent-distinct-track-subscriptions` | `D22-3-1-3-MUST-NOT-050` | As `d21-concurrent-distinct-track-subscriptions`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-control-stream-lifetime` | shared | `d21-control-stream-lifetime` | `D22-6-3-MUST-NOT-160` | As `d21-control-stream-lifetime`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-discover-original-publisher-namespaces` | own | none | `D22-4-2-MUST-110` | SUBSCRIBE (FORWARD=0) for the track, then SUBSCRIBE_NAMESPACE with the empty prefix (a NAMESPACE for the track's namespace is required before the response FIN), then a nonmatching prefix |
+| `d22-discovery-independent-overlap-spaces` | shared | `d21-discovery-independent-overlap-spaces` | `D22-3-6-MUST-083`, `D22-4-2-MUST-111` | As `d21-discovery-independent-overlap-spaces` on the draft 22 wire. On draft 22 the publisher's PUBLISH is accepted with REQUEST_OK (a courtesy write, not stimulus) |
+| `d22-discovery-update-independent-overlap-spaces` | shared | `d21-discovery-update-independent-overlap-spaces` | `D22-9-20-20-MUST-455`, `D22-9-20-20-MUST-456` | As `d21-discovery-update-independent-overlap-spaces` on the draft 22 wire. On draft 22 the publisher's PUBLISH is accepted with REQUEST_OK (a courtesy write, not stimulus) |
+| `d22-discovery-update-invalid-forward` | shared | `d21-discovery-update-invalid-forward` | `D22-9-20-18-MUST-445` | As `d21-discovery-update-invalid-forward` on the draft 22 wire |
+| `d22-duplicate-control-goaway` | shared | `d21-duplicate-control-goaway` | `D22-9-2-MUST-338` | As `d21-duplicate-control-goaway` on the draft 22 wire |
+| `d22-duplicate-range-filter-key-in-request` | shared | `d21-duplicate-range-filter-key-in-request` | `D22-3-3-2-MUST-076` | As `d21-duplicate-range-filter-key-in-request` on the draft 22 wire |
+| `d22-duplicate-range-filter-key-in-update` | shared | `d21-duplicate-range-filter-key-in-update` | `D22-3-3-2-MUST-076` | As `d21-duplicate-range-filter-key-in-update` on the draft 22 wire |
+| `d22-duplicate-request-goaway` | shared | `d21-duplicate-request-goaway` | `D22-9-2-MUST-339` | As `d21-duplicate-request-goaway` on the draft 22 wire. On draft 22 the SUBSCRIBE_NAMESPACE uses the run's namespace (draft 21: prefix "a") |
+| `d22-duplicate-request-id-across-streams` | shared | `d21-duplicate-request-id-across-streams` | `D22-6-4-2-1-MUST-169` | As `d21-duplicate-request-id-across-streams` on the draft 22 wire |
+| `d22-duplicate-request-update-id` | shared | `d21-duplicate-request-update-id` | `D22-6-4-2-1-MUST-169` | As `d21-duplicate-request-update-id` on the draft 22 wire |
+| `d22-established-subscription-publisher-fin` | shared | `d21-established-subscription-publisher-fin` | `D22-6-4-2-2-MUST-172` | As `d21-established-subscription-publisher-fin`; see [Cancellation, resets and cleanup](#cancellation-resets-and-cleanup) |
+| `d22-expired-token-alias-lifetime` | shared | `d21-expired-token-alias-lifetime` | `D22-8-9-MUST-285` | As `d21-expired-token-alias-lifetime`; see [Operator-supplied credentials and policy](#operator-supplied-credentials-and-policy) |
+| `d22-failed-fetch-update-data-reset` | shared | `d21-failed-fetch-update-data-reset` | `D22-9-5-1-MUST-358` | As `d21-failed-fetch-update-data-reset`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-failed-subscribe-namespace-update-close` | shared | `d21-failed-subscribe-namespace-update-close` | `D22-9-5-1-MUST-359` | As `d21-failed-subscribe-namespace-update-close` on the draft 22 wire |
+| `d22-failed-subscribe-tracks-update-close` | shared | `d21-failed-subscribe-tracks-update-close` | `D22-9-5-1-MUST-360` | As `d21-failed-subscribe-tracks-update-close` on the draft 22 wire. On draft 22 the publisher's PUBLISH is accepted with REQUEST_OK (a courtesy write, not stimulus) |
+| `d22-failed-subscription-update-cleanup` | shared | `d21-failed-subscription-update-cleanup` | `D22-9-5-1-MUST-357` | As `d21-failed-subscription-update-cleanup` on the draft 22 wire. On draft 22 the SUBSCRIBE names the run's track (draft 21 sends namespace () and track "x") |
+| `d22-fetch-accepted` | shared | `d21-fetch-accepted` | `D22-3-2-MUST-057` | As `d21-fetch-accepted`; see [Subscriptions, updates and response cardinality](#subscriptions-updates-and-response-cardinality) |
+| `d22-fetch-ascending-groups` | shared | `d21-fetch-ascending-groups` | `D22-3-2-1-MUST-062` | As `d21-fetch-ascending-groups`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-bounded-location-range` | own | none | `D22-3-3-1-MUST-NOT-069` | FETCH whose range is a LOCATION_FILTER; fails an Object outside it. Needs FETCH (skipped with a no-FETCH declaration) |
+| `d22-fetch-datagram-preference` | shared | `d21-fetch-datagram-preference` | `D22-11-4-1-1-MUST-533`, `D22-11-4-1-1-SHOULD-534` | As `d21-fetch-datagram-preference`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-default-group-order` | shared | `d21-fetch-default-group-order` | `D22-3-2-1-MUST-062` | As `d21-fetch-default-group-order`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-descending-groups` | shared | `d21-fetch-descending-groups` | `D22-3-2-1-MUST-062` | As `d21-fetch-descending-groups`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-first-object-flags` | shared | `d21-fetch-first-object-flags` | `D22-11-4-1-1-MUST-527`, `D22-11-4-1-1-MUST-528` | As `d21-fetch-first-object-flags`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-parameters-preserve-payload` | shared | `d21-fetch-parameters-preserve-payload` | `D22-9-20-MUST-NOT-395` | As `d21-fetch-parameters-preserve-payload`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-rejected` | shared | `d21-fetch-rejected` | `D22-3-2-MUST-057` | As `d21-fetch-rejected`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-start-beyond-largest-object` | shared | `d21-fetch-start-beyond-largest-object` | `D22-3-2-MUST-061` | As `d21-fetch-start-beyond-largest-object`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fetch-track-with-no-published-objects` | shared | `d21-fetch-track-with-no-published-objects` | `D22-3-2-MUST-060` | As `d21-fetch-track-with-no-published-objects`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-fill-fails-before-first-object` | shared | `d21-fill-fails-before-first-object` | `D22-3-4-1-MUST-080`, `D22-3-4-1-MUST-081` | As `d21-fill-fails-before-first-object`; see [Filters and fill (draft 21)](#filters-and-fill-draft-21) |
+| `d22-fill-forbidden-nested-authorization` | shared | `d21-fill-forbidden-nested-authorization` | `D22-9-20-15-MUST-432` | As `d21-fill-forbidden-nested-authorization` on the draft 22 wire |
+| `d22-fill-forbidden-track-property-filter` | shared | `d21-fill-forbidden-track-property-filter` | `D22-9-20-15-MUST-432` | As `d21-fill-forbidden-track-property-filter` on the draft 22 wire |
+| `d22-fill-invalid-group-order` | shared | `d21-fill-invalid-group-order` | `D22-9-20-8-MUST-421` | As `d21-fill-invalid-group-order` on the draft 22 wire |
+| `d22-fill-location-filter-end-group-overflow` | own | none | `D22-9-20-9-MUST-424` | The same overflowing LOCATION_FILTER inside FILL_PARAMETERS; requires a PROTOCOL_VIOLATION close. Its row also needs `d22-location-filter-end-group-overflow` in the run |
+| `d22-fill-recursive-parameter` | shared | `d21-fill-recursive-parameter` | `D22-9-20-15-MUST-432` | As `d21-fill-recursive-parameter` on the draft 22 wire |
+| `d22-fill-timeout-outside-fill-or-fetch` | shared | `d21-fill-timeout-outside-fill-or-fetch` | `D22-9-20-1-MUST-396` | As `d21-fill-timeout-outside-fill-or-fetch` on the draft 22 wire |
+| `d22-filter-immutable-property` | shared | `d21-filter-immutable-property` | `D22-10-7-MUST-475` | As `d21-filter-immutable-property` on the draft 22 wire |
+| `d22-filter-mutable-property` | shared | `d21-filter-mutable-property` | `D22-10-7-MUST-474` | As `d21-filter-mutable-property` on the draft 22 wire |
+| `d22-forward-location-and-range-filter-conjunction` | shared | `d21-forward-location-and-range-filter-conjunction` | `D22-3-3-3-MUST-078` | As `d21-forward-location-and-range-filter-conjunction`; see [Filters and fill (draft 21)](#filters-and-fill-draft-21) |
+| `d22-forward-value-255` | shared | `d21-forward-value-255` | `D22-9-20-18-MUST-445` | As `d21-forward-value-255` on the draft 22 wire |
+| `d22-forward-value-two` | shared | `d21-forward-value-two` | `D22-9-20-18-MUST-445` | As `d21-forward-value-two`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-goaway-on-distinct-request-streams` | shared | `d21-goaway-on-distinct-request-streams` | `D22-9-2-MUST-339` | As `d21-goaway-on-distinct-request-streams` on the draft 22 wire. On draft 22 the two requests are SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS for the run's namespace (draft 21: SUBSCRIBE_NAMESPACE "a" and "b"); the PUBLISH the publisher sends is accepted with REQUEST_OK |
+| `d22-goaway-uri-length-boundary` | shared | `d21-goaway-uri-length-boundary` | `D22-9-2-MUST-342` | As `d21-goaway-uri-length-boundary` on the draft 22 wire |
+| `d22-grease-auth-token-type` | shared | `d21-grease-auth-token-type` | `D22-13-MUST-568`, `D22-13-MUST-NOT-569` | As `d21-grease-auth-token-type` on the draft 22 wire |
+| `d22-grease-request-error` | shared | `d21-grease-request-error` | `D22-13-MUST-568`, `D22-13-MUST-NOT-569`, `D22-13-MUST-NOT-576` | As `d21-grease-request-error` on the draft 22 wire |
+| `d22-grease-setup-options` | shared | `d21-grease-setup-options` | `D22-13-MUST-568`, `D22-13-MUST-NOT-569`, `D22-13-MUST-570`, `D22-16-4-MUST-604` | As `d21-grease-setup-options` on the draft 22 wire |
+| `d22-grease-stop-sending` | shared | `d21-grease-stop-sending` | `D22-13-MUST-568`, `D22-13-MUST-NOT-569` | As `d21-grease-stop-sending` on the draft 22 wire |
+| `d22-group-order-above-two` | shared | `d21-group-order-above-two` | `D22-9-20-8-MUST-421` | As `d21-group-order-above-two` on the draft 22 wire |
+| `d22-group-order-in-subscription-update` | shared | `d21-group-order-in-subscription-update` | `D22-9-20-1-MUST-396` | As `d21-group-order-in-subscription-update` on the draft 22 wire |
+| `d22-group-order-zero` | shared | `d21-group-order-zero` | `D22-9-20-8-MUST-421` | As `d21-group-order-zero` on the draft 22 wire |
+| `d22-immutable-property-repeat` | shared | `d21-immutable-property-repeat` | `D22-10-7-MUST-NOT-465`, `D22-10-7-MUST-NOT-466`, `D22-10-7-MUST-NOT-467` | As `d21-immutable-property-repeat`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-inbound-padding-datagram` | shared | `d21-inbound-padding-datagram` | `D22-11-5-2-MUST-546` | As `d21-inbound-padding-datagram` on the draft 22 wire |
+| `d22-inbound-padding-stream` | shared | `d21-inbound-padding-stream` | `D22-11-5-1-MUST-541` | As `d21-inbound-padding-stream` on the draft 22 wire |
+| `d22-include-properties-value-255` | shared | `d21-include-properties-value-255` | `D22-9-20-21-MUST-460` | As `d21-include-properties-value-255` on the draft 22 wire |
+| `d22-include-properties-value-two` | shared | `d21-include-properties-value-two` | `D22-9-20-21-MUST-460` | As `d21-include-properties-value-two` on the draft 22 wire |
+| `d22-invalid-bidirectional-request-stream-opener` | shared | `d21-invalid-bidirectional-request-stream-opener` | `D22-6-3-MUST-156` | As `d21-invalid-bidirectional-request-stream-opener` on the draft 22 wire |
+| `d22-largest-object-before-publication` | shared | `d21-largest-object-before-publication` | `D22-9-20-17-MUST-441` | As `d21-largest-object-before-publication` on the draft 22 wire |
+| `d22-largest-object-required-after-publication` | shared | `d21-largest-object-required-after-publication` | `D22-9-20-17-MUST-441` | As `d21-largest-object-required-after-publication`; see [Subscriptions, updates and response cardinality](#subscriptions-updates-and-response-cardinality) |
+| `d22-location-filter-end-group-overflow` | own | none | `D22-9-20-9-MUST-424` | SUBSCRIBE whose LOCATION_FILTER (Type 0x03) has StartGroup 2^64-1 and EndGroupDelta 1; requires a PROTOCOL_VIOLATION close |
+| `d22-message-body-length-mismatch` | shared | `d21-message-body-length-mismatch` | `D22-9-MUST-296` | As `d21-message-body-length-mismatch` on the draft 22 wire |
+| `d22-namespace-discovery-authorization` | shared | `d21-namespace-discovery-authorization` | `D22-4-2-1-MUST-115` | As `d21-namespace-discovery-authorization` on the draft 22 wire |
+| `d22-namespace-discovery-withdrawal-order` | shared | `d21-namespace-discovery-withdrawal-order` | `D22-4-2-MUST-NOT-112` | As `d21-namespace-discovery-withdrawal-order` on the draft 22 wire |
+| `d22-namespace-prefix-update-overlap` | shared | `d21-namespace-prefix-update-overlap` | `D22-9-20-20-MUST-455` | As `d21-namespace-prefix-update-overlap` on the draft 22 wire |
+| `d22-native-publisher-empty-query` | shared | `d21-native-publisher-empty-query` | `D22-9-1-2-MUST-315` | As `d21-native-publisher-empty-query`; see [Transport restrictions](#transport-restrictions) |
+| `d22-native-publisher-uri-options` | shared | `d21-native-publisher-uri-options` | `D22-9-1-1-MUST-307`, `D22-9-1-2-MUST-314` | As `d21-native-publisher-uri-options`; see [Transport restrictions](#transport-restrictions) |
+| `d22-native-publisher-uri-query` | shared | `d21-native-publisher-uri-query` | `D22-9-1-2-MUST-315` | As `d21-native-publisher-uri-query`; see [Transport restrictions](#transport-restrictions) |
+| `d22-native-quic-datagram-support` | shared | `d21-native-quic-datagram-support` | `D22-6-2-MUST-153` | As `d21-native-quic-datagram-support`; see [Transport restrictions](#transport-restrictions) |
+| `d22-native-quic-required-setup-options` | shared | `d21-native-quic-required-setup-options` | `D22-6-3-2-MUST-164` | As `d21-native-quic-required-setup-options`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-native-quic-without-datagram-negotiation` | shared | `d21-native-quic-without-datagram-negotiation` | `D22-6-2-MUST-154` | As `d21-native-quic-without-datagram-negotiation`; see [Transport restrictions](#transport-restrictions) |
+| `d22-object-datagram-flags` | shared | `d21-object-datagram-flags` | `D22-11-2-1-MUST-502` | As `d21-object-datagram-flags` on the draft 22 wire |
+| `d22-object-immutable-property-singleton` | shared | `d21-object-immutable-property-singleton` | `D22-10-7-MUST-NOT-477` | As `d21-object-immutable-property-singleton`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-object-property-filter-odd-property-type` | shared | `d21-object-property-filter-odd-property-type` | `D22-9-20-13-MUST-427` | As `d21-object-property-filter-odd-property-type` on the draft 22 wire |
+| `d22-original-publisher-opens-new-subgroup` | shared | `d21-original-publisher-opens-new-subgroup` | `D22-2-2-MUST-022` | As `d21-original-publisher-opens-new-subgroup`; see [Objects, Subgroups and datagrams](#objects-subgroups-and-datagrams) |
+| `d22-overlapping-subscriptions-distinct-aliases` | shared | `d21-overlapping-subscriptions-distinct-aliases` | `D22-3-1-MUST-043` | As `d21-overlapping-subscriptions-distinct-aliases` on the draft 22 wire |
+| `d22-overlapping-subscriptions-shared-alias` | shared | `d21-overlapping-subscriptions-shared-alias` | `D22-3-1-MUST-043` | As `d21-overlapping-subscriptions-shared-alias`; see [Objects, Subgroups and datagrams](#objects-subgroups-and-datagrams) |
+| `d22-padding-datagram-emission` | shared | `d21-padding-datagram-emission` | `D22-11-5-MAY-537`, `D22-11-5-2-MAY-544`, `D22-11-5-2-MUST-545` | As `d21-padding-datagram-emission` on the draft 22 wire |
+| `d22-padding-stream-emission` | shared | `d21-padding-stream-emission` | `D22-11-5-MAY-536`, `D22-11-5-1-MAY-539`, `D22-11-5-1-MUST-540` | As `d21-padding-stream-emission` on the draft 22 wire |
+| `d22-parameter-invalid-message-scope` | shared | `d21-parameter-invalid-message-scope` | `D22-9-20-1-MUST-396` | As `d21-parameter-invalid-message-scope` on the draft 22 wire |
+| `d22-parameter-type-delta-overflow` | shared | `d21-parameter-type-delta-overflow` | `D22-9-20-MUST-388` | As `d21-parameter-type-delta-overflow` on the draft 22 wire |
+| `d22-prior-group-gap-repeat` | shared | `d21-prior-group-gap-repeat` | `D22-10-8-MUST-NOT-480`, `D22-10-8-MUST-NOT-481` | As `d21-prior-group-gap-repeat`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-prior-group-gap-singleton` | shared | `d21-prior-group-gap-singleton` | `D22-10-8-MUST-NOT-482` | As `d21-prior-group-gap-singleton`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-prior-object-gap-repeat` | shared | `d21-prior-object-gap-repeat` | `D22-10-9-MUST-NOT-485`, `D22-10-9-MUST-NOT-486` | As `d21-prior-object-gap-repeat`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-prior-object-gap-singleton` | shared | `d21-prior-object-gap-singleton` | `D22-10-9-MUST-NOT-487` | As `d21-prior-object-gap-singleton`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-priority-filter-end-above-255` | shared | `d21-priority-filter-end-above-255` | `D22-9-20-12-MUST-425` | As `d21-priority-filter-end-above-255` on the draft 22 wire |
+| `d22-priority-filter-start-above-255` | shared | `d21-priority-filter-start-above-255` | `D22-9-20-12-MUST-425` | As `d21-priority-filter-start-above-255` on the draft 22 wire |
+| `d22-publish-distinct-tracks-in-one-scope` | shared | `d21-publish-distinct-tracks-in-one-scope` | `D22-2-5-MUST-034` | As `d21-publish-distinct-tracks-in-one-scope`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publish-done-datagram-only` | shared | `d21-publish-done-datagram-only` | `D22-9-9-MUST-376` | As `d21-publish-done-datagram-only` on the draft 22 wire |
+| `d22-publish-done-without-data-streams` | shared | `d21-publish-done-without-data-streams` | `D22-9-9-MUST-376` | As `d21-publish-done-without-data-streams` on the draft 22 wire |
+| `d22-publish-established-subscriber-sends-publish-state-notify` | shared | `d21-publish-established-subscriber-sends-publish-state-notify` | `D22-9-10-MUST-381` | As `d21-publish-established-subscriber-sends-publish-state-notify` on the draft 22 wire |
+| `d22-publish-namespace-ok-with-track-properties` | shared | `d21-publish-namespace-ok-with-track-properties` | `D22-9-3-MUST-348` | As `d21-publish-namespace-ok-with-track-properties` on the draft 22 wire |
+| `d22-publish-namespace-redirect-nonempty-track-name` | shared | `d21-publish-namespace-redirect-nonempty-track-name` | `D22-9-4-1-MUST-352` | As `d21-publish-namespace-redirect-nonempty-track-name` on the draft 22 wire |
+| `d22-publish-ok-with-track-properties` | shared | `d21-publish-ok-with-track-properties` | `D22-9-3-MUST-348` | As `d21-publish-ok-with-track-properties` on the draft 22 wire |
+| `d22-publish-request-error-oversized-reason` | shared | `d21-publish-request-error-oversized-reason` | `D22-8-5-MUST-266` | As `d21-publish-request-error-oversized-reason` on the draft 22 wire |
+| `d22-publish-state-notify-before-first-object` | shared | `d21-publish-state-notify-before-first-object` | `D22-9-10-MUST-383` | As `d21-publish-state-notify-before-first-object` on the draft 22 wire |
+| `d22-publish-state-notify-known-largest-object` | shared | `d21-publish-state-notify-known-largest-object` | `D22-9-10-MUST-383` | As `d21-publish-state-notify-known-largest-object` on the draft 22 wire |
+| `d22-publish-state-notify-on-fetch` | shared | `d21-publish-state-notify-on-fetch` | `D22-9-10-MUST-380` | As `d21-publish-state-notify-on-fetch`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-publish-state-notify-on-namespace-request` | shared | `d21-publish-state-notify-on-namespace-request` | `D22-9-10-MUST-380` | As `d21-publish-state-notify-on-namespace-request`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-publish-state-notify-preserves-subscriber-control` | shared | `d21-publish-state-notify-preserves-subscriber-control` | `D22-9-10-MUST-NOT-382` | As `d21-publish-state-notify-preserves-subscriber-control` on the draft 22 wire |
+| `d22-publish-state-notify-requested-forward-change` | shared | `d21-publish-state-notify-requested-forward-change` | `D22-9-10-MUST-NOT-382` | As `d21-publish-state-notify-requested-forward-change` on the draft 22 wire |
+| `d22-publish-track-with-mandatory-property` | shared | `d21-publish-track-with-mandatory-property` | `D22-3-7-MUST-088` | As `d21-publish-track-with-mandatory-property`; see [Objects, Subgroups and datagrams](#objects-subgroups-and-datagrams) |
+| `d22-publish-update-ok-with-track-properties` | shared | `d21-publish-update-ok-with-track-properties` | `D22-9-3-MUST-348` | As `d21-publish-update-ok-with-track-properties` on the draft 22 wire |
+| `d22-publisher-client-goaway-control` | shared | `d21-publisher-client-goaway-control` | `D22-9-2-MUST-329` | As `d21-publisher-client-goaway-control`; see [GOAWAY](#goaway) |
+| `d22-publisher-client-goaway-request` | shared | `d21-publisher-client-goaway-request` | `D22-9-2-MUST-329` | As `d21-publisher-client-goaway-request` on the draft 22 wire |
+| `d22-publisher-delete-with-pending-alias-uses` | shared | `d21-publisher-delete-with-pending-alias-uses` | `D22-8-9-MUST-NOT-293` | As `d21-publisher-delete-with-pending-alias-uses`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-emitted-namespace-fields` | shared | `d21-publisher-emitted-namespace-fields` | `D22-8-7-MUST-268` | As `d21-publisher-emitted-namespace-fields`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-goaway-alternate-uri` | shared | `d21-publisher-goaway-alternate-uri` | `D22-9-2-MUST-340` | As `d21-publisher-goaway-alternate-uri`; see [Ports and listeners](#ports-and-listeners) |
+| `d22-publisher-key-value-type-deltas` | shared | `d21-publisher-key-value-type-deltas` | `D22-8-3-MUST-NOT-248` | As `d21-publisher-key-value-type-deltas`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-location-filter-parameter` | own | none | `D22-9-20-9-MAY-422` | SUBSCRIBE with Absolute Start 7/0; any PUBLISH or PUBLISH_STATE_NOTIFY LOCATION_FILTER the publisher sends must be well formed and, on the probe's subscription, report the requested filter (MAY row: scores only when one is sent) |
+| `d22-publisher-namespace-redirect` | shared | `d21-publisher-namespace-redirect` | `D22-9-4-1-MUST-351` | As `d21-publisher-namespace-redirect` on the draft 22 wire |
+| `d22-publisher-namespace-routing-announcement` | shared | `d21-publisher-namespace-routing-announcement` | `D22-7-6-MUST-226` | As `d21-publisher-namespace-routing-announcement`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-parameter-multiplicity` | shared | `d21-publisher-parameter-multiplicity` | `D22-9-20-MUST-NOT-391` | As `d21-publisher-parameter-multiplicity` on the draft 22 wire |
+| `d22-publisher-parameter-negotiation` | shared | `d21-publisher-parameter-negotiation` | `D22-9-20-MUST-389` | As `d21-publisher-parameter-negotiation` on the draft 22 wire |
+| `d22-publisher-parameter-serialization` | shared | `d21-publisher-parameter-serialization` | `D22-9-20-MUST-387` | As `d21-publisher-parameter-serialization` on the draft 22 wire |
+| `d22-publisher-request-response-before-fin` | shared | `d21-publisher-request-response-before-fin` | `D22-6-4-2-2-MUST-171` | As `d21-publisher-request-response-before-fin`; see [Cancellation, resets and cleanup](#cancellation-resets-and-cleanup) |
+| `d22-publisher-request-stream-openers` | shared | `d21-publisher-request-stream-openers` | `D22-6-3-MUST-NOT-155` | As `d21-publisher-request-stream-openers` on the draft 22 wire |
+| `d22-publisher-request-stream-placement` | shared | `d21-publisher-request-stream-placement` | `D22-6-3-MUST-NOT-155`, `D22-9-MUST-294`, `D22-9-1-MUST-NOT-300`, `D22-9-1-1-MUST-NOT-303`, `D22-9-1-2-MUST-NOT-310` | As `d21-publisher-request-stream-placement`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-setup-option-multiplicity` | shared | `d21-publisher-setup-option-multiplicity` | `D22-9-1-MUST-NOT-300` | As `d21-publisher-setup-option-multiplicity`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-publisher-subscribe-tracks-redirect` | shared | `d21-publisher-subscribe-tracks-redirect` | `D22-9-4-1-MUST-351` | As `d21-publisher-subscribe-tracks-redirect` on the draft 22 wire |
+| `d22-publisher-update-credit-limit` | shared | `d21-publisher-update-credit-limit` | `D22-9-1-7-MUST-NOT-327` | As `d21-publisher-update-credit-limit`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-publisher-update-credit-per-stream` | shared | `d21-publisher-update-credit-per-stream` | `D22-9-1-7-MUST-NOT-327` | As `d21-publisher-update-credit-per-stream` on the draft 22 wire |
+| `d22-publisher-update-zero-unlimited` | shared | `d21-publisher-update-zero-unlimited` | `D22-9-1-7-MUST-NOT-327` | As `d21-publisher-update-zero-unlimited`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-range-filter-default-zero-limit` | shared | `d21-range-filter-default-zero-limit` | `D22-9-1-6-MUST-326` | As `d21-range-filter-default-zero-limit` on the draft 22 wire |
+| `d22-range-filter-end-delta-overflow` | shared | `d21-range-filter-end-delta-overflow` | `D22-8-6-MUST-267` | As `d21-range-filter-end-delta-overflow` on the draft 22 wire |
+| `d22-range-filter-start-delta-overflow` | shared | `d21-range-filter-start-delta-overflow` | `D22-8-6-MUST-267` | As `d21-range-filter-start-delta-overflow` on the draft 22 wire |
+| `d22-range-filter-total-exceeds-negotiated-limit` | shared | `d21-range-filter-total-exceeds-negotiated-limit` | `D22-3-3-2-MUST-077` | As `d21-range-filter-total-exceeds-negotiated-limit` on the draft 22 wire |
+| `d22-range-filter-total-limit` | shared | `d21-range-filter-total-limit` | `D22-9-1-6-MUST-326` | As `d21-range-filter-total-limit` on the draft 22 wire |
+| `d22-range-filter-update-total-limit` | shared | `d21-range-filter-update-total-limit` | `D22-9-1-6-MUST-326` | As `d21-range-filter-update-total-limit` on the draft 22 wire |
+| `d22-range-filter-with-zero-negotiated-limit` | shared | `d21-range-filter-with-zero-negotiated-limit` | `D22-3-3-2-MUST-077` | As `d21-range-filter-with-zero-negotiated-limit` on the draft 22 wire |
+| `d22-register-token-on-other-request-error` | shared | `d21-register-token-on-other-request-error` | `D22-8-9-MUST-283` | As `d21-register-token-on-other-request-error` on the draft 22 wire |
+| `d22-register-token-on-unauthorized-request` | shared | `d21-register-token-on-unauthorized-request` | `D22-8-9-MUST-283` | As `d21-register-token-on-unauthorized-request` on the draft 22 wire |
+| `d22-reject-publish-before-object-production` | shared | `d21-reject-publish-before-object-production` | `D22-3-1-2-MUST-NOT-049` | As `d21-reject-publish-before-object-production`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-rejected-subscribe-no-delivery` | shared | `d21-rejected-subscribe-no-delivery` | `D22-3-1-2-MUST-NOT-049` | As `d21-rejected-subscribe-no-delivery`; see [Namespaces, reserved names and publisher announcements](#namespaces-reserved-names-and-publisher-announcements) |
+| `d22-repeat-object-retrieval` | shared | `d21-repeat-object-retrieval` | `D22-2-1-MUST-NOT-016` | As `d21-repeat-object-retrieval`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-request-alias-registration-with-default-zero-cache` | shared | `d21-request-alias-registration-with-default-zero-cache` | `D22-8-9-MUST-289` | As `d21-request-alias-registration-with-default-zero-cache` on the draft 22 wire |
+| `d22-request-deleted-token-alias` | shared | `d21-request-deleted-token-alias` | `D22-8-9-MUST-281` | As `d21-request-deleted-token-alias`; see [Authorization tokens](#authorization-tokens) |
+| `d22-request-id-wrong-sender-parity` | shared | `d21-request-id-wrong-sender-parity` | `D22-6-4-2-1-MUST-168` | As `d21-request-id-wrong-sender-parity` on the draft 22 wire |
+| `d22-request-message-truncated-at-fin` | shared | `d21-request-message-truncated-at-fin` | `D22-9-MUST-296` | As `d21-request-message-truncated-at-fin` on the draft 22 wire |
+| `d22-request-single-period-namespace` | shared | `d21-request-single-period-namespace` | `D22-2-4-3-MUST-033` | As `d21-request-single-period-namespace` on the draft 22 wire |
+| `d22-request-stream-before-peer-setup` | own | none | `D22-6-3-MAY-159` | Opens the control stream with one byte of SETUP, sends a SUBSCRIBE (FORWARD=0), then completes SETUP; passes (MAY row) when the publisher resets the request before the SETUP is complete or answers it only afterwards; an earlier answer is inconclusive |
+| `d22-request-stream-terminal-message-order` | shared | `d21-request-stream-terminal-message-order` | `D22-6-4-2-2-MUST-NOT-170` | As `d21-request-stream-terminal-message-order`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-request-token-cache-overflow` | shared | `d21-request-token-cache-overflow` | `D22-8-9-MUST-289` | As `d21-request-token-cache-overflow` on the draft 22 wire |
+| `d22-request-undecodable-authorization-token` | shared | `d21-request-undecodable-authorization-token` | `D22-8-9-MUST-279` | As `d21-request-undecodable-authorization-token` on the draft 22 wire |
+| `d22-request-unknown-token-alias` | shared | `d21-request-unknown-token-alias` | `D22-8-9-MUST-281` | As `d21-request-unknown-token-alias` on the draft 22 wire |
+| `d22-request-update-independent-streams` | shared | `d21-request-update-independent-streams` | `D22-9-1-7-MUST-328` | As `d21-request-update-independent-streams` on the draft 22 wire |
+| `d22-request-update-overrun` | shared | `d21-request-update-overrun` | `D22-9-1-7-MUST-328` | As `d21-request-update-overrun` on the draft 22 wire |
+| `d22-request-update-unlimited` | shared | `d21-request-update-unlimited` | `D22-9-1-7-MUST-328` | As `d21-request-update-unlimited` on the draft 22 wire |
+| `d22-request-well-formed-invalid-token` | shared | `d21-request-well-formed-invalid-token` | `D22-8-9-MUST-282` | As `d21-request-well-formed-invalid-token`; see [Operator-supplied credentials and policy](#operator-supplied-credentials-and-policy) |
+| `d22-responder-update-on-publish-namespace` | shared | `d21-responder-update-on-publish-namespace` | `D22-9-5-MUST-355` | As `d21-responder-update-on-publish-namespace` on the draft 22 wire |
+| `d22-server-sends-authority` | shared | `d21-server-sends-authority` | `D22-9-1-1-MUST-304`, `D22-9-1-1-MUST-305` | As `d21-server-sends-authority`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-server-sends-path` | shared | `d21-server-sends-path` | `D22-9-1-2-MUST-311`, `D22-9-1-2-MUST-312` | As `d21-server-sends-path`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-session-namespace-empty-track-request` | shared | `d21-session-namespace-empty-track-request` | `D22-6-5-MUST-184` | As `d21-session-namespace-empty-track-request` on the draft 22 wire |
+| `d22-session-namespace-unknown-namespace-request` | shared | `d21-session-namespace-unknown-namespace-request` | `D22-6-5-MUST-186` | As `d21-session-namespace-unknown-namespace-request` on the draft 22 wire |
+| `d22-session-namespace-unknown-track-request` | shared | `d21-session-namespace-unknown-track-request` | `D22-6-5-MUST-185` | As `d21-session-namespace-unknown-track-request` on the draft 22 wire |
+| `d22-setup-duplicate-unknown-options` | shared | `d21-setup-duplicate-unknown-options` | `D22-9-1-MUST-298`, `D22-9-1-MUST-299`, `D22-9-1-MUST-301` | As `d21-setup-duplicate-unknown-options`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-setup-key-value-declared-length-overflow` | shared | `d21-setup-key-value-declared-length-overflow` | `D22-8-3-MUST-250` | As `d21-setup-key-value-declared-length-overflow` on the draft 22 wire |
+| `d22-setup-key-value-type-overflow` | shared | `d21-setup-key-value-type-overflow` | `D22-8-3-MUST-249` | As `d21-setup-key-value-type-overflow` on the draft 22 wire |
+| `d22-setup-known-key-value-malformed-value` | shared | `d21-setup-known-key-value-malformed-value` | `D22-8-3-MUST-251` | As `d21-setup-known-key-value-malformed-value` on the draft 22 wire |
+| `d22-setup-register-default-zero-cache` | shared | `d21-setup-register-default-zero-cache` | `D22-9-1-4-MUST-NOT-318` | As `d21-setup-register-default-zero-cache` on the draft 22 wire |
+| `d22-setup-register-exceeds-token-cache` | shared | `d21-setup-register-exceeds-token-cache` | `D22-9-1-4-MUST-NOT-318` | As `d21-setup-register-exceeds-token-cache` on the draft 22 wire |
+| `d22-setup-register-use-value-fallback` | shared | `d21-setup-register-use-value-fallback` | `D22-9-1-4-MUST-319` | As `d21-setup-register-use-value-fallback`; see [Authorization tokens](#authorization-tokens) |
+| `d22-setup-unknown-options` | shared | `d21-setup-unknown-options` | `D22-9-1-MUST-298`, `D22-9-1-MUST-299` | As `d21-setup-unknown-options`; see [Session setup, SETUP options and GREASE](#session-setup-setup-options-and-grease) |
+| `d22-single-request-update-response` | shared | `d21-single-request-update-response` | `D22-9-5-MUST-356` | As `d21-single-request-update-response` on the draft 22 wire |
+| `d22-subgroup-completion-withheld-acknowledgments` | shared | `d21-subgroup-completion-withheld-acknowledgments` | `D22-5-2-MUST-144` | As `d21-subgroup-completion-withheld-acknowledgments`; see [Filters and fill (draft 21)](#filters-and-fill-draft-21) |
+| `d22-subgroup-early-handoff-reset` | shared | `d21-subgroup-early-handoff-reset` | `D22-11-3-2-MUST-519` | As `d21-subgroup-early-handoff-reset` on the draft 22 wire |
+| `d22-subgroup-header-flags` | shared | `d21-subgroup-header-flags` | `D22-11-3-1-MUST-510` | As `d21-subgroup-header-flags` on the draft 22 wire |
+| `d22-subgroup-premature-close-reset` | shared | `d21-subgroup-premature-close-reset` | `D22-11-3-2-MUST-513` | As `d21-subgroup-premature-close-reset` on the draft 22 wire |
+| `d22-subgroup-restart-after-reset` | shared | `d21-subgroup-restart-after-reset` | `D22-2-2-MUST-NOT-020` | As `d21-subgroup-restart-after-reset`; see [Objects, Subgroups and datagrams](#objects-subgroups-and-datagrams) |
+| `d22-subgroup-start-location-fin` | shared | `d21-subgroup-start-location-fin` | `D22-11-3-2-MUST-512` | As `d21-subgroup-start-location-fin` on the draft 22 wire |
+| `d22-subscribe-33-namespace-fields` | shared | `d21-subscribe-33-namespace-fields` | `D22-8-7-MUST-270` | As `d21-subscribe-33-namespace-fields` on the draft 22 wire |
+| `d22-subscribe-accepted` | shared | `d21-subscribe-accepted` | `D22-3-1-MUST-035` | As `d21-subscribe-accepted`; see [Subscriptions, updates and response cardinality](#subscriptions-updates-and-response-cardinality) |
+| `d22-subscribe-bounded-location-range` | own | none | `D22-3-3-1-MUST-NOT-069` | Five concurrent FORWARD=1 SUBSCRIBEs, each with one LOCATION_FILTER (Relative Start, Absolute Start 7/9, Absolute Bounded, Absolute Range 7/9-7/9, Next Object); fails an Object delivered outside the range the filter selects from the reported Largest Object (Section 9.20.9, Table 6). Needs distinct Track Aliases or LARGEST_OBJECT to attribute Objects |
+| `d22-subscribe-empty-namespace-field` | shared | `d21-subscribe-empty-namespace-field` | `D22-8-7-MUST-269` | As `d21-subscribe-empty-namespace-field` on the draft 22 wire |
+| `d22-subscribe-namespace-accepted` | shared | `d21-subscribe-namespace-accepted` | `D22-4-2-MUST-108` | As `d21-subscribe-namespace-accepted` on the draft 22 wire |
+| `d22-subscribe-namespace-overlap` | shared | `d21-subscribe-namespace-overlap` | `D22-4-2-MUST-111` | As `d21-subscribe-namespace-overlap` on the draft 22 wire |
+| `d22-subscribe-namespace-rejected` | shared | `d21-subscribe-namespace-rejected` | `D22-4-2-MUST-108` | As `d21-subscribe-namespace-rejected` on the draft 22 wire |
+| `d22-subscribe-oversized-full-track-name` | shared | `d21-subscribe-oversized-full-track-name` | `D22-8-7-MUST-272` | As `d21-subscribe-oversized-full-track-name` on the draft 22 wire |
+| `d22-subscribe-parameters-preserve-payload` | shared | `d21-subscribe-parameters-preserve-payload` | `D22-9-20-MUST-NOT-394` | As `d21-subscribe-parameters-preserve-payload` on the draft 22 wire |
+| `d22-subscribe-rejected` | shared | `d21-subscribe-rejected` | `D22-3-1-MUST-035` | As `d21-subscribe-rejected` on the draft 22 wire |
+| `d22-subscribe-single-subgroup` | shared | `d21-subscribe-single-subgroup` | `D22-2-2-MUST-NOT-020` | As `d21-subscribe-single-subgroup`; see [Objects, Subgroups and datagrams](#objects-subgroups-and-datagrams) |
+| `d22-subscribe-tracks-overlap` | shared | `d21-subscribe-tracks-overlap` | `D22-3-6-MUST-083` | As `d21-subscribe-tracks-overlap` on the draft 22 wire. On draft 22 the publisher's PUBLISH is accepted with REQUEST_OK (a courtesy write, not stimulus) |
+| `d22-subscribe-tracks-oversized-namespace` | shared | `d21-subscribe-tracks-oversized-namespace` | `D22-8-7-MUST-271` | As `d21-subscribe-tracks-oversized-namespace` on the draft 22 wire |
+| `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` | shared | `d21-subscribe-tracks-publish-skipped-then-capacity-recovers` | `D22-3-6-3-MUST-NOT-086` | As `d21-subscribe-tracks-publish-skipped-then-capacity-recovers`; see [Discovery (SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS)](#discovery-subscribe_namespace-subscribe_tracks) |
+| `d22-subscriber-sends-publish-state-notify` | shared | `d21-subscriber-sends-publish-state-notify` | `D22-9-10-MUST-381` | As `d21-subscriber-sends-publish-state-notify` on the draft 22 wire |
+| `d22-subscriber-update-on-publish` | shared | `d21-subscriber-update-on-publish` | `D22-9-5-MUST-355` | As `d21-subscriber-update-on-publish` on the draft 22 wire |
+| `d22-subscription-forwarding-preference` | shared | `d21-subscription-forwarding-preference` | `D22-2-1-1-MUST-018` | As `d21-subscription-forwarding-preference`; see [Scenarios that need FETCH](#scenarios-that-need-fetch) |
+| `d22-successful-subscribe-forward-zero` | shared | `d21-successful-subscribe-forward-zero` | `D22-9-6-MUST-366` | As `d21-successful-subscribe-forward-zero` on the draft 22 wire |
+| `d22-successful-subscribe-object-delivery` | shared | `d21-successful-subscribe-object-delivery` | `D22-9-6-MUST-366` | As `d21-successful-subscribe-object-delivery` on the draft 22 wire |
+| `d22-successful-subscribe-response` | shared | `d21-successful-subscribe-response` | `D22-9-6-MUST-365` | As `d21-successful-subscribe-response` on the draft 22 wire |
+| `d22-token-delete-and-reuse` | shared | `d21-token-delete-and-reuse` | `D22-8-9-MUST-276` | As `d21-token-delete-and-reuse`; see [Authorization tokens](#authorization-tokens) |
+| `d22-token-duplicate-registration` | shared | `d21-token-duplicate-registration` | `D22-8-9-MUST-280` | As `d21-token-duplicate-registration` on the draft 22 wire |
+| `d22-token-register-alias-lifetime` | shared | `d21-token-register-alias-lifetime` | `D22-8-9-MUST-277` | As `d21-token-register-alias-lifetime`; see [Authorization tokens](#authorization-tokens) |
+| `d22-track-discovery-authorization` | shared | `d21-track-discovery-authorization` | `D22-3-6-MUST-084` | As `d21-track-discovery-authorization` on the draft 22 wire |
+| `d22-track-discovery-does-not-copy-authorization` | shared | `d21-track-discovery-does-not-copy-authorization` | `D22-9-20-2-MUST-NOT-399` | As `d21-track-discovery-does-not-copy-authorization` on the draft 22 wire |
+| `d22-track-prefix-update-overlap` | shared | `d21-track-prefix-update-overlap` | `D22-9-20-20-MUST-456` | As `d21-track-prefix-update-overlap` on the draft 22 wire. On draft 22 the publisher's PUBLISH is accepted with REQUEST_OK (a courtesy write, not stimulus) |
+| `d22-track-property-filter-odd-property-type` | shared | `d21-track-property-filter-odd-property-type` | `D22-9-20-14-MUST-429` | As `d21-track-property-filter-odd-property-type` on the draft 22 wire |
+| `d22-unexpected-duplicate-message-parameter` | shared | `d21-unexpected-duplicate-message-parameter` | `D22-9-20-SHOULD-393` | As `d21-unexpected-duplicate-message-parameter` on the draft 22 wire |
+| `d22-unknown-control-message` | shared | `d21-unknown-control-message` | `D22-9-MUST-295` | As `d21-unknown-control-message` on the draft 22 wire |
+| `d22-unknown-datagram-type` | shared | `d21-unknown-datagram-type` | `D22-11-MUST-488` | As `d21-unknown-datagram-type` on the draft 22 wire |
+| `d22-unknown-message-parameter` | shared | `d21-unknown-message-parameter` | `D22-9-20-MUST-390` | As `d21-unknown-message-parameter` on the draft 22 wire |
+| `d22-unknown-request-stream-message` | shared | `d21-unknown-request-stream-message` | `D22-9-MUST-295` | As `d21-unknown-request-stream-message` on the draft 22 wire |
+| `d22-unknown-unidirectional-stream-type` | shared | `d21-unknown-unidirectional-stream-type` | `D22-6-4-1-MUST-167` | As `d21-unknown-unidirectional-stream-type` on the draft 22 wire |
+| `d22-update-on-track-status` | shared | `d21-update-on-track-status` | `D22-9-5-MUST-355` | As `d21-update-on-track-status` on the draft 22 wire |
+| `d22-update-subscription-location-range` | own | none | `D22-3-3-1-MUST-NOT-069` | The same five filters, each set by a REQUEST_UPDATE (FORWARD=1 plus LOCATION_FILTER) on a FORWARD=0 subscription; judged as above |
+| `d22-webtransport-h3-datagram-support` | shared | `d21-webtransport-h3-datagram-support` | `D22-6-2-MUST-153` | As `d21-webtransport-h3-datagram-support`; see [Transport restrictions](#transport-restrictions) |
+| `d22-webtransport-h3-without-datagram-negotiation` | shared | `d21-webtransport-h3-without-datagram-negotiation` | `D22-6-2-MUST-154` | As `d21-webtransport-h3-without-datagram-negotiation`; see [Transport restrictions](#transport-restrictions) |
+| `d22-webtransport-publisher-setup` | shared | `d21-webtransport-publisher-setup` | `D22-9-1-1-MUST-NOT-303`, `D22-9-1-2-MUST-NOT-310` | As `d21-webtransport-publisher-setup`; see [Transport restrictions](#transport-restrictions) |
+| `d22-webtransport-required-setup-options` | shared | `d21-webtransport-required-setup-options` | `D22-6-3-2-MUST-164` | As `d21-webtransport-required-setup-options`; see [Transport restrictions](#transport-restrictions) |
+| `d22-webtransport-server-sends-authority` | shared | `d21-webtransport-server-sends-authority` | `D22-9-1-1-MUST-305` | As `d21-webtransport-server-sends-authority`; see [Transport restrictions](#transport-restrictions) |
+| `d22-webtransport-server-sends-path` | shared | `d21-webtransport-server-sends-path` | `D22-9-1-2-MUST-312` | As `d21-webtransport-server-sends-path`; see [Transport restrictions](#transport-restrictions) |
+
+### Unscored draft 22 probes
+
+These run when a run request names them, like any raw probe, but are not in `executable_profiles` and no
+catalog row names them. Each records its verdict as an `unscored_probe_verdict` event; scoring never
+sees it.
+
+| Draft 22 ID | Stimulus | Verdict recorded |
+|---|---|---|
+| `d22-location-filter-unknown-type` | SUBSCRIBE whose LOCATION_FILTER has Type 0x06, the first undefined value | pass on a PROTOCOL_VIOLATION close, fail on another close code, no verdict without a close in the reaction window (Section 9.20.9: any other Location Filter Type is a PROTOCOL_VIOLATION) |
+| `d22-location-filter-absolute-origin` | SUBSCRIBE whose LOCATION_FILTER is Absolute Start (Type 0x02) {0, 0}, a form no draft 21 field list can express | pass when the publisher answers SUBSCRIBE_OK and delivers an Object, fail on a PROTOCOL_VIOLATION close (the valid filter read as malformed), no verdict otherwise; a control for the probe above |
 
 ## What NOT_RUN means for each family
 

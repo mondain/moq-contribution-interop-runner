@@ -173,7 +173,7 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled adapters (`adapters/moqxr`, `adapters/moq5`) support drafts 18 and 21 only and refuse a draft 22 request (exit 64) |
+| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter") |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -182,6 +182,56 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `log_dir` | string | Absolute directory for this context's request file and logs |
 | `scenario_timeout_ms` | integer | The scenario's deadline (the run's `timeout_ms`) |
 | `process_timeout_ms` | integer | Hard limit for the process: `scenario_timeout_ms` plus 1000 |
+
+For a draft 22 request, the bundled moqxr adapter gives a scenario shared with draft 21
+(`d22-X` paired with `d21-X`) exactly the moqxr options of `d21-X`, with `--draft 22`,
+except for the draft 22 overrides listed after the table below.
+The draft 22 own scenarios and the two unscored probes have no draft 21 twin; their
+options are listed in `adapters/moqxr/run.sh` and pinned by
+`tests/golden/moqxr-cmdlines-d22.txt` (timeout+3 is the scenario timeout plus 3 seconds).
+With `--forward 1`, moqxr sends its own PUBLISH and blocks until it is answered, so every
+probe in which the runner is the subscriber and does not answer that PUBLISH gets
+`--forward 0 --paced`. Only `publisher-location-filter-parameter` answers it and keeps
+`--forward 1`:
+
+| `d22-` scenario | moqxr options | Closest draft 21 scenario |
+|---|---|---|
+| `subscribe-bounded-location-range` | `--forward 0 --paced`, timeout+3 | `d21-update-subscription-location-range` |
+| `update-subscription-location-range` | `--forward 0 --paced`, timeout+3 | `d21-update-subscription-location-range` |
+| `fetch-bounded-location-range` | `--forward 0 --paced`, timeout+3 | `d21-fetch-datagram-preference` |
+| `discover-original-publisher-namespaces` | `--forward 0 --paced`, timeout+3 | `d21-namespace-discovery-authorization` |
+| `publisher-location-filter-parameter` | `--forward 1` | `d21-publisher-parameter-serialization` |
+| `request-stream-before-peer-setup` | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
+| `location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
+| `fill-location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
+| `location-filter-unknown-type` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
+| `location-filter-absolute-origin` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
+
+Draft 22 overrides of the draft 21 option lists: these shared scenarios run with
+`--forward 0 --paced`, timeout+3 at draft 22, while their `d21-` twin keeps `--forward 1` at
+draft 21 (draft 21 command lines are frozen). In each the runner is the subscriber and never
+answers moqxr's own PUBLISH; with `--forward 1` moqxr blocks on it and closes with code 0 about
+2 seconds later, inside the reaction window, which the runner reads as the reaction to the
+stimulus. The draft 22 moqxr sweep of 2026-10-06 showed every one reaching its stimulus when
+paced. `tests/e2e/moqxr-adapter-cmdlines.sh` enumerates the same ids as the only exceptions to
+its twin-equality check:
+
+| `d22-` scenario | Draft 22 moqxr options | `d21-` twin at draft 21 |
+|---|---|---|
+| `subscribe-empty-namespace-field` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-33-namespace-fields` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-tracks-oversized-namespace` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `subscribe-oversized-full-track-name` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-undecodable-authorization-token` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-token-cache-overflow` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `request-alias-registration-with-default-zero-cache` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-forbidden-nested-authorization` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-forbidden-track-property-filter` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-recursive-parameter` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `fill-invalid-group-order` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `unknown-unidirectional-stream-type` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `unknown-control-message` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+| `successful-subscribe-object-delivery` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 
 A real request file from a run:
 
@@ -479,8 +529,12 @@ The flags:
 Replace the stand-in with your publisher by setting `ACME_PUB_BIN` (or the variable
 your adapter reads) and adapting the flag mapping. The environment of the runner is
 inherited by the adapter, which is how that variable reaches it. The driven-mode
-check scripts are `tests/e2e/driven-moqxr.sh` (one combination) and
-`tests/e2e/moqxr-matrix.sh` (four combinations).
+check scripts are `tests/e2e/driven-moqxr.sh` (one draft and transport) and
+`tests/e2e/moqxr-matrix.sh` (the adapter contract, then drafts 18, 21 and 22 over native
+QUIC and WebTransport: six pairs). Each pair runs a single scenario
+(`subscribe-to-publisher-track` for draft 18, `d21-publisher-request-stream-placement`
+for draft 21, `d22-publisher-request-stream-placement` for draft 22), so the matrix is a
+smoke test of the harness, not a conformance sweep.
 
 ### 6.2 In Docker Compose
 
@@ -569,8 +623,8 @@ it needs, and a limited endpoint SHOULD answer a message it does not support wit
 NOT_SUPPORTED instead of ignoring it (draft 18 Section 4, draft 21 Section 1.5).
 A live publisher with no cache or history, such as moqxr, normally has no FETCH. Not
 implementing FETCH is not a conformance failure, so tell the runner instead of
-letting 45 scenarios (23 in draft 18, 22 in draft 21) that start with a FETCH end in
-run-level errors:
+letting the scenarios that start with a FETCH (23 in draft 18, 22 in draft 21, 23 in
+draft 22) end in run-level errors:
 
 ```sh
 # once, when starting the runner
