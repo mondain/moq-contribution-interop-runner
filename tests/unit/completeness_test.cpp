@@ -2,6 +2,7 @@
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
 
 #include <gtest/gtest.h>
 
@@ -115,16 +116,18 @@ TEST(CompletenessTest, PartialScenarioOrEvaluatorBindingsKeepRequiredRowUncovere
     EXPECT_TRUE(report.findings.empty());
 }
 
-TEST(CompletenessTest, ReportsRequiredRowCompletionForBothDrafts) {
+TEST(CompletenessTest, ReportsRequiredRowCompletionForAllDrafts) {
     const auto root = std::filesystem::path{MOQ_INTEROP_PROJECT_SOURCE_DIR};
-    for (const unsigned draft : {18u, 21u}) {
+    for (const unsigned draft : {18u, 21u, 22u}) {
         const auto source = load_draft_source(
             draft, root / "docs", root / "requirements" / "draft-digests.json");
         const auto catalog = RequirementCatalog::load(
             source, root / "requirements" /
-                ("draft" + std::to_string(draft) + ".json"));
-        const auto bindings = draft == 18
-            ? draft18_executable_bindings() : draft21_executable_bindings();
+                ("draft" + std::to_string(draft) + ".json"),
+            draft == 22 ? CatalogLoadMode::AllowIncomplete : CatalogLoadMode::RequireComplete);
+        const auto bindings = draft == 18 ? draft18_executable_bindings()
+            : draft == 21 ? draft21_executable_bindings()
+                          : draft22_executable_bindings();
         const auto report = audit_completeness(
             catalog, bindings, app::executable_scenarios(draft));
         // The required set is the testable MUST and MUST NOT rows. It started at 175 rows per
@@ -136,11 +139,12 @@ TEST(CompletenessTest, ReportsRequiredRowCompletionForBothDrafts) {
                        (row.strength == Strength::Must || row.strength == Strength::MustNot);
             }));
         EXPECT_EQ(report.required_total, expected_required);
-        // Both drafts reach required-row completion: every required row has a binding, so
-        // losing a binding (or a scenario registration) fails here.
-        EXPECT_EQ(report.required_total, 173u);
+        // Every draft reaches required-row completion: every required row has a binding, so
+        // losing a binding (or a scenario registration) fails here. Draft 22 has 170 required
+        // rows against 173 for drafts 18 and 21: its catalog has three fewer testable MUST or
+        // MUST NOT rows than draft 21's.
+        EXPECT_EQ(report.required_total, draft == 22 ? 170u : 173u);
         EXPECT_EQ(report.required_covered, report.required_total);
-        EXPECT_TRUE(report.complete());
         const auto blocking = static_cast<std::size_t>(std::count_if(
             report.findings.begin(), report.findings.end(),
             [](const auto& finding) {
@@ -148,12 +152,27 @@ TEST(CompletenessTest, ReportsRequiredRowCompletionForBothDrafts) {
                        finding.code == "missing_required_evaluator";
             }));
         EXPECT_EQ(report.required_total - report.required_covered, blocking);
-        EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
+        const auto audit = audit_normative_occurrences(source, catalog);
+        if (draft == 22) {
+            // requirements/draft22.json is still complete:false, so the only blocking finding
+            // is incomplete_catalog and the only audit error is the incomplete-catalog one.
+            // TODO(D3 Task 4): when the catalog flips to complete:true, replace this branch
+            // with EXPECT_TRUE(report.complete()) and EXPECT_TRUE(audit.ok()) like 18 and 21.
+            for (const auto& finding : report.findings) {
+                if (finding.blocking)
+                    EXPECT_EQ(finding.code, "incomplete_catalog") << finding.requirement_id;
+            }
+            EXPECT_TRUE(audit.missing.empty());
+            EXPECT_TRUE(audit.multiply_classified.empty());
+        } else {
+            EXPECT_TRUE(report.complete());
+            EXPECT_TRUE(audit.ok());
+        }
     }
 }
 
 TEST(CompletenessTest, ExecutableScenarioRegistryHasNoEmptyOrDuplicateIds) {
-    for (const unsigned draft : {18u, 21u}) {
+    for (const unsigned draft : {18u, 21u, 22u}) {
         const auto ids = app::executable_scenarios(draft);
         EXPECT_FALSE(ids.empty());
         std::set<std::string_view> seen;
