@@ -12,6 +12,7 @@
 #include <compare>
 #include <limits>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -40,6 +41,7 @@ constexpr std::uint64_t kRequestOk = 0x07;
 constexpr std::uint64_t kFetch = 0x16;
 constexpr std::uint64_t kFetchOk = 0x18;
 constexpr std::uint64_t kFetchHeader = 0x05;
+constexpr std::uint64_t kPublish = 0x1d;
 constexpr std::uint64_t kLargestObject = 0x09;
 constexpr std::uint64_t kForward = 0x10;
 constexpr std::uint64_t kLocationFilter = 0x21;
@@ -50,6 +52,18 @@ struct Fixture {
     Namespace ns;
     Bytes name;
 };
+
+// The probe family's filters (see draft22_location_range_filters), built once.
+const std::vector<d22::LocationFilter>& filters() {
+    static const std::vector<d22::LocationFilter> list{
+        {FilterType::RelativeGroup, 1, 0, std::nullopt, std::nullopt},
+        {FilterType::Absolute, kGroup, kObject, std::nullopt, std::nullopt},
+        {FilterType::AbsoluteBounded, kGroup, kObject, 0, std::nullopt},
+        {FilterType::AbsoluteRange, kGroup, kObject, 0, kObject},
+        {FilterType::NextObject, 0, 0, std::nullopt, std::nullopt},
+    };
+    return list;
+}
 
 // ------------------------------------------------------------------ requests
 
@@ -102,7 +116,8 @@ Bytes filter_value(const d22::LocationFilter& filter) {
     return {writer.bytes().begin(), writer.bytes().end()};
 }
 
-// Section 9.20.18: FORWARD (0x10, a varint) as the first parameter.
+// Section 9.20.18: FORWARD (0x10, a uint8; 0 and 1 encode as the same single byte as a varint) as the
+// first parameter.
 void forward(Bytes& params, std::uint64_t value) {
     integer(params, kForward);
     integer(params, value);
@@ -318,6 +333,7 @@ struct Range {
     Location start;
     std::optional<Location> end;
     bool contains(Location location) const { return start <= location && (!end || location <= *end); }
+    friend bool operator==(const Range&, const Range&) = default;
 };
 
 // What a response said about the Largest Object: `decoded` is false when the response could not be
@@ -452,7 +468,30 @@ std::vector<Delivered> delivered_objects(const RawProbeTranscript& t, const Coll
     return result;
 }
 
-std::size_t subscription_count() { return draft22_location_range_filters().size(); }
+// Track Aliases the publisher announced in a PUBLISH (Section 9.8) on a request stream it opened. A
+// subscription the publisher initiated has no range these probes requested, so Objects carrying such an
+// alias are never judged against these ranges. Read by hand (Request ID, Track Namespace, Track Name,
+// Track Alias) so a filter the draft 21 form cannot represent does not hide the alias.
+std::set<std::uint64_t> published_aliases(const Collected& collected) {
+    std::set<std::uint64_t> result;
+    for (const auto& [id, stream] : collected.streams) {
+        if ((id & 3u) != 0u) continue;  // peer-initiated bidirectional streams only
+        const auto messages = parse_messages(stream.bytes);
+        if (messages.complete.empty() || messages.complete.front().type != kPublish) continue;
+        wire::Cursor body(messages.complete.front().body);
+        const auto request = number(body);
+        const auto fields = request ? number(body) : std::nullopt;
+        if (!fields || *fields > 32) continue;
+        bool ok = true;
+        for (std::uint64_t index = 0; index <= *fields && ok; ++index)  // namespace fields, then the name
+            ok = std::holds_alternative<std::span<const std::byte>>(wire::read_length_prefixed_bytes(body, 4096));
+        if (!ok) continue;
+        if (const auto alias = number(body)) result.insert(*alias);
+    }
+    return result;
+}
+
+std::size_t subscription_count() { return filters().size(); }
 
 // The writes a probe makes: one request per filter (SUBSCRIBE or FETCH), and for Kind::Update one
 // REQUEST_UPDATE each.
@@ -460,14 +499,23 @@ std::size_t write_count(Kind kind) { return subscription_count() * (kind == Kind
 
 // Section 3.3.1 over every subscription of the probe. Subscriptions to one Track may share a Track
 // Alias (Section 3.1: "the subscriber re-applies each subscription's filter to determine which
-// subscription a received Object belongs to"), so an Object is outside the
-// requested range only when it fits none of the subscriptions that carry its alias. No failure is
-// claimed while any subscription is unanswered (its alias is unknown) or for an Object whose alias is
-// shared with a subscription whose range cannot be known.
+// subscription a received Object belongs to"), so an Object is outside the requested range when it fits
+// none of the subscriptions that carry its alias. Counting copies is not used: Section 3.1's "the
+// publisher MUST send the Object once for each matching subscription" makes an extra copy a violation of
+// that sentence, but the extra copy may have gone to a subscription whose range contains it, so it does
+// not prove an Object was sent outside a requested range.
+//
+// No failure is claimed while any subscription is unanswered (its alias is unknown), or for an alias
+// shared with a subscription whose range cannot be known or announced by a PUBLISH. A pass needs every
+// Object attributable to exactly one range: when one alias carries established subscriptions with
+// different ranges, a filter-ignoring publisher could send Objects to the wrong one unseen, so the
+// scenario settles without a pass.
 State observe_subscriptions(const RawProbeTranscript& t, const Collected& collected, Kind kind,
                             bool window_ended) {
-    const auto filters = draft22_location_range_filters();
-    // Until every write went out (an update waits for its SUBSCRIBE_OK) nothing can be settled.
+    const auto& filters = scenarios::filters();
+    // Until every write went out (an update waits for its SUBSCRIBE_OK) nothing can be settled. In the
+    // update scenario a refused SUBSCRIBE keeps its REQUEST_UPDATE (gated on SUBSCRIBE_OK) and every later
+    // write from being sent, so that scenario then stays Pending and ends without a verdict (NotRun).
     if (t.writes.size() < write_count(kind)) return State::Pending;
     std::vector<Subscription> subscriptions;
     for (std::size_t index = 0; index < subscription_count(); ++index)
@@ -477,10 +525,11 @@ State observe_subscriptions(const RawProbeTranscript& t, const Collected& collec
     };
     if (any([](const auto& s) { return s.answer == Answer::Unanswered; }))
         return window_ended ? State::Inconclusive : State::Pending;
+    const auto published = published_aliases(collected);
     std::size_t in_range = 0;
     for (const auto& object : delivered_objects(t, collected)) {
         bool candidate = false;
-        bool unknown = false;
+        bool unknown = published.contains(object.alias);
         bool inside = false;
         for (const auto& subscription : subscriptions) {
             if (subscription.answer != Answer::Established || subscription.alias != object.alias) continue;
@@ -488,15 +537,22 @@ State observe_subscriptions(const RawProbeTranscript& t, const Collected& collec
             if (!subscription.range) unknown = true;
             else if (subscription.range->contains(object.location)) inside = true;
         }
-        if (!candidate) continue;  // another track's alias
-        if (inside) { ++in_range; continue; }
-        if (unknown) continue;
-        return State::Fail;
+        if (!candidate || unknown) continue;  // another track's alias, or one that cannot be judged
+        if (!inside) return State::Fail;
+        ++in_range;
     }
     // A rejected request or an unknowable range leaves its Type unexercised: keep watching the others
     // for a violation until the window ends, then settle without a pass.
     if (any([](const auto& s) { return s.answer == Answer::Rejected || !s.range; }))
         return window_ended ? State::Inconclusive : State::Pending;
+    // Objects on an alias shared with a PUBLISH, or on one alias carrying different ranges, cannot be
+    // attributed to one requested range: no pass.
+    for (const auto& subscription : subscriptions) {
+        if (published.contains(subscription.alias)) return window_ended ? State::Inconclusive : State::Pending;
+        for (const auto& other : subscriptions)
+            if (other.alias == subscription.alias && !(other.range == subscription.range))
+                return window_ended ? State::Inconclusive : State::Pending;
+    }
     if (!window_ended) return State::Pending;
     return in_range != 0 ? State::Pass : State::Inconclusive;
 }
@@ -617,7 +673,7 @@ std::map<std::uint64_t, FetchDelivery> fetch_deliveries(const RawProbeTranscript
 // Object the required INVALID_RANGE answer) or once its data stream ended; FETCH being finite, a probe
 // whose FETCHes all settled needs no more of the window.
 State observe_fetches(const RawProbeTranscript& t, const Collected& collected, bool window_ended) {
-    const auto filters = draft22_location_range_filters();
+    const auto& filters = scenarios::filters();
     if (t.writes.size() < write_count(Kind::Fetch)) return State::Pending;
     const auto deliveries = fetch_deliveries(t, collected);
     std::size_t in_range = 0;
@@ -678,7 +734,7 @@ RawProbeDefinition build(Kind kind, std::chrono::milliseconds deadline, const Fi
     definition.setup_bytes = Bytes{std::byte{0xaf}, std::byte{0}, std::byte{0}, std::byte{0}};
     definition.deadline = deadline;
     definition.peer_setup_ready = setup_ready;
-    const auto filters = draft22_location_range_filters();
+    const auto& filters = scenarios::filters();
     switch (kind) {
     case Kind::Subscribe:
         definition.id = std::string(kDraft22SubscribeLocationRange);
@@ -770,15 +826,7 @@ std::optional<bool> evaluate(const RawProbeTranscript& t, Kind kind, std::uint64
 
 }  // namespace
 
-std::vector<wire::draft22::LocationFilter> draft22_location_range_filters() {
-    return {
-        {FilterType::RelativeGroup, 1, 0, std::nullopt, std::nullopt},
-        {FilterType::Absolute, kGroup, kObject, std::nullopt, std::nullopt},
-        {FilterType::AbsoluteBounded, kGroup, kObject, 0, std::nullopt},
-        {FilterType::AbsoluteRange, kGroup, kObject, 0, kObject},
-        {FilterType::NextObject, 0, 0, std::nullopt, std::nullopt},
-    };
-}
+std::vector<wire::draft22::LocationFilter> draft22_location_range_filters() { return filters(); }
 
 RawProbeDefinition draft22_subscribe_location_range_probe(std::chrono::milliseconds deadline,
                                                           std::vector<std::vector<std::byte>> track_namespace,

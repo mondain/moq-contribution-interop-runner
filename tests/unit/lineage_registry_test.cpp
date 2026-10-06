@@ -1,10 +1,9 @@
 #include "moq/interop/app/lineage.h"
 #include "moq/interop/app/scenario_registry.h"
 
-#include <algorithm>
-
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 

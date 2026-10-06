@@ -254,9 +254,9 @@ std::vector<Bytes> fetch_requests() {
             b({0x16, 0, 9, 9, 1, 1, 'n', 1, 't', 1, 0x21, 0x05})};
 }
 
-// FETCH_OK with End Location {group, object}; REQUEST_ERROR INVALID_RANGE.
+// FETCH_OK with End Location {group, object}; REQUEST_ERROR INVALID_RANGE (0x11, Section 12.3).
 Bytes fetch_ok(unsigned group, unsigned object) { return b({0x18, 0, 4, 0, group, object, 0}); }
-Bytes invalid_range() { return b({5, 0, 3, 0x05, 0, 0}); }
+Bytes invalid_range() { return b({5, 0, 3, 0x11, 0, 0}); }
 
 // FETCH data stream: FETCH_HEADER for `request_id`, then Objects of Group 7 in Ascending order.
 Bytes fetch_stream(unsigned request_id, const std::vector<unsigned>& objects) {
@@ -470,6 +470,35 @@ TEST(Draft22LocationRangeLive, Row069FailsWhenOnlyTheFetchDeviates) {
     const auto run = run_row(conforming_subscribe(), conforming_update(), fetch);
     ASSERT_EQ(run.state, storage::RunState::Finalized);
     EXPECT_EQ(state_of(run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
+}
+
+// One Track Alias for all five subscriptions (Section 3.1 allows it), Largest Object {7, 9}.
+std::vector<Bytes> shared_subscribe_oks() {
+    return {subscribe_ok(1), subscribe_ok(1), subscribe_ok(1), subscribe_ok(1), subscribe_ok(1)};
+}
+
+TEST(Draft22LocationRangeLive, FilterIgnoringPublisherOnOneAliasDoesNotPass) {
+    // Every Object goes to all five subscriptions, past the 0x03 and 0x04 ends: no copy can be shown to be
+    // outside every range carrying the alias, so the verdict is none (never a pass).
+    std::vector<Bytes> data;
+    for (int copy = 0; copy < 5; ++copy) {
+        data.push_back(subgroup(1, 7, {9, 10}));
+        data.push_back(subgroup(1, 8, {4}));
+    }
+    const auto played = run_subscribe({shared_subscribe_oks(), data});
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{std::nullopt}));
+    EXPECT_EQ(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::NotRun);
+}
+
+TEST(Draft22LocationRangeLive, ConformingPublisherOnOneAliasIsNotFailed) {
+    // Each Object once per matching subscription: {7, 0} to 0x01, {7, 9} to 0x01..0x04.
+    std::vector<Bytes> data{subgroup(1, 7, {0})};
+    for (int copy = 0; copy < 4; ++copy) data.push_back(subgroup(1, 7, {9}));
+    const auto played = run_subscribe({shared_subscribe_oks(), data});
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{std::nullopt}));
+    EXPECT_NE(state_of(played.run, "D22-3-3-1-MUST-NOT-069"), requirements::OutcomeState::Fail);
 }
 
 }  // namespace

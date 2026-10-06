@@ -205,19 +205,65 @@ TEST_F(Draft22LocationRange, RelativeRangesFollowTheReportedLargestObject) {
               std::optional<bool>{true});
 }
 
-TEST_F(Draft22LocationRange, ASharedAliasIsJudgedAgainstEverySubscriptionCarryingIt) {
+// One Track Alias for all five subscriptions (Section 3.1 allows it). With Largest Object {7, 9} the ranges
+// are 0x01 {7, 0}.., 0x02 {7, 9}.., 0x03 {7, 9}..{7, max}, 0x04 {7, 9}..{7, 9}, 0x05 {7, 10}..
+std::vector<Bytes> shared_oks() {
+    return {subscribe_ok(1), subscribe_ok(1), subscribe_ok(1), subscribe_ok(1), subscribe_ok(1)};
+}
+
+TEST_F(Draft22LocationRange, ASharedAliasFailsOnlyAnObjectThatFitsNoSubscriptionCarryingIt) {
     const auto p = subscribe_probe();
-    const std::vector<Bytes> shared{subscribe_ok(1), subscribe_ok(1), subscribe_ok(1), subscribe_ok(1),
-                                    subscribe_ok(1)};
-    // {7, 0} fits only 0x01, {8, 4} only the open-ended Types: each belongs to some subscription.
-    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared, {{1, 7, {0, 9}}, {1, 8, {4}}})),
-              std::optional<bool>{true});
-    // {6, 9} fits none of them.
-    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared, {{1, 7, {9}}, {1, 6, {9}}})),
+    // {6, 9} fits none of the ranges.
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared_oks(), {{1, 7, {9}}, {1, 6, {9}}})),
               std::optional<bool>{false});
-    // Objects of another alias belong to no subscription of this probe.
-    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared, {{1, 7, {9}}, {9, 6, {9}}})),
-              std::optional<bool>{true});
+}
+
+TEST_F(Draft22LocationRange, ASharedAliasWithDifferentRangesNeverPasses) {
+    const auto p = subscribe_probe();
+    // A filter-ignoring publisher sends {7, 10} and {8, 4} to the 0x03 and 0x04 subscriptions too (past their
+    // ends). On one alias every copy also fits an open-ended range, so no copy can be shown to be outside: the
+    // scenario settles without a verdict instead of passing.
+    std::vector<Delivery> ignoring;
+    for (int copy = 0; copy < 5; ++copy) {
+        ignoring.push_back({1, 7, {9, 10}});
+        ignoring.push_back({1, 8, {4}});
+    }
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared_oks(), ignoring)), std::nullopt);
+    // A conforming publisher on one alias sends each Object once per matching subscription: {7, 0} to 0x01
+    // only, {7, 9} to 0x01..0x04, {8, 4} to 0x01, 0x02 and 0x05. It is not failed, and (the evidence cannot
+    // tell it from the publisher above) not passed either.
+    std::vector<Delivery> conforming_shared{{1, 7, {0}}};
+    for (int copy = 0; copy < 4; ++copy) conforming_shared.push_back({1, 7, {9}});
+    for (int copy = 0; copy < 3; ++copy) conforming_shared.push_back({1, 8, {4}});
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, shared_oks(), conforming_shared)),
+              std::nullopt);
+    // Two aliases, each carrying subscriptions with different ranges: still no pass.
+    const std::vector<Bytes> pairs{subscribe_ok(1), subscribe_ok(2), subscribe_ok(3), subscribe_ok(3), subscribe_ok(1)};
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, pairs, conforming())), std::nullopt);
+}
+
+TEST_F(Draft22LocationRange, AnAliasAnnouncedInAPublishIsNotJudgedAgainstTheseRanges) {
+    const auto p = subscribe_probe();
+    // PUBLISH (0x1d) on the publisher's request stream 0: Request ID 0, track (n)/t, Track Alias 4, no
+    // parameters. Its subscription shares alias 4 with the 0x04 subscription.
+    const auto publish = b({0x1d, 0, 8, 0, 1, 1, 'n', 1, 't', 4, 0});
+    auto deliveries = conforming();
+    deliveries.push_back({4, 7, {12}});
+    auto t = subscribed(p, distinct_oks(), deliveries);
+    t.events.insert(t.events.begin() + 2, transport::StreamDataEvent{0, publish, false});
+    for (auto& write : t.writes) ++*write.delivery_event_count;
+    ++*t.delivery_event_count;
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(t), std::nullopt);
+    // Without the PUBLISH the same Object fails the 0x04 subscription.
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(subscribed(p, distinct_oks(), deliveries)),
+              std::optional<bool>{false});
+    // Other aliases are still judged.
+    deliveries.push_back({2, 7, {8}});
+    auto other = subscribed(p, distinct_oks(), deliveries);
+    other.events.insert(other.events.begin() + 2, transport::StreamDataEvent{0, publish, false});
+    for (auto& write : other.writes) ++*write.delivery_event_count;
+    ++*other.delivery_event_count;
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(other), std::optional<bool>{false});
 }
 
 TEST_F(Draft22LocationRange, MissingOrInsufficientEvidenceHasNoVerdict) {
@@ -623,6 +669,17 @@ TEST_F(Draft22LocationRange, FetchResponseReadyStopsOnceEveryFetchSettledOrOnAVi
     EXPECT_TRUE(p.response_ready(fetched(p, fetch_answers(), fetch_conforming())));
     open[1].objects = {{7, 8}};
     EXPECT_TRUE(p.response_ready(fetched(p, fetch_answers(), open)));
+}
+
+TEST_F(Draft22LocationRange, UpdatedSubscriptionsSharingAnAliasNeverPass) {
+    const auto u = update_probe();
+    std::vector<Delivery> ignoring;
+    for (int copy = 0; copy < 5; ++copy) ignoring.push_back({1, 7, {9, 10}});
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(updated(u, shared_oks(), acknowledged(), ignoring)),
+              std::nullopt);
+    EXPECT_EQ(evaluate_draft22_subscription_location_range(
+                  updated(u, shared_oks(), acknowledged(), {{1, 7, {9}}, {1, 6, {9}}})),
+              std::optional<bool>{false});
 }
 
 }  // namespace
