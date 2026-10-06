@@ -93,6 +93,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_location_filter_unknown_type_probe(
                  execution.timeout, std::move(track.name_space), std::move(track.name));
          }},
+        {scenarios::kDraft22LocationFilterAbsoluteOrigin, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_location_filter_absolute_origin_probe(
+                 execution.timeout, std::move(track.name_space), std::move(track.name));
+         }},
     };
     return table;
 }
@@ -119,6 +124,9 @@ const std::vector<UnscoredEvaluator22>& unscored_evaluators() {
     static const std::vector<UnscoredEvaluator22> table{
         {scenarios::kDraft22LocationFilterUnknownType,
          {scenarios::kDraft22LocationFilterUnknownTypeEvaluator, scenarios::evaluate_draft22_location_filter_unknown_type}},
+        {scenarios::kDraft22LocationFilterAbsoluteOrigin,
+         {scenarios::kDraft22LocationFilterAbsoluteOriginEvaluator,
+          scenarios::evaluate_draft22_location_filter_absolute_origin}},
     };
     return table;
 }

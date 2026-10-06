@@ -206,6 +206,30 @@ TEST_F(Draft22LocationFilterProbes, UnknownTypeProbeSendsType6WithNoFields) {
     EXPECT_THROW(unknown_type_probe(), std::logic_error);
 }
 
+// ------------------------------------------------------------------ unscored: Absolute {0, 0}
+
+RawProbeDefinition absolute_origin_probe(std::chrono::milliseconds deadline = 1000ms) {
+    return draft22_location_filter_absolute_origin_probe(deadline, {b({'n'})}, b({'t'}));
+}
+
+TEST_F(Draft22LocationFilterProbes, AbsoluteOriginProbeSendsType2ZeroZeroFromTheEncoder) {
+    const auto p = absolute_origin_probe();
+    EXPECT_EQ(p.id, kDraft22LocationFilterAbsoluteOrigin);
+    ASSERT_EQ(p.writes.size(), 1u);
+    // SUBSCRIBE, Length 11: Request ID 1, (n), t, one parameter: 0x21, Type 02, StartGroup 0, StartObject 0.
+    EXPECT_EQ(hex(p.writes[0].bytes), "03" "000b" "01" "01016e" "0174" "01" "21" "02" "00" "00");
+    wire::ByteWriter output(16);
+    ASSERT_FALSE(d22::encode_location_filter({d22::LocationFilterType::Absolute, 0, 0, {}, {}}, output));
+    EXPECT_EQ(Bytes(output.bytes().begin(), output.bytes().end()), b({2, 0, 0}));
+    const auto decoded = decode(b({2, 0, 0}));
+    ASSERT_TRUE(std::holds_alternative<d22::LocationFilter>(decoded));
+    EXPECT_EQ(std::get<d22::LocationFilter>(decoded).type, d22::LocationFilterType::Absolute)
+        << "not Next Object (Type 05), which the draft 21 field list {0, 0} meant";
+    EXPECT_FALSE(p.liveness.has_value());
+    const ScopedWireDraft wire21(21);
+    EXPECT_THROW(absolute_origin_probe(), std::logic_error);
+}
+
 // ------------------------------------------------------------------ recorded sessions
 
 class ScriptedPeer : public transport::SessionTransport {
@@ -427,6 +451,93 @@ TEST_F(UnknownTypeVerdicts, OnlyItsOwnScenarioIsJudged) {
     auto altered = done;
     altered.writes[0].write.bytes.back() = std::byte{0x07};
     EXPECT_FALSE(verdict(altered).has_value());
+    const ScopedWireDraft wire21(21);
+    EXPECT_FALSE(verdict(done).has_value());
+}
+
+// Subgroup stream (Section 11.3, the draft 21 format): flags 0x30 (Subgroup ID 0, default priority), alias,
+// group, then Objects (delta-encoded ID, length 1, payload 'x').
+Bytes subgroup(unsigned alias, unsigned group, const std::vector<unsigned>& object_ids) {
+    Bytes result = b({0x30, alias, group});
+    unsigned previous = 0;
+    bool first = true;
+    for (const auto id : object_ids) {
+        result.push_back(static_cast<std::byte>(first ? id : id - previous - 1));
+        result.push_back(std::byte{1});
+        result.push_back(std::byte{'x'});
+        previous = id;
+        first = false;
+    }
+    return result;
+}
+
+const Bytes kSubscribeOkAlias1 = b({4, 0, 2, 1, 0});
+
+class AbsoluteOriginVerdicts : public ::testing::Test {
+protected:
+    ScopedWireDraft wire{22};
+    static std::optional<bool> verdict(const RawProbeTranscript& t) {
+        return evaluate_draft22_location_filter_absolute_origin(t);
+    }
+    // The publisher answers with `answer`, then sends `streams` (peer unidirectional 6, 10, ...), and the
+    // window ends.
+    static RawProbeTranscript played(const Bytes& answer, const std::vector<Bytes>& streams) {
+        Session session(absolute_origin_probe());
+        session.poll(0ms);
+        if (!answer.empty()) session.send(transport::StreamDataEvent{kStimulus, answer, false});
+        transport::StreamId stream = 6;
+        for (const auto& bytes : streams) {
+            session.send(transport::StreamDataEvent{stream, bytes, true});
+            stream += 4;
+        }
+        session.poll(10ms);
+        auto end = session.poll(1001ms);
+        EXPECT_TRUE(end.timed_out);
+        return end;
+    }
+};
+
+TEST_F(AbsoluteOriginVerdicts, AcceptedAndDeliveringFromTheOriginPasses) {
+    EXPECT_EQ(verdict(played(kSubscribeOkAlias1, {subgroup(1, 0, {0, 1})})), std::optional<bool>{true});
+    // Any delivered Object is inside a range from {0, 0}.
+    EXPECT_EQ(verdict(played(kSubscribeOkAlias1, {subgroup(1, 7, {9})})), std::optional<bool>{true});
+}
+
+TEST_F(AbsoluteOriginVerdicts, NoDeliveryOrNoAcceptanceIsNotJudged) {
+    EXPECT_FALSE(verdict(played(kSubscribeOkAlias1, {})).has_value()) << "accepted, nothing delivered";
+    EXPECT_FALSE(verdict(played(kSubscribeOkAlias1, {subgroup(2, 0, {0})})).has_value()) << "another alias";
+    EXPECT_FALSE(verdict(played(kSubscribeOkAlias1, {b({0x30, 1, 0})})).has_value()) << "a header, no Object";
+    EXPECT_FALSE(verdict(played(b({5, 0, 3, 0x10, 0, 0}), {subgroup(1, 0, {0})})).has_value()) << "REQUEST_ERROR";
+    EXPECT_FALSE(verdict(played({}, {subgroup(1, 0, {0})})).has_value()) << "unanswered";
+}
+
+TEST_F(AbsoluteOriginVerdicts, AProtocolViolationCloseFailsAndOtherClosesAreNotJudged) {
+    const auto close_after = [](std::chrono::milliseconds after, std::uint64_t code, bool accepted) {
+        Session session(absolute_origin_probe());
+        session.poll(0ms);
+        if (accepted) session.send(transport::StreamDataEvent{kStimulus, kSubscribeOkAlias1, false});
+        session.close(code);
+        return verdict(session.poll(after));
+    };
+    EXPECT_EQ(close_after(10ms, 0x3, false), std::optional<bool>{false}) << "a valid filter read as malformed";
+    EXPECT_EQ(close_after(10ms, 0x3, true), std::optional<bool>{false});
+    EXPECT_FALSE(close_after(10ms, 0x1, false).has_value()) << "INTERNAL_ERROR says nothing about the filter";
+    EXPECT_FALSE(close_after(10ms, 0x0, true).has_value());
+    EXPECT_FALSE(close_after(1600ms, 0x3, false).has_value()) << "beyond the reaction window";
+}
+
+TEST_F(AbsoluteOriginVerdicts, AnUnprovenOrForeignTranscriptIsNotJudged) {
+    const auto done = played(kSubscribeOkAlias1, {subgroup(1, 0, {0})});
+    ASSERT_EQ(verdict(done), std::optional<bool>{true});
+    auto altered = done;
+    altered.writes[0].write.bytes.back() = std::byte{1};  // StartObject 1: not the origin
+    EXPECT_FALSE(verdict(altered).has_value());
+    auto other = done;
+    other.scenario_id = std::string(kDraft22LocationFilterUnknownType);
+    EXPECT_FALSE(verdict(other).has_value());
+    auto failed = done;
+    failed.harness_failed = true;
+    EXPECT_FALSE(verdict(failed).has_value());
     const ScopedWireDraft wire21(21);
     EXPECT_FALSE(verdict(done).has_value());
 }

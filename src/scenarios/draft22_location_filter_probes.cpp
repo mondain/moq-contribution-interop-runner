@@ -5,11 +5,15 @@
 #include "moq/interop/scenarios/fetch_first_object.h"
 #include "moq/interop/scenarios/raw_probe_liveness.h"
 #include "moq/interop/scenarios/wire_draft.h"
+#include "moq/interop/wire/draft21/objects.h"
+#include "moq/interop/wire/draft22/location_filter.h"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 
 namespace moq::interop::scenarios {
 namespace {
@@ -18,6 +22,7 @@ using namespace d22support;
 
 // Section 9 message type and Section 9.20 parameter types.
 constexpr std::uint64_t kSubscribe = 0x03;
+constexpr std::uint64_t kSubscribeOk = 0x04;
 constexpr std::uint64_t kLocationFilter = 0x21;
 constexpr std::uint64_t kFillParameters = 0x23;
 // Section 16.11.1: the session close code the row requires.
@@ -64,6 +69,15 @@ bool overflow(std::string_view id) {
     return id == kDraft22LocationFilterOverflow || id == kDraft22FillLocationFilterOverflow;
 }
 
+// Absolute Start (Type 0x02) {StartGroup 0, StartObject 0}, built by the draft 22 encoder. No draft 21 field
+// list can express it ({0, 0} there is Next Object), so filter_param_value cannot either.
+Bytes absolute_origin() {
+    wire::ByteWriter writer(16);
+    const wire::draft22::LocationFilter filter{wire::draft22::LocationFilterType::Absolute, 0, 0, {}, {}};
+    if (wire::draft22::encode_location_filter(filter, writer)) throw std::logic_error("absolute origin filter");
+    return {writer.bytes().begin(), writer.bytes().end()};
+}
+
 // The LOCATION_FILTER value the scenario sends.
 Bytes filter_value(std::string_view id) {
     if (id == kDraft22LocationFilterUnknownType) {
@@ -71,6 +85,7 @@ Bytes filter_value(std::string_view id) {
         integer(value, kUndefinedType);
         return value;
     }
+    if (id == kDraft22LocationFilterAbsoluteOrigin) return absolute_origin();
     return draft22_overflow_filter_value(id);
 }
 
@@ -177,6 +192,58 @@ std::optional<bool> evaluate_draft22_location_filter_overflow(const RawProbeTran
 std::optional<bool> evaluate_draft22_location_filter_unknown_type(const RawProbeTranscript& t) {
     if (t.scenario_id != kDraft22LocationFilterUnknownType) return std::nullopt;
     return judge_close(t);
+}
+
+RawProbeDefinition draft22_location_filter_absolute_origin_probe(std::chrono::milliseconds deadline,
+                                                                 std::vector<std::vector<std::byte>> track_namespace,
+                                                                 std::vector<std::byte> track_name) {
+    return build(kDraft22LocationFilterAbsoluteOrigin, deadline,
+                 fixture_of(std::move(track_namespace), std::move(track_name)));
+}
+
+std::optional<bool> evaluate_draft22_location_filter_absolute_origin(const RawProbeTranscript& t) {
+    if (t.scenario_id != kDraft22LocationFilterAbsoluteOrigin) return std::nullopt;
+    if (current_wire_draft() != 22 || t.writes.empty() || t.harness_failed) return std::nullopt;
+    const auto fixture = recover_fixture(t.writes.front().write.bytes, kSubscribe, request_id(0));
+    if (!fixture) return std::nullopt;
+    const auto expected = build(t.scenario_id, kRebuildDeadline, *fixture);
+    // A session close: the publisher failed the probe only when it closed with PROTOCOL_VIOLATION in reaction
+    // to the request, i.e. it read a valid filter as malformed (Section 3.3.1: "A Location Filter on a
+    // subscription is always valid"). Any other close says nothing about the filter.
+    if (std::any_of(t.events.begin(), t.events.end(), [](const auto& event) {
+            return std::holds_alternative<transport::PeerCloseEvent>(event);
+        })) {
+        if (!raw_probe_stimulus_valid(t, expected)) return std::nullopt;
+        const auto close = observe_raw_probe_close(t, expected);
+        if (close && close->error_code == kProtocolViolation) return false;
+        return std::nullopt;
+    }
+    // No close: the window must have ended on a proven stimulus.
+    const auto proven = prove(t, expected, true);
+    if (!proven || !proven->ended) return std::nullopt;
+    const auto& prefix = proven->prefix;
+    const auto collected = collect(prefix.events);
+    if (!collected.bounded) return std::nullopt;
+    // Accepted: the first answer is SUBSCRIBE_OK, whose first field is the Track Alias (Section 9.7).
+    const auto response = response_of(prefix, collected, 0);
+    if (!response.stream || response.messages.malformed || response.messages.complete.empty() ||
+        response.messages.complete.front().type != kSubscribeOk)
+        return std::nullopt;
+    wire::Cursor body(response.messages.complete.front().body);
+    const auto alias = number(body);
+    if (!alias) return std::nullopt;
+    // Delivered: a complete Object for that alias on a subgroup stream opened after the request (Section
+    // 11.3; draft 22 keeps the draft 21 data stream format). Every Location is inside a range that starts at
+    // {0, 0}, so no Object can be outside it.
+    const auto marker = *t.writes.front().delivery_event_count;
+    const auto control = control_stream(collected.streams);
+    for (const auto& [id, stream] : collected.streams) {
+        if ((id & 3u) != 2u || id == control || stream.first_event < marker) continue;
+        wire::draft21::SubgroupDecoder decoder;
+        const auto decoded = decoder.push(stream.bytes, false);
+        if (decoded.header && decoded.header->track_alias == *alias && !decoded.objects.empty()) return true;
+    }
+    return std::nullopt;
 }
 
 }  // namespace moq::interop::scenarios

@@ -51,9 +51,11 @@ inline constexpr auto kOwnScenarioTraits22 = std::to_array<OwnScenarioTraits22>(
 // "unscored_probe_verdict" event only, so scoring never sees them.
 inline constexpr auto kUnscoredProbeTraits22 = std::to_array<OwnScenarioTraits22>({
     {"d22-location-filter-unknown-type", true},
+    {"d22-location-filter-absolute-origin", true},
 });
 inline constexpr auto kUnscoredEvaluators22 = std::to_array<std::string_view>({
     "d22-location-filter-unknown-type-protocol-violation",
+    "d22-location-filter-absolute-origin-delivery",
 });
 
 inline bool unscored_probe_22(std::string_view id) {

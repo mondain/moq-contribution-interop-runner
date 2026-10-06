@@ -27,6 +27,7 @@ enum class Behaviour {
     CloseProtocolViolation,  // closes the session with PROTOCOL_VIOLATION (the row)
     CloseInternalError,      // closes the session with INTERNAL_ERROR
     Serve,                   // accepts the subscription and answers the follow-up SUBSCRIBE: keeps serving
+    Deliver,                 // accepts the subscription and sends Group 0 Objects 0 and 1
     Silent,                  // says nothing
 };
 
@@ -67,6 +68,11 @@ void play(const std::shared_ptr<storage::SqliteRunStore>& store, const app::RunI
             return follow_up && !follow_up->data.empty() && follow_up->data.front() == std::byte{3};
         })) << "the runner's follow-up SUBSCRIBE";
         EXPECT_TRUE(client->send_stream(request_stream(1), b({4, 0, 2, 2, 0}), false));
+        break;
+    case Behaviour::Deliver:
+        EXPECT_TRUE(client->send_stream(request_stream(0), subscribe_ok(), false));
+        // Subgroup stream (Section 11.3): flags 0x30, alias 1, Group 0, Objects 0 and 1 (one byte each).
+        EXPECT_TRUE(client->send_stream(6, b({0x30, 1, 0, 0, 1, 'x', 0, 1, 'y'}), true));
         break;
     case Behaviour::Silent:
         break;
@@ -252,6 +258,53 @@ TEST(Draft22LocationFilterProbesLive, AnUnscoredProbeNextToScoredScenariosLeaves
     EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true, true}));
     EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::Pass);
     expect_only_catalog_outcomes(played.run);
+}
+
+// SUBSCRIBE, Request ID 1, (n), t, LOCATION_FILTER Type 02 {0, 0}.
+const Bytes kAbsoluteOrigin = b({3, 0, 11, 1, 1, 1, 'n', 1, 't', 1, 0x21, 2, 0, 0});
+
+Played run_absolute_origin(Behaviour behaviour) {
+    return run({std::string(scenarios::kDraft22LocationFilterAbsoluteOrigin)}, {behaviour});
+}
+
+TEST(Draft22LocationFilterProbesLive, AbsoluteOriginProbeIsExecutableButUnscored) {
+    const auto id = scenarios::kDraft22LocationFilterAbsoluteOrigin;
+    EXPECT_TRUE(app::unscored_probe_22(id));
+    EXPECT_TRUE(app::executable_scenario(22, id));
+    EXPECT_TRUE(app::raw_probe_scenario(22, id));
+    EXPECT_TRUE(app::scenario_requires_track(22, id));
+}
+
+TEST(Draft22LocationFilterProbesLive, AbsoluteOriginAcceptedAndDeliveredIsRecordedAsAPass) {
+    const auto played = run_absolute_origin(Behaviour::Deliver);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    EXPECT_EQ(played.written, std::vector<Bytes>{kAbsoluteOrigin});
+    EXPECT_FALSE(harness_error(played.run));
+    const auto verdicts = unscored_verdicts(played.run, scenarios::kDraft22LocationFilterAbsoluteOrigin);
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_TRUE(verdicts.front().starts_with(
+        "evaluator=d22-location-filter-absolute-origin-delivery verdict=pass scored=false"))
+        << verdicts.front();
+    expect_only_catalog_outcomes(played.run);
+}
+
+TEST(Draft22LocationFilterProbesLive, AbsoluteOriginReadAsMalformedIsRecordedAsAFail) {
+    const auto played = run_absolute_origin(Behaviour::CloseProtocolViolation);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    const auto verdicts = unscored_verdicts(played.run, scenarios::kDraft22LocationFilterAbsoluteOrigin);
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_NE(verdicts.front().find(" verdict=fail "), std::string::npos) << verdicts.front();
+    expect_only_catalog_outcomes(played.run);
+    EXPECT_TRUE(std::none_of(played.run.outcomes.begin(), played.run.outcomes.end(),
+                             [](const auto& outcome) { return outcome.state == requirements::OutcomeState::Fail; }));
+}
+
+TEST(Draft22LocationFilterProbesLive, AbsoluteOriginWithoutDeliveryIsNotRun) {
+    const auto played = run_absolute_origin(Behaviour::Silent);
+    ASSERT_EQ(played.run.state, storage::RunState::Finalized);
+    const auto verdicts = unscored_verdicts(played.run, scenarios::kDraft22LocationFilterAbsoluteOrigin);
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_NE(verdicts.front().find(" verdict=not_run "), std::string::npos) << verdicts.front();
 }
 
 }  // namespace

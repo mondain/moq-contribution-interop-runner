@@ -17,6 +17,9 @@
 // run events and never scored.
 // - d22-location-filter-unknown-type: Section 9.20.9 "Any other Location Filter Type is a
 //   PROTOCOL_VIOLATION" (no BCP 14 keyword, hence no row).
+// - d22-location-filter-absolute-origin: Absolute Start (Type 0x02) {0, 0}, a filter only draft 22 can
+//   express (the draft 21 field list {0, 0} is Next Object); Section 3.3.1 "A Location Filter on a
+//   subscription is always valid".
 //
 // Probes are built on the draft 22 wire only; building one on another wire throws std::logic_error. The
 // evaluators judge nothing on another wire.
@@ -38,6 +41,9 @@ inline constexpr std::string_view kDraft22LocationFilterOverflowEvaluator =
 inline constexpr std::string_view kDraft22LocationFilterUnknownType = "d22-location-filter-unknown-type";
 inline constexpr std::string_view kDraft22LocationFilterUnknownTypeEvaluator =
     "d22-location-filter-unknown-type-protocol-violation";
+inline constexpr std::string_view kDraft22LocationFilterAbsoluteOrigin = "d22-location-filter-absolute-origin";
+inline constexpr std::string_view kDraft22LocationFilterAbsoluteOriginEvaluator =
+    "d22-location-filter-absolute-origin-delivery";
 
 // The LOCATION_FILTER value an overflow scenario sends (the bytes after the parameter's type delta): Type
 // 0x03 {StartGroup 2^64 - 1, StartObject 0, EndGroupDelta 1} at the top level, Type 0x04 {2^64 - 1, 0, 1,
@@ -78,5 +84,21 @@ RawProbeDefinition draft22_location_filter_unknown_type_probe(std::chrono::milli
 // PROTOCOL_VIOLATION within the reaction window, false for one with any other code there, no value otherwise
 // (in particular a publisher that never closes: without the follow-up nothing proves it kept serving).
 std::optional<bool> evaluate_draft22_location_filter_unknown_type(const RawProbeTranscript& transcript);
+
+// Unscored. One session: a SUBSCRIBE (Request ID 1) for the track whose only parameter is LOCATION_FILTER
+// Type 0x02 {0, 0}, written by wire::draft22::encode_location_filter (bytes 21 02 00 00). FORWARD is left at
+// its default, so the publisher delivers.
+RawProbeDefinition draft22_location_filter_absolute_origin_probe(std::chrono::milliseconds deadline,
+                                                                 std::vector<std::vector<std::byte>> track_namespace,
+                                                                 std::vector<std::byte> track_name);
+
+// Verdict of d22-location-filter-absolute-origin-delivery (unscored): true when the window ended with no
+// session close, the request was answered with SUBSCRIBE_OK and at least one complete Object arrived for its
+// Track Alias; false when the publisher closed the session with PROTOCOL_VIOLATION in reaction to the request
+// (it read a valid filter as malformed). No value otherwise: a REQUEST_ERROR, no Object in the window, any
+// other close, an unproven stimulus, another scenario or wire. Whether the publisher also delivers Objects
+// before the Next Object (what tells {0, 0} from Next Object) is its choice and is not judged: a subscription
+// carries Objects as they are published, and only a publisher that still sends earlier ones shows it.
+std::optional<bool> evaluate_draft22_location_filter_absolute_origin(const RawProbeTranscript& transcript);
 
 }  // namespace moq::interop::scenarios
