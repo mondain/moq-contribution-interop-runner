@@ -5,6 +5,7 @@
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/app/unscored_probe_event_22.h"
 
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
@@ -925,9 +926,10 @@ public:
                 if (identity_draft(plan) == DraftVersion::Draft22) {
                     if (const auto unscored = evaluate_unscored_probe_22(completed)) {
                         const char* verdict = !unscored->verdict ? "not_run" : *unscored->verdict ? "pass" : "fail";
-                        append_context_event(worker, plan, current_id, "unscored_probe_verdict",
-                            "evaluator=" + std::string(unscored->evaluator) + " verdict=" + verdict +
-                            " scored=false (no catalog row names this probe)");
+                        // The detail keeps its earlier prefix and adds the reason, in the format the HTTP layer
+                        // reads back as the event's structured verdict and reason (unscored_probe_event_22.h).
+                        append_context_event(worker, plan, current_id, kUnscoredProbeVerdictEvent,
+                            unscored_probe_detail_22(unscored->evaluator, verdict, unscored->reason));
                     }
                 }
                 if (operational_error || worker->stop_requested) {

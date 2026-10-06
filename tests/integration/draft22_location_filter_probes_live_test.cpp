@@ -3,6 +3,7 @@
 // production NativeRunManager on moqt-22.
 #include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/app/unscored_probe_event_22.h"
 #include "moq/interop/scenarios/draft22_location_filter_probes.h"
 #include "support/draft22_own_live.h"
 
@@ -196,6 +197,15 @@ std::vector<std::string> unscored_verdicts(const storage::RunRecord& run, std::s
     return details;
 }
 
+// The detail carries the verdict and a nonempty reason in the structured format the HTTP layer reads back.
+void expect_structured(const std::string& detail, std::string_view verdict) {
+    const auto fields = app::parse_unscored_probe_detail_22(detail);
+    ASSERT_TRUE(fields) << detail;
+    EXPECT_EQ(fields->verdict, verdict) << detail;
+    EXPECT_FALSE(fields->reason.empty()) << detail;
+    EXPECT_EQ(fields->reason.find("ordinal="), std::string::npos) << detail;
+}
+
 // Every outcome is a catalog row's, so scoring never sees an unscored probe.
 void expect_only_catalog_outcomes(const storage::RunRecord& run) {
     std::set<std::string> rows;
@@ -225,6 +235,7 @@ TEST(Draft22LocationFilterProbesLive, UnknownTypeClosedWithProtocolViolationIsRe
         "evaluator=d22-location-filter-unknown-type-protocol-violation verdict=pass scored=false"))
         << verdicts.front();
     EXPECT_TRUE(verdicts.front().ends_with(" ordinal=1")) << "stamped with its own context";
+    expect_structured(verdicts.front(), "pass");
     expect_only_catalog_outcomes(played.run);
     EXPECT_TRUE(played.verdicts.empty()) << "the row 424 evaluator is never asked about the probe";
     EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::NotRun);
@@ -237,6 +248,7 @@ TEST(Draft22LocationFilterProbesLive, UnknownTypeClosedWithAnotherCodeFailsNoRow
     const auto verdicts = unscored_verdicts(played.run, scenarios::kDraft22LocationFilterUnknownType);
     ASSERT_EQ(verdicts.size(), 1u);
     EXPECT_NE(verdicts.front().find(" verdict=fail "), std::string::npos) << verdicts.front();
+    expect_structured(verdicts.front(), "fail");
     expect_only_catalog_outcomes(played.run);
     EXPECT_TRUE(std::none_of(played.run.outcomes.begin(), played.run.outcomes.end(),
                              [](const auto& outcome) { return outcome.state == requirements::OutcomeState::Fail; }))
@@ -255,6 +267,7 @@ TEST(Draft22LocationFilterProbesLive, AnUnscoredProbeNextToScoredScenariosLeaves
     ASSERT_EQ(verdicts.size(), 1u);
     EXPECT_NE(verdicts.front().find(" verdict=not_run "), std::string::npos) << verdicts.front();
     EXPECT_TRUE(verdicts.front().ends_with(" ordinal=2")) << verdicts.front();
+    expect_structured(verdicts.front(), "not_run");
     EXPECT_EQ(played.verdicts, (std::vector<std::optional<bool>>{true, true}));
     EXPECT_EQ(state_of(played.run, kRow), requirements::OutcomeState::Pass);
     expect_only_catalog_outcomes(played.run);
