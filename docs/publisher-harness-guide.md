@@ -173,7 +173,7 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled adapters (`adapters/moqxr`, `adapters/moq5`) support drafts 18 and 21 only and refuse a draft 22 request (exit 64) |
+| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter") |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -182,6 +182,25 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `log_dir` | string | Absolute directory for this context's request file and logs |
 | `scenario_timeout_ms` | integer | The scenario's deadline (the run's `timeout_ms`) |
 | `process_timeout_ms` | integer | Hard limit for the process: `scenario_timeout_ms` plus 1000 |
+
+For a draft 22 request, the bundled moqxr adapter gives a scenario shared with draft 21
+(`d22-X` paired with `d21-X`) exactly the moqxr options of `d21-X`, with `--draft 22`.
+The draft 22 own scenarios and the two unscored probes have no draft 21 twin; their
+options are listed in `adapters/moqxr/run.sh` and pinned by
+`tests/golden/moqxr-cmdlines-d22.txt` (timeout+3 is the scenario timeout plus 3 seconds):
+
+| `d22-` scenario | moqxr options | Mirrors |
+|---|---|---|
+| `subscribe-bounded-location-range` | `--forward 1` | `d21-subscribe-bounded-location-range` |
+| `update-subscription-location-range` | `--forward 0 --paced`, timeout+3 | `d21-update-subscription-location-range` |
+| `fetch-bounded-location-range` | `--forward 1` | `d21-fetch-first-object-flags` |
+| `discover-original-publisher-namespaces` | `--forward 1` | `d21-discover-original-publisher-namespaces` |
+| `publisher-location-filter-parameter` | `--forward 1` | `d21-publisher-parameter-serialization` |
+| `request-stream-before-peer-setup` | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
+| `location-filter-end-group-overflow` | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
+| `fill-location-filter-end-group-overflow` | `--forward 1` | `d21-fill-location-filter-end-group-overflow` |
+| `location-filter-unknown-type` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-location-filter-end-group-overflow` |
+| `location-filter-absolute-origin` (unscored) | `--forward 0 --paced`, timeout+3 | `d21-successful-subscribe-response` |
 
 A real request file from a run:
 

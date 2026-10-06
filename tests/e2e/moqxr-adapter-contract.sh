@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft22.err"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft23.err" "$test_dir/moq5.err"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -59,6 +59,8 @@ check_case 18 native_quic 0
 check_case 21 native_quic 1
 check_case 18 webtransport 0
 check_case 21 webtransport 1
+check_case 22 native_quic 1
+check_case 22 webtransport 1
 
 # Scenarios in which the runner subscribes make moqxr await that SUBSCRIBE.
 make_request 21 webtransport 6d65646961 766964655f31 "$test_dir/ca cert.pem"
@@ -92,16 +94,40 @@ if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
     printf 'unsupported draft unexpectedly accepted\n' >&2
     exit 1
 fi
-# Draft 22 is in the driver contract, but moqxr does not speak it: the adapter refuses (exit 64) before
-# starting the publisher.
+# Draft 22 runs: the shared scenarios reuse their draft 21 options (a d22- id gets the options of its
+# d21- twin), and own scenarios have their own entries.
 make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d22-fill-fails-before-first-object"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+[[ "$output" == *"<--draft>"$'\n'"<22>"* ]]
+[[ "$output" == *"<--forward>"$'\n'"<0>"* && "$output" != *"<--paced>"* ]]
+make_request 22 webtransport 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d22-update-subscription-location-range"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+[[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
+# A draft the adapter does not list is refused (exit 64) before the publisher starts.
+make_request 23 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
 set +e
 MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
-    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft22.err"
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft23.err"
 status=$?
 set -e
-[[ "$status" -eq 64 ]] || { printf 'draft 22 request not refused (status %s)\n' "$status" >&2; exit 1; }
-grep -q 'moqxr adapter: unsupported or malformed request' "$test_dir/draft22.err"
+[[ "$status" -eq 64 ]] || { printf 'draft 23 request not refused (status %s)\n' "$status" >&2; exit 1; }
+grep -q 'moqxr adapter: unsupported or malformed request (supported drafts: 18, 21, 22)' "$test_dir/draft23.err"
+# The moq5 adapter does not speak draft 22: it refuses with a message that says so (exit 64).
+moq5_adapter="$root_dir/adapters/moq5/run.sh"
+make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+set +e
+MOQ5_MEDIA_SEND_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$moq5_adapter" >/dev/null 2>"$test_dir/moq5.err"
+status=$?
+set -e
+[[ "$status" -eq 64 ]] || { printf 'moq5 draft 22 request not refused (status %s)\n' "$status" >&2; exit 1; }
+grep -qx 'moq5 adapter: draft 22 is not supported by this adapter' "$test_dir/moq5.err"
 make_request 18 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem" \
     "https://127.0.0.1:4443/moq"
 if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
