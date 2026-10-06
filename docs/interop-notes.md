@@ -137,8 +137,10 @@ Requirement rows touched by the sweep:
   `d22-location-filter-absolute-origin` (SUBSCRIBE_OK and Objects).
 - WebTransport works at drafts 21 and 22 with this build. It scores like native QUIC
   except for the transport-specific rows: the four WebTransport SETUP rows pass on
-  WebTransport only, and `D22-11-MUST-488` (unknown datagram type) passes on native QUIC
-  only.
+  WebTransport only; `D22-9-1-1-MUST-307`, `D22-9-1-2-MUST-314` and `-315`, scored only by
+  the `d22-native-publisher-*` scenarios, pass on native QUIC and are not touched on
+  WebTransport; and `D22-11-MUST-488` (unknown datagram type) passes on native QUIC only
+  (its WebTransport run is confounded, see below).
 - Audit: `Required executable coverage: 170/170` (draft 22) and `173/173` (draft 21),
   `Static gate: PASS` on every database. The execution audit reports, at both drafts
   alike, one `run_error` and one `stored_score_mismatch` per `error` run and
@@ -192,7 +194,7 @@ defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0
 | T5 | b | `D22-9-5-1-MUST-357`, `-359`, `-360` (not_run) | `d22-failed-subscription-update-cleanup`, `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close` | The REQUEST_UPDATE meant to fail (`02 0006 03 01 03 02 02 00`: AUTHORIZATION TOKEN USE_ALIAS 0, never registered) is accepted on a SUBSCRIBE (REQUEST_OK `07 0004 01 09 00 01`) and ignored on SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS (no reply, no FIN). The update never fails, so the cleanup these rows require never comes due; the rows stay unscored | 3708-3709 (unknown alias), 4395-4401 | `D21-9-5-1-MUST-346`, `-348`, `-349` not_run (fixed names at draft 21) | Punch list D22-10 (unscored observation) |
 | T6 | b | `D22-11-5-1-MUST-541` (not_run) | `d22-inbound-padding-stream` | A padding stream (type 0x132B3E28) makes moqxr close with PROTOCOL_VIOLATION ("received unknown or malformed unidirectional stream type"); the row's evaluator scores only the liveness follow-up, so the close leaves it unscored | 2702, 6633-6647 | `D21-11-5-1-MUST-566` not_run (same close) | Punch list D22-03 |
 | T7 | b | `D22-9-5-MUST-356`, `D22-9-5-1-MUST-363` (not_run) | `d22-single-request-update-response`, `d22-coalesced-successful-update-responses`, `d22-coalesced-failed-update-response` | After an accepted SUBSCRIBE, a valid REQUEST_UPDATE (`02 0004 03 01 20 64`; three coalesced) followed by a TRACK_STATUS with FIN on a new request stream: moqxr closes 0x3 "request stream closed before a complete message" (its `read_request_stream_message`) and sends no REQUEST_OK. Which of the two requests triggers the close is not settled | 4304-4308, 4406-4408 | `D21-9-5-MUST-345`, `D21-9-5-1-MUST-352` not_run (same close) | Punch list D22-05 (medium confidence) |
-| T8 | b | `D22-4-2-MUST-110`, `D22-9-20-18-MUST-445`, `D22-9-5-MUST-355` (not_run) | `d22-discover-original-publisher-namespaces`; `d22-discovery-update-invalid-forward` (`d22-forward-value-two`, `-255` close 0x3 correctly); `d22-update-on-track-status`, `d22-responder-update-on-publish-namespace`, `d22-subscriber-update-on-publish` | Silence where the draft requires an answer or a close: no NAMESPACE for `media` after accepting SUBSCRIBE_NAMESPACE with the empty prefix; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS ignored; updates on TRACK_STATUS and on PUBLISH_NAMESPACE ignored. Silence is not proof, so the rows stay unscored | 1929-1931, 5613, 4302 | `D22-4-2-MUST-110` is a draft 22 row (no twin); `D21-9-20-19-MUST-460`, `D21-9-5-MUST-344` not_run | Punch list D22-06 (suspected) |
+| T8 | b | `D22-4-2-MUST-110`, `D22-9-20-18-MUST-445`, `D22-9-5-MUST-355` (not_run) | `d22-discover-original-publisher-namespaces`; `d22-discovery-update-invalid-forward` (`d22-forward-value-two`, `-255` close 0x3 correctly); `d22-update-on-track-status`, `d22-responder-update-on-publish-namespace`, `d22-subscriber-update-on-publish` | Silence where the draft requires an answer or a close: no NAMESPACE for `media` after accepting SUBSCRIBE_NAMESPACE with the empty prefix; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS ignored; a REQUEST_UPDATE on moqxr's own PUBLISH_NAMESPACE (after REQUEST_OK) ignored. Not evidence: `d22-update-on-track-status` is confounded by the open runner item below (fixed track "x"; moqxr did not answer even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED, so it probably never read that stream), and in `d22-subscriber-update-on-publish` (a permitted case) moqxr reset its PUBLISH streams before the update, so nothing was observed. Silence is not proof, so the rows stay unscored | 1929-1931, 5613, 4302 | `D22-4-2-MUST-110` is a draft 22 row (no twin); `D21-9-20-19-MUST-460`, `D21-9-5-MUST-344` not_run | Punch list D22-06 (suspected) |
 | T9 | b | `D22-9-2-MUST-340` (not_run) | `d22-publisher-goaway-alternate-uri` (error run) | GOAWAY with a New Session URI on the control stream: moqxr logs "received unknown or unsupported control-stream message" and closes 0x3 instead of migrating | 4129-4130 | `D21-9-2-MUST-329` not_run (same error) | Punch list D22-04 (M-19) |
 | T10 | c | `D22-13-MUST-568`, `D22-13-MUST-NOT-569`, `D22-13-MUST-NOT-576` (not_run) | `d22-grease-request-error` (+ `-grease-setup-options`, `-auth-token-type`, `-stop-sending`) | The runner rejects moqxr's PUBLISH with GREASE code 0x9d (`05 0004 80 9d 00 00`); moqxr resets the stream and ends the session with code 0. It ends the session after any refused PUBLISH, so whether it closed because of the unknown code cannot be told; the NO_ERROR close is unscored. The other three GREASE scenarios show no close | 7025-7039 | `D21-13-MUST-593`, `-NOT-594`, `-NOT-601` not_run | Expectation question (punch list D22-C1) |
 | T11 | d | `D22-8-6-MUST-267`, `D22-3-3-2-MUST-076`, `D22-9-20-12-MUST-425`, `D22-9-20-13-MUST-427`, `D22-9-20-14-MUST-429` (not_run) | range-filter delta overflow, duplicate range-filter key, priority filter, property-filter odd type | moqxr advertises no MAX_FILTER_RANGES (its SETUP carries only PATH and AUTHORITY); these probes wait for it, so the stimulus is never sent | 3535-3536, 1493-1494, 5421-5466 | twins not_run | None (optional capability) |
@@ -209,9 +211,16 @@ defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0
 | T22 | d | `D22-9-20-20-MUST-455`, `-456` (not_run) | `d22-namespace-prefix-update-overlap`, `d22-track-prefix-update-overlap`, `d22-discovery-update-independent-overlap-spaces` (error runs) | Need two prefixes accepted; moqxr refuses the second prefix `mediab` (DOES_NOT_EXIST "unsupported namespace prefix") and, on the SUBSCRIBE_TRACKS legs, exits | 5685-5686 | twins not_run | None (single-namespace publisher) |
 
 WebTransport: the same 78 rows less the four of T17 (pass there), plus
-`D22-11-MUST-488` (not_run on WebTransport, pass on native QUIC): moqxr closes on an
-unknown datagram type over native QUIC but not over WebTransport (lines 5955-5956;
-punch list D22-07, M-18 open). Category (b) on WebTransport is 16 rows.
+`D22-11-MUST-488` (not_run on WebTransport, pass on native QUIC). The WebTransport run of
+`d22-unknown-datagram-type` is confounded: the adapter runs it `--forward 1`, and moqxr
+sent its PUBLISH, reset it and closed with code 0 ("timed out waiting for stream data"),
+the own-PUBLISH timeout pattern, so its `not_run` is not a datagram observation. Over
+native QUIC the same flags still drew close 0x3 "invalid MOQT datagram". The finding
+rests on moqxr's source instead: the WebTransport client ignores incoming datagrams
+(`webtransport_client.cpp` lines 666-669 return 0 for `picohttp_callback_post_datagram`)
+while the native client validates them and closes with 0x3 (`picoquic_client.cpp` lines
+581-589); lines 5955-5956 require a close; punch list D22-07, M-18 open. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+Category (b) on WebTransport is 16 rows, that one by source.
 
 `D22-3-4-1-MUST-079` (`d22-cancel-subscription-with-concurrent-fill-streams`) is
 counted under T20 for this sweep: no fill stream appeared, so the cancellation was never
@@ -225,8 +234,13 @@ and `d22-update-on-track-status` still send a fixed request for namespace () and
 "x" (`03 0005 01 00 01 78 00`, `0d 0005 01 00 01 78 00`) on the draft 22 wire, and the
 first still runs moqxr `--forward 1`. Against moqxr the request-stream half of
 `D22-9-MUST-295` is therefore never exercised (moqxr refuses the unknown track or times
-out on its own PUBLISH); the row's FAIL comes from the control-message scenario. The
-draft 21 twins have the same fixed names (punch list, runner-side follow-ups).
+out on its own PUBLISH); the row's FAIL comes from the control-message scenario. It also
+weakens the evidence for T8 / punch list D22-06: the TRACK_STATUS leg of
+`D22-9-5-MUST-355` comes from `d22-update-on-track-status`, where moqxr answered nothing,
+not even the TRACK_STATUS, so that leg says nothing about update handling. The draft 21
+twins have the same fixed names (punch list, runner-side follow-ups). Likewise
+`d22-unknown-datagram-type` still runs `--forward 1`, which confounds its WebTransport
+run (above); a later adapter change could pace it as the other 14.
 
 ## Results observed with moqxr 0993cf7
 

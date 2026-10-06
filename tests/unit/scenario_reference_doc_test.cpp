@@ -41,21 +41,25 @@ std::vector<std::string> doc_lines() {
     return lines;
 }
 
-// The lines after `heading` up to the next heading of the same or a higher level.
+// The lines after `heading` up to the next heading of the same or a higher level. Lines inside a
+// fenced code block (``` or ~~~) are never headings, so a "# comment" in a shell block does not end
+// the section.
 std::vector<std::string> section(const std::vector<std::string>& lines, std::string_view heading) {
     const auto level = heading.find(' ');
-    const std::string stop(level, '#');
     std::vector<std::string> out;
     bool inside = false;
+    bool fenced = false;
     for (const auto& line : lines) {
-        if (line == heading) {
+        const bool fence = line.starts_with("```") || line.starts_with("~~~");
+        if (!fenced && line == heading) {
             inside = true;
             continue;
         }
-        if (inside && line.starts_with('#')) {
+        if (inside && !fenced && !fence && line.starts_with('#')) {
             const auto hashes = line.find_first_not_of('#');
             if (hashes != std::string::npos && hashes <= level && line[hashes] == ' ') break;
         }
+        if (fence) fenced = !fenced;
         if (inside) out.push_back(line);
     }
     return out;
@@ -85,10 +89,21 @@ std::vector<std::vector<std::string>> id_rows(const std::vector<std::string>& li
     std::vector<std::vector<std::string>> rows;
     for (const auto& line : lines) {
         if (!line.starts_with("| `d22-")) continue;
+        // Split on unescaped pipes; an escaped "\|" stays inside its cell.
         std::vector<std::string> cells;
-        std::stringstream in{line.substr(1)};
-        for (std::string cell; std::getline(in, cell, '|');) cells.push_back(trim(cell));
-        if (!cells.empty() && cells.back().empty()) cells.pop_back();
+        std::string cell;
+        for (std::size_t i = 1; i < line.size(); ++i) {
+            if (line[i] == '\\' && i + 1 < line.size() && line[i + 1] == '|') {
+                cell += '|';
+                ++i;
+            } else if (line[i] == '|') {
+                cells.push_back(trim(cell));
+                cell.clear();
+            } else {
+                cell += line[i];
+            }
+        }
+        if (!trim(cell).empty()) cells.push_back(trim(cell));
         rows.push_back(std::move(cells));
     }
     return rows;
@@ -168,6 +183,33 @@ TEST(ScenarioReferenceDoc, NamesNoOtherDraft22Id) {
         EXPECT_TRUE(executable.contains(id) || is_unscored(id)) << "neither executable nor unscored: " << id;
     }
     EXPECT_GT(seen, 0U);
+}
+
+// Draft 22 ids also appear outside the section (the FETCH list names the own FETCH scenario); every
+// one anywhere on the page must be executable or an unscored probe.
+TEST(ScenarioReferenceDoc, PageNamesNoStaleDraft22Id) {
+    const auto text = joined(doc_lines());
+    std::set<std::string> executable;
+    for (const auto id : executable_scenarios(22)) executable.emplace(id);
+    const std::regex token{"`(d22-[a-z0-9-]+)`"};
+    for (auto it = std::sregex_iterator(text.begin(), text.end(), token); it != std::sregex_iterator(); ++it) {
+        const auto id = (*it)[1].str();
+        EXPECT_TRUE(executable.contains(id) || is_unscored(id)) << "neither executable nor unscored: " << id;
+    }
+}
+
+TEST(ScenarioReferenceDoc, SectionParserSkipsFencedBlocks) {
+    const std::vector<std::string> lines{"## A", "x", "```sh", "# comment", "```", "y", "## B", "z"};
+    const auto body = section(lines, "## A");
+    EXPECT_EQ(body.size(), 5U);
+    EXPECT_EQ(body.back(), "y");
+}
+
+TEST(ScenarioReferenceDoc, RowSplitKeepsEscapedPipes) {
+    const auto rows = id_rows({"| `d22-x` | a \\| b | c |"});
+    ASSERT_EQ(rows.size(), 1U);
+    ASSERT_EQ(rows.front().size(), 3U);
+    EXPECT_EQ(rows.front()[1], "a | b");
 }
 
 TEST(ScenarioReferenceDoc, StatedCountsMatchRegistry) {

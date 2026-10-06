@@ -70,7 +70,7 @@ pass, so those draft 21 FAILs are adapter artifacts, not moqxr defects.
 | M-13 REQUEST_UPDATE_OK LARGEST_OBJECT | Fixed | D21-9-20-18-MUST-456 and D22-9-20-17-MUST-441 pass |
 | M-14 Track Properties tolerated | Unscored (unchanged) | D22-9-3-MUST-348, D22-9-5-MUST-355 not_run |
 | M-15 REDIRECT and oversized REQUEST_ERROR | Fixed (unchanged) | D22-9-4-1-MUST-352, D22-8-5-MUST-266 pass |
-| M-18 WebTransport datagram validation | Open | D22-11-MUST-488 passes on native QUIC, not_run on WebTransport: D22-07 |
+| M-18 WebTransport datagram validation | Open (by source) | D22-11-MUST-488 passes on native QUIC; its WebTransport run is confounded by the adapter's `--forward 1`, so the evidence is moqxr's source: D22-07 |
 | M-19 control-stream GOAWAY URI | Changed: now a PROTOCOL_VIOLATION close | D22-04 |
 | M-20 rejected announcement ends the session | Still observed | A refused PUBLISH (GREASE code) ends the session with code 0: D22-C1 |
 
@@ -102,6 +102,11 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   close the session."
 - **Observed:** after `7e 00 00` on the control stream moqxr keeps the session and serves
   the liveness SUBSCRIBE (SUBSCRIBE_OK and Objects).
+- **Where:** the behavior depends on the session phase. Before serving, the control loop
+  closes on an unknown type (`moqt_session.cpp` lines 4684-4691, which is why the GOAWAY of
+  D22-04 closes); while serving, the control loop (around lines 10462-10533) handles only
+  REQUEST_UPDATE, SUBSCRIBE and SUBSCRIBE_NAMESPACE and erases any other message silently.
+  0x7e arrived while serving. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
 - **Required:** close the session on an unknown control message type.
 
 ### D22-03 A padding stream closes the session
@@ -113,6 +118,11 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   "The receiver MUST discard all data received on a padding stream".
 - **Observed:** moqxr logs "received unknown or malformed unidirectional stream type" and
   closes with PROTOCOL_VIOLATION.
+- **Where (hypothesis):** `is_known_peer_unidirectional_stream_type` already accepts
+  0x132b3e28 (`moqt_session.cpp` line 1571), so the close probably comes from the stream
+  prefix read (lines 4190-4207): it reads with a 0 ms timeout and decodes the type with
+  `decode_moqint`, so a partial read of the 5-byte type (or a decode of it) fails before the
+  type is checked. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
 - **Required:** accept and discard padding streams.
 
 ### D22-04 A control-stream GOAWAY with a New Session URI closes the session (carries M-19)
@@ -145,7 +155,7 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Required:** answer each REQUEST_UPDATE; a complete message followed by FIN is not
   truncated. Confirm with moqxr's own tests before changing anything.
 
-### D22-06 Silence where an answer or a close is required (suspected)
+### D22-06 Silence where an answer or a close is required (suspected; a question, not a confirmed defect)
 
 - **Rows:** D22-4-2-MUST-110, D22-9-20-18-MUST-445, D22-9-5-MUST-355 (not_run).
 - **Scenarios:** `d22-discover-original-publisher-namespaces`,
@@ -156,10 +166,18 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   PROTOCOL_VIOLATION), 4300-4302 (REQUEST_UPDATE outside
   the permitted cases is a PROTOCOL_VIOLATION).
 - **Observed:** after accepting SUBSCRIBE_NAMESPACE with the empty prefix moqxr sends no
-  NAMESPACE for `media`; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS, and updates
-  on TRACK_STATUS and on its own PUBLISH_NAMESPACE, get no answer and no close.
-- **Required:** as cited. Silence is not proof, so the runner leaves these rows unscored;
-  check each against moqxr's code.
+  NAMESPACE for `media`; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS gets no
+  answer and no close; a REQUEST_UPDATE on its own PUBLISH_NAMESPACE (sent after the
+  runner's REQUEST_OK) gets no answer and no close.
+- **Not evidence:** the TRACK_STATUS leg (`d22-update-on-track-status`) is confounded by the
+  runner's fixed request for track "x" (see the runner-side follow-ups): moqxr did not answer
+  even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED as soon as it reads the
+  request stream (`moqt_session.cpp` around lines 10379-10395), so it probably never read that
+  stream. In `d22-subscriber-update-on-publish` (a permitted case, lines 4298-4299) moqxr
+  reset its PUBLISH streams before the update arrived and sent no REQUEST_UPDATE_OK, so
+  nothing was observed there. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+- **Question:** is the silence real for the remaining legs? Silence is not proof, so the
+  runner leaves these rows unscored; check each against moqxr's code before changing it.
 
 ### D22-07 WebTransport does not reject an unknown datagram type (carries M-18)
 
@@ -167,6 +185,14 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Scenario:** `d22-unknown-datagram-type`.
 - **Draft:** lines 5955-5956: "An endpoint that receives an unknown datagram type MUST
   close the session."
+- **Observed:** over native QUIC moqxr closes 0x3 "invalid MOQT datagram". The WebTransport
+  run is confounded: the adapter runs this probe `--forward 1`, and moqxr sent its PUBLISH,
+  reset it and closed with code 0 ("timed out waiting for stream data") before anything
+  about the datagram showed.
+- **Where (the evidence for this item):** `webtransport_client.cpp` lines 666-669 return 0
+  for `picohttp_callback_post_datagram` (incoming datagrams are dropped), while
+  `picoquic_client.cpp` lines 581-589 validate each datagram and close with 0x3.
+  moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
 - **Required:** validate datagrams on the WebTransport path as on native QUIC.
 
 ### D22-08 A second GOAWAY on an accepted SUBSCRIBE_NAMESPACE stream is not detected
@@ -779,7 +805,10 @@ These come out of the same results but belong to the runner repository:
   `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams`), but
   `d22-unknown-request-stream-message` and `d22-update-on-track-status` still request
   namespace () and track "x", and the first still runs moqxr `--forward 1`, so the
-  request-stream half of D22-9-MUST-295 is never exercised against moqxr.
+  request-stream half of D22-9-MUST-295 is never exercised against moqxr, and the
+  TRACK_STATUS leg of D22-06 is no evidence (moqxr answered nothing, not even the
+  TRACK_STATUS). `d22-unknown-datagram-type` also still runs `--forward 1`, which
+  confounds its WebTransport run (D22-07).
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
 
