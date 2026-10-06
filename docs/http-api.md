@@ -161,7 +161,10 @@ The runner does not authenticate which process connects.
 In driven mode the runner launches the executable configured with
 `--driver-executable` once per context, writes a JSON request file and passes it
 through the environment; see
-[publisher-harness-guide.md](publisher-harness-guide.md) for the contract. If
+[publisher-harness-guide.md](publisher-harness-guide.md) for the contract. The
+request names the run's draft and the scenario id as it was selected for the
+run, the same id the run's events carry (for a draft 22 run a `d22-` id, also
+for a scenario the runner executes with its draft 21 implementation). If
 the adapter exits before the publisher connects the run ends `error` with the
 logs retained. Once the publisher is connected, scores come from MoQT
 observations, not from the process exit status. `driven` requires `track` and a

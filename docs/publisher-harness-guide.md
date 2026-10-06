@@ -171,9 +171,9 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 |---|---|---|
 | `schema_version` | `1` | Contract version |
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
-| `scenario_id` | string | The scenario this context runs. Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
+| `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18` or `21` | Draft under test |
+| `draft` | `18` or `21` (`22` once draft 22 runs are enabled) | Draft under test: the run's draft, whose ALPN the runner accepts |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |

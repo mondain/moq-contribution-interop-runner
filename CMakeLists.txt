@@ -455,6 +455,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
     target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
         moq-interop-runs moq-interop-lineage-run moq-interop-test-client
+        moq-interop-draft22-evaluators moq-interop-execution-audit
         nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"

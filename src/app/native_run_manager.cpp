@@ -8,6 +8,7 @@
 
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/lineage_translate.h"
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft18.h"
 #include "moq/interop/scenarios/draft18_close.h"
@@ -356,15 +357,34 @@ storage::EvidenceEvent stored_draft21_evidence(
     return result;
 }
 
-storage::EvidenceEvent driver_evidence(const DriverResult& result,
-                                       std::string_view scenario_id) {
+// The identity rule at store time. The scenario layer works with `plan.execution`'s ids (for a draft 22 run, a
+// shared scenario's draft 21 implementation id); everything the run stores or hands the publisher driver names
+// the requested scenario (its draft 22 id). Every store site and DriverRequest goes through this one function;
+// for drafts 18 and 21 it is the identity.
+std::string stored_scenario_id(const LineageRun& plan, std::string_view execution_id) {
+    return stamp_scenario_id(plan.wire_draft, execution_id);
+}
+
+// The same rule for a requirement id an event carries (a draft 21 row id the scenario layer attaches): a draft 22
+// run stores its draft 22 row. A row with no single draft 22 successor is a bug, as for scenario ids.
+std::string stored_requirement_id(const LineageRun& plan, const std::string& execution_row) {
+    if (plan.wire_draft != DraftVersion::Draft22 || !execution_row.starts_with("D21-")) return execution_row;
+    const requirements::Outcome source{execution_row, requirements::OutcomeState::NotRun};
+    const auto translated = requirements::translate_shared_outcomes(std::span(&source, 1));
+    if (translated.size() != 1)
+        throw std::logic_error("draft 21 row " + execution_row + " has no single draft 22 successor");
+    return translated.front().requirement_id;
+}
+
+storage::EvidenceEvent driver_evidence(const DriverResult& result, const LineageRun& plan,
+                                       std::string_view execution_id) {
     storage::EvidenceEvent event;
     event.wall_time_unix_ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
     event.kind = "publisher_process";
     event.detail = serialize_driver_result(result);
-    event.scenario_id = std::string(scenario_id);
+    event.scenario_id = stored_scenario_id(plan, execution_id);
     return event;
 }
 
@@ -643,10 +663,11 @@ public:
             event.detail += " ordinal=" + std::to_string(worker->context_ordinal);
     }
 
-    void append_context_event(Worker* worker, std::string_view id,
+    // `execution_id` is the scenario layer's id; the event is stored under the requested one.
+    void append_context_event(Worker* worker, const LineageRun& plan, std::string_view execution_id,
                               std::string_view kind, std::string detail) {
         storage::EvidenceEvent event;
-        event.scenario_id = id;
+        event.scenario_id = stored_scenario_id(plan, execution_id);
         event.kind = kind;
         event.detail = std::move(detail);
         stamp_context_event(worker, event);
@@ -660,24 +681,26 @@ public:
         request.executable = config.driver_executable;
         request.arguments = config.driver_arguments;
         request.run_id = worker->id;
-        request.scenario_id = id;
+        // Identity: the publisher is told the run's real (wire) draft and the scenario that was selected for
+        // it (the requested draft 22 id for a draft 22 run), as every stored event names it.
+        request.scenario_id = stored_scenario_id(plan, id);
+        // Behavior: the endpoint is built from the execution config, because the path and query of a few
+        // scenarios' URIs are part of what the scenario layer tests (keyed by the implementation id).
         request.endpoint = endpoint_uri(worker, run_config, id);
-        // The publisher speaks the run's real draft; the scenario id is the scenario layer's
-        // (a draft 21 implementation id for a draft 22 run; presenting it is sub-project D4's).
         request.draft = plan.wire_draft;
         request.transport = run_config.transport;
         request.track = *run_config.track_fixture;
         request.fixture = config.driver_fixture;
         request.tls_ca = config.driver_tls_ca.empty() ? config.certificate_path : config.driver_tls_ca;
         request.log_dir = config.driver_log_root / worker->id /
-                          (std::to_string(worker->context_ordinal) + "-" + std::string(id));
+                          (std::to_string(worker->context_ordinal) + "-" + request.scenario_id);
         request.scenario_timeout = run_config.timeout;
         request.process_timeout = run_config.timeout + 1000ms;
         const auto started = driver.start(request);
         if (started.status == DriverStartStatus::Started) return started.handle;
         DriverResult failure;
         failure.error = started.error;
-        auto event = driver_evidence(failure, id);
+        auto event = driver_evidence(failure, plan, id);
         stamp_context_event(worker, event);
         store->append_events(worker->id, std::span(&event, 1));
         throw std::runtime_error("publisher driver start failed: " + started.error);
@@ -728,7 +751,7 @@ public:
         // An errored run always says why: operational errors were recorded where they
         // happened, and a stop request is recorded here.
         if (worker->stop_requested && !operational_error)
-            append_context_event(worker, last_scenario_id, "run_stopped",
+            append_context_event(worker, plan, last_scenario_id, "run_stopped",
                                  "the run was stopped before every selected context finished");
         store->finalize(worker->id, summary, outcomes);
     }
@@ -769,7 +792,7 @@ public:
             if (!handle.valid()) return false;
             const auto result = driver.stop(handle);
             handle = {};
-            auto event = driver_evidence(result, current_id);
+            auto event = driver_evidence(result, plan, current_id);
             stamp_context_event(worker, event);
             store->append_events(worker->id, std::span(&event, 1));
             return driver_failed(result);
@@ -801,7 +824,7 @@ public:
                     listener = std::move(replacement.listener);
                 }
                 if (worker->stop_requested) break;
-                append_context_event(worker, current_id, "context_ready",
+                append_context_event(worker, plan, current_id, "context_ready",
                     "endpoint=" + endpoint_uri(worker, run_config, current_id) +
                     " reconnect=fresh-session publisher_identity=unverified");
                 if (worker->stop_requested) break;
@@ -818,20 +841,20 @@ public:
                     // what the publisher asked for. A publisher that gives up afterwards is the
                     // consequence of what was observed, not a harness failure, so the transport
                     // evidence stays scoreable.
-                    append_context_event(worker, current_id, "publisher_exit_after_refusal",
+                    append_context_event(worker, plan, current_id, "publisher_exit_after_refusal",
                                          "publisher process exited after the runner refused or rejected it");
                 } else if (process_error) {
                     transcript.complete = false;
                     transcript.harness_failed = true;
                     if (transcript.harness_failure_reason.empty())
                         transcript.harness_failure_reason = "publisher process failed";
-                    append_context_event(worker, current_id, "harness_error", "publisher process failed");
+                    append_context_event(worker, plan, current_id, "harness_error", "publisher process failed");
                 }
                 if (worker->stop_requested) transcript.complete = false;
                 operational_error = operational_error || transcript.harness_failed;
                 worker->transcripts.push_back(std::move(transcript));
                 const auto& completed = worker->transcripts.back();
-                append_context_event(worker, current_id,
+                append_context_event(worker, plan, current_id,
                     completed.complete && !completed.harness_failed ? "context_complete" : "context_end",
                     "complete=" + std::string(completed.complete ? "true" : "false") +
                     " timed_out=" + (completed.timed_out ? "true" : "false") +
@@ -841,7 +864,7 @@ public:
                 if (plan.wire_draft == DraftVersion::Draft22) {
                     if (const auto unscored = evaluate_unscored_probe_22(completed)) {
                         const char* verdict = !unscored->verdict ? "not_run" : *unscored->verdict ? "pass" : "fail";
-                        append_context_event(worker, current_id, "unscored_probe_verdict",
+                        append_context_event(worker, plan, current_id, "unscored_probe_verdict",
                             "evaluator=" + std::string(unscored->evaluator) + " verdict=" + verdict +
                             " scored=false (no catalog row names this probe)");
                     }
@@ -850,9 +873,9 @@ public:
                     // Contexts that never ran are named, so the run explains its own end.
                     std::string not_run;
                     for (std::size_t later = index + 1; later < definitions.size(); ++later)
-                        not_run += (not_run.empty() ? "" : ",") + definitions[later].id;
+                        not_run += (not_run.empty() ? "" : ",") + stored_scenario_id(plan, definitions[later].id);
                     if (operational_error && !not_run.empty())
-                        append_context_event(worker, current_id, "run_aborted",
+                        append_context_event(worker, plan, current_id, "run_aborted",
                             "the run ended after context " + std::to_string(index + 1) + " of " +
                             std::to_string(definitions.size()) + " because of a harness error (" +
                             (completed.harness_failure_reason.empty() ? "see harness_error" : completed.harness_failure_reason) +
@@ -864,7 +887,7 @@ public:
             operational_error = true;
             try {
                 retire_driver();
-                append_context_event(worker, current_id, "harness_error", error.what());
+                append_context_event(worker, plan, current_id, "harness_error", error.what());
             } catch (const std::exception& cleanup_error) {
                 std::cerr << "raw context cleanup failed: " << cleanup_error.what() << '\n';
             }
@@ -888,7 +911,7 @@ public:
             if (!handle.valid()) return;
             const auto result = driver.stop(handle);
             handle = {};
-            const auto event = driver_evidence(result, run_config.scenario_ids.front());
+            const auto event = driver_evidence(result, plan, run_config.scenario_ids.front());
             store->append_events(worker->id, std::span(&event, 1));
         };
         try {
@@ -896,13 +919,15 @@ public:
                 run_raw_family(worker, listener, plan, std::move(definitions));
             } else {
                 if (run_config.mode == RunMode::Driven) {
+                    // Behavior: the endpoint follows the execution config (see start_context_driver).
                     const std::string endpoint = endpoint_uri(
                         worker, run_config, run_config.scenario_ids.front());
                     DriverRequest request;
                     request.executable = config.driver_executable;
                     request.arguments = config.driver_arguments;
                     request.run_id = worker->id;
-                    request.scenario_id = run_config.scenario_ids.front();
+                    // Identity: the requested scenario id and the wire draft.
+                    request.scenario_id = stored_scenario_id(plan, run_config.scenario_ids.front());
                     request.endpoint = endpoint;
                     request.draft = plan.wire_draft;
                     request.transport = run_config.transport;
@@ -918,7 +943,7 @@ public:
                         DriverResult failure;
                         failure.error = started.error;
                         const auto event = driver_evidence(
-                            failure, run_config.scenario_ids.front());
+                            failure, plan, run_config.scenario_ids.front());
                         store->append_events(worker->id, std::span(&event, 1));
                         throw std::runtime_error("publisher driver start failed: " + started.error);
                     }
@@ -936,7 +961,8 @@ public:
                 storage::EvidenceEvent reason;
                 reason.kind = "harness_error";
                 reason.detail = error.what();
-                reason.scenario_id = run_config.scenario_ids.empty() ? std::string{} : run_config.scenario_ids.front();
+                reason.scenario_id = run_config.scenario_ids.empty()
+                    ? std::string{} : stored_scenario_id(plan, run_config.scenario_ids.front());
                 reason.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
                 try { store->append_events(worker->id, std::span(&reason, 1)); } catch (...) {}
@@ -963,6 +989,9 @@ public:
                        const LineageRun& plan, scenarios::RawProbeDefinition definition,
                        PublisherDriver* driver, DriverHandle handle) {
         const RunConfig& run_config = plan.execution;
+        // Every event of this context is stored under the requested scenario id; the transcript (and so the
+        // evaluators) keeps the scenario layer's id.
+        const std::string stored_id = stored_scenario_id(plan, definition.id);
         const auto started = scenarios::RawProbeClock::now();
         const auto deadline = started + run_config.timeout;
         // A replacement-session definition gets a second listener at its own
@@ -1003,7 +1032,7 @@ public:
             std::vector<storage::EvidenceEvent> batch;
             for (; recorded < limit; ++recorded) {
                 storage::EvidenceEvent event;
-                event.scenario_id = transcript.scenario_id;
+                event.scenario_id = stored_id;
                 // An event may be stored after it arrived (a growing tail is held back), so it
                 // carries the time it arrived, not the time it was stored.
                 const auto arrived = recorded < transcript.event_times.size() ? transcript.event_times[recorded] : now;
@@ -1050,7 +1079,7 @@ public:
             }
             for (; replacement_recorded < transcript.replacement_events.size(); ++replacement_recorded) {
                 storage::EvidenceEvent event;
-                event.scenario_id = transcript.scenario_id;
+                event.scenario_id = stored_id;
                 event.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now-worker->started).count();
                 event.wall_time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 const auto& source = transcript.replacement_events[replacement_recorded];
@@ -1102,15 +1131,15 @@ public:
             transcript.complete = false;
             transcript.harness_failed = true;
             transcript.harness_failure_reason = operational_error;
-            append_context_event(worker, transcript.scenario_id, "harness_error", operational_error);
+            append_context_event(worker, plan, transcript.scenario_id, "harness_error", operational_error);
         } else if (transcript.harness_failed) {
-            append_context_event(worker, transcript.scenario_id, "harness_error",
+            append_context_event(worker, plan, transcript.scenario_id, "harness_error",
                 transcript.harness_failure_reason.empty() ? "harness failure without a recorded reason"
                                                           : transcript.harness_failure_reason);
         }
         // Truncated evidence is its own, scored-as-nothing, condition of this context only.
         if (transcript.event_limit_reached)
-            append_context_event(worker, transcript.scenario_id, "context_event_limit",
+            append_context_event(worker, plan, transcript.scenario_id, "context_event_limit",
                                  transcript.event_limit_reason);
         if (worker->stop_requested) transcript.complete = false;
         if (!transcript.complete && !transcript.harness_failed && !transcript.event_limit_reached &&
@@ -1120,7 +1149,7 @@ public:
         transcript.denied_authorization_token = config.denied_authorization_token;
         transcript.connection_uri = endpoint_uri(worker, run_config, transcript.scenario_id);
         storage::EvidenceEvent stimulus;
-        stimulus.scenario_id = transcript.scenario_id;
+        stimulus.scenario_id = stored_id;
         stimulus.connection_id = worker->connection_id;
         stimulus.kind = transcript.stimulus_delivered ? "raw_probe_stimulus" : "raw_probe_partial_stimulus";
         stimulus.monotonic_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(scenarios::RawProbeClock::now()-worker->started).count();
@@ -1190,7 +1219,7 @@ public:
             storage::EvidenceEvent mapping = stimulus;
             mapping.kind = config.unknown_auth_token_alias_compatibility_code
                 ? "compatibility_error_mapping" : "unresolved_error_mapping";
-            mapping.requirement_id = request_profile->requirement_id;
+            mapping.requirement_id = stored_requirement_id(plan, request_profile->requirement_id);
             mapping.detail = "UNKNOWN_AUTH_TOKEN_ALIAS REQUEST_ERROR profile=compatibility code=" +
                 (config.unknown_auth_token_alias_compatibility_code
                     ? std::to_string(*config.unknown_auth_token_alias_compatibility_code) : "unconfigured; result=NOT_RUN") +
@@ -1388,6 +1417,8 @@ public:
             if (recorded < evidence.size()) {
                 std::vector<storage::EvidenceEvent> batch;
                 batch.reserve(evidence.size() - recorded);
+                // Draft 18 has no lineage (its execution draft is its wire draft), so the controller's id is
+                // already the requested one.
                 for (; recorded < evidence.size(); ++recorded) {
                     batch.push_back(stored_evidence(
                         evidence[recorded],
@@ -1453,6 +1484,8 @@ public:
             }
             controller.configure_scenario(scenario, std::move(uri));
         }
+        // The evidence is stored under the requested scenario id (the harness_error below copies it).
+        const std::string stored_id = stored_scenario_id(plan, run_config.scenario_ids.front());
         std::size_t recorded = 0;
         while (!worker->stop_requested) {
             const auto now = scenarios::Draft21Clock::now();
@@ -1462,9 +1495,7 @@ public:
                 std::vector<storage::EvidenceEvent> batch;
                 batch.reserve(evidence.size() - recorded);
                 for (; recorded < evidence.size(); ++recorded) {
-                    batch.push_back(stored_draft21_evidence(
-                        evidence[recorded], started,
-                        run_config.scenario_ids.front()));
+                    batch.push_back(stored_draft21_evidence(evidence[recorded], started, stored_id));
                     // The draft 22 PUBLISH adapter refused what it cannot present in draft 21's
                     // form; the session close that follows is the runner's limit, not a verdict.
                     if (lineage &&
@@ -1548,6 +1579,16 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     auto plan = plan_run(requested);
     if (!plan) return {RunStartStatus::Unsupported, {}, {}};
     const RunConfig& execution = plan->execution;
+    // Every stored event and driver request names the requested scenario (stored_scenario_id): it must lead back
+    // from each execution id to the id requested at the same position, or the run would store evidence under
+    // a scenario it did not select. Checked here, before anything is stored, so the worker never meets it.
+    if (execution.scenario_ids.size() != requested.scenario_ids.size())
+        throw std::logic_error("run plan changed the number of selected scenarios");
+    for (std::size_t index = 0; index < execution.scenario_ids.size(); ++index) {
+        if (stored_scenario_id(*plan, execution.scenario_ids[index]) != requested.scenario_ids[index])
+            throw std::logic_error("scenario " + execution.scenario_ids[index] + " is not stored as the requested " +
+                                   requested.scenario_ids[index]);
+    }
     if (execution.scenario_ids.empty() || execution.scenario_ids.size() > 100 ||
         execution.timeout < 2ms || execution.timeout > 3600000ms ||
         (execution.track_fixture && !valid_fixture(*execution.track_fixture)))
@@ -1556,8 +1597,8 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     std::vector<scenarios::RawProbeDefinition> definitions;
     // Scenarios the publisher's declaration rules out: never given a listener context or a
     // publisher process, only a context_skipped evidence event.
-    // Stored skip events carry the scenario layer's id (a draft 21 implementation id for a draft 22
-    // run; how results present it is sub-project D4's). The API is answered with the requested id.
+    // `skipped` holds the scenario layer's ids; the stored skip events and the API answer carry the
+    // requested ones.
     std::vector<std::pair<std::string, std::string>> skipped;
     std::string first_skipped_requested;
     std::string first_skipped_capability;
@@ -1754,7 +1795,7 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             event.wall_time_unix_ns = wall;
             event.kind = "context_skipped";
             event.detail = reason;
-            event.scenario_id = skipped_id;
+            event.scenario_id = stored_scenario_id(*plan, skipped_id);
             declaration.push_back(std::move(event));
         }
         try {
