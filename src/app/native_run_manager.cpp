@@ -84,6 +84,19 @@ std::optional<LineageRun> plan_run(const RunConfig& requested) {
     return plan;
 }
 
+// The identity rule, in one place. A run has two drafts that differ only for a draft 22 run:
+// - its IDENTITY draft (the requested, wire draft): the ALPN its listeners offer, its stored row, the catalog it
+//   is scored against, the scenario and requirement ids it stores, DriverRequest::draft, API answers;
+// - its BEHAVIOR draft (the execution draft, `plan.execution.draft`, the draft 21 family for a draft 22 run):
+//   which probes, profiles, controllers and evaluators run. Every by_draft(...) and draft test in this file
+//   reads either the plan through these accessors or a `run_config` that is `plan.execution`.
+// Never switch a behavior site to the identity draft unless it chooses identity.
+DraftVersion identity_draft(const LineageRun& plan) { return plan.wire_draft; }
+DraftVersion behavior_draft(const LineageRun& plan) { return plan.execution.draft; }
+// A draft 22 run executed by lineage on the draft 21 family: its outcomes are translated to the identity
+// draft's rows and scored against its catalog.
+bool runs_by_lineage(const LineageRun& plan) { return identity_draft(plan) != behavior_draft(plan); }
+
 constexpr std::string_view kDuplicateSubscribeScenario =
     "subscribe-again-to-established-publisher-track";
 constexpr std::string_view kFetchScenario = "fetch-publisher-track-range";
@@ -362,13 +375,13 @@ storage::EvidenceEvent stored_draft21_evidence(
 // the requested scenario (its draft 22 id). Every store site and DriverRequest goes through this one function;
 // for drafts 18 and 21 it is the identity.
 std::string stored_scenario_id(const LineageRun& plan, std::string_view execution_id) {
-    return stamp_scenario_id(plan.wire_draft, execution_id);
+    return stamp_scenario_id(identity_draft(plan), execution_id);
 }
 
 // The same rule for a requirement id an event carries (a draft 21 row id the scenario layer attaches): a draft 22
 // run stores its draft 22 row. A row with no single draft 22 successor is a bug, as for scenario ids.
 std::string stored_requirement_id(const LineageRun& plan, const std::string& execution_row) {
-    if (plan.wire_draft != DraftVersion::Draft22 || !execution_row.starts_with("D21-")) return execution_row;
+    if (identity_draft(plan) != DraftVersion::Draft22 || !execution_row.starts_with("D21-")) return execution_row;
     const requirements::Outcome source{execution_row, requirements::OutcomeState::NotRun};
     const auto translated = requirements::translate_shared_outcomes(std::span(&source, 1));
     if (translated.size() != 1)
@@ -557,6 +570,7 @@ public:
     }
 
     static void finish_raw_probe(scenarios::RawProbeDefinition& definition, const RunConfig& run_config) {
+        // Behavior: `run_config` is the execution config, so this is the family draft's namespace answer.
         scenarios::apply_default_namespace_answer(definition, static_cast<unsigned>(run_config.draft));
         // A definition that opted into a liveness follow-up asks for the track fixture.
         if (definition.liveness && run_config.track_fixture) {
@@ -569,6 +583,7 @@ public:
 
     static std::optional<scenarios::RawProbeDefinition> resolve_raw_probe_definition(
         const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
+        // Behavior: `run_config` is the execution config; every draft test below picks the family's probes.
         if (!raw_probe_scenario(static_cast<unsigned>(run_config.draft), id)) return std::nullopt;
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_gap_a_scenario(id)) {
             std::vector<std::vector<std::byte>> name_space;
@@ -593,6 +608,7 @@ public:
             if (found == profiles.end()) return std::nullopt;
             return std::move(found->definition);
         };
+        // Behavior: the execution draft (never 22) chooses the family's profile tables.
         return app::by_draft(run_config.draft,
             [&]() -> std::optional<scenarios::RawProbeDefinition> {
             if (auto value = find(scenarios::draft18_response_probes(run_config.timeout))) return value;
@@ -635,6 +651,8 @@ public:
 
     std::string endpoint_uri(const Worker* worker, const RunConfig& run_config,
                              std::string_view scenario = {}) const {
+        // Behavior: `run_config` is the execution config and `scenario` an execution id; the URI path and
+        // query a few scenarios test are the family's.
         const auto tail = run_config.transport == TransportKind::NativeQuic &&
                 run_config.draft == DraftVersion::Draft21 &&
                 announcement_gap_scenario(21, scenario)
@@ -687,7 +705,7 @@ public:
         // Behavior: the endpoint is built from the execution config, because the path and query of a few
         // scenarios' URIs are part of what the scenario layer tests (keyed by the implementation id).
         request.endpoint = endpoint_uri(worker, run_config, id);
-        request.draft = plan.wire_draft;
+        request.draft = identity_draft(plan);
         request.transport = run_config.transport;
         request.track = *run_config.track_fixture;
         request.fixture = config.driver_fixture;
@@ -727,13 +745,15 @@ public:
         const auto outcomes_21 = [&]() -> std::vector<requirements::Outcome> {
             return requirements::evaluate_draft21_raw_probes(*draft21, worker->transcripts);
         };
+        // Behavior: the execution draft's evaluators judge the transcripts.
         std::vector<requirements::Outcome> outcomes = app::by_draft(run_config.draft, outcomes_18, outcomes_21);
         // Pointer-returning lambdas: a reference-returning by_draft trips -Wdangling-reference.
+        // Behavior, and identity for drafts 18 and 21 only: the execution draft's catalog, which a lineage run
+        // replaces with the identity draft's catalog below.
         const auto* catalog = app::by_draft(run_config.draft,
             [&]() -> const requirements::RequirementCatalog* { return draft18.get(); },
             [&]() -> const requirements::RequirementCatalog* { return draft21.get(); });
-        const bool lineage = plan.wire_draft != run_config.draft;
-        if (lineage) {
+        if (runs_by_lineage(plan)) {
             // A draft 22 run: the draft 21 evaluators' complete outcome set, keyed by draft 22 rows, with
             // the own draft 22 evaluators' outcomes (already draft 22 rows) for the rows they reach.
             const auto own = evaluate_own_draft22(*draft22, worker->transcripts);
@@ -744,7 +764,7 @@ public:
         // not applicable to this run (they leave the score denominators). The draft number is
         // the catalog's: draft 22 rows name draft 22 scenarios, which the registry forwards to
         // their draft 21 implementations.
-        apply_publisher_capabilities(draft_number(plan.wire_draft), *catalog,
+        apply_publisher_capabilities(draft_number(identity_draft(plan)), *catalog,
                                      run_config.publisher_capabilities, outcomes);
         auto summary = requirements::score(*catalog, outcomes);
         if (operational_error || worker->stop_requested) summary.verdict = requirements::RunVerdict::Error;
@@ -816,7 +836,7 @@ public:
                     } while (scenarios::RawProbeClock::now() < cleanup_deadline);
                     listener.reset();
                     if (worker->stop_requested) break;
-                    auto replacement = create_listener(run_config.transport, plan.wire_draft, worker->endpoint.port,
+                    auto replacement = create_listener(run_config.transport, identity_draft(plan), worker->endpoint.port,
                                                        tuning_of(definitions[index]));
                     if (!replacement.listener || replacement.endpoint.port != worker->endpoint.port)
                         throw std::runtime_error("raw context listener could not rebind reserved run port" +
@@ -861,7 +881,8 @@ public:
                     " event_limit=" + (completed.event_limit_reached ? "true" : "false") +
                     " cancelled=" + (worker->stop_requested ? "true" : "false"));
                 // An unscored draft 22 probe: its verdict is evidence only, never a requirement outcome.
-                if (plan.wire_draft == DraftVersion::Draft22) {
+                // Identity: unscored probes exist only on the draft 22 wire.
+                if (identity_draft(plan) == DraftVersion::Draft22) {
                     if (const auto unscored = evaluate_unscored_probe_22(completed)) {
                         const char* verdict = !unscored->verdict ? "not_run" : *unscored->verdict ? "pass" : "fail";
                         append_context_event(worker, plan, current_id, "unscored_probe_verdict",
@@ -903,7 +924,7 @@ public:
              std::unique_ptr<transport::SessionTransport> listener,
              LineageRun plan,
              std::vector<scenarios::RawProbeDefinition> definitions) {
-        const scenarios::ScopedWireDraft wire(draft_number(plan.wire_draft));
+        const scenarios::ScopedWireDraft wire(draft_number(identity_draft(plan)));
         const RunConfig& run_config = plan.execution;
         PublisherDriver driver;
         DriverHandle handle;
@@ -929,7 +950,7 @@ public:
                     // Identity: the requested scenario id and the wire draft.
                     request.scenario_id = stored_scenario_id(plan, run_config.scenario_ids.front());
                     request.endpoint = endpoint;
-                    request.draft = plan.wire_draft;
+                    request.draft = identity_draft(plan);
                     request.transport = run_config.transport;
                     request.track = *run_config.track_fixture;
                     request.fixture = config.driver_fixture;
@@ -949,6 +970,7 @@ public:
                     }
                     handle = started.handle;
                 }
+                // Behavior: the execution draft picks the typed controller (draft 21's for a draft 22 run).
                 app::by_draft(run_config.draft,
                     [&] { run_draft18(worker, *listener, run_config, &driver, handle, record_driver); },
                     [&] { run_draft21(worker, *listener, plan, &driver, handle, record_driver); });
@@ -1001,7 +1023,7 @@ public:
         if (definition.offer_replacement_session) {
             // The port was reserved by start(); ephemeral mode binds port 0.
             const std::uint16_t port = worker->replacement_port.value_or(0);
-            auto created = create_listener(run_config.transport, plan.wire_draft, port,
+            auto created = create_listener(run_config.transport, identity_draft(plan), port,
                 Tuning{std::nullopt, std::nullopt, std::nullopt, false, kReplacementPath});
             if (!created.listener) {
                 throw std::runtime_error("replacement session listener could not be created");
@@ -1202,6 +1224,7 @@ public:
             courtesy_events.push_back(std::move(event));
         }
         if (!courtesy_events.empty()) store->append_events(worker->id, courtesy_events);
+        // Behavior: the execution draft and id (the event itself is stored under the requested id).
         if (run_config.draft == DraftVersion::Draft18 &&
             scenarios::draft18_contribution_scenario(transcript.scenario_id)) {
             storage::EvidenceEvent uri = stimulus;
@@ -1210,6 +1233,7 @@ public:
                          " ordinal=" + std::to_string(worker->context_ordinal);
             store->append_events(worker->id,std::span(&uri,1));
         }
+        // Behavior: the family's request profiles; the requirement id they name is translated to identity below.
         const auto request_profiles = app::by_draft(run_config.draft,
             [&] { return scenarios::draft18_request_profiles(); },
             [&] { return scenarios::draft21_request_profiles(); });
@@ -1231,6 +1255,8 @@ public:
 
     static std::optional<scenarios::RawProbeDefinition> resolve_track_probe(
         const NativeRunManagerConfig& config, const RunConfig& run_config, std::string_view id) {
+        // Behavior: `run_config` is the execution config and `id` an execution id; every draft test and
+        // by_draft(...) in this function picks the family's probe tables.
         if (run_config.draft == DraftVersion::Draft18 && scenarios::draft18_contribution_scenario(id)) {
             std::vector<std::vector<std::byte>> contribution_namespace;
             std::vector<std::byte> contribution_name{std::byte{'x'}};
@@ -1294,6 +1320,7 @@ public:
             id == "d21-range-filter-total-limit" ||
             id == "d21-range-filter-default-zero-limit" ||
             id == "d21-range-filter-update-total-limit";
+        // Behavior: execution draft (see the top of this function).
         const bool discovery_overlap = discovery_overlap_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool first_fetch = fetch_first_object_scenario(static_cast<unsigned>(run_config.draft),id);
         const bool immutable_repeat = immutable_repeat_scenario(static_cast<unsigned>(run_config.draft),id);
@@ -1452,7 +1479,7 @@ public:
                      const LineageRun& plan, PublisherDriver* driver,
                      DriverHandle handle, const std::function<void()>& record_driver) {
         const RunConfig& run_config = plan.execution;
-        const bool lineage = plan.wire_draft != run_config.draft;
+        const bool lineage = runs_by_lineage(plan);
         const auto started = scenarios::Draft21Clock::now();
         // The controller starts its own observation clock at its first poll, a
         // little after `started`. This deadline is only a backstop: if it fired
@@ -1569,11 +1596,22 @@ NativeRunManager::~NativeRunManager() = default;
 // catalog, API answers). `execution` is what the scenario layer runs: the same run for drafts 18 and 21, and for
 // draft 22 the draft 21 family with each shared scenario's draft 21 implementation id.
 RunStartResult NativeRunManager::start(const RunConfig& requested) {
+    // Identity: whether this runner can run the requested draft (its catalogs).
     if (!supports(requested.draft) ||
         (requested.mode == RunMode::Driven && !supports_driven()))
         return {RunStartStatus::Unsupported, {}, {}};
     if (requested.scenario_ids.empty() || requested.scenario_ids.size() > 100)
         return {RunStartStatus::InvalidConfig, {}, {}};
+    // The selection's ids are validated before they are planned, the same way for every draft: an empty or
+    // duplicate id is InvalidConfig whatever else the selection holds. plan_run refuses (Unsupported) a draft
+    // 22 selection it cannot plan, so checking after it would answer a draft 22 selection differently from
+    // the same selection on drafts 18 and 21. Distinct requested ids stay distinct execution ids (the
+    // stored_scenario_id check below maps each execution id back to its requested id).
+    {
+        std::set<std::string_view> selected;
+        for (const auto& id : requested.scenario_ids)
+            if (id.empty() || !selected.insert(id).second) return {RunStartStatus::InvalidConfig, {}, {}};
+    }
     // An unknown, unimplemented own or not yet executable draft 22 scenario has no run; an implemented
     // own draft 22 scenario bypasses lineage_run and is dispatched natively below.
     auto plan = plan_run(requested);
@@ -1593,7 +1631,6 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         execution.timeout < 2ms || execution.timeout > 3600000ms ||
         (execution.track_fixture && !valid_fixture(*execution.track_fixture)))
         return {RunStartStatus::InvalidConfig, {}, {}};
-    std::set<std::string> selected;
     std::vector<scenarios::RawProbeDefinition> definitions;
     // Scenarios the publisher's declaration rules out: never given a listener context or a
     // publisher process, only a context_skipped evidence event.
@@ -1602,12 +1639,13 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
     std::vector<std::pair<std::string, std::string>> skipped;
     std::string first_skipped_requested;
     std::string first_skipped_capability;
-    const auto draft = static_cast<unsigned>(execution.draft);
+    // Behavior: every `draft`/`execution.draft` test in this loop is the execution draft, checked against an
+    // execution id (a shared draft 22 scenario is checked as its draft 21 implementation).
+    const auto draft = static_cast<unsigned>(behavior_draft(*plan));
     for (std::size_t index = 0; index < execution.scenario_ids.size(); ++index) {
         const auto& id = execution.scenario_ids[index];
-        if (id.empty() || !selected.insert(id).second)
-            return {RunStartStatus::InvalidConfig, {}, {}};
-        if (plan->wire_draft == DraftVersion::Draft22 && own_scenario_22(id)) {
+        // Identity: own scenarios exist only on the draft 22 wire, and keep their draft 22 id in execution.
+        if (identity_draft(*plan) == DraftVersion::Draft22 && own_scenario_22(id)) {
             // An own draft 22 scenario: a raw probe on the draft 22 wire, scored by own evaluators.
             // Follow-up for Tasks 9-10: this branch skips the family transport gates (webtransport_only /
             // native_only profiles, gap_*_only_scenario); a transport-specific own scenario needs a field in
@@ -1638,8 +1676,11 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             return {RunStartStatus::Unsupported, {}, {}};
         if (auto reason = scenario_skip_reason(draft, id, execution.publisher_capabilities)) {
             if (skipped.empty()) {
+                // Identity: the API answer names the requested scenario and asks the identity draft's registry
+                // (which forwards a shared draft 22 id to its implementation, so the capability is the same).
                 first_skipped_requested = requested.scenario_ids[index];
-                first_skipped_capability = std::string(scenario_required_capability(draft, id).value_or("unknown"));
+                first_skipped_capability = std::string(scenario_required_capability(
+                    draft_number(identity_draft(*plan)), first_skipped_requested).value_or("unknown"));
             }
             skipped.emplace_back(id, std::move(*reason));
             continue;
@@ -1705,7 +1746,7 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             try {
                 // start() runs on the caller's thread, outside the worker's ScopedWireDraft: build the
                 // writes for the wire draft the peer speaks.
-                auto definition = resolve_probe(impl_->config, execution, id, plan->wire_draft);
+                auto definition = resolve_probe(impl_->config, execution, id, identity_draft(*plan));
                 if (!definition || definition->id != id)
                     return {RunStartStatus::Unsupported, {}, {}};
                 definitions.push_back(std::move(*definition));
@@ -1740,7 +1781,8 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
         const auto port = ephemeral ? std::uint16_t{0} :
             static_cast<std::uint16_t>(impl_->config.port_start + attempt);
         if (port != 0 && impl_->reserved_ports.contains(port)) continue;
-        auto created = impl_->create_listener(requested.transport, requested.draft, port,
+        // Identity: the listener offers the identity draft's ALPN (requested.draft == identity_draft(*plan)).
+        auto created = impl_->create_listener(requested.transport, identity_draft(*plan), port,
             definitions.empty() ? Impl::Tuning{} : Impl::tuning_of(definitions.front()));
         if (created.listener) {
             if (impl_->reserved_ports.contains(created.endpoint.port)) continue;
@@ -1749,7 +1791,7 @@ RunStartResult NativeRunManager::start(const RunConfig& requested) {
             listener = std::move(created.listener);
             if (requested.transport == TransportKind::WebTransport) {
                 path = "/moq";
-                protocol = std::string(app::alpn(requested.draft));
+                protocol = std::string(app::alpn(identity_draft(*plan)));
                 const auto host = endpoint.address.find(':') != std::string::npos
                     ? "[" + endpoint.address + "]" : endpoint.address;
                 url = "https://" + host + ":" + std::to_string(endpoint.port) + path;

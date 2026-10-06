@@ -693,6 +693,52 @@ TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
     EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
 }
 
+// A selection is validated before it is planned, the same way for every draft: an empty or duplicate id is
+// InvalidConfig (400 invalid_run_config) whatever else the selection holds; an unknown id or a shared scenario
+// whose implementation is not executable is Unsupported (422 unsupported_run_config). Draft 22 answers exactly
+// as draft 21 does for the same selection in its own ids.
+TEST(NativeRunManagerDraft22Lineage, ValidatesSelectionsLikeDraft21BeforePlanning) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    // A shared draft 22 scenario whose draft 21 implementation exists but is not executable.
+    std::string unimplemented22;
+    std::string unimplemented21;
+    for (const auto& [d22,d21] : requirements::lineage_data::kSharedScenarios) {
+        if (app::executable_scenario(21,d21)) continue;
+        unimplemented22=std::string(d22);
+        unimplemented21=std::string(d21);
+        break;
+    }
+    ASSERT_FALSE(unimplemented22.empty());
+    struct Draft { app::DraftVersion version; std::string valid; std::string unimplemented; };
+    for (const auto& [version,valid,unimplemented] : {
+             Draft{app::DraftVersion::Draft21,"d21-duplicate-request-goaway",unimplemented21},
+             Draft{app::DraftVersion::Draft22,"d22-duplicate-request-goaway",unimplemented22}}) {
+        const std::vector<std::pair<std::vector<std::string>,app::RunStartStatus>> rejected{
+            {{valid,valid},app::RunStartStatus::InvalidConfig},
+            {{valid,""},app::RunStartStatus::InvalidConfig},
+            {{""},app::RunStartStatus::InvalidConfig},
+            {{},app::RunStartStatus::InvalidConfig},
+            // Empty and duplicate ids are found before any id is planned.
+            {{"does-not-exist",""},app::RunStartStatus::InvalidConfig},
+            {{unimplemented,unimplemented},app::RunStartStatus::InvalidConfig},
+            {{"does-not-exist","does-not-exist"},app::RunStartStatus::InvalidConfig},
+            {{"does-not-exist"},app::RunStartStatus::Unsupported},
+            {{valid,"does-not-exist"},app::RunStartStatus::Unsupported},
+            {{unimplemented},app::RunStartStatus::Unsupported},
+            {{valid,unimplemented},app::RunStartStatus::Unsupported},
+        };
+        for (const auto& [ids,status] : rejected) {
+            SCOPED_TRACE(::testing::PrintToString(static_cast<unsigned>(version))+" "+::testing::PrintToString(ids));
+            const auto started=manager.start({version,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,ids,1000ms,app::TrackFixture{{"n"},"t"}});
+            EXPECT_EQ(started.status,status);
+            EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+        }
+    }
+    EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
+}
+
 TEST(NativeRunManagerDraft22Lineage, ListenerAcceptsOnlyTheDraft22Alpn) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
@@ -1315,6 +1361,24 @@ TEST(NativeRunManagerDraft22Identity, ASkippedSharedScenarioIsRecordedUnderItsRe
     EXPECT_FALSE(declaration->scenario_id.has_value() && !declaration->scenario_id->empty());
     expect_draft22_identity(run);
     EXPECT_TRUE(manager.stop(started.id));
+}
+
+// The API answer for a selection of only skipped shared scenarios names the requested draft 22 scenario and
+// its capability, as draft 21 names its own.
+TEST(NativeRunManagerDraft22Identity, AllSkippedSharedSelectionNamesTheRequestedScenario) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    for (const auto& [version,id] : {std::pair{app::DraftVersion::Draft21,std::string("d21-fetch-accepted")},
+                                     std::pair{app::DraftVersion::Draft22,std::string("d22-fetch-accepted")}}) {
+        SCOPED_TRACE(id);
+        const auto started=manager.start({version,app::TransportKind::NativeQuic,
+            app::RunMode::Observed,{id},1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}});
+        EXPECT_EQ(started.status,app::RunStartStatus::ScenarioRequiresCapability);
+        EXPECT_EQ(started.scenario,id);
+        EXPECT_EQ(started.capability,"fetch");
+        EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    }
+    EXPECT_EQ(store->list({10,0}).total,0u);
 }
 }
 }
