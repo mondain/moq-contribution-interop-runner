@@ -299,6 +299,16 @@ target_compile_options(moq-interop-draft21-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+# Draft 22 bindings: draft 21's translated through the lineage (it consumes draft21_executable_bindings, so it
+# cannot live in moq-interop-requirements without a dependency cycle).
+add_library(moq-interop-draft22-evaluators
+    src/requirements/draft22_bindings.cpp)
+target_link_libraries(moq-interop-draft22-evaluators PUBLIC
+    moq-interop-requirements moq-interop-draft21-evaluators)
+target_compile_options(moq-interop-draft22-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
@@ -949,6 +959,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-draft22-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME draft22-lineage COMMAND moq-interop-draft22-lineage-tests)
+
+    add_executable(moq-interop-draft22-bindings-tests tests/unit/draft22_bindings_test.cpp)
+    target_compile_definitions(moq-interop-draft22-bindings-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-draft22-bindings-tests PRIVATE
+        moq-interop-draft22-evaluators GTest::gtest_main)
+    add_test(NAME draft22-bindings COMMAND moq-interop-draft22-bindings-tests)
 
     add_executable(moq-interop-draft22-catalog-tests tests/unit/draft22_catalog_test.cpp)
     target_compile_definitions(moq-interop-draft22-catalog-tests PRIVATE
