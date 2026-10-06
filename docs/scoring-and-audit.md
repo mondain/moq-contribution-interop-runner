@@ -96,7 +96,7 @@ Two different claims must not be confused:
   and evaluator, and the source-keyword audit has classified every normative
   keyword in the draft text. Its current result is 173 of 173 required rows bound
   for each of draft 18 and draft 21, with optional (SHOULD/MAY) coverage of 1 of
-  90 and 1 of 97.
+  90 and 1 of 97, and 170 of 170 for draft 22 with optional coverage of 3 of 97.
 - Live evidence is what a particular run observed from a particular publisher. A
   binding is not proof that a publisher passed; many scenarios can only pass on
   positive wire evidence and stay `not_run` when the publisher never produces the
@@ -111,7 +111,7 @@ build/moq-interop-audit --draft 21 --format json
 build/moq-interop-audit --draft 18 --database /path/to/runs.sqlite3
 ```
 
-Options: `--draft 18|21|22` (required; `--database` is not supported with draft 22 yet), `--format text|json` (default `text`),
+Options: `--draft 18|21|22` (required; with `--database` only the stored runs of that draft are audited), `--format text|json` (default `text`),
 `--docs DIR`, `--requirements DIR` and `--database PATH` (an existing run
 database). Without `--docs` and `--requirements` it uses the source tree, or
 `/usr/share/moq-interop` when that is absent (as in the Docker image).

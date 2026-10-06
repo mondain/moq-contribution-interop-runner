@@ -87,7 +87,7 @@ Flags below match `build/moq-interop-runner --help`.
 | `--port PORT` | `8080` | HTTP port |
 | `--database PATH` | `interop-runs.sqlite3` in the working directory | SQLite database |
 | `--docs PATH` | `docs/` of the source tree | Directory holding the checked-in draft text files; `draft-ietf-moq-transport-18.txt`, `-21.txt` and `-22.txt` are all required at startup |
-| `--requirements PATH` | `requirements/` of the source tree | Requirement catalogs and draft digests; `draft18.json`, `draft21.json`, `draft22.json` (draft 22 is listed but not runnable yet) and `draft-digests.json` with entries for 18, 21 and 22 are all required at startup |
+| `--requirements PATH` | `requirements/` of the source tree | Requirement catalogs and draft digests; `draft18.json`, `draft21.json`, `draft22.json` and `draft-digests.json` with entries for 18, 21 and 22 are all required at startup (each catalog must be complete) |
 | `--publisher-bind ADDRESS` | `127.0.0.1` | UDP bind address for the per-run QUIC/WebTransport listeners |
 | `--publisher-advertise ADDRESS` | the bound address | Host or address returned to publishers in `publisher_endpoint` and in driver request URIs |
 | `--publisher-port-start PORT` | `4443` | First UDP port of the publisher range |

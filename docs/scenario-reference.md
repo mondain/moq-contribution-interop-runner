@@ -137,14 +137,17 @@ row `NOT_RUN`).
   named by the context's `context_ready` event.
 - Over WebTransport the runner admits only the strict profile (HTTP/3,
   QUIC/H3 DATAGRAM, RESET_STREAM_AT, current WebTransport settings, extended
-  CONNECT, exact `moqt-18` or `moqt-21` in `WT-Available-Protocols`). A client
+  CONNECT, exact `moqt-18`, `moqt-21` or `moqt-22` in `WT-Available-Protocols`). A client
   that sends `Origin` must use an origin listed with `--publisher-origin`;
   clients without `Origin` are accepted unless `--require-publisher-origin` is set.
 
 ## Scenario families
 
 The sections below group scenarios by the feature they exercise. "Draft 18" and
-"draft 21" scenario IDs differ; draft-21 IDs start with `d21-`.
+"draft 21" scenario IDs differ; draft-21 IDs start with `d21-`. This page lists
+drafts 18 and 21 only: draft 22 runs use the draft 21 IDs with `d21-` replaced by
+`d22-` for the scenarios the drafts share, plus 8 scenarios of draft 22's own
+(`/healthz` lists them all; see [http-api.md](http-api.md)).
 
 ### Session setup, SETUP options and GREASE
 

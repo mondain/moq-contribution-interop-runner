@@ -92,7 +92,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 ```
 
 The response contains `publisher_endpoint`. Native QUIC returns `address`, `port`
-and `alpn` (`moqt-18` or `moqt-21`); connect to `moqt://ADDRESS:PORT/moq`.
+and `alpn` (`moqt-18`, `moqt-21` or `moqt-22`); connect to `moqt://ADDRESS:PORT/moq`.
 WebTransport (`"transport": "webtransport"`) additionally returns `url`
 (`https://ADDRESS:PORT/moq`), `path` and `protocol`; give the URL to your publisher.
 Start your publisher now. The run ends when its scenario completes, the timeout
@@ -529,16 +529,17 @@ address that host can reach and publish the UDP range. Driver logs are kept in t
   records `publisher_exit_after_refusal` and its rows stay `not_run`. Enable QUIC
   datagrams (a nonzero `max_datagram_frame_size` transport parameter) in your
   publisher's QUIC stack.
-- **Exact ALPN.** Native QUIC uses `moqt-18` for draft 18 and `moqt-21` for draft 21.
+- **Exact ALPN.** Native QUIC uses `moqt-18` for draft 18, `moqt-21` for draft 21 and
+  `moqt-22` for draft 22.
   There is no fallback to another draft; a mismatch is rejected and recorded.
 - **WebTransport profile.** The runner admits only a strict profile: HTTP/3 (ALPN
   `h3`) with the WebTransport-capable HTTP/3 settings, HTTP/3 and QUIC DATAGRAM
   and RESET_STREAM_AT negotiated, an extended CONNECT request with the
   `webtransport-h3` protocol, scheme `https`, the authority and path from the
   returned URL (`/moq`), and `WT-Available-Protocols` as a Structured Fields list of
-  strings containing the exact `moqt-18` or `moqt-21` (the runner selects it in
-  `WT-Protocol`). Draft 18 references `draft-ietf-webtrans-http3-15` and draft 21
-  `draft-ietf-webtrans-http3-16`. Legacy WebTransport settings or protocol tokens
+  strings containing the exact `moqt-18`, `moqt-21` or `moqt-22` (the runner selects
+  it in `WT-Protocol`). Draft 18 references `draft-ietf-webtrans-http3-15`, and
+  drafts 21 and 22 `draft-ietf-webtrans-http3-16`. Legacy WebTransport settings or protocol tokens
   are rejected before any MoQT bytes are scored. A client that sends `Origin` must
   use an origin the operator listed with `--publisher-origin`.
 - **URIs.** Native QUIC: `moqt://host:port/moq`. WebTransport: `https://host:port/moq`.
