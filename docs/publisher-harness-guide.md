@@ -529,8 +529,12 @@ The flags:
 Replace the stand-in with your publisher by setting `ACME_PUB_BIN` (or the variable
 your adapter reads) and adapting the flag mapping. The environment of the runner is
 inherited by the adapter, which is how that variable reaches it. The driven-mode
-check scripts are `tests/e2e/driven-moqxr.sh` (one combination) and
-`tests/e2e/moqxr-matrix.sh` (four combinations).
+check scripts are `tests/e2e/driven-moqxr.sh` (one draft and transport) and
+`tests/e2e/moqxr-matrix.sh` (the adapter contract, then drafts 18, 21 and 22 over native
+QUIC and WebTransport: six pairs). Each pair runs a single scenario
+(`subscribe-to-publisher-track` for draft 18, `d21-publisher-request-stream-placement`
+for draft 21, `d22-publisher-request-stream-placement` for draft 22), so the matrix is a
+smoke test of the harness, not a conformance sweep.
 
 ### 6.2 In Docker Compose
 
@@ -619,8 +623,8 @@ it needs, and a limited endpoint SHOULD answer a message it does not support wit
 NOT_SUPPORTED instead of ignoring it (draft 18 Section 4, draft 21 Section 1.5).
 A live publisher with no cache or history, such as moqxr, normally has no FETCH. Not
 implementing FETCH is not a conformance failure, so tell the runner instead of
-letting 45 scenarios (23 in draft 18, 22 in draft 21) that start with a FETCH end in
-run-level errors:
+letting the scenarios that start with a FETCH (23 in draft 18, 22 in draft 21, 23 in
+draft 22) end in run-level errors:
 
 ```sh
 # once, when starting the runner

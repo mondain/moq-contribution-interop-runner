@@ -1111,6 +1111,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-executable-ids-golden-tests PRIVATE moq-interop-app GTest::gtest_main)
     add_test(NAME executable-ids-golden COMMAND moq-interop-executable-ids-golden-tests)
+    add_executable(moq-interop-scenario-reference-doc-tests tests/unit/scenario_reference_doc_test.cpp)
+    target_compile_definitions(moq-interop-scenario-reference-doc-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-scenario-reference-doc-tests PRIVATE moq-interop-app GTest::gtest_main)
+    add_test(NAME scenario-reference-doc COMMAND moq-interop-scenario-reference-doc-tests)
 
     add_executable(moq-interop-webtransport-run-api-tests
                    tests/integration/webtransport_run_api_test.cpp)

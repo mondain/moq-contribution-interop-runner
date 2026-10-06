@@ -1,11 +1,12 @@
 # moqxr Punch List
 
 This is a work list for an agent fixing `openmoq-publisher` (moqxr) so that it
-conforms to MoQT draft 18 and draft 21. Every item comes from a run of the interop
+conforms to MoQT drafts 18, 21 and 22. Every M- item comes from a run of the interop
 runner in this repository against `openmoq-publisher 0.4.1 (commit 9bda5c9)`, with
 the evidence and draft citation recorded below. The item bodies keep that original
-evidence; the status table that follows records what a later sweep against moqxr
-`0993cf7` showed. Background and the full result set
+evidence; the status tables that follow record what later sweeps against moqxr
+`0993cf7` and `4b615f4` showed. The D22- items come from the first draft 22 sweep,
+against `4b615f4`. Background and the full result set
 are in [interop-notes.md](interop-notes.md).
 
 ## Status against moqxr 0993cf7
@@ -44,12 +45,191 @@ publisher cache-less. Run with `--publisher-no-fetch` (or `"publisher_capabiliti
 {"fetch": false}`) and the FETCH-dependent rows become not applicable instead of
 failing. Re-check this row with the declaration before treating it as a moqxr defect.
 
+## Status against moqxr 4b615f4
+
+The draft 21 and draft 22 sweep of 2026-10-06 against `4b615f4` (`0.4.2-dev`, "Add moqt
+draft 22") re-checked the items below; the method and the full triage are in
+[interop-notes.md](interop-notes.md#draft-22-sweep-against-moqxr-4b615f4). Draft 18 was
+not swept, so draft 18-only items keep their `0993cf7` status. Several draft 21 rows
+still fail at draft 21 only because the bundled adapter runs their probes with
+`--forward 1` (moqxr then blocks on its own PUBLISH and closes with code 0 inside the
+reaction window); draft 21 command lines are frozen, the draft 22 twins run paced and
+pass, so those draft 21 FAILs are adapter artifacts, not moqxr defects.
+
+| Item | Status on 4b615f4 | Evidence |
+|------|-------------------|----------|
+| M-01 duplicate unknown SETUP options | No verdict (unchanged) | D21-13-MUST-593 and its twin D22-13-MUST-568 stay not_run (see D22-C1) |
+| M-02 malformed namespaces and names | Fixed | D22-8-7-MUST-269 to -272 pass (close 0x3); D21-8-7-MUST-251 to -254 fail only through the adapter flag artifact and pass with paced flags |
+| M-03 SUBSCRIBE_NAMESPACE 32-field limit | Fixed for draft 21 | D21-9-15-MUST-383 passes with paced flags (the bundled-adapter FAIL is the flag artifact); draft 22 has no such row |
+| M-05 namespace prefix overlap | Fixed for SUBSCRIBE_NAMESPACE | D22-4-2-MUST-111 passes (PREFIX_OVERLAP). SUBSCRIBE_TRACKS overlap is not detected: D22-09 |
+| M-08 server SETUP AUTHORITY or PATH | Fixed (unchanged) | D22-9-1-1-MUST-304, D22-9-1-2-MUST-311 pass; -305 and -312 pass over WebTransport |
+| M-09 unknown messages and stream types | Partly fixed | D22-6-4-1-MUST-167 (unknown unidirectional stream type) passes; D22-9-MUST-295 (unknown control message) fails: D22-02 |
+| M-10 AUTHORIZATION TOKEN structure | Fixed | D22-8-9-MUST-279 (close 0x6) and -289 (close 0x13) pass; D21-8-9-MUST-267 and -277 fail only through the flag artifact |
+| M-11 Range Filter without MAX_FILTER_RANGES | Open | D22-3-3-2-MUST-077, D22-9-1-6-MUST-326 fail (and the draft 21 twins): D22-01 |
+| M-12 nested FILL_PARAMETERS | Fixed | D22-9-20-8-MUST-421, D22-9-20-15-MUST-432 and D22-9-20-9-MUST-424 pass; the draft 21 FAILs are the flag artifact |
+| M-13 REQUEST_UPDATE_OK LARGEST_OBJECT | Fixed | D21-9-20-18-MUST-456 and D22-9-20-17-MUST-441 pass |
+| M-14 Track Properties tolerated | Unscored (unchanged) | D22-9-3-MUST-348, D22-9-5-MUST-355 not_run |
+| M-15 REDIRECT and oversized REQUEST_ERROR | Fixed (unchanged) | D22-9-4-1-MUST-352, D22-8-5-MUST-266 pass |
+| M-18 WebTransport datagram validation | Open | D22-11-MUST-488 passes on native QUIC, not_run on WebTransport: D22-07 |
+| M-19 control-stream GOAWAY URI | Changed: now a PROTOCOL_VIOLATION close | D22-04 |
+| M-20 rejected announcement ends the session | Still observed | A refused PUBLISH (GREASE code) ends the session with code 0: D22-C1 |
+
+M-04, M-06, M-07, M-16, M-17 and M-21 were not re-checked (draft 18 rows, or FETCH,
+which the sweep declared away).
+
+## Draft 22 items
+
+From the same sweep, with draft 22 rows and line numbers in
+`docs/draft-ietf-moq-transport-22.txt`. They follow the ground rules above; read the
+cited lines first. Items that carry an M- item over to draft 22 say so.
+
+### D22-01 A Range Filter with no advertised MAX_FILTER_RANGES gets UNAUTHORIZED (carries M-11)
+
+- **Rows:** D22-3-3-2-MUST-077, D22-9-1-6-MUST-326 (fail).
+- **Scenarios:** `d22-range-filter-with-zero-negotiated-limit`,
+  `d22-range-filter-default-zero-limit`.
+- **Draft:** lines 1501-1505 and 4039-4044: with no MAX_FILTER_RANGES advertised the
+  limit is zero, and a Range Filter must be rejected with INVALID_FILTER (0x36, line 7975).
+- **Observed:** REQUEST_ERROR code 0x1 (UNAUTHORIZED), reason "invalid SUBSCRIBE"
+  (`05 0014 01 00 11 ...`).
+- **Required:** use INVALID_FILTER for a filter over the negotiated limit.
+
+### D22-02 An unknown control message type is skipped (carries M-09)
+
+- **Row:** D22-9-MUST-295 (fail).
+- **Scenario:** `d22-unknown-control-message`.
+- **Draft:** lines 3877-3878: "An endpoint that receives an unknown message type MUST
+  close the session."
+- **Observed:** after `7e 00 00` on the control stream moqxr keeps the session and serves
+  the liveness SUBSCRIBE (SUBSCRIBE_OK and Objects).
+- **Required:** close the session on an unknown control message type.
+
+### D22-03 A padding stream closes the session
+
+- **Row:** D22-11-5-1-MUST-541 (not scored: the runner judges this row by the liveness
+  follow-up only).
+- **Scenario:** `d22-inbound-padding-stream`.
+- **Draft:** lines 6633-6647: an endpoint MAY open a padding stream (type 0x132B3E28);
+  "The receiver MUST discard all data received on a padding stream".
+- **Observed:** moqxr logs "received unknown or malformed unidirectional stream type" and
+  closes with PROTOCOL_VIOLATION.
+- **Required:** accept and discard padding streams.
+
+### D22-04 A control-stream GOAWAY with a New Session URI closes the session (carries M-19)
+
+- **Row:** D22-9-2-MUST-340 (not_run; the run ends `error`).
+- **Scenario:** `d22-publisher-goaway-alternate-uri`.
+- **Draft:** lines 4127-4130: "The client MUST use this URI for the new session if
+  provided."
+- **Observed:** after SUBSCRIBE_OK, GOAWAY with a URI on the control stream draws "received
+  unknown or unsupported control-stream message" and close 0x3.
+- **Required:** decode GOAWAY on the control stream and reconnect to the given URI. Lowest
+  priority, as M-19.
+
+### D22-05 A valid REQUEST_UPDATE on an accepted SUBSCRIBE is followed by close 0x3 (medium confidence)
+
+- **Rows:** D22-9-5-MUST-356, D22-9-5-1-MUST-363 (not_run).
+- **Scenarios:** `d22-single-request-update-response`,
+  `d22-coalesced-successful-update-responses`, `d22-coalesced-failed-update-response`.
+- **Draft:** lines 4304-4308: "The receiver of a REQUEST_UPDATE MUST respond with exactly
+  one REQUEST_UPDATE_OK or REQUEST_UPDATE_ERROR"; coalescing at 4406-4408.
+- **Observed:** after SUBSCRIBE_OK the runner sends REQUEST_UPDATE (`02 0004 03 01 20 64`,
+  SUBSCRIBER_PRIORITY 100; three for the coalesced probe) and then a TRACK_STATUS with FIN
+  on a new request stream. moqxr sends no REQUEST_OK and closes 0x3 "request stream closed
+  before a complete message". Which request triggers the close is not settled. Separately,
+  `d21-cancel-subscription-with-concurrent-fill-streams` (and once its draft 22 twin)
+  drew REQUEST_OK and then close 0x3 "retained SUBSCRIBE stream closed with a truncated
+  REQUEST_UPDATE" when the update was sent with FIN; this is intermittent.
+- **Where:** `read_request_stream_message` (the "request stream closed before a complete
+  message" return) and the retained-SUBSCRIBE update reader in `moqt_session.cpp`.
+- **Required:** answer each REQUEST_UPDATE; a complete message followed by FIN is not
+  truncated. Confirm with moqxr's own tests before changing anything.
+
+### D22-06 Silence where an answer or a close is required (suspected)
+
+- **Rows:** D22-4-2-MUST-110, D22-9-20-18-MUST-445, D22-9-5-MUST-355 (not_run).
+- **Scenarios:** `d22-discover-original-publisher-namespaces`,
+  `d22-discovery-update-invalid-forward`, `d22-update-on-track-status`,
+  `d22-responder-update-on-publish-namespace`, `d22-subscriber-update-on-publish`.
+- **Draft:** lines 1929-1931 (NAMESPACE for each matching namespace after accepting
+  SUBSCRIBE_NAMESPACE), 5608-5613 (a FORWARD value other than 0 or 1 is a
+  PROTOCOL_VIOLATION), 4300-4302 (REQUEST_UPDATE outside
+  the permitted cases is a PROTOCOL_VIOLATION).
+- **Observed:** after accepting SUBSCRIBE_NAMESPACE with the empty prefix moqxr sends no
+  NAMESPACE for `media`; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS, and updates
+  on TRACK_STATUS and on its own PUBLISH_NAMESPACE, get no answer and no close.
+- **Required:** as cited. Silence is not proof, so the runner leaves these rows unscored;
+  check each against moqxr's code.
+
+### D22-07 WebTransport does not reject an unknown datagram type (carries M-18)
+
+- **Row:** D22-11-MUST-488 (pass on native QUIC, not_run on WebTransport).
+- **Scenario:** `d22-unknown-datagram-type`.
+- **Draft:** lines 5955-5956: "An endpoint that receives an unknown datagram type MUST
+  close the session."
+- **Required:** validate datagrams on the WebTransport path as on native QUIC.
+
+### D22-08 A second GOAWAY on an accepted SUBSCRIBE_NAMESPACE stream is not detected
+
+- **Row:** D22-9-2-MUST-339 (fail).
+- **Scenarios:** `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams`
+  (run together).
+- **Draft:** lines 4113-4115: close with PROTOCOL_VIOLATION on more than one GOAWAY "on the
+  control stream or on a single request stream".
+- **Observed:** moqxr accepts SUBSCRIBE_NAMESPACE for `media` (`07 0001 00`); two GOAWAYs
+  (`10 0003 00 a7 10`) on that request stream draw no close, and the liveness SUBSCRIBE is
+  served. moqxr stops reading the request stream after accepting SUBSCRIBE_NAMESPACE, so
+  it never sees them. The distinct-streams control (one GOAWAY on each of two streams)
+  correctly drew no close.
+- **Required:** keep reading accepted SUBSCRIBE_NAMESPACE request streams (also needed
+  for REQUEST_UPDATE on them, D22-06) and close on a second GOAWAY.
+
+### D22-09 SUBSCRIBE_TRACKS prefix overlap is not detected
+
+- **Row:** D22-3-6-MUST-083 (fail).
+- **Scenarios:** `d22-subscribe-tracks-overlap`, `d22-discovery-independent-overlap-spaces`.
+- **Draft:** lines 1716-1719: a SUBSCRIBE_TRACKS whose prefix shares a common prefix with
+  an established SUBSCRIBE_TRACKS MUST get SUBSCRIBE_TRACKS_ERROR with PREFIX_OVERLAP.
+- **Observed:** a second SUBSCRIBE_TRACKS for `media`, and one for the empty prefix, are
+  accepted with REQUEST_OK. The same check for SUBSCRIBE_NAMESPACE works
+  (D22-4-2-MUST-111 passes).
+- **Required:** apply the overlap check to SUBSCRIBE_TRACKS, in its own overlap space.
+
+### D22-10 A REQUEST_UPDATE that references an unregistered token alias is not rejected
+
+- **Rows:** none scored. It keeps D22-9-5-1-MUST-357, -359 and -360 unscored: their
+  probes use such an update to make it fail.
+- **Scenarios:** `d22-failed-subscription-update-cleanup`,
+  `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close`.
+- **Draft:** lines 3708-3709: "The receiver of a message referencing an Alias that is not
+  currently registered MUST reject the message with UNKNOWN_AUTH_TOKEN_ALIAS."
+- **Observed:** the update `02 0006 03 01 03 02 02 00` (AUTHORIZATION TOKEN, USE_ALIAS 0,
+  never registered) is answered REQUEST_OK (`07 0004 01 09 00 01`) on a SUBSCRIBE, and
+  gets no answer on SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS.
+- **Required:** reject a reference to an unregistered alias.
+
+### D22-C1 A refused PUBLISH ends the session, GREASE code included (expectation question)
+
+- **Rows:** D22-13-MUST-568, D22-13-MUST-NOT-569, D22-13-MUST-NOT-576 (not_run).
+- **Scenario:** `d22-grease-request-error` (with `-grease-setup-options`,
+  `-grease-auth-token-type`, `-grease-stop-sending`).
+- **Draft:** lines 7024-7039: an unknown error code in a REQUEST_ERROR "MUST be treated
+  as equivalent to INTERNAL_ERROR", and an endpoint "MUST NOT close the session because it
+  received an unknown error code in a REQUEST_ERROR or PUBLISH_DONE".
+- **Observed:** the runner rejects moqxr's PUBLISH with REQUEST_ERROR code 0x9d; moqxr
+  resets the stream and ends the session with code 0, as it does after any refused
+  PUBLISH (M-20). Whether it closed because of the unknown code cannot be told.
+- **Question for the runner, not moqxr work yet:** pair the GREASE code with a known-code
+  refusal in the same run, or treat "a publisher ends its session after a refused
+  publication" as unrelated to these rows.
+
 ## Ground rules
 
 1. **The drafts decide.** The checked-in texts
-   `docs/draft-ietf-moq-transport-18.txt` and `docs/draft-ietf-moq-transport-21.txt`
-   in this repository are the only authority. Line numbers below refer to those
-   files. Read the cited lines before changing anything.
+   `docs/draft-ietf-moq-transport-18.txt`, `docs/draft-ietf-moq-transport-21.txt` and
+   `docs/draft-ietf-moq-transport-22.txt` in this repository are the only authority.
+   Line numbers below refer to those files. Read the cited lines before changing
+   anything.
 2. **The runner is not the authority either.** If, after reading the cited draft
    lines, you believe a finding is wrong (the runner's stimulus, its expected code,
    or its reading of the text), do not change moqxr to satisfy it. Record the
@@ -62,7 +242,7 @@ failing. Re-check this row with the declaration before treating it as a moqxr de
    Likewise do not implement token validation, PUBLISH_STATE_NOTIFY, padding, or the
    optional SETUP capabilities (`MAX_REQUEST_UPDATES`, `MAX_FILTER_RANGES`, a token
    cache); see "Out of scope".
-4. **Scope is draft 18 and draft 21.** moqxr also speaks draft 16; do not change
+4. **Scope is drafts 18, 21 and 22 (draft 22 for the D22- items).** moqxr also speaks draft 16; do not change
    draft 16 behavior. Where a fix touches shared code, keep draft-dependent behavior
    behind the existing draft checks. Draft 21 is not draft 18 with a different
    version number; confirm each item against the draft it names.
@@ -594,7 +774,12 @@ These come out of the same results but belong to the runner repository:
 - **Peer-close and response probe families** (probes where the publisher opens the
   request stream) do not yet use the close-attribution rule.
 - **Remaining hard-coded baseline SUBSCRIBEs** in a few draft 21 probes (for example
-  `d21-unknown-request-stream-message`, `d21-duplicate-invalid-request-id`).
+  `d21-unknown-request-stream-message`, `d21-duplicate-invalid-request-id`). At
+  draft 22, three probes now send the run's names (`d22-failed-subscription-update-cleanup`,
+  `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams`), but
+  `d22-unknown-request-stream-message` and `d22-update-on-track-status` still request
+  namespace () and track "x", and the first still runs moqxr `--forward 1`, so the
+  request-stream half of D22-9-MUST-295 is never exercised against moqxr.
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
 
