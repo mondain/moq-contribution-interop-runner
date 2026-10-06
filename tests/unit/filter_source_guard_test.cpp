@@ -46,6 +46,10 @@ const std::map<std::string, Allowed> kAllowed{
      {1, 1, "kLocationFilter: delta, then filter_param_value or (Types 0x01, 0x05) the draft 22 encoder"}},
     {"draft22_publisher_location_filter.cpp",
      {1, 1, "kLocationFilter: SUBSCRIBE delta then filter_param_value; the reader of publisher messages"}},
+    // Draft 22 only (the probes throw on another wire): filters the builder refuses by design (an End Group
+    // overflow), written by hand next to the draft 22 decoder that must reject them.
+    {"draft22_location_filter_probes.cpp",
+     {1, 0, "kLocationFilter: type delta before hand-written draft 22 bytes the builder refuses"}},
     // draft21_close: the overflow probe's type byte before filter_param_value, and a reader of a
     // received PUBLISH (decode_publish_for_wire presents it in draft 21 form).
     {"draft21_close.cpp", {2, 1, "std::byte{0x21} + filter_param_value; parameter.type == 0x21 reader"}},

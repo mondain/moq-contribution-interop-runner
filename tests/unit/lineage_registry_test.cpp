@@ -48,8 +48,9 @@ TEST(LineageRegistry, ExecutableDraft22ScenariosAreTheSharedOnesWhoseDraft21Impl
 TEST(LineageRegistry, ExecutableDraft22CountIsPinned) {
     EXPECT_EQ(shared_scenario_ids_22().size(), 307u);
     // Task 9a: the three row 069 scenarios; Task 9b: d22-discover-original-publisher-namespaces (row 110),
-    // d22-publisher-location-filter-parameter (row 422) and d22-request-stream-before-peer-setup (row 159).
-    EXPECT_EQ(kOwnScenarioTraits22.size(), 6u);
+    // d22-publisher-location-filter-parameter (row 422) and d22-request-stream-before-peer-setup (row 159);
+    // Task 10: d22-location-filter-end-group-overflow (row 424).
+    EXPECT_EQ(kOwnScenarioTraits22.size(), 7u);
     EXPECT_EQ(executable_scenarios(22).size(), 213u + kOwnScenarioTraits22.size());
 }
 
@@ -118,9 +119,9 @@ TEST(LineageRegistry, Draft18And21RegistriesAreUnchanged) {
 
 // ---- Own draft 22 scenarios (Task 8 dispatch seam) ----------------------------------------------------
 
-// An own id without a production implementation (Task 10 implements it; then pick another or drop the
-// stub tests). d22-request-stream-before-peer-setup served until Task 9b implemented it.
-constexpr std::string_view kStubOwn = "d22-location-filter-end-group-overflow";
+// An own id without a production implementation. d22-request-stream-before-peer-setup served until Task 9b
+// implemented it, d22-location-filter-end-group-overflow until Task 10 did.
+constexpr std::string_view kStubOwn = "d22-fill-location-filter-end-group-overflow";
 
 TEST(LineageRegistryOwn, OnlyTheProductionOwnScenariosAreImplemented) {
     EXPECT_EQ(own_scenario_ids_22().size(), kOwnScenarioTraits22.size());

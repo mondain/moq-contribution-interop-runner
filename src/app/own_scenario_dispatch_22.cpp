@@ -1,5 +1,6 @@
 #include "moq/interop/app/own_scenario_dispatch_22.h"
 
+#include "moq/interop/scenarios/draft22_location_filter_probes.h"
 #include "moq/interop/scenarios/draft22_location_range.h"
 #include "moq/interop/scenarios/draft22_namespace_discovery.h"
 #include "moq/interop/scenarios/draft22_pre_setup_request.h"
@@ -76,6 +77,11 @@ const std::vector<OwnProbe22>& production_probes() {
              return scenarios::draft22_pre_setup_request_probe(execution.timeout, std::move(track.name_space),
                                                                std::move(track.name));
          }},
+        {scenarios::kDraft22LocationFilterOverflow, [](const RunConfig& execution) {
+             auto track = track_of(execution);
+             return scenarios::draft22_location_filter_overflow_probe(
+                 execution.timeout, std::move(track.name_space), std::move(track.name));
+         }},
     };
     return table;
 }
@@ -88,6 +94,7 @@ const std::vector<OwnEvaluator22>& production_evaluators() {
         {scenarios::kDraft22NamespaceDiscoveryEvaluator, scenarios::evaluate_draft22_namespace_discovery},
         {scenarios::kDraft22PublisherLocationFilterEvaluator, scenarios::evaluate_draft22_publisher_location_filter},
         {scenarios::kDraft22PreSetupResetEvaluator, scenarios::evaluate_draft22_pre_setup_request},
+        {scenarios::kDraft22LocationFilterOverflowEvaluator, scenarios::evaluate_draft22_location_filter_overflow},
     };
     return table;
 }

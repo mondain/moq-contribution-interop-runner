@@ -900,9 +900,10 @@ app::OwnEvaluator22 stub_own_evaluator(StubObservations& seen) {
 }
 
 TEST(NativeRunManagerDraft22Lineage, AnUnregisteredOwnScenarioIsRefused) {
-    // An own id with no production implementation (Task 10 implements it). kStubOwnScenario served until
-    // Task 9b implemented it in production; the stub tests below shadow that implementation.
-    constexpr std::string_view unimplemented="d22-location-filter-end-group-overflow";
+    // An own id with no production implementation. kStubOwnScenario served until Task 9b implemented it in
+    // production (the stub tests below shadow that implementation), d22-location-filter-end-group-overflow
+    // until Task 10 did.
+    constexpr std::string_view unimplemented="d22-fill-location-filter-end-group-overflow";
     ASSERT_FALSE(app::own_scenario_22(unimplemented).has_value());
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     auto manager=lineage_manager(store,catalog22());
