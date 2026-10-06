@@ -73,9 +73,6 @@ Options parse(int argc, char* argv[]) {
         }
     }
     if (result.draft == 0) throw std::invalid_argument("--draft is required");
-    // audit_execution over stored draft 22 runs is not built yet; refuse rather than audit nothing.
-    if (result.draft == 22 && result.database)
-        throw std::invalid_argument("stored draft 22 runs are not supported yet");
     return result;
 }
 

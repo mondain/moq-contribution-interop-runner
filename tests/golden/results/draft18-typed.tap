@@ -1,0 +1,6 @@
+TAP version 14
+1..1
+ok 1 - subscribe-namespace-at-publisher
+  ---
+  {"draft":18,"failed":0,"not_run":0,"passed":1,"result":"pass","run_id":"<run-id>","scenario_id":"subscribe-namespace-at-publisher","scoring_profile":"standards"}
+  ...

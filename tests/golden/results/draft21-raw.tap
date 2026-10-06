@@ -1,0 +1,15 @@
+TAP version 14
+1..3
+# publisher_capabilities fetch=false (declared: the publisher does not implement FETCH)
+ok 1 - d21-duplicate-request-goaway
+  ---
+  {"draft":21,"failed":0,"not_run":0,"passed":1,"result":"pass","run_id":"<run-id>","scenario_id":"d21-duplicate-request-goaway","scoring_profile":"standards"}
+  ...
+ok 2 - d21-fetch-accepted # SKIP publisher declared no FETCH support
+  ---
+  {"draft":21,"failed":0,"not_run":0,"passed":0,"result":"skip","run_id":"<run-id>","scenario_id":"d21-fetch-accepted","scoring_profile":"standards","skip_reason":"publisher declared no FETCH support"}
+  ...
+ok 3 - d21-goaway-on-distinct-request-streams
+  ---
+  {"draft":21,"failed":0,"not_run":0,"passed":1,"result":"pass","run_id":"<run-id>","scenario_id":"d21-goaway-on-distinct-request-streams","scoring_profile":"standards"}
+  ...

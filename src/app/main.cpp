@@ -208,13 +208,13 @@ int main(int argc, char* argv[]) {
         auto draft21 = std::make_shared<const moq::interop::requirements::RequirementCatalog>(
             moq::interop::requirements::RequirementCatalog::load(
                 source21, options.requirements / "draft21.json"));
-        // Draft 22 is known but not runnable: its catalog is incomplete by design.
+        // One draft 22 catalog serves the run manager (scoring) and the server (listing, results), so both
+        // agree on what a draft 22 run is. Like the others it must be complete: startup fails otherwise.
         const auto source22 = moq::interop::requirements::load_draft_source(22, options.docs, digest_file);
-        options.server.draft22_catalog =
-            std::make_shared<const moq::interop::requirements::RequirementCatalog>(
-                moq::interop::requirements::RequirementCatalog::load(
-                    source22, options.requirements / "draft22.json",
-                    moq::interop::requirements::CatalogLoadMode::AllowIncomplete));
+        auto draft22 = std::make_shared<const moq::interop::requirements::RequirementCatalog>(
+            moq::interop::requirements::RequirementCatalog::load(
+                source22, options.requirements / "draft22.json"));
+        options.server.draft22_catalog = draft22;
         auto store = std::make_shared<moq::interop::storage::SqliteRunStore>(options.database, build);
         const auto recovered = store->recover_interrupted();
         if (recovered != 0)
@@ -222,7 +222,7 @@ int main(int argc, char* argv[]) {
         std::shared_ptr<moq::interop::app::NativeRunManager> runs;
         if (!options.native.certificate_path.empty()) {
             runs = std::make_shared<moq::interop::app::NativeRunManager>(
-                draft18, draft21, store, options.native);
+                draft18, draft21, store, options.native, draft22);
         }
         moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server, runs);
         if (!server.start()) throw std::runtime_error("could not bind the HTTP listener");

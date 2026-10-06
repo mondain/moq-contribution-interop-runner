@@ -235,6 +235,7 @@ std::optional<bool> evaluate_draft22_location_filter_absolute_origin(const RawPr
     // Delivered: a complete Object for that alias on a subgroup stream opened after the request (Section
     // 11.3; draft 22 keeps the draft 21 data stream format). Every Location is inside a range that starts at
     // {0, 0}, so no Object can be outside it.
+    if (!t.writes.front().delivery_event_count) return std::nullopt;
     const auto marker = *t.writes.front().delivery_event_count;
     const auto control = control_stream(collected.streams);
     for (const auto& [id, stream] : collected.streams) {

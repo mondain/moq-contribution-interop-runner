@@ -3,13 +3,14 @@
 **Date:** 2026-09-27
 
 > Note (2026-10): this document describes the two-draft design (drafts 18 and 21). Draft 22 has since
-> been added as a known draft that is not runnable through the API yet: its complete requirement
-> catalog (`requirements/draft22.json`), delta audit (`requirements/draft21-to-22-delta.json`), wire
-> codecs (`wire/draft22`) and application plumbing (`app/draft_traits.h`) exist. Draft 22 shares
-> draft 21's scenarios and evaluators through a generated lineage
+> been added and is runnable through the HTTP API like drafts 18 and 21 (`moqt-22`, native QUIC and
+> WebTransport): its complete requirement catalog (`requirements/draft22.json`), delta audit
+> (`requirements/draft21-to-22-delta.json`), wire codecs (`wire/draft22`) and application plumbing
+> (`app/draft_traits.h`) exist. Draft 22 shares draft 21's scenarios and evaluators through a generated lineage
 > (`include/moq/interop/requirements/draft22_lineage_data.h`), adds its own scenarios and evaluators for the rows that
-> changed, and its executable bindings pass the completeness gate (all 170 required rows covered).
-> Running it through the HTTP API is still to come. Statements below about "two drafts" predate that.
+> changed, and its executable bindings pass the completeness gate (all 170 required rows covered). A draft 22
+> run is stored and reported in draft 22 terms (`d22-` scenario IDs, `D22-` rows); see
+> [http-api.md](http-api.md). Statements below about "two drafts" predate that.
 
 ## Purpose
 

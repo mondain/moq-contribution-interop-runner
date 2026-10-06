@@ -28,6 +28,7 @@ std::vector<std::string_view> production_own_evaluator_ids_22();
 struct UnscoredVerdict22 {
     std::string_view evaluator;
     std::optional<bool> verdict;  // no value: not run (no verdict, or evidence cut at a recording limit)
+    std::string_view reason;      // why: what the publisher did for a verdict, or why there is none
 };
 
 // The verdict on a transcript of an unscored probe (kUnscoredProbeTraits22); nothing for any other

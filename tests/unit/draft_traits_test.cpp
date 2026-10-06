@@ -16,7 +16,7 @@ static_assert(draft_number(DraftVersion::Draft21) == 21);
 static_assert(draft_number(DraftVersion::Draft22) == 22);
 static_assert(alpn(DraftVersion::Draft22) == "moqt-22");
 static_assert(runnable(DraftVersion::Draft18) && runnable(DraftVersion::Draft21));
-static_assert(!runnable(DraftVersion::Draft22));
+static_assert(runnable(DraftVersion::Draft22));
 
 TEST(DraftTraits, EveryFunctionHandlesEveryDraft) {
     for (const auto draft : kAllDrafts) {

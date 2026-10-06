@@ -1,10 +1,15 @@
 #include "moq/interop/http/server.h"
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/app/unscored_probe_event_22.h"
 
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
+#include "moq/interop/requirements/execution_audit.h"
+#include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/draft18_gap_a.h"
 #include "moq/interop/scenarios/draft18_contribution.h"
 #include "moq/interop/storage/run_store.h"
@@ -16,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <set>
 #include <span>
@@ -158,6 +164,8 @@ TEST_F(HttpApiTest, ReportsReadinessAndCompleteDraftInventory) {
     EXPECT_EQ(health.at("status"), "ok");
     EXPECT_TRUE(health.at("database").at("ready"));
     EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
+    // No draft 22 catalog is configured here, so no draft 22 profile is listed.
+    for (const auto& profile : health.at("executable_profiles")) EXPECT_NE(profile.at("draft"), 22);
     // Every observed profile is repeated once as a driven profile.
     const auto profile_total = health.at("executable_profiles").size();
     ASSERT_EQ(profile_total % 2, 0u);
@@ -353,8 +361,8 @@ protected:
     std::unique_ptr<httplib::Client> client_;
 };
 
-// The draft 22 catalog is complete since D3; draft 22 stays not runnable until D4.
-TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownCompleteAndNotRunnable) {
+// The draft 22 catalog is complete since D3 and draft 22 is runnable since D4.
+TEST_F(HttpApiDraft22Test, ListsDraft22AsCompleteAndRunnable) {
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 3u);
     EXPECT_EQ(drafts.at("drafts").at(0).at("draft"), 18);
@@ -362,14 +370,66 @@ TEST_F(HttpApiDraft22Test, ListsDraft22AsKnownCompleteAndNotRunnable) {
     EXPECT_EQ(drafts.at("drafts").at(1).at("draft"), 21);
     EXPECT_TRUE(drafts.at("drafts").at(1).at("runnable"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("draft"), 22);
-    EXPECT_FALSE(drafts.at("drafts").at(2).at("runnable"));
+    EXPECT_TRUE(drafts.at("drafts").at(2).at("runnable"));
     EXPECT_TRUE(drafts.at("drafts").at(2).at("complete"));
     EXPECT_EQ(drafts.at("drafts").at(2).at("requirement_count"), 613);
-    // Healthz still reports only the runnable drafts and lists no draft 22 profile.
+    // With the draft 22 catalog configured, healthz lists draft 22 and its profiles: the API accepts draft 22
+    // runs exactly when it lists the draft.
     const auto health = get_json("/healthz");
-    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21}));
+    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21, 22}));
+    EXPECT_TRUE(std::any_of(health.at("executable_profiles").begin(), health.at("executable_profiles").end(),
+                            [](const Json& profile) { return profile.at("draft") == 22; }));
+}
+
+// The draft 22 profiles: every executable draft 22 scenario, each on the transports of its draft 21
+// implementation's profiles (own scenarios on both), observed and driven; draft 18/21 profiles are
+// exactly those of a server without the draft 22 catalog.
+TEST_F(HttpApiDraft22Test, HealthzListsDraft22ProfilesBesideUnchangedDraft18And21Profiles) {
+    const auto health = get_json("/healthz");
+    TemporaryDatabase other_database;
+    auto other_store = std::make_shared<storage::SqliteRunStore>(other_database.path(), test_build());
+    HttpServer plain(catalog(18), catalog(21), other_store, test_build(), ServerConfig{.port = 0});
+    ASSERT_TRUE(plain.start());
+    httplib::Client plain_client("127.0.0.1", plain.port());
+    plain_client.set_connection_timeout(2s);
+    plain_client.set_read_timeout(2s);
+    const auto plain_response = plain_client.Get("/healthz");
+    ASSERT_TRUE(plain_response);
+    const auto plain_health = Json::parse(plain_response->body);
+
+    Json earlier = Json::array();
+    std::map<std::string, std::set<std::pair<std::string, std::string>>> draft22;
+    std::map<std::string, std::set<std::pair<std::string, std::string>>> draft21;
     for (const auto& profile : health.at("executable_profiles")) {
-        EXPECT_NE(profile.at("draft"), 22);
+        const auto draft = profile.at("draft").get<unsigned>();
+        const auto scenario = profile.at("scenario").get<std::string>();
+        const std::pair combination{profile.at("transport").get<std::string>(), profile.at("mode").get<std::string>()};
+        if (draft != 22) {
+            earlier.push_back(profile);
+            if (draft == 21) draft21[scenario].insert(combination);
+            continue;
+        }
+        EXPECT_TRUE(app::executable_scenario(22, scenario)) << scenario;
+        EXPECT_TRUE(scenario.starts_with("d22-")) << scenario;
+        EXPECT_EQ(profile.at("requires_fetch").get<bool>(), app::scenario_requires_fetch(22, scenario)) << scenario;
+        EXPECT_FALSE(profile.at("configured")) << "no run manager is configured here";
+        EXPECT_TRUE(draft22[scenario].insert(combination).second) << scenario << " listed twice";
+    }
+    EXPECT_EQ(earlier, plain_health.at("executable_profiles")) << "draft 18/21 profiles changed";
+
+    const auto executable = app::executable_scenarios(22);
+    EXPECT_EQ(executable.size(), 221u);
+    EXPECT_EQ(draft22.size(), executable.size());
+    for (const auto id : executable) {
+        const auto found = draft22.find(std::string(id));
+        ASSERT_NE(found, draft22.end()) << id;
+        if (app::own_scenario_22(id)) {
+            EXPECT_EQ(found->second.size(), 4u) << id << ": own scenarios run on both transports, both modes";
+            continue;
+        }
+        const auto implementation = app::implementation_scenario_id(id);
+        ASSERT_TRUE(implementation) << id;
+        EXPECT_EQ(found->second, draft21[std::string(*implementation)]) << id;
     }
 }
 
@@ -395,20 +455,40 @@ TEST(HttpServerConfigTest, RejectsADraft22CatalogThatIsNotDraft22) {
                  std::invalid_argument);
 }
 
-TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
+// With the draft 22 catalog, a draft 22 run request is validated like a draft 18 or 21 one: an id the draft
+// cannot execute is the same 422, a valid selection reaches the run manager (none here: 503, as for 18/21).
+TEST_F(HttpApiDraft22Test, Draft22RunsAreValidatedLikeDraft18And21Runs) {
     const auto post = [&](const Json& request) {
         auto response = client_->Post("/api/v1/runs", request.dump(), "application/json");
         EXPECT_TRUE(response);
         return response;
     };
-    // Even a nonsense scenario list gets the draft error, not a scenario error.
-    const auto response = post({{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
-                                {"scenarios", Json::array({"no-such-scenario"})}, {"timeout_ms", 1000}});
-    ASSERT_TRUE(response);
-    EXPECT_EQ(response->status, 422);
-    const auto error = Json::parse(response->body).at("error");
-    EXPECT_EQ(error.at("code"), "draft_not_runnable");
-    EXPECT_EQ(error.at("message"), "Draft 22 is not runnable through the API yet.");
+    const auto request = [](unsigned draft, const std::string& id) {
+        return Json{{"draft", draft}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", Json::array({"6e"})}, {"name_hex", "74"}}}};
+    };
+    for (const auto& [draft, id] : std::vector<std::pair<unsigned, std::string>>{
+             {18, "no-such-scenario"}, {21, "d21-no-such-scenario"}, {22, "d22-no-such-scenario"},
+             {22, "d21-publisher-request-stream-placement"}}) {
+        SCOPED_TRACE(id);
+        const auto response = post(request(draft, id));
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 422) << response->body;
+        const auto error = Json::parse(response->body).at("error");
+        EXPECT_EQ(error.at("code"), "unsupported_run_config");
+        EXPECT_EQ(error.at("message"), "Scenario '" + id + "' is not an executable scenario for draft " +
+                                           std::to_string(draft) + ".");
+    }
+    for (const auto& [draft, id] : std::vector<std::pair<unsigned, std::string>>{
+             {21, "d21-publisher-request-stream-placement"}, {22, "d22-publisher-request-stream-placement"},
+             {22, "d22-request-stream-before-peer-setup"}}) {
+        SCOPED_TRACE(id);
+        const auto response = post(request(draft, id));
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 503) << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "publisher_listener_unavailable");
+    }
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
     // Draft 23 is still a malformed run configuration.
     const auto invalid = post({{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},
@@ -418,6 +498,8 @@ TEST_F(HttpApiDraft22Test, RunsForDraft22AreRejectedBeforeScenarioValidation) {
     EXPECT_EQ(Json::parse(invalid->body).at("error").at("code"), "invalid_run_config");
 }
 
+// A runner without the draft 22 catalog does not list draft 22 and refuses its runs before scenario validation:
+// it could neither score nor present them.
 TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
     const auto drafts = get_json("/api/v1/drafts");
     ASSERT_EQ(drafts.at("drafts").size(), 2u);
@@ -425,6 +507,7 @@ TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
     const auto error = get_json("/api/v1/requirements?draft=22", 400);
     EXPECT_EQ(error.at("error").at("code"), "unsupported_draft");
     EXPECT_EQ(error.at("error").at("message"), "draft must be 18 or 21.");
+    EXPECT_EQ(get_json("/healthz").at("supported_drafts"), Json::array({18, 21}));
     const auto response = client_->Post(
         "/api/v1/runs",
         Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
@@ -432,7 +515,10 @@ TEST_F(HttpApiTest, WithoutADraft22CatalogDraft22IsOnlyRefusedForRuns) {
         "application/json");
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 422);
-    EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "draft_not_runnable");
+    const auto refused = Json::parse(response->body).at("error");
+    EXPECT_EQ(refused.at("code"), "draft_not_runnable");
+    EXPECT_EQ(refused.at("message"), "Draft 22 is not runnable on this runner.");
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
 }
 
 TEST_F(HttpApiTest, ValidatesPublisherCapabilityDeclarations) {
@@ -969,6 +1055,282 @@ TEST_F(HttpApiTest, FirstFetchProfilesAdvertiseUniqueContextsAndPreflightFixture
         ASSERT_TRUE(response);
         EXPECT_EQ(response->status,503)<<response->body;
     }
+}
+
+// ---- draft 22 through the read routes (runs are stored directly: POST refuses draft 22 until it is runnable) ----
+
+// A finalized draft 22 run as the manager stores one: requested d22 ids, events stamped with them, a passed row
+// with its binding's declared evidence, and one unscored probe verdict.
+struct StoredDraft22Run {
+    app::RunId id;
+    requirements::ExecutableBinding binding;
+};
+
+// One observation per catalog row, as a finalized run stores them: the bound row passed, other scored rows were
+// not run, and unscored rows carry their classification.
+static std::vector<requirements::Outcome> draft22_outcomes(const requirements::RequirementCatalog& draft22,
+                                                           const requirements::ExecutableBinding& binding) {
+    std::vector<requirements::Outcome> outcomes;
+    for (const auto& row : draft22.requirements) {
+        auto state = requirements::OutcomeState::NotRun;
+        if (row.applicability != requirements::Applicability::Applicable)
+            state = requirements::OutcomeState::NotApplicable;
+        else if (row.testability != requirements::Testability::Testable)
+            state = requirements::OutcomeState::NotTestable;
+        else if (row.id == binding.requirement_id)
+            state = requirements::OutcomeState::Pass;
+        outcomes.push_back({row.id, state});
+    }
+    return outcomes;
+}
+
+static StoredDraft22Run store_draft22_run(storage::RunStore& store, const requirements::RequirementCatalog& draft22) {
+    const auto bindings = requirements::draft22_executable_bindings();
+    const auto binding = *std::find_if(bindings.begin(), bindings.end(), [&](const auto& candidate) {
+        const auto row = std::find_if(draft22.requirements.begin(), draft22.requirements.end(),
+                                      [&](const auto& requirement) { return requirement.id == candidate.requirement_id; });
+        return !candidate.evidence_kinds.empty() && row != draft22.requirements.end() &&
+               row->applicability == requirements::Applicability::Applicable &&
+               row->testability == requirements::Testability::Testable &&
+               app::executable_scenario(22, candidate.scenario_id);
+    });
+    app::RunConfig config{app::DraftVersion::Draft22, app::TransportKind::NativeQuic, app::RunMode::Observed,
+                          {binding.scenario_id, "d22-location-filter-unknown-type"}, 1s};
+    const auto id = store.create_run(config);
+    std::vector<storage::EvidenceEvent> events;
+    for (const auto& kind : binding.evidence_kinds) {
+        storage::EvidenceEvent event;
+        event.kind = kind;
+        event.detail = "observed";
+        event.scenario_id = binding.scenario_id;
+        events.push_back(std::move(event));
+    }
+    storage::EvidenceEvent unscored;
+    unscored.kind = std::string(app::kUnscoredProbeVerdictEvent);
+    unscored.detail = app::unscored_probe_detail_22("d22-location-filter-unknown-type-protocol-violation", "fail",
+                                                    "the publisher closed with another error code") + " ordinal=2";
+    unscored.scenario_id = "d22-location-filter-unknown-type";
+    events.push_back(std::move(unscored));
+    store.append_events(id, events);
+    store.finalize(id, requirements::score(draft22, draft22_outcomes(draft22, binding)), draft22_outcomes(draft22, binding));
+    return {id, binding};
+}
+
+TEST(UnscoredProbeDetail22Test, RoundTripsVerdictAndReasonAndReadsTheOlderFormat) {
+    const auto detail = app::unscored_probe_detail_22("eval-x", "not_run", "evidence cut at a recording limit");
+    const auto fields = app::parse_unscored_probe_detail_22(detail + " ordinal=3");
+    ASSERT_TRUE(fields);
+    EXPECT_EQ(fields->evaluator, "eval-x");
+    EXPECT_EQ(fields->verdict, "not_run");
+    EXPECT_EQ(fields->reason, "evidence cut at a recording limit");
+    const auto older = app::parse_unscored_probe_detail_22(
+        "evaluator=eval-y verdict=pass scored=false (no catalog row names this probe) ordinal=1");
+    ASSERT_TRUE(older);
+    EXPECT_EQ(older->verdict, "pass");
+    EXPECT_EQ(older->reason, "");
+    for (const auto* malformed : {"", "verdict=pass", "evaluator=e verdict=maybe scored=false",
+                                  "evaluator= verdict=pass scored=false", "evaluator=e verdict=pass"})
+        EXPECT_FALSE(app::parse_unscored_probe_detail_22(malformed)) << malformed;
+}
+
+TEST_F(HttpApiDraft22Test, CompletenessListsDraft22BesideUnchangedDraft18And21Entries) {
+    const auto document = get_json("/results/completeness.json");
+    ASSERT_EQ(document.at("drafts").size(), 3u);
+    const auto& entry = document.at("drafts").at(2);
+    const auto draft22 = catalog22();
+    const auto audit = requirements::audit_completeness(*draft22, requirements::draft22_executable_bindings(),
+                                                        app::executable_scenarios(22));
+    EXPECT_EQ(entry.at("draft"), 22);
+    EXPECT_EQ(entry.at("source_sha256"), draft22->source_sha256);
+    EXPECT_EQ(entry.at("catalog_rows"), draft22->requirements.size());
+    EXPECT_EQ(entry.at("required_covered"), 170);
+    EXPECT_EQ(entry.at("required_total"), 170);
+    EXPECT_EQ(entry.at("required_covered"), audit.required_covered);
+    EXPECT_EQ(entry.at("optional_covered"), audit.optional_covered);
+    EXPECT_EQ(entry.at("optional_total"), audit.optional_total);
+    EXPECT_EQ(entry.at("evaluator_complete"), audit.complete());
+    ASSERT_EQ(entry.at("transports").size(), 2u);
+
+    // Drafts 18 and 21 are byte-identical to a server without the draft 22 catalog.
+    TemporaryDatabase other_database;
+    auto other_store = std::make_shared<storage::SqliteRunStore>(other_database.path(), test_build());
+    HttpServer plain(catalog(18), catalog(21), other_store, test_build(), ServerConfig{.port = 0});
+    ASSERT_TRUE(plain.start());
+    httplib::Client plain_client("127.0.0.1", plain.port());
+    plain_client.set_read_timeout(5s);
+    const auto plain_response = plain_client.Get("/results/completeness.json");
+    ASSERT_TRUE(plain_response);
+    const auto plain_document = Json::parse(plain_response->body);
+    ASSERT_EQ(plain_document.at("drafts").size(), 2u);
+    EXPECT_EQ(document.at("drafts").at(0).dump(), plain_document.at("drafts").at(0).dump());
+    EXPECT_EQ(document.at("drafts").at(1).dump(), plain_document.at("drafts").at(1).dump());
+
+    const auto page = client_->Get("/results");
+    ASSERT_TRUE(page);
+    EXPECT_EQ(page->status, 200);
+    EXPECT_NE(page->body.find("170/170"), std::string::npos);
+}
+
+TEST_F(HttpApiDraft22Test, StoredDraft22RunIsServedWithTheDraft22CatalogEverywhere) {
+    const auto draft22 = catalog22();
+    const auto stored = store_draft22_run(*store_, *draft22);
+
+    const auto result = get_json("/results/" + stored.id + ".json");
+    EXPECT_EQ(result.at("draft_source_sha256"), draft22->source_sha256);
+    EXPECT_EQ(result.at("run").at("config").at("draft"), 22);
+    EXPECT_EQ(result.at("run").at("config").at("scenarios"),
+              Json::array({stored.binding.scenario_id, "d22-location-filter-unknown-type"}));
+    ASSERT_EQ(result.at("requirements").size(), draft22->requirements.size());
+    bool passed = false;
+    for (const auto& row : result.at("requirements")) {
+        EXPECT_TRUE(row.at("id").get<std::string>().starts_with("D22-")) << row.at("id");
+        if (row.at("id") == stored.binding.requirement_id) {
+            EXPECT_EQ(row.at("outcome"), "pass");
+            passed = true;
+        }
+    }
+    EXPECT_TRUE(passed);
+    // The unscored probe is listed on its own, outside the score.
+    ASSERT_TRUE(result.contains("unscored_probes"));
+    EXPECT_EQ(result.at("unscored_probes"),
+              Json::array({{{"scenario_id", "d22-location-filter-unknown-type"},
+                            {"verdict", "fail"},
+                            {"reason", "the publisher closed with another error code"}}}));
+    // The unscored fail never reaches the score: it is the score of the one passed row.
+    const auto outcomes = draft22_outcomes(*draft22, stored.binding);
+    const auto expected = requirements::score(*draft22, outcomes);
+    EXPECT_EQ(expected.verdict, requirements::RunVerdict::Incomplete);
+    EXPECT_GT(expected.weighted.earned, 0u);
+    EXPECT_EQ(result.at("run").at("verdict"), "incomplete");
+    EXPECT_EQ(result.at("run").at("score").at("required").at("earned"), expected.required.earned);
+    EXPECT_EQ(result.at("run").at("score").at("weighted").at("earned"), expected.weighted.earned);
+    for (const auto& row : result.at("requirements")) EXPECT_NE(row.at("outcome"), "fail") << row.at("id");
+    bool structured = false;
+    for (const auto& event : result.at("evidence")) {
+        if (event.at("kind") != "unscored_probe_verdict") {
+            EXPECT_FALSE(event.contains("verdict"));
+            continue;
+        }
+        EXPECT_EQ(event.at("verdict"), "fail");
+        EXPECT_EQ(event.at("reason"), "the publisher closed with another error code");
+        structured = true;
+    }
+    EXPECT_TRUE(structured);
+
+    const auto events = get_json("/api/v1/runs/" + stored.id + "/events");
+    const auto unscored = std::find_if(events.at("items").begin(), events.at("items").end(),
+                                       [](const Json& event) { return event.at("kind") == "unscored_probe_verdict"; });
+    ASSERT_NE(unscored, events.at("items").end());
+    EXPECT_EQ(unscored->at("verdict"), "fail");
+    EXPECT_EQ(unscored->at("reason"), "the publisher closed with another error code");
+    EXPECT_TRUE(unscored->at("detail").get<std::string>().starts_with(
+        "evaluator=d22-location-filter-unknown-type-protocol-violation verdict=fail scored=false"));
+
+    const auto tap = client_->Get("/results/" + stored.id + ".tap");
+    ASSERT_TRUE(tap);
+    EXPECT_EQ(tap->status, 200) << tap->body;
+    EXPECT_TRUE(tap->body.starts_with("TAP version 14\n1..2\n")) << tap->body;
+    EXPECT_NE(tap->body.find(stored.binding.scenario_id), std::string::npos);
+    EXPECT_NE(tap->body.find("d22-location-filter-unknown-type"), std::string::npos);
+
+    const auto html = client_->Get("/results/" + stored.id);
+    ASSERT_TRUE(html);
+    EXPECT_EQ(html->status, 200) << html->body;
+    EXPECT_NE(html->body.find("Draft 22;"), std::string::npos);
+    EXPECT_NE(html->body.find(stored.binding.requirement_id), std::string::npos);
+    EXPECT_NE(html->body.find("Unscored probes"), std::string::npos);
+
+    // Completeness counts the run under draft 22 and finds it consistent with the draft 22 bindings.
+    const auto document = get_json("/results/completeness.json");
+    const auto& native = document.at("drafts").at(2).at("transports").at(0);
+    EXPECT_EQ(native.at("transport"), "native-quic");
+    EXPECT_EQ(native.at("run_count"), 1);
+    EXPECT_EQ(native.at("scored_rows"), 1);
+    EXPECT_EQ(native.at("observed_requirement_count"), 1);
+    EXPECT_TRUE(native.at("execution_consistent")) << native.at("execution_findings").dump();
+    const std::vector<storage::RunRecord> runs{store_->load(stored.id)};
+    const auto bindings = requirements::draft22_executable_bindings();
+    EXPECT_TRUE(requirements::audit_execution(*draft22, bindings, runs).consistent());
+    for (const auto draft : {0u, 1u})
+        for (const auto& transport : document.at("drafts").at(draft).at("transports"))
+            EXPECT_EQ(transport.at("run_count"), 0);
+}
+
+TEST_F(HttpApiTest, StoredDraft22RunWithoutTheDraft22CatalogIsAClearConflict) {
+    const auto stored = store_draft22_run(*store_, *catalog22());
+    for (const auto& path : {"/results/" + stored.id + ".json", "/results/" + stored.id + ".tap",
+                             "/results/" + stored.id}) {
+        const auto error = get_json(path, 409);
+        EXPECT_EQ(error.at("error").at("code"), "draft_catalog_not_configured") << path;
+        EXPECT_EQ(error.at("error").at("message"),
+                  "Draft 22 results need the draft 22 catalog, which this runner does not have configured.");
+    }
+    // The run listing and completeness still work; completeness has no draft 22 entry.
+    const auto document = get_json("/results/completeness.json");
+    EXPECT_EQ(document.at("drafts").size(), 2u);
+    const auto page = client_->Get("/results");
+    ASSERT_TRUE(page);
+    EXPECT_EQ(page->status, 200);
+    EXPECT_EQ(get_json("/api/v1/runs/" + stored.id).at("run").at("config").at("draft"), 22);
+}
+
+TEST_F(HttpApiTest, Draft18And21ResultsCarryNoUnscoredProbes) {
+    for (const auto draft : {18u, 21u}) {
+        const auto current = catalog(draft);
+        const auto binding = draft == 18 ? requirements::draft18_executable_bindings().front()
+                                         : requirements::draft21_executable_bindings().front();
+        app::RunConfig config{*app::parse_draft(draft), app::TransportKind::NativeQuic, app::RunMode::Observed,
+                              {binding.scenario_id}, 1s};
+        const auto id = store_->create_run(config);
+        const std::vector<requirements::Outcome> outcomes{{binding.requirement_id, requirements::OutcomeState::Pass}};
+        store_->finalize(id, requirements::score(*current, outcomes), outcomes);
+        const auto result = get_json("/results/" + id + ".json");
+        EXPECT_FALSE(result.contains("unscored_probes")) << draft;
+    }
+}
+
+// The FETCH fixture check covers the draft 22 successor of d21-publish-state-notify-on-fetch, as it does
+// every other draft 22 FETCH scenario.
+TEST_F(HttpApiDraft22Test, Draft22FetchNotifyScenarioPreflightsItsFixture) {
+    const auto request = [](Json fields, const char* name) {
+        return Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({"d22-publish-state-notify-on-fetch"})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", std::move(fields)}, {"name_hex", name}}}};
+    };
+    const auto invalid = client_->Post("/api/v1/runs", request(Json::array({"2e"}), "78").dump(), "application/json");
+    ASSERT_TRUE(invalid);
+    EXPECT_EQ(invalid->status, 400) << invalid->body;
+    EXPECT_EQ(Json::parse(invalid->body).at("error").at("message"), "Invalid FETCH track namespace or name.");
+    const auto valid = client_->Post("/api/v1/runs", request(Json::array({"6e"}), "74").dump(), "application/json");
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(valid->status, 503) << valid->body;
+    EXPECT_EQ(Json::parse(valid->body).at("error").at("code"), "publisher_listener_unavailable");
+}
+
+// Every own draft 22 scenario builds its requests from the track fixture and refuses the fixtures the FETCH
+// check refuses, so the HTTP preflight names the fixture instead of answering a generic invalid configuration.
+TEST_F(HttpApiDraft22Test, OwnDraft22ScenariosPreflightTheirFixture) {
+    const auto request = [](const std::string& id, Json fields, const char* name) {
+        return Json{{"draft", 22}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", std::move(fields)}, {"name_hex", name}}}};
+    };
+    std::size_t own = 0;
+    for (const auto id : app::executable_scenarios(22)) {
+        if (!app::own_scenario_22(id)) continue;
+        ++own;
+        SCOPED_TRACE(std::string(id));
+        const auto invalid = client_->Post("/api/v1/runs", request(std::string(id), Json::array({"2e"}), "78").dump(),
+                                           "application/json");
+        ASSERT_TRUE(invalid);
+        EXPECT_EQ(invalid->status, 400) << invalid->body;
+        EXPECT_EQ(Json::parse(invalid->body).at("error").at("message"), "Invalid FETCH track namespace or name.");
+        const auto valid = client_->Post("/api/v1/runs", request(std::string(id), Json::array({"6e"}), "74").dump(),
+                                         "application/json");
+        ASSERT_TRUE(valid);
+        EXPECT_EQ(valid->status, 503) << valid->body;
+    }
+    EXPECT_EQ(own, 8u);
 }
 
 }  // namespace moq::interop::http

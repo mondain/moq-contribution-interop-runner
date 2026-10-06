@@ -41,13 +41,13 @@ constexpr std::string_view alpn(DraftVersion draft) {
     throw std::logic_error("unreachable DraftVersion");
 }
 
-// Draft 22 is not runnable through the API yet: the run manager can execute its shared scenarios by lineage,
-// but the API gate stays closed until its own scenarios, bindings and storage land.
+// Whether the API accepts runs for the draft (when the server also has its catalog). Draft 22 runs its shared
+// scenarios on draft 21's family by lineage and its own scenarios as raw probes on the draft 22 wire.
 constexpr bool runnable(DraftVersion draft) {
     switch (draft) {
         case DraftVersion::Draft18: return true;
         case DraftVersion::Draft21: return true;
-        case DraftVersion::Draft22: return false;
+        case DraftVersion::Draft22: return true;
     }
     throw std::logic_error("unreachable DraftVersion");
 }
@@ -67,15 +67,16 @@ constexpr bool known_alpn(std::string_view value) {
     return false;
 }
 
-// Runs the callable for `draft`; the other is never evaluated. Draft 22 is not runnable, so
-// reaching it here is a logic error (the run gate refuses it first). Both callables must
-// return the same type; give reference-returning lambdas an explicit return type.
+// Runs the callable for `draft`; the other is never evaluated. It chooses between the two family drafts
+// only: a site that can see draft 22 must switch on the draft itself (or use family_draft first), so
+// reaching draft 22 here is a logic error. Both callables must return the same type; give
+// reference-returning lambdas an explicit return type.
 template <class When18, class When21>
 decltype(auto) by_draft(DraftVersion draft, When18&& when_18, When21&& when_21) {
     switch (draft) {
         case DraftVersion::Draft18: return std::forward<When18>(when_18)();
         case DraftVersion::Draft21: return std::forward<When21>(when_21)();
-        case DraftVersion::Draft22: throw std::logic_error("draft 22 is not runnable");
+        case DraftVersion::Draft22: throw std::logic_error("by_draft chooses between drafts 18 and 21 only");
     }
     throw std::logic_error("unreachable DraftVersion");
 }

@@ -17,8 +17,11 @@ struct DriverRequest {
     std::filesystem::path executable;
     std::vector<std::string> arguments;
     RunId run_id;
+    // The scenario as it was selected for the run (a d22- id for a draft 22 run, never the draft 21
+    // implementation id the runner executes it with), the same id the run's stored events carry.
     std::string scenario_id;
     std::string endpoint;
+    // The draft the run is on the wire (the ALPN the runner accepts), not the family it executes on.
     DraftVersion draft{DraftVersion::Draft18};
     TransportKind transport{TransportKind::NativeQuic};
     TrackFixture track;
@@ -59,6 +62,8 @@ struct DriverStartResult {
     std::string error;
 };
 
+// The request file handed to the driver: `scenario_id` is the requested scenario id and `draft` the wire draft
+// (see DriverRequest), so a draft 22 run's driver sees draft 22 and d22- ids only.
 std::string serialize_driver_request(const DriverRequest& request);
 std::string serialize_driver_result(const DriverResult& result);
 

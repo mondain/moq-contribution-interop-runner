@@ -5,9 +5,10 @@ publishers. It presents itself to a publisher as the receiving end of a relay,
 drives controlled interactions (subscribing, fetching, sending malformed or
 unusual input), records what the publisher puts on the wire, and scores that
 evidence against the publisher-applicable requirements of
-`draft-ietf-moq-transport-18` and `draft-ietf-moq-transport-21`.
+`draft-ietf-moq-transport-18`, `draft-ietf-moq-transport-21` and
+`draft-ietf-moq-transport-22`.
 
-- Both drafts, scored independently; native QUIC and WebTransport.
+- Each draft scored independently; native QUIC and WebTransport.
 - Runs as a plain process or as a Docker container.
 - Results are served over HTTP as JSON, TAP 14 and an HTML report, and stored in
   SQLite.
@@ -24,10 +25,12 @@ payloads; payload bytes are opaque.
 ## Status
 
 - Every applicable, testable MUST/MUST NOT row of each draft has a bound scenario
-  and evaluator: 173 of 173 for draft 18 and 173 of 173 for draft 21 (check with
-  `build/moq-interop-audit --draft 18` and `--draft 21`).
-- Optional SHOULD/MAY coverage is low: 1 of 90 rows for draft 18 and 1 of 97 for
-  draft 21.
+  and evaluator: 173 of 173 for draft 18, 173 of 173 for draft 21 and 170 of 170
+  for draft 22 (check with `build/moq-interop-audit --draft 18`, `--draft 21` and
+  `--draft 22`). Draft 22 reuses draft 21's scenarios where the requirement did
+  not change and adds its own where it did; its runs use `d22-` scenario IDs.
+- Optional SHOULD/MAY coverage is low: 1 of 90 rows for draft 18, 1 of 97 for
+  draft 21 and 3 of 97 for draft 22.
 - A binding is not proof that a publisher passed. Most scenarios pass only on
   positive wire evidence, and a publisher that never produces the behavior leaves
   the row `NOT_RUN`. `incomplete` is the normal verdict of a run that selects a
@@ -103,10 +106,10 @@ have the runner launch your publisher for you, follow the
 | Path | Contents |
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
-| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, and `draft22.json`, which is complete: draft 22 is known but not runnable yet), the draft 21 to 22 delta audit, schema and draft digests |
+| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json` and `draft22.json`), the draft 21 to 22 delta audit, schema and draft digests |
 | `adapters/` | Driver contract schema and the bundled `moqxr` adapter |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
-| `docs/` | Documentation and the two draft texts |
+| `docs/` | Documentation and the draft texts |
 | `tests/` | Unit, golden, protocol, integration, end-to-end and fuzz tests |
 | `scripts/` | `container-build.sh`, which builds the pinned image from a clean tree |
 | `Dockerfile`, `compose.yaml` | Container image and Compose service |
@@ -117,7 +120,7 @@ have the runner launch your publisher for you, follow the
 ctest --test-dir build -j2 --timeout 600 --output-on-failure
 bash tests/e2e/moqxr-adapter-contract.sh              # adapter mapping, no network
 bash examples/harness/test-adapter.sh                 # example adapter, no network
-build/moq-interop-audit --draft 18                    # static completeness gate (also --draft 21)
+build/moq-interop-audit --draft 18                    # static completeness gate (also --draft 21 and --draft 22)
 ```
 
 The default suite needs `jq`, `openssl` and `curl`. Checks against an external

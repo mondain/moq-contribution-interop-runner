@@ -29,9 +29,14 @@ int execute(const std::string& mode) {
     std::ifstream input(path);
     const auto request = nlohmann::json::parse(input);
     const auto scenario = request.at("scenario_id").get<std::string>();
-    const bool duplicate = scenario == "d21-duplicate-request-goaway";
-    if (!duplicate && scenario != "d21-goaway-on-distinct-request-streams") return 3;
-    if (request.at("draft") != 21 || request.at("transport") != "native_quic" ||
+    // A draft 21 run, or a draft 22 run of the same shared scenarios: the request carries the run's
+    // draft and the scenario id selected for that draft (a d22- id for draft 22), never a mix.
+    const auto draft = request.at("draft").get<unsigned>();
+    if (draft != 21 && draft != 22) return 4;
+    const std::string family = draft == 22 ? "d22-" : "d21-";
+    const bool duplicate = scenario == family + "duplicate-request-goaway";
+    if (!duplicate && scenario != family + "goaway-on-distinct-request-streams") return 3;
+    if (request.at("transport") != "native_quic" ||
         request.at("namespace_hex") != nlohmann::json::array({"6e"}) ||
         request.at("track_name_hex") != "74") return 4;
     const auto endpoint = request.at("endpoint").get<std::string>();
@@ -43,7 +48,7 @@ int execute(const std::string& mode) {
     if (mode == "--fail-control" && !duplicate) return 7;
     if (mode == "--ignore-term-control" && !duplicate) std::signal(SIGTERM,SIG_IGN);
     auto client = Client::create({.port=static_cast<std::uint16_t>(port),
-        .alpn=bytes({'m','o','q','t','-','2','1'})});
+        .alpn=bytes({'m','o','q','t','-','2',draft == 22 ? unsigned{'2'} : unsigned{'1'}})});
     if (!client) return 8;
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     const auto wait = [&](const auto& ready) {

@@ -9,6 +9,8 @@
 
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace moq::interop::app {
@@ -48,5 +50,11 @@ inline std::optional<LineageRun> lineage_run(const RunConfig& config) {
 std::vector<requirements::Outcome> lineage_outcomes(const requirements::RequirementCatalog& draft22,
                                                     std::span<const requirements::Outcome> draft21_outcomes,
                                                     std::span<const requirements::Outcome> own_outcomes = {});
+
+// The requested (draft 22) scenario id for a draft 21 implementation id of a lineage run: the reverse of
+// kSharedScenarios. Identity for any run whose wire draft is not 22 and, on draft 22, for ids that are not
+// draft 21 ids (draft 22 ids: shared, own scenarios and unscored probes). Throws std::logic_error naming
+// the id for a draft 21 id of a draft 22 run that has no reverse mapping.
+std::string stamp_scenario_id(DraftVersion wire_draft, std::string_view scenario_id);
 
 }  // namespace moq::interop::app

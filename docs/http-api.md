@@ -15,7 +15,7 @@ The examples below assume the runner listens on `127.0.0.1:8080`.
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | Database readiness and the list of executable profiles |
-| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as an optional third entry (`complete: true`, `runnable: false`) when the service loaded its catalog |
+| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as a third entry (`complete: true`, `runnable: true`) when the service loaded its catalog |
 | `GET /api/v1/requirements?draft=18\|21\|22` | Requirement catalog rows with draft line citations (paginated) |
 | `POST /api/v1/runs` | Create a run |
 | `GET /api/v1/runs` | List runs, newest first (paginated) |
@@ -54,13 +54,25 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18` or `21`. Drafts are scored independently. `22` is accepted as a known draft but is refused with `422 draft_not_runnable` before any scenario is validated, and no run is created (draft 22 is not runnable through the API yet). Any other number is `400 invalid_run_config`. |
+| `draft` | `18`, `21` or `22`. Drafts are scored independently. A runner that did not load a draft's catalog refuses runs of that draft with `422 draft_not_runnable` before any scenario is validated (the production runner always loads all three or does not start). Any other number is `400 invalid_run_config`. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
 | `timeout_ms` | 2 to 3600000. For multi-scenario runs it applies to each context. |
 | `track` | Optional for receiver-error probes in observed mode, required for most scenarios and always required in driven mode. `namespace_hex` is an array of 0 to 32 nonempty hex strings; `name_hex` is the possibly empty hex Track Name. The decoded namespace plus name is limited to 4096 bytes. Hex preserves arbitrary bytes. |
 | `publisher_capabilities` | Optional object declaring what the publisher does not implement; see below. Absent means the publisher is fully capable. |
+
+Draft 22 runs take draft 22 scenario IDs. The 221 executable ones are the 213
+scenarios draft 22 shares with draft 21, named by the draft 21 ID with `d21-`
+replaced by `d22-` (the runner executes them with their draft 21 implementation
+on the draft 22 wire), and 8 scenarios of draft 22's own. Two further unscored
+probes, `d22-location-filter-unknown-type` and
+`d22-location-filter-absolute-origin`, run when selected by ID but are not in
+`executable_profiles` and score no row (see `unscored_probes` below). A draft 21
+ID in a draft 22 run, or a draft 22 ID in a draft 21 run, is
+`422 unsupported_run_config`. Everything a draft 22 run stores and reports
+(`config.scenarios`, event and result `scenario_id`s, TAP points, the driver
+request) uses the draft 22 IDs, and its outcomes are `D22-` rows.
 
 ### Declaring publisher capabilities
 
@@ -122,11 +134,11 @@ A successful create returns HTTP 201:
 ```
 
 For `webtransport` the endpoint also carries `url` (for example
-`https://127.0.0.1:19901/moq`), `path` (`/moq`) and `protocol` (`moqt-18` or
-`moqt-21`; `moqt-22` is reserved for draft 22 and is never offered while draft 22 is
-not runnable), and `alpn` is `h3`. For native QUIC the publisher connects to
-`address:port` with ALPN `moqt-18` or `moqt-21` (`moqt-22` once draft 22 is runnable),
-using the URI `moqt://address:port/moq`.
+`https://127.0.0.1:19901/moq`), `path` (`/moq`) and `protocol` (`moqt-18`,
+`moqt-21` or `moqt-22`, the run's draft), and `alpn` is `h3`. For native QUIC the
+publisher connects to `address:port` with ALPN `moqt-18`, `moqt-21` or `moqt-22`,
+using the URI `moqt://address:port/moq`. A draft 22 run accepts only `moqt-22`,
+also on the second listener of a replacement-session scenario.
 
 ## Run lifecycle
 
@@ -161,7 +173,12 @@ The runner does not authenticate which process connects.
 In driven mode the runner launches the executable configured with
 `--driver-executable` once per context, writes a JSON request file and passes it
 through the environment; see
-[publisher-harness-guide.md](publisher-harness-guide.md) for the contract. If
+[publisher-harness-guide.md](publisher-harness-guide.md) for the contract. The
+request names the run's draft (`22` for a draft 22 run) and the scenario id as it
+was selected for the run, the same id the run's events carry (for a draft 22 run a
+`d22-` id, also for a scenario the runner executes with its draft 21
+implementation). The bundled adapters (`adapters/moqxr`, `adapters/moq5`) refuse
+draft 22 requests, so a driven draft 22 run needs an adapter of your own. If
 the adapter exits before the publisher connects the run ends `error` with the
 logs retained. Once the publisher is connected, scores come from MoQT
 observations, not from the process exit status. `driven` requires `track` and a
@@ -209,6 +226,7 @@ normal runs include:
 | `context_event_limit` | The publisher sent more than one context records (4096 recorded transport events or 4 MiB of stream data; adjacent chunks of one publisher data stream count as one event). Later events were not recorded, this context is not scored (its rows stay `not_run`), and the run goes on with the next context, so it is `incomplete`, not `error` |
 | `publisher_capabilities` | First event of every run: the effective declaration, `fetch=true` or `fetch=false`. It belongs to the run, so it has no `scenario_id` |
 | `context_skipped` | The scenario was not started because the publisher declared it does not implement a capability it needs; `detail` is `publisher declared no FETCH support` |
+| `unscored_probe_verdict` | Draft 22 unscored probes only: the probe's verdict, which no catalog row scores. The event JSON adds `verdict` (`pass`, `fail` or `not_run`) and `reason`, read from its `detail` |
 | `runner_recovery` | Added at restart to a run that was interrupted |
 
 Events tied to a scored requirement carry its `requirement_id`; the JSON export
@@ -225,7 +243,11 @@ lists them per requirement in `evidence_sequences`.
   recorded nothing for it. A scored row declared not applicable for the run
   (see the publisher capabilities above) is `not_applicable` and carries a
   `not_applicable_reason`, `null` for every other row. The document also has
-  `publisher_capabilities` and `skipped_scenarios` (`scenario_id`, `reason`).
+  `publisher_capabilities` and `skipped_scenarios` (`scenario_id`, `reason`). A
+  run that recorded `unscored_probe_verdict` events (a draft 22 run that selected
+  an unscored probe) also has `unscored_probes`, one `{scenario_id, verdict,
+  reason}` per event; they are not part of the score, and the field is absent
+  otherwise.
 - `GET /results/{id}.tap` is TAP 14, one test point per selected scenario. A
   point is `ok` only when every applicable row bound to that scenario passed
   (or the scenario has none and is marked `# SKIP`). Failed, incomplete and
@@ -242,7 +264,11 @@ lists them per requirement in `evidence_sequences`.
   and `scenario` query filters. Invalid filters return 400
   `invalid_report_filter`. A run that declared no FETCH shows a "Publisher
   capabilities" section naming the skipped scenarios, and each not applicable
-  row states its reason in text.
+  row states its reason in text. A run with `unscored_probes` shows them in an
+  "Unscored probes" table (scenario, verdict, reason).
+- The three `/results/{id}` routes read a stored run with its own draft's
+  catalog. A stored run of a draft whose catalog this runner did not load is
+  answered with 409 `draft_catalog_not_configured`.
 - `GET /results` lists up to 100 runs and summarizes completeness by draft and
   transport.
 
@@ -266,12 +292,15 @@ evidence-backed pass or fail), `not_run_count` with the `not_run` rows,
 stored in the current database. A pass or fail observation is not proof of
 conformance; inspect the run's evidence.
 
-`GET /healthz` returns `status`, `database.ready`, `supported_drafts` (only runnable drafts, so `[18, 21]`; draft 22 is never listed there or in
-`executable_profiles`), the
+`GET /healthz` returns `status`, `database.ready`, `supported_drafts` (the drafts
+this runner accepts runs for: `[18, 21, 22]` when the draft 22 catalog is loaded,
+as in production), the
 `validator` build identity, `publisher_capability_defaults` and
 `executable_profiles`: one entry per `draft`, `transport`, `mode` and `scenario`
 with a `configured` flag that is true only when the TLS material (and, for
-`driven`, an adapter) is set, and a `requires_fetch` flag.
+`driven`, an adapter) is set, and a `requires_fetch` flag. Draft 22 profiles
+name the 221 executable draft 22 scenarios; the two unscored probes are not
+listed, although a run may select them by ID.
 
 ## Error codes
 
@@ -288,8 +317,9 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 | 404 | `run_not_found`, `not_found` | Unknown run or path |
 | 409 | `run_finalized` | Stop requested for a finalized run |
 | 409 | `run_not_active` | The run is not active in this process |
+| 409 | `draft_catalog_not_configured` | `/results/{id}`, `.json` or `.tap` for a stored run whose draft's catalog this runner did not load |
 | 422 | `scenario_requires_publisher_capability` | Every selected scenario needs a capability the run declares the publisher does not implement (today only FETCH); the message names the first scenario and the capability |
-| 422 | `draft_not_runnable` | The run request names draft 22. The draft is known and has a requirement catalog, but is not runnable through the API yet. Returned before scenario validation; no run is created |
+| 422 | `draft_not_runnable` | `Draft N is not runnable on this runner.`: the run request names a draft whose catalog this runner did not load. Returned before scenario validation; no run is created |
 | 422 | `unsupported_run_config` | Unknown scenario, mixed typed and raw scenarios, driven mode without an adapter, or a draft the listener does not support. The message names the offending scenario and the reason. Unsupported scenarios are never silently scored |
 | 500 | `internal_error` | Unexpected failure |
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |

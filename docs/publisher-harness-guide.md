@@ -92,7 +92,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 ```
 
 The response contains `publisher_endpoint`. Native QUIC returns `address`, `port`
-and `alpn` (`moqt-18` or `moqt-21`); connect to `moqt://ADDRESS:PORT/moq`.
+and `alpn` (`moqt-18`, `moqt-21` or `moqt-22`); connect to `moqt://ADDRESS:PORT/moq`.
 WebTransport (`"transport": "webtransport"`) additionally returns `url`
 (`https://ADDRESS:PORT/moq`), `path` and `protocol`; give the URL to your publisher.
 Start your publisher now. The run ends when its scenario completes, the timeout
@@ -171,9 +171,9 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 |---|---|---|
 | `schema_version` | `1` | Contract version |
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
-| `scenario_id` | string | The scenario this context runs. Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
+| `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18` or `21` | Draft under test |
+| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled adapters (`adapters/moqxr`, `adapters/moq5`) support drafts 18 and 21 only and refuse a draft 22 request (exit 64) |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -529,16 +529,17 @@ address that host can reach and publish the UDP range. Driver logs are kept in t
   records `publisher_exit_after_refusal` and its rows stay `not_run`. Enable QUIC
   datagrams (a nonzero `max_datagram_frame_size` transport parameter) in your
   publisher's QUIC stack.
-- **Exact ALPN.** Native QUIC uses `moqt-18` for draft 18 and `moqt-21` for draft 21.
+- **Exact ALPN.** Native QUIC uses `moqt-18` for draft 18, `moqt-21` for draft 21 and
+  `moqt-22` for draft 22.
   There is no fallback to another draft; a mismatch is rejected and recorded.
 - **WebTransport profile.** The runner admits only a strict profile: HTTP/3 (ALPN
   `h3`) with the WebTransport-capable HTTP/3 settings, HTTP/3 and QUIC DATAGRAM
   and RESET_STREAM_AT negotiated, an extended CONNECT request with the
   `webtransport-h3` protocol, scheme `https`, the authority and path from the
   returned URL (`/moq`), and `WT-Available-Protocols` as a Structured Fields list of
-  strings containing the exact `moqt-18` or `moqt-21` (the runner selects it in
-  `WT-Protocol`). Draft 18 references `draft-ietf-webtrans-http3-15` and draft 21
-  `draft-ietf-webtrans-http3-16`. Legacy WebTransport settings or protocol tokens
+  strings containing the exact `moqt-18`, `moqt-21` or `moqt-22` (the runner selects
+  it in `WT-Protocol`). Draft 18 references `draft-ietf-webtrans-http3-15`, and
+  drafts 21 and 22 `draft-ietf-webtrans-http3-16`. Legacy WebTransport settings or protocol tokens
   are rejected before any MoQT bytes are scored. A client that sends `Origin` must
   use an origin the operator listed with `--publisher-origin`.
 - **URIs.** Native QUIC: `moqt://host:port/moq`. WebTransport: `https://host:port/moq`.

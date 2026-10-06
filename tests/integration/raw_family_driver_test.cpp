@@ -3,7 +3,9 @@
 #include "moq/interop/app/own_scenario_dispatch_22.h"
 #include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/publisher_capabilities.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/requirements/lineage_translate.h"
 #include "moq/interop/scenarios/raw_probe.h"
 #include "moq/interop/scenarios/wire_draft.h"
@@ -612,6 +614,42 @@ requirements::OutcomeState state_of(const storage::RunRecord& run,std::string_vi
     return found==run.outcomes.end() ? requirements::OutcomeState::NotRun : found->state;
 }
 
+// The identity rule at every store site: a draft 22 run stores only draft 22 scenario ids (a shared scenario's
+// evidence is stamped back from its draft 21 implementation id), each one a selected scenario; no event detail
+// names a draft 21 scenario id and no event carries a draft 21 requirement id. Events that belong to the run
+// (publisher_capabilities) carry no scenario id.
+void expect_draft22_identity(const storage::RunRecord& run) {
+    ASSERT_EQ(run.config.draft,app::DraftVersion::Draft22);
+    const std::set<std::string> selected(run.config.scenario_ids.begin(),run.config.scenario_ids.end());
+    for (const auto& id : run.config.scenario_ids) EXPECT_TRUE(id.starts_with("d22-")) << id;
+    std::size_t stamped=0;
+    for (const auto& event : run.events) {
+        SCOPED_TRACE(event.kind+" "+event.detail);
+        if (event.scenario_id && !event.scenario_id->empty()) {
+            ++stamped;
+            EXPECT_FALSE(event.scenario_id->starts_with("d21-")) << *event.scenario_id;
+            EXPECT_TRUE(event.scenario_id->starts_with("d22-")) << *event.scenario_id;
+            EXPECT_TRUE(selected.contains(*event.scenario_id)) << *event.scenario_id;
+        }
+        EXPECT_EQ(event.detail.find("d21-"),std::string::npos);
+        if (event.requirement_id) {
+            EXPECT_FALSE(event.requirement_id->starts_with("D21-")) << *event.requirement_id;
+        }
+    }
+    EXPECT_GT(stamped,0u);
+}
+
+// Execution audit of one stored draft 22 run against the draft 22 bindings: a passed row whose bound scenario ran
+// must find its declared evidence under the bound (draft 22) scenario id.
+void expect_no_missing_evaluator_evidence(const storage::RunRecord& run,const requirements::RequirementCatalog& draft22) {
+    const auto bindings=requirements::draft22_executable_bindings();
+    const auto audit=requirements::audit_execution(draft22,bindings,std::span(&run,1));
+    EXPECT_EQ(audit.run_count,1u);
+    EXPECT_GT(audit.scored_rows,0u);
+    for (const auto& finding : audit.findings)
+        EXPECT_NE(finding.code,"missing_evaluator_evidence") << finding.requirement_id << ": " << finding.detail;
+}
+
 TEST(NativeRunManagerDraft22Lineage, SupportsDraft22OnlyWithTheDraft22Catalog) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
     const auto without=lineage_manager(store,nullptr);
@@ -651,6 +689,109 @@ TEST(NativeRunManagerDraft22Lineage, RefusesOwnAndUnknownDraft22Scenarios) {
             app::RunMode::Observed,ids,1000ms,app::TrackFixture{{"n"},"t"}});
         EXPECT_EQ(started.status,app::RunStartStatus::Unsupported);
         EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    }
+    EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
+}
+
+// The selection's ids are judged in selection order, the first defect deciding, the same way for every draft
+// (drafts 18 and 21 exactly as before draft 22 ran): an empty id or a repeat of an earlier id is InvalidConfig
+// (400 invalid_run_config), an id the draft cannot run (unknown, or a shared scenario whose implementation is
+// not executable) is Unsupported (422 unsupported_run_config), and an earlier id's other defect (a typed
+// scenario in a multi-scenario selection) wins over a later one. Draft 22 answers exactly as draft 21 does for
+// the same selection in its own ids. Characterization: the draft 18 and 21 rows pass against cb23ec3.
+TEST(NativeRunManagerIdValidation, EveryDraftJudgesTheSelectionInOrderLikeDrafts18And21) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    // A shared draft 22 scenario whose draft 21 implementation exists but is not executable.
+    std::string unimplemented22;
+    std::string unimplemented21;
+    for (const auto& [d22,d21] : requirements::lineage_data::kSharedScenarios) {
+        if (app::executable_scenario(21,d21)) continue;
+        unimplemented22=std::string(d22);
+        unimplemented21=std::string(d21);
+        break;
+    }
+    ASSERT_FALSE(unimplemented22.empty());
+    struct Draft { app::DraftVersion version; std::string valid; std::string typed; std::string unimplemented; };
+    const std::vector<Draft> drafts{
+        {app::DraftVersion::Draft18,"receive-setup-with-duplicate-unknown-options","subscribe-namespace-at-publisher",
+         "d21-duplicate-request-goaway"},
+        {app::DraftVersion::Draft21,"d21-duplicate-request-goaway","d21-setup-duplicate-unknown-options",
+         unimplemented21},
+        {app::DraftVersion::Draft22,"d22-duplicate-request-goaway","d22-setup-duplicate-unknown-options",
+         unimplemented22}};
+    using Status=app::RunStartStatus;
+    for (const auto& [version,valid,typed,unimplemented] : drafts) {
+        const auto number=app::draft_number(version);
+        ASSERT_TRUE(app::executable_scenario(number,valid) && app::raw_probe_scenario(number,valid)) << valid;
+        ASSERT_TRUE(app::executable_scenario(number,typed) && !app::raw_probe_scenario(number,typed)) << typed;
+        ASSERT_FALSE(app::executable_scenario(number,unimplemented)) << unimplemented;
+        const std::string unknown="does-not-exist";
+        const std::vector<std::pair<std::vector<std::string>,Status>> rejected{
+            // One defect.
+            {{},Status::InvalidConfig},
+            {{""},Status::InvalidConfig},
+            {{valid,""},Status::InvalidConfig},
+            {{valid,valid},Status::InvalidConfig},
+            {{unknown},Status::Unsupported},
+            {{valid,unknown},Status::Unsupported},
+            {{unimplemented},Status::Unsupported},
+            {{valid,unimplemented},Status::Unsupported},
+            // Several defects: the first in selection order decides.
+            {{"",unknown},Status::InvalidConfig},
+            {{"",""},Status::InvalidConfig},
+            {{unknown,""},Status::Unsupported},
+            {{unknown,unknown},Status::Unsupported},
+            {{unimplemented,unimplemented},Status::Unsupported},
+            {{valid,unknown,""},Status::Unsupported},
+            {{valid,"",unknown},Status::InvalidConfig},
+            {{valid,valid,unknown},Status::InvalidConfig},
+            // A typed scenario in a multi-scenario selection is refused before a later repeat is seen.
+            {{typed,typed},Status::Unsupported},
+            {{typed,""},Status::Unsupported},
+        };
+        for (const auto& [ids,status] : rejected) {
+            SCOPED_TRACE(std::to_string(number)+" "+::testing::PrintToString(ids));
+            const auto started=manager.start({version,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,ids,1000ms,app::TrackFixture{{"n"},"t"}});
+            EXPECT_EQ(started.status,status);
+            EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+        }
+        // The selection-level checks come before any id is judged: a refused id under a 1 ms timeout is
+        // InvalidConfig.
+        {
+            SCOPED_TRACE(std::to_string(number)+" unknown id, 1 ms timeout");
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{unknown},1ms,
+                app::TrackFixture{{"n"},"t"}}).status,Status::InvalidConfig);
+        }
+        // A scenario the publisher's declaration skips does not stop the ids after it from being judged: a
+        // refused id after it is Unsupported, not ScenarioRequiresCapability.
+        std::string fetch;
+        for (const auto id : app::executable_scenarios(number)) {
+            if (!app::scenario_requires_fetch(number,id) || !app::raw_probe_scenario(number,id)) continue;
+            fetch=std::string(id);
+            break;
+        }
+        ASSERT_FALSE(fetch.empty());
+        {
+            SCOPED_TRACE(std::to_string(number)+" "+fetch+" skipped, then an unknown id");
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{fetch,unknown},
+                1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}}).status,Status::Unsupported);
+            EXPECT_EQ(manager.start({version,app::TransportKind::NativeQuic,app::RunMode::Observed,{fetch,""},
+                1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}}).status,Status::InvalidConfig);
+        }
+    }
+    // A draft 22 own scenario (dispatched natively, not by lineage) is judged in order like any other id.
+    const std::string own="d22-discover-original-publisher-namespaces";
+    for (const auto& [ids,status] : std::vector<std::pair<std::vector<std::string>,app::RunStartStatus>>{
+             {{own,""},app::RunStartStatus::InvalidConfig},
+             {{"",own},app::RunStartStatus::InvalidConfig},
+             {{own,own},app::RunStartStatus::InvalidConfig},
+             {{own,"does-not-exist"},app::RunStartStatus::Unsupported},
+             {{own,"does-not-exist",""},app::RunStartStatus::Unsupported}}) {
+        SCOPED_TRACE("22 "+::testing::PrintToString(ids));
+        EXPECT_EQ(manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,app::RunMode::Observed,
+            ids,1000ms,app::TrackFixture{{"n"},"t"}}).status,status);
     }
     EXPECT_EQ(store->list({10,0}).total,0u) << "no run is created";
 }
@@ -699,8 +840,8 @@ TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgai
     // The stored run is a draft 22 run with the draft 22 selection.
     EXPECT_EQ(run.config.draft,app::DraftVersion::Draft22);
     EXPECT_EQ(run.config.scenario_ids,ids);
-    // The listener negotiated moqt-22. Stored evidence carries the scenario layer's (draft 21
-    // implementation) id; how results present it is sub-project D4's.
+    // The listener negotiated moqt-22. Stored evidence carries the requested draft 22 id, never the
+    // scenario layer's draft 21 implementation id.
     EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
         return event.kind=="transport_established" &&
                event.detail.find(" alpn=6d6f71742d3232 ")!=std::string::npos;
@@ -708,6 +849,14 @@ TEST(NativeRunManagerDraft22Lineage, RunsASharedScenarioOnDraft22AndScoresItAgai
     EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
         return event.kind=="harness_error";
     }));
+    expect_draft22_identity(run);
+    for (const auto& id : ids)
+        for (const std::string kind : {"context_ready","transport_established","raw_probe_transport_event",
+                                       "raw_probe_stimulus","context_complete"})
+            EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+                return event.kind==kind && event.scenario_id==id;
+            })) << id << " " << kind;
+    expect_no_missing_evaluator_evidence(run,*draft22);
     expect_draft22_outcomes(run,*draft22);
     // The same evidence and evaluator as draft 21's D21-9-2-MUST-328.
     EXPECT_EQ(state_of(run,"D22-9-2-MUST-339"),requirements::OutcomeState::Pass);
@@ -800,6 +949,8 @@ TEST(NativeRunManagerDraft22Lineage, SharedFetchProbeWritesTheDraft22FilterOnThe
     EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
         return event.kind=="harness_error";
     }));
+    expect_draft22_identity(run);
+    expect_no_missing_evaluator_evidence(run,*draft22);
     expect_draft22_outcomes(run,*draft22);
     // The evaluator rebuilds the expected FETCH under the same wire draft and recognises the stimulus:
     // one accepted and one rejected context pass the draft 22 counterpart of D21-3-2-1-MUST-052.
@@ -852,6 +1003,12 @@ TEST(NativeRunManagerDraft22Lineage, TypedAnnouncementScenarioOnDraft22MatchesIt
     ASSERT_EQ(run22.state,storage::RunState::Finalized);
     EXPECT_EQ(run22.config.draft,app::DraftVersion::Draft22);
     EXPECT_EQ(run22.config.scenario_ids,std::vector<std::string>{"d22-setup-duplicate-unknown-options"});
+    // The typed path's evidence (stored_draft21_evidence) carries the requested id too.
+    expect_draft22_identity(run22);
+    EXPECT_TRUE(std::any_of(run22.events.begin(),run22.events.end(),[](const auto& event) {
+        return event.kind=="peer_setup_received" && event.scenario_id=="d22-setup-duplicate-unknown-options";
+    }));
+    expect_no_missing_evaluator_evidence(run22,*draft22);
     expect_draft22_outcomes(run22,*draft22);
     // Every shared row carries exactly the state its draft 21 run gave its counterpart(s).
     const auto translated=requirements::translate_shared_outcomes(run21.outcomes);
@@ -869,6 +1026,161 @@ TEST(NativeRunManagerDraft22Lineage, TypedAnnouncementScenarioOnDraft22MatchesIt
     EXPECT_EQ(run22.score->required.possible,expected.required.possible);
     EXPECT_EQ(run22.score->coverage.possible,expected.coverage.possible);
     EXPECT_GT(run22.score->coverage.earned,0u);
+}
+
+// ---- Adapter refusals: a draft 22 PUBLISH the draft 21 family cannot be shown fails the run loudly -------
+
+// A PUBLISH (Request ID 0, namespace {"media"}, name "test", alias 2) with one LOCATION_FILTER parameter
+// whose bytes after the 0x21 type are `filter`. With {0x02,0x00,0x00} draft 22 reads Absolute {0,0} (the
+// adapter refuses it) and draft 21 reads Length 2 {0,0} (a valid Next Object filter).
+std::vector<std::byte> publish_with_filter(std::initializer_list<unsigned> filter) {
+    std::vector<unsigned> body={0x00,0x01,0x05,'m','e','d','i','a',0x04,'t','e','s','t',0x02,0x01,0x21};
+    body.insert(body.end(),filter.begin(),filter.end());
+    std::vector<std::byte> wire={std::byte{0x1d},std::byte{0},static_cast<std::byte>(body.size())};
+    for (const auto value : body) wire.push_back(static_cast<std::byte>(value));
+    return wire;
+}
+constexpr std::initializer_list<unsigned> kAbsoluteZeroZero={0x02,0x00,0x00};
+constexpr std::initializer_list<unsigned> kNextObject22={0x05};
+
+const std::vector<std::byte> kPlainServerSetup={std::byte{0xaf},std::byte{0},std::byte{0},std::byte{0}};
+const std::vector<std::byte> kDuplicateOptionsServerSetup=wire_bytes({0xaf,0x00,0x00,0x07,0x80,0x9d,0x01,0xaa,0x00,0x01,0xbb});
+
+// A publisher that answers the runner's SETUP, opens a request stream with `publish` and stays until the run
+// ends (the runner closes the session, or the scenario times out).
+void publish_and_wait(std::uint16_t port,std::string_view alpn,const std::vector<std::byte>& server_setup,
+                      const std::vector<std::byte>& publish,
+                      const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id) {
+    auto client=Client::create({.port=port,.alpn=alpn_of(alpn)});
+    ASSERT_NE(client,nullptr);
+    ASSERT_TRUE(pump_until(*client,[&] { const auto setup=client->stream(3); return setup && setup->data==server_setup; }));
+    ASSERT_TRUE(client->send_stream(2,wire_bytes({0xaf,0,0,0}),false));
+    ASSERT_TRUE(client->send_stream(0,publish,false));
+    (void)pump_until(*client,[&] { return store->load(id).state==storage::RunState::Finalized; },5s);
+}
+
+std::vector<storage::EvidenceEvent> events_of(const storage::RunRecord& run,std::string_view kind) {
+    std::vector<storage::EvidenceEvent> result;
+    for (const auto& event : run.events) if (event.kind==kind) result.push_back(event);
+    return result;
+}
+
+// Every stored event, for a failure message.
+std::string describe_events(const storage::RunRecord& run) {
+    std::string text;
+    for (const auto& event : run.events)
+        text+="\n  "+event.kind+" ["+event.scenario_id.value_or("")+"] "+event.detail.substr(0,200);
+    return text;
+}
+
+std::vector<storage::EvidenceEvent> refusal_events(const storage::RunRecord& run) {
+    std::vector<storage::EvidenceEvent> result;
+    for (const auto& event : events_of(run,"harness_error"))
+        if (event.detail.find(scenarios::kUnrepresentableLocationFilterDetail)!=std::string::npos) result.push_back(event);
+    return result;
+}
+
+struct RefusalRun {
+    app::DraftVersion draft;
+    std::vector<std::string> ids;
+    std::string_view alpn;
+    const std::vector<std::byte>* server_setup;
+};
+
+storage::RunRecord play_publish(app::NativeRunManager& manager,const std::shared_ptr<storage::SqliteRunStore>& store,
+                                const RefusalRun& spec,const std::vector<std::byte>& publish) {
+    const auto started=manager.start({spec.draft,app::TransportKind::NativeQuic,app::RunMode::Observed,
+        spec.ids,800ms,app::TrackFixture{{"media"},"test"}});
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    if (started.status!=app::RunStartStatus::Started) return {};
+    // Raw contexts announce themselves; the typed path listens from start().
+    if (app::raw_probe_scenario(app::draft_number(spec.draft),spec.ids.front())) {
+        EXPECT_TRUE(context_ready(store,started.id,1));
+    }
+    publish_and_wait(started.endpoint.port,spec.alpn,*spec.server_setup,publish,store,started.id);
+    auto run=finalized(store,started.id);
+    EXPECT_TRUE(manager.stop(started.id));
+    return run;
+}
+
+const RefusalRun kTyped22{app::DraftVersion::Draft22,{"d22-setup-duplicate-unknown-options"},"moqt-22",
+                          &kDuplicateOptionsServerSetup};
+// d21-subscriber-update-on-publish gates its REQUEST_OK on draft21_response.cpp's publish_ready, one of the
+// raw sites that drop the adapter's DecodeError (the context would just wait for a PUBLISH it never sees).
+const RefusalRun kRaw22{app::DraftVersion::Draft22,{"d22-subscriber-update-on-publish","d22-duplicate-request-goaway"},
+                        "moqt-22",&kPlainServerSetup};
+
+TEST(NativeRunManagerDraft22Refusal, TheTypedPathFailsTheRunAndNamesTheRefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto run=play_publish(manager,store,kTyped22,publish_with_filter(kAbsoluteZeroZero));
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto refusals=refusal_events(run);
+    ASSERT_EQ(refusals.size(),1u) << "exactly one harness_error names the refusal" << describe_events(run);
+    EXPECT_EQ(refusals.front().scenario_id,"d22-setup-duplicate-unknown-options");
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    expect_draft22_identity(run);
+}
+
+TEST(NativeRunManagerDraft22Refusal, ARawSiteThatDropsTheDecodeErrorStillFailsTheRun) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    for (const auto& id : kRaw22.ids) ASSERT_TRUE(app::raw_probe_scenario(22,id)) << id;
+    const auto run=play_publish(manager,store,kRaw22,publish_with_filter(kAbsoluteZeroZero));
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto refusals=refusal_events(run);
+    ASSERT_EQ(refusals.size(),1u) << "exactly one harness_error names the refusal" << describe_events(run);
+    // Stamped with the requested id of the context that was running when the adapter refused.
+    EXPECT_EQ(refusals.front().scenario_id,"d22-subscriber-update-on-publish");
+    EXPECT_NE(refusals.front().detail.find(" ordinal=1"),std::string::npos) << refusals.front().detail;
+    // Like any harness error of a raw run, the contexts after it never run and are named.
+    const auto aborted=events_of(run,"run_aborted");
+    ASSERT_EQ(aborted.size(),1u);
+    EXPECT_NE(aborted.front().detail.find("contexts not run: d22-duplicate-request-goaway"),std::string::npos)
+        << aborted.front().detail;
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="context_ready" && event.scenario_id=="d22-duplicate-request-goaway";
+    }));
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    expect_draft22_identity(run);
+}
+
+TEST(NativeRunManagerDraft22Refusal, ARepresentablePublishFilterRaisesNoRefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const RefusalRun raw{app::DraftVersion::Draft22,{"d22-subscriber-update-on-publish"},"moqt-22",&kPlainServerSetup};
+    for (const auto& spec : {kTyped22,raw}) {
+        SCOPED_TRACE(spec.ids.front());
+        const auto run=play_publish(manager,store,spec,publish_with_filter(kNextObject22));
+        ASSERT_EQ(run.state,storage::RunState::Finalized);
+        EXPECT_TRUE(events_of(run,"harness_error").empty());
+        ASSERT_TRUE(run.score);
+        EXPECT_NE(run.score->verdict,requirements::RunVerdict::Error);
+    }
+}
+
+TEST(NativeRunManagerDraft22Refusal, Draft21RunsReadingTheSameBytesNeverRecordARefusal) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const RefusalRun typed{app::DraftVersion::Draft21,{"d21-setup-duplicate-unknown-options"},"moqt-21",
+                           &kDuplicateOptionsServerSetup};
+    const RefusalRun raw{app::DraftVersion::Draft21,{"d21-subscriber-update-on-publish"},"moqt-21",&kPlainServerSetup};
+    for (const auto& spec : {typed,raw}) {
+        SCOPED_TRACE(spec.ids.front());
+        const auto run=play_publish(manager,store,spec,publish_with_filter(kAbsoluteZeroZero));
+        ASSERT_EQ(run.state,storage::RunState::Finalized);
+        EXPECT_TRUE(events_of(run,"harness_error").empty());
+        ASSERT_TRUE(run.score);
+        EXPECT_NE(run.score->verdict,requirements::RunVerdict::Error);
+        // The draft 21 decoder read the PUBLISH: the raw context saw it and answered.
+        if (spec.ids.front()=="d21-subscriber-update-on-publish") {
+            EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+                return event.kind=="raw_probe_stimulus" && event.detail.find(" bytes=07000100 ")!=std::string::npos;
+            }));
+        }
+    }
 }
 
 // ---- Own draft 22 scenarios (Task 8 dispatch seam) ----------------------------------------------------
@@ -952,11 +1264,15 @@ TEST(NativeRunManagerDraft22Lineage, ARegisteredOwnScenarioRunsNativelyAndIsScor
     EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
         return event.kind=="harness_error";
     }));
-    // The own context is recorded under its draft 22 id; the shared one under its implementation id.
-    for (const std::string& id : {std::string(kStubOwnScenario),std::string("d21-goaway-on-distinct-request-streams")})
+    // Both contexts are recorded under their requested draft 22 ids: the own one natively, the shared one
+    // stamped back from its draft 21 implementation id.
+    for (const auto& id : ids)
         EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
             return event.kind=="context_complete" && event.scenario_id==id;
         })) << id;
+    expect_draft22_identity(run);
+    // End to end: the audit finds every passed row's declared evidence under its bound draft 22 scenario.
+    expect_no_missing_evaluator_evidence(run,*draft22);
     EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
         return event.kind=="transport_established" && event.detail.find(" alpn=6d6f71742d3232 ")!=std::string::npos;
     }));
@@ -1092,12 +1408,271 @@ TEST(NativeRunManagerDraft22Lineage, WithoutFetchRow069StaysNotRunOnPassingSubsc
             return event.kind=="context_complete" && event.scenario_id==id;
         })) << id;
     EXPECT_GT(subscription_calls.load(),0u) << "the SUBSCRIBE evidence was evaluated";
+    expect_draft22_identity(run);
     expect_draft22_outcomes(run,*draft22);
     EXPECT_EQ(state_of(run,"D22-3-3-1-MUST-NOT-069"),requirements::OutcomeState::NotRun);
     ASSERT_TRUE(run.score);
     EXPECT_EQ(run.score->required.possible,draft22_denominators(*draft22,capabilities).required.possible)
         << "069 is not excluded by the declaration";
     EXPECT_TRUE(manager.stop(started.id));
+}
+
+// ---- Draft 22 identity at every store site and in the driver contract (D4 Task 3) --------------------------
+
+app::NativeRunManager driven_lineage_manager(const std::shared_ptr<storage::SqliteRunStore>& store,
+                                             const DriverLogs& logs,std::vector<std::string> arguments={}) {
+    return app::NativeRunManager(catalog(18),catalog(21),store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",
+         .port_start=0,.port_end=0,.maximum_active_runs=1,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem",
+         .driver_executable=PICOQUIC_FAMILY_DRIVER_PATH,.driver_arguments=std::move(arguments),
+         .driver_log_root=logs.path},
+        catalog22());
+}
+
+nlohmann::json driver_request_file(const std::filesystem::path& directory) {
+    std::ifstream input(directory/"request.json");
+    EXPECT_TRUE(input.good()) << directory;
+    return input.good() ? nlohmann::json::parse(input) : nlohmann::json::object();
+}
+
+TEST(NativeRunManagerDraft22Identity, DrivenRawRunHandsTheDriverTheRequestedIdsAndTheWireDraft) {
+    DriverLogs logs;
+    const auto draft22=catalog22();
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=driven_lineage_manager(store,logs);
+    const std::vector<std::string> ids={"d22-duplicate-request-goaway","d22-goaway-on-distinct-request-streams"};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,ids,2s,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.scenario_ids,ids);
+    EXPECT_FALSE(std::any_of(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="harness_error";
+    }));
+    // The test peer only plays a context whose request names the draft 22 id under draft 22 (and connects
+    // with moqt-22), so the pass itself shows the driver contract; the request files say it directly.
+    EXPECT_EQ(state_of(run,"D22-9-2-MUST-339"),requirements::OutcomeState::Pass);
+    std::vector<std::string> driven;
+    for (const auto& event : run.events) {
+        if (event.kind!="publisher_process") continue;
+        ASSERT_TRUE(event.scenario_id);
+        driven.push_back(*event.scenario_id);
+        const auto result=nlohmann::json::parse(event.detail);
+        const auto directory=std::filesystem::path(result.at("stdout_log").at("path").get<std::string>()).parent_path();
+        const auto request=driver_request_file(directory);
+        EXPECT_EQ(request.at("draft"),22);
+        EXPECT_EQ(request.at("scenario_id"),*event.scenario_id);
+        EXPECT_EQ(request.at("endpoint"),"moqt://127.0.0.1:"+std::to_string(started.endpoint.port)+"/moq");
+        EXPECT_TRUE(directory.filename().string().ends_with("-"+*event.scenario_id)) << directory;
+    }
+    EXPECT_EQ(driven,ids);
+    expect_draft22_identity(run);
+    expect_no_missing_evaluator_evidence(run,*draft22);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Identity, HarnessErrorsAndAbortsOfARawRunCarryTheRequestedIds) {
+    DriverLogs logs;
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    // The peer fails the distinct-streams context before connecting, so the first context ends in a harness
+    // error and the second is never run.
+    auto manager=driven_lineage_manager(store,logs,{"--fail-control"});
+    const std::vector<std::string> ids={"d22-goaway-on-distinct-request-streams","d22-duplicate-request-goaway"};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,ids,2s,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    const auto errors=std::count_if(run.events.begin(),run.events.end(),[&](const auto& event) {
+        return event.kind=="harness_error" && event.scenario_id==ids[0];
+    });
+    EXPECT_GE(errors,1);
+    const auto aborted=std::find_if(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="run_aborted";
+    });
+    ASSERT_NE(aborted,run.events.end());
+    EXPECT_EQ(aborted->scenario_id,ids[0]);
+    EXPECT_NE(aborted->detail.find("contexts not run: "+ids[1]+" ordinal=1"),std::string::npos) << aborted->detail;
+    expect_draft22_identity(run);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Identity, DrivenTypedRunHandsTheDriverTheRequestedIdAndRecordsItsFailure) {
+    DriverLogs logs;
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=driven_lineage_manager(store,logs);
+    // The test peer plays only the GOAWAY scenarios: it exits for this typed one before connecting, so the run
+    // ends in error with the publisher_process and harness_error events of the typed path.
+    const std::string id="d22-setup-duplicate-unknown-options";
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Driven,{id},1000ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto request=driver_request_file(logs.path/started.id);
+    EXPECT_EQ(request.at("draft"),22);
+    EXPECT_EQ(request.at("scenario_id"),id);
+    for (const std::string kind : {"publisher_process","harness_error"})
+        EXPECT_TRUE(std::any_of(run.events.begin(),run.events.end(),[&](const auto& event) {
+            return event.kind==kind && event.scenario_id==id;
+        })) << kind;
+    expect_draft22_identity(run);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+// The unknown-alias request probe records how its unassigned error code is mapped, naming the row it maps: on a
+// draft 22 run that is the draft 22 row (D21-8-9-MUST-269 -> D22-8-9-MUST-281), under the draft 22 scenario id.
+// No publisher connects; the mapping event is recorded however the context ends.
+TEST(NativeRunManagerDraft22Identity, AnErrorMappingEventNamesTheDraft22RowAndScenario) {
+    const std::string id="d22-request-unknown-token-alias";
+    ASSERT_TRUE(app::executable_scenario(22,id));
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,{id},200ms,app::TrackFixture{{"n"},"t"}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    const auto mapping=std::find_if(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="unresolved_error_mapping" || event.kind=="compatibility_error_mapping";
+    });
+    ASSERT_NE(mapping,run.events.end());
+    EXPECT_EQ(mapping->scenario_id,id);
+    EXPECT_EQ(mapping->requirement_id,"D22-8-9-MUST-281");
+    expect_draft22_identity(run);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+TEST(NativeRunManagerDraft22Identity, ASkippedSharedScenarioIsRecordedUnderItsRequestedId) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const std::vector<std::string> ids={"d22-duplicate-request-goaway","d22-fetch-accepted"};
+    const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+        app::RunMode::Observed,ids,2000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}});
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    ASSERT_TRUE(context_ready(store,started.id,1));
+    goaway_publisher(started.endpoint.port,"moqt-22",true);
+    const auto run=finalized(store,started.id);
+    ASSERT_EQ(run.state,storage::RunState::Finalized);
+    EXPECT_EQ(run.config.scenario_ids,ids);
+    const auto skip=std::find_if(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="context_skipped";
+    });
+    ASSERT_NE(skip,run.events.end());
+    EXPECT_EQ(skip->scenario_id,"d22-fetch-accepted");
+    // The declaration belongs to the run: no scenario id.
+    const auto declaration=std::find_if(run.events.begin(),run.events.end(),[](const auto& event) {
+        return event.kind=="publisher_capabilities";
+    });
+    ASSERT_NE(declaration,run.events.end());
+    EXPECT_FALSE(declaration->scenario_id.has_value() && !declaration->scenario_id->empty());
+    expect_draft22_identity(run);
+    EXPECT_TRUE(manager.stop(started.id));
+}
+
+// The API answer for a selection of only skipped shared scenarios names the requested draft 22 scenario and
+// its capability, as draft 21 names its own.
+TEST(NativeRunManagerDraft22Identity, AllSkippedSharedSelectionNamesTheRequestedScenario) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    for (const auto& [version,id] : {std::pair{app::DraftVersion::Draft21,std::string("d21-fetch-accepted")},
+                                     std::pair{app::DraftVersion::Draft22,std::string("d22-fetch-accepted")}}) {
+        SCOPED_TRACE(id);
+        const auto started=manager.start({version,app::TransportKind::NativeQuic,
+            app::RunMode::Observed,{id},1000ms,app::TrackFixture{{"n"},"t"},{.fetch=false}});
+        EXPECT_EQ(started.status,app::RunStartStatus::ScenarioRequiresCapability);
+        EXPECT_EQ(started.scenario,id);
+        EXPECT_EQ(started.capability,"fetch");
+        EXPECT_EQ(started.endpoint.port,0u) << "no listener may be allocated";
+    }
+    EXPECT_EQ(store->list({10,0}).total,0u);
+}
+// Degenerate track fixtures: what the API's fixture parser can hand the manager (an empty namespace, an empty
+// track name), the bounds valid_fixture refuses (33 fields, a field or name over 4096 bytes, an empty field),
+// and the largest fixture it accepts. Each name says which.
+std::vector<std::pair<std::string,app::TrackFixture>> degenerate_fixtures() {
+    return {
+        {"empty namespace",app::TrackFixture{{},"t"}},
+        {"empty namespace and name",app::TrackFixture{{},""}},
+        {"empty name",app::TrackFixture{{"n"},""}},
+        {"empty field",app::TrackFixture{{""},"t"}},
+        {"33 fields",app::TrackFixture{std::vector<std::string>(33,"n"),"t"}},
+        {"field over 4096 bytes",app::TrackFixture{{std::string(4097,'n')},"t"}},
+        {"name over 4096 bytes",app::TrackFixture{{"n"},std::string(4097,'t')}},
+        {"largest accepted",app::TrackFixture{std::vector<std::string>(32,std::string(120,'n')),std::string(256,'t')}},
+    };
+}
+
+// Fills both of lineage_manager's run slots, so every selection that passes validation answers PortExhausted:
+// start() then builds every probe (where a fixture could crash it) but binds and stores nothing more.
+std::vector<app::RunId> fill_run_slots(app::NativeRunManager& manager) {
+    std::vector<app::RunId> blockers;
+    for (unsigned index = 0; index < 2; ++index) {
+        const auto started=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+            app::RunMode::Observed,{"d21-duplicate-request-goaway"},60000ms,app::TrackFixture{{"n"},"t"}});
+        EXPECT_EQ(started.status,app::RunStartStatus::Started);
+        blockers.push_back(started.id);
+    }
+    return blockers;
+}
+
+// No fixture crashes an own draft 22 probe (or an unscored one): each answers InvalidConfig before anything is
+// bound or stored, or passes validation. An own probe needs a fixture fetch_first_object_fixture_valid accepts;
+// the namespace discovery probe also needs a namespace field (its prefixes are cut from the first one).
+TEST(NativeRunManagerDraft22Fixtures, OwnProbesRefuseFixturesTheyCannotBuildInsteadOfCrashing) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto blockers=fill_run_slots(manager);
+    std::vector<std::string_view> ids;
+    for (const auto& traits : app::kOwnScenarioTraits22) ids.push_back(traits.id);
+    for (const auto& traits : app::kUnscoredProbeTraits22) ids.push_back(traits.id);
+    ASSERT_EQ(ids.size(),10u);
+    for (const auto id : ids) {
+        for (const auto& [name,fixture] : degenerate_fixtures()) {
+            SCOPED_TRACE(std::string(id)+" / "+name);
+            const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(id)},1000ms,fixture});
+            const bool out_of_bounds=name=="empty field" || name=="33 fields" || name.find("over 4096")!=std::string::npos;
+            const bool discovery_without_prefix=id==std::string_view("d22-discover-original-publisher-namespaces") &&
+                fixture.namespace_fields.empty();
+            if (out_of_bounds || discovery_without_prefix)
+                EXPECT_EQ(started.status,app::RunStartStatus::InvalidConfig);
+            else
+                EXPECT_EQ(started.status,app::RunStartStatus::PortExhausted) << "the fixture is buildable";
+        }
+    }
+    EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
+    for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
+}
+
+// A shared draft 22 scenario runs its draft 21 implementation, so it answers every degenerate fixture exactly
+// as that draft 21 scenario does (and neither crashes).
+TEST(NativeRunManagerDraft22Fixtures, SharedScenariosAnswerDegenerateFixturesLikeTheirDraft21Implementations) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto blockers=fill_run_slots(manager);
+    std::size_t compared=0;
+    for (const auto id : app::executable_scenarios(22)) {
+        const auto implementation=app::implementation_scenario_id(id);
+        if (!implementation) continue;
+        for (const auto& [name,fixture] : degenerate_fixtures()) {
+            SCOPED_TRACE(std::string(id)+" / "+name);
+            const auto draft21=manager.start({app::DraftVersion::Draft21,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(*implementation)},1000ms,fixture});
+            const auto draft22=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(id)},1000ms,fixture});
+            EXPECT_EQ(draft22.status,draft21.status);
+            ++compared;
+        }
+    }
+    EXPECT_GT(compared,0u);
+    EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
+    for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
 }
 }
 }

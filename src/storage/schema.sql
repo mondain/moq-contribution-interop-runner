@@ -1,11 +1,11 @@
 CREATE TABLE schema_meta (
-    version INTEGER NOT NULL CHECK (version = 3)
+    version INTEGER NOT NULL CHECK (version = 4)
 );
-INSERT INTO schema_meta(version) VALUES (3);
+INSERT INTO schema_meta(version) VALUES (4);
 
--- Draft 22 is accepted below for NEW databases only. Databases migrated from schema
--- version 1 or 2 keep CHECK (draft IN (18, 21)) until the version 4 rebuild of `runs`
--- planned for the sub-project that makes draft 22 runnable.
+-- Schema version 4 accepts draft 22. The version 3 to 4 migration in sqlite_run_store.cpp
+-- rebuilds `runs` with this exact definition (and recreates runs_newest_idx), so a
+-- change to `runs` here must be made there too.
 
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,

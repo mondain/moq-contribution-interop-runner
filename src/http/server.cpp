@@ -28,6 +28,7 @@
 #include "moq/interop/requirements/completeness.h"
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 
 #include "detail.h"
@@ -41,6 +42,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -231,6 +233,10 @@ app::RunConfig parse_run_config(const httplib::Request& request,
                 app::immutable_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 app::object_repeat_scenario(static_cast<unsigned>(draft),id) ||
                 (draft == 21 && id == "d21-publish-state-notify-on-fetch") ||
+                (draft == 22 && app::implementation_scenario_id(id) == "d21-publish-state-notify-on-fetch") ||
+                // Every own draft 22 scenario builds its requests from the fixture and refuses the fixtures
+                // this check refuses (draft22_*.cpp build()), so name the fixture instead of a generic 400.
+                (draft == 22 && app::own_scenario_22(id).has_value()) ||
                 app::gap_raw_scenario(static_cast<unsigned>(draft),id) ||
                 app::subscriber_notify_scenario(static_cast<unsigned>(draft),id) ||
                 app::established_update_scenario(static_cast<unsigned>(draft),id);
@@ -331,15 +337,28 @@ bool has_declared_evidence(const storage::RunRecord& run,
     return false;
 }
 
+// The executable bindings of a configured catalog's draft (draft 22's are draft 21's translated through the
+// lineage plus its own).
+std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersion draft) {
+    switch (draft) {
+        case app::DraftVersion::Draft18: return requirements::draft18_executable_bindings();
+        case app::DraftVersion::Draft21: return requirements::draft21_executable_bindings();
+        case app::DraftVersion::Draft22: return requirements::draft22_executable_bindings();
+    }
+    throw std::logic_error("unknown draft");
+}
+
+// One entry per configured catalog: drafts 18 and 21 always, draft 22 only when its catalog is configured
+// (`draft22` is null otherwise, and there is then no draft 22 entry).
 Json completeness_json(const requirements::RequirementCatalog& draft18,
                        const requirements::RequirementCatalog& draft21,
+                       const requirements::RequirementCatalog* draft22,
                        const storage::RunStore& store, const app::BuildInfo& build) {
     Json drafts = Json::array();
-    for (const auto* catalog : {&draft18, &draft21}) {
-        const auto bindings = app::by_draft(
-            *app::parse_draft(catalog->draft),
-            [] { return requirements::draft18_executable_bindings(); },
-            [] { return requirements::draft21_executable_bindings(); });
+    std::vector<const requirements::RequirementCatalog*> catalogs{&draft18, &draft21};
+    if (draft22) catalogs.push_back(draft22);
+    for (const auto* catalog : catalogs) {
+        const auto bindings = executable_bindings(*app::parse_draft(catalog->draft));
         const auto audit = requirements::audit_completeness(
             *catalog, bindings, app::executable_scenarios(catalog->draft));
         Json findings = Json::array();
@@ -678,6 +697,34 @@ public:
                         append_profile(21, profile.definition.id, "webtransport");
                     }
                 }
+                // Draft 22, only when this server accepts draft 22 runs (its catalog is configured): every
+                // executable draft 22 scenario (executable_scenarios(22): the lineage-shared ids with a draft 21
+                // implementation, then the implemented own ids). A shared id is listed on the transports its draft 21 implementation's
+                // profiles above list (same family, same transport limits); an own scenario is a raw probe on
+                // both transports. Unscored probes are executable by id but are not listed (no catalog row
+                // names them). `configured` says whether this runner's manager executes the profile now,
+                // as for drafts 18 and 21.
+                if (accepts_runs(app::DraftVersion::Draft22)) {
+                    std::map<std::string, std::vector<std::string>> draft21_transports;
+                    for (const auto& profile : profiles) {
+                        if (profile.at("draft") != 21) continue;
+                        draft21_transports[profile.at("scenario").get<std::string>()].push_back(
+                            profile.at("transport").get<std::string>());
+                    }
+                    for (const auto id : app::executable_scenarios(22)) {
+                        if (app::own_scenario_22(id)) {
+                            append_profile(22, id, "native-quic");
+                            append_profile(22, id, "webtransport");
+                            continue;
+                        }
+                        const auto implementation = app::implementation_scenario_id(id);
+                        if (!implementation) continue;
+                        const auto found = draft21_transports.find(std::string(*implementation));
+                        if (found == draft21_transports.end()) continue;
+                        for (const auto& transport : found->second)
+                            append_profile(22, id, transport.c_str());
+                    }
+                }
                 for (auto& profile : profiles) {
                     profile["requires_fetch"] = app::scenario_requires_fetch(
                         profile.at("draft").get<unsigned>(), profile.at("scenario").get<std::string>());
@@ -693,7 +740,7 @@ public:
                 json_response(response, {{"schema_version", 1},
                                          {"status", "ok"},
                                          {"database", {{"ready", true}}},
-                                         {"supported_drafts", {18, 21}},
+                                         {"supported_drafts", supported_drafts()},
                                          {"executable_profiles", std::move(profiles)},
                                          {"publisher_capability_defaults",
                                           {{"fetch", config.default_publisher_capabilities.fetch}}},
@@ -748,10 +795,10 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities);
-                if (!app::runnable(requested.draft))
+                if (!accepts_runs(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
                         "Draft " + std::to_string(app::draft_number(requested.draft)) +
-                        " is not runnable through the API yet."};
+                        " is not runnable on this runner."};
                 {
                     // Say which part of the selection is unsupported, and why, so the caller
                     // does not have to bisect a long scenario list.
@@ -895,7 +942,8 @@ public:
         server.Get("/results/completeness.json", [this](const httplib::Request&,
                                                         httplib::Response& response) {
             guarded(response, [this, &response] {
-                json_response(response, completeness_json(*draft18, *draft21, *store, build));
+                json_response(response, completeness_json(*draft18, *draft21, config.draft22_catalog.get(),
+                                                          *store, build));
             });
         });
         server.Get(R"(/results/(.+)\.json)", [this](const httplib::Request& request,
@@ -903,10 +951,7 @@ public:
             guarded(response, [this, &request, &response] {
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = app::by_draft(
-                        run.config.draft,
-                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
-                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
+                    const auto& catalog = catalog_for(run.config.draft);
                     json_response(response, serialize_result(run, catalog));
                 } catch (const std::out_of_range&) {
                     throw ApiError{404, "run_not_found", "The requested run was not found."};
@@ -918,10 +963,7 @@ public:
             guarded(response, [this, &request, &response] {
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = app::by_draft(
-                        run.config.draft,
-                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
-                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
+                    const auto& catalog = catalog_for(run.config.draft);
                     response.status = 200;
                     response.set_header("X-Content-Type-Options", "nosniff");
                     response.set_content(serialize_tap14(run, catalog),
@@ -937,10 +979,7 @@ public:
                 const auto filters = report_filters(request);
                 try {
                     const auto run = store->load(request.matches[1]);
-                    const auto& catalog = app::by_draft(
-                        run.config.draft,
-                        [&]() -> const requirements::RequirementCatalog& { return *draft18; },
-                        [&]() -> const requirements::RequirementCatalog& { return *draft21; });
+                    const auto& catalog = catalog_for(run.config.draft);
                     response.status = 200;
                     html_headers(response);
                     response.set_content(detail::render_run_detail(run, catalog, filters),
@@ -956,7 +995,7 @@ public:
                 response.status = 200;
                 html_headers(response);
                 response.set_content(detail::render_run_list(
-                    runs.items, completeness_json(*draft18, *draft21, *store, build)),
+                    runs.items, completeness_json(*draft18, *draft21, config.draft22_catalog.get(), *store, build)),
                     "text/html; charset=utf-8");
             });
         });
@@ -965,6 +1004,42 @@ public:
                 error_response(response, {404, "not_found", "The requested resource was not found."});
             }
         });
+    }
+
+    // Whether POST /api/v1/runs takes runs for `draft`: it must be runnable and this server must have its
+    // catalog to present and score them (a runner without the draft 22 catalog refuses draft 22 runs).
+    // /healthz lists exactly these drafts as supported_drafts.
+    bool accepts_runs(app::DraftVersion draft) const {
+        if (!app::runnable(draft)) return false;
+        switch (draft) {
+            case app::DraftVersion::Draft18: return true;
+            case app::DraftVersion::Draft21: return true;
+            case app::DraftVersion::Draft22: return config.draft22_catalog != nullptr;
+        }
+        return false;
+    }
+
+    Json supported_drafts() const {
+        Json drafts = Json::array();
+        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22})
+            if (accepts_runs(draft)) drafts.push_back(app::draft_number(draft));
+        return drafts;
+    }
+
+    // The catalog a stored run is presented with, chosen by the run's (wire) draft. A stored draft 22 run on a
+    // runner without the draft 22 catalog is a clear conflict, never an internal error.
+    const requirements::RequirementCatalog& catalog_for(app::DraftVersion draft) const {
+        switch (draft) {
+            case app::DraftVersion::Draft18: return *draft18;
+            case app::DraftVersion::Draft21: return *draft21;
+            case app::DraftVersion::Draft22:
+                if (config.draft22_catalog) return *config.draft22_catalog;
+                break;
+        }
+        const auto number = std::to_string(app::draft_number(draft));
+        throw ApiError{409, "draft_catalog_not_configured",
+                       "Draft " + number + " results need the draft " + number +
+                       " catalog, which this runner does not have configured."};
     }
 
     std::shared_ptr<const requirements::RequirementCatalog> draft18;

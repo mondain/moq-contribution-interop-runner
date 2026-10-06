@@ -55,4 +55,22 @@ std::vector<requirements::Outcome> lineage_outcomes(const requirements::Requirem
     return outcomes;
 }
 
+std::string stamp_scenario_id(DraftVersion wire_draft, std::string_view scenario_id) {
+    if (wire_draft != DraftVersion::Draft22 || !scenario_id.starts_with("d21-")) return std::string(scenario_id);
+    // Built once on first use (thread-safe static initialization); kSharedScenarios is sorted by d22.
+    static const std::map<std::string_view, std::string_view, std::less<>> by_d21 = [] {
+        std::map<std::string_view, std::string_view, std::less<>> reverse;
+        for (const auto& pair : requirements::lineage_data::kSharedScenarios)
+            if (!reverse.emplace(pair.d21, pair.d22).second)
+                throw std::logic_error("draft 21 scenario " + std::string(pair.d21) +
+                                       " implements more than one draft 22 scenario");
+        return reverse;
+    }();
+    const auto found = by_d21.find(scenario_id);
+    if (found == by_d21.end())
+        throw std::logic_error("draft 21 scenario " + std::string(scenario_id) +
+                               " implements no shared draft 22 scenario");
+    return std::string(found->second);
+}
+
 }  // namespace moq::interop::app

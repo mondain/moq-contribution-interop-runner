@@ -170,7 +170,7 @@ set(MOQ_INTEROP_HTTP_SOURCES
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
-                      moq-interop-storage moq-interop-execution-audit)
+                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 target_compile_options(moq-interop-http PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
@@ -455,6 +455,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-raw-family-driver-tests tests/integration/raw_family_driver_test.cpp)
     target_link_libraries(moq-interop-raw-family-driver-tests PRIVATE
         moq-interop-runs moq-interop-lineage-run moq-interop-test-client
+        moq-interop-draft22-evaluators moq-interop-execution-audit
         nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-raw-family-driver-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -466,6 +467,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-raw-family-driver-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME raw-family-driver COMMAND moq-interop-raw-family-driver-tests)
+    # Golden result pins for drafts 18 and 21 (MOQ_UPDATE_GOLDEN=1 regenerates tests/golden/results/).
+    add_executable(moq-interop-draft-result-pins-tests tests/integration/draft_result_pins_test.cpp)
+    target_link_libraries(moq-interop-draft-result-pins-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client
+        nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-draft-result-pins-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-draft-result-pins-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME draft-result-pins COMMAND moq-interop-draft-result-pins-tests)
     add_executable(moq-interop-d22-location-range-live-tests
                    tests/integration/draft22_location_range_live_test.cpp)
     target_link_libraries(moq-interop-d22-location-range-live-tests PRIVATE
@@ -506,6 +518,28 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_options(moq-interop-d22-pre-setup-request-live-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME d22-pre-setup-request-live COMMAND moq-interop-d22-pre-setup-request-live-tests)
+    # Writes draft 22 run databases for tests/e2e/audit-cli-draft22.sh.
+    add_executable(moq-interop-draft22-audit-fixture tests/support/draft22_audit_fixture.cpp)
+    target_link_libraries(moq-interop-draft22-audit-fixture PRIVATE
+        moq-interop-runs moq-interop-test-client moq-interop-draft22-evaluators)
+    target_compile_definitions(moq-interop-draft22-audit-fixture PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_compile_options(moq-interop-draft22-audit-fixture PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_executable(moq-interop-d22-http-run-live-tests
+                   tests/integration/draft22_http_run_live_test.cpp)
+    target_link_libraries(moq-interop-d22-http-run-live-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client moq-interop-draft22-evaluators
+        moq-interop-execution-audit httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-d22-http-run-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa"
+        PICOQUIC_FAMILY_DRIVER_PATH="$<TARGET_FILE:moq-interop-raw-family-driver-peer>")
+    add_dependencies(moq-interop-d22-http-run-live-tests moq-interop-raw-family-driver-peer)
+    target_compile_options(moq-interop-d22-http-run-live-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME d22-http-run-live COMMAND moq-interop-d22-http-run-live-tests)
     add_executable(moq-interop-d22-location-filter-probes-live-tests
                    tests/integration/draft22_location_filter_probes_live_test.cpp)
     target_link_libraries(moq-interop-d22-location-filter-probes-live-tests PRIVATE
@@ -1006,10 +1040,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-smoke.sh"
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>")
-    set_tests_properties(audit-cli-smoke PROPERTIES RESOURCE_LOCK "audit-cli-port")
     add_test(NAME audit-cli-draft22
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-draft22.sh"
-                     "$<TARGET_FILE:moq-interop-audit>")
+                     "$<TARGET_FILE:moq-interop-runner>"
+                     "$<TARGET_FILE:moq-interop-audit>"
+                     "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
                      --check-only)
@@ -1059,6 +1094,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     target_link_libraries(moq-interop-webtransport-run-api-tests PRIVATE
                           moq-interop-http moq-interop-execution-audit
+                          moq-interop-draft22-evaluators
                           httplib::httplib
                           nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME webtransport-run-api COMMAND moq-interop-webtransport-run-api-tests)

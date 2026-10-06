@@ -116,17 +116,30 @@ const std::vector<OwnEvaluator22>& production_evaluators() {
 }
 
 // The evaluator of each unscored probe (kUnscoredProbeTraits22), keyed by the probe's id.
+// With it, the reason recorded for each verdict (src/scenarios/draft22_location_filter_probes.cpp states the rules).
 struct UnscoredEvaluator22 {
     std::string_view probe;
     OwnEvaluator22 evaluator;
+    std::string_view pass_reason;
+    std::string_view fail_reason;
+    std::string_view no_verdict_reason;
 };
 const std::vector<UnscoredEvaluator22>& unscored_evaluators() {
     static const std::vector<UnscoredEvaluator22> table{
         {scenarios::kDraft22LocationFilterUnknownType,
-         {scenarios::kDraft22LocationFilterUnknownTypeEvaluator, scenarios::evaluate_draft22_location_filter_unknown_type}},
+         {scenarios::kDraft22LocationFilterUnknownTypeEvaluator, scenarios::evaluate_draft22_location_filter_unknown_type},
+         "the publisher closed the session with PROTOCOL_VIOLATION after the undefined LOCATION_FILTER Type",
+         "the publisher closed the session with an error code other than PROTOCOL_VIOLATION after the undefined "
+         "LOCATION_FILTER Type",
+         "no session close in the reaction window (or the stimulus was not proven sent), so nothing shows how the "
+         "publisher treated the undefined Type"},
         {scenarios::kDraft22LocationFilterAbsoluteOrigin,
          {scenarios::kDraft22LocationFilterAbsoluteOriginEvaluator,
-          scenarios::evaluate_draft22_location_filter_absolute_origin}},
+          scenarios::evaluate_draft22_location_filter_absolute_origin},
+         "the publisher answered SUBSCRIBE_OK and delivered an Object under the absolute {0, 0} LOCATION_FILTER",
+         "the publisher closed the session with PROTOCOL_VIOLATION, reading the valid {0, 0} filter as malformed",
+         "no SUBSCRIBE_OK with a delivered Object and no PROTOCOL_VIOLATION close in the window (an error reply, "
+         "silence, another close or an unproven stimulus)"},
     };
     return table;
 }
@@ -167,8 +180,12 @@ std::optional<UnscoredVerdict22> evaluate_unscored_probe_22(const scenarios::Raw
     for (const auto& entry : unscored_evaluators()) {
         if (entry.probe != transcript.scenario_id) continue;
         // Evidence cut at a recording limit is never judged (as for rows).
-        if (transcript.event_limit_reached || !entry.evaluator.evaluate) return UnscoredVerdict22{entry.evaluator.id, {}};
-        return UnscoredVerdict22{entry.evaluator.id, entry.evaluator.evaluate(transcript)};
+        if (transcript.event_limit_reached)
+            return UnscoredVerdict22{entry.evaluator.id, {}, "evidence cut at a recording limit; the probe is not judged"};
+        if (!entry.evaluator.evaluate) return UnscoredVerdict22{entry.evaluator.id, {}, "the probe has no evaluator"};
+        const auto verdict = entry.evaluator.evaluate(transcript);
+        return UnscoredVerdict22{entry.evaluator.id, verdict,
+                                 !verdict ? entry.no_verdict_reason : *verdict ? entry.pass_reason : entry.fail_reason};
     }
     return std::nullopt;
 }

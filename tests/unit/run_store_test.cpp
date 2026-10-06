@@ -6,7 +6,9 @@
 #include <chrono>
 #include <barrier>
 #include <filesystem>
+#include <fstream>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -128,6 +130,242 @@ CREATE INDEX runs_newest_idx ON runs(created_at_unix_ns DESC, id DESC);
 CREATE INDEX evidence_events_page_idx ON evidence_events(run_id, sequence);
 )SQL";
 
+// Schema version 1, verbatim as last shipped (7b37485): version 2 without the track
+// fixture tables.
+constexpr const char* kVersionOneSchema = R"SQL(CREATE TABLE schema_meta (
+    version INTEGER NOT NULL CHECK (version = 1)
+);
+INSERT INTO schema_meta(version) VALUES (1);
+
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    draft INTEGER NOT NULL CHECK (draft IN (18, 21)),
+    transport INTEGER NOT NULL CHECK (transport IN (0, 1)),
+    mode INTEGER NOT NULL CHECK (mode IN (0, 1)),
+    timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),
+    state INTEGER NOT NULL CHECK (state IN (0, 1)),
+    created_at_unix_ns INTEGER NOT NULL,
+    finalized_at_unix_ns INTEGER,
+    CHECK ((state = 0 AND finalized_at_unix_ns IS NULL) OR
+           (state = 1 AND finalized_at_unix_ns IS NOT NULL AND
+            finalized_at_unix_ns > created_at_unix_ns))
+);
+
+CREATE TABLE run_builds (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    source_revision TEXT NOT NULL
+);
+
+CREATE TABLE build_dependencies (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    PRIMARY KEY (run_id, name)
+);
+
+CREATE TABLE selected_scenarios (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    scenario_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, position)
+);
+
+CREATE TABLE evidence_events (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK (sequence >= 0),
+    monotonic_time_ns INTEGER NOT NULL,
+    wall_time_unix_ns INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    connection_id TEXT,
+    stream_id TEXT,
+    request_id TEXT,
+    scenario_id TEXT,
+    requirement_id TEXT,
+    PRIMARY KEY (run_id, sequence)
+);
+
+CREATE TABLE final_scores (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    verdict INTEGER NOT NULL CHECK (verdict BETWEEN 0 AND 3),
+    required_earned TEXT NOT NULL,
+    required_possible TEXT NOT NULL,
+    weighted_earned TEXT NOT NULL,
+    weighted_possible TEXT NOT NULL,
+    coverage_earned TEXT NOT NULL,
+    coverage_possible TEXT NOT NULL
+);
+
+CREATE TABLE outcomes (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    requirement_id TEXT NOT NULL,
+    state INTEGER NOT NULL CHECK (state BETWEEN 0 AND 4),
+    PRIMARY KEY (run_id, requirement_id),
+    UNIQUE (run_id, position)
+);
+
+CREATE INDEX runs_newest_idx ON runs(created_at_unix_ns DESC, id DESC);
+CREATE INDEX evidence_events_page_idx ON evidence_events(run_id, sequence);
+)SQL";
+
+// The version 2 to 3 step, verbatim from the store's migration chain.
+constexpr const char* kVersionTwoToThreeMigration =
+    "CREATE TABLE run_publisher_capabilities ("
+    "run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,"
+    "fetch INTEGER NOT NULL CHECK (fetch IN (0, 1)));"
+    "CREATE TABLE schema_meta_v3 (version INTEGER NOT NULL CHECK (version = 3));"
+    "INSERT INTO schema_meta_v3(version) VALUES (3);"
+    "DROP TABLE schema_meta;"
+    "ALTER TABLE schema_meta_v3 RENAME TO schema_meta;";
+
+// Every table holding run data; all but `runs` reference it (directly or, for the
+// namespace fields, through run_track_fixtures) with ON DELETE CASCADE.
+const std::vector<std::string> kRunTables{
+    "runs",           "run_builds",           "build_dependencies",
+    "selected_scenarios", "run_track_fixtures", "run_track_namespace_fields",
+    "run_publisher_capabilities", "evidence_events", "final_scores", "outcomes"};
+
+void exec_or_fail(sqlite3* raw, const std::string& sql) {
+    char* error = nullptr;
+    const auto result = sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, &error);
+    const std::string message = error == nullptr ? "" : error;
+    sqlite3_free(error);
+    ASSERT_EQ(result, SQLITE_OK) << message << "\n" << sql;
+}
+
+// A version 3 database built directly with SQL, not through the store. With
+// `accepts_draft22` false it is a database migrated from version 2 (the runs CHECK is
+// draft IN (18, 21)); with true it is a database created fresh at version 3 after draft
+// 22 was added to schema.sql.
+void create_version_three_database(const std::filesystem::path& path,
+                                   bool accepts_draft22 = false) {
+    std::string schema = kVersionTwoSchema;
+    if (accepts_draft22) {
+        const std::string old_check = "draft IN (18, 21)";
+        const auto at = schema.find(old_check);
+        ASSERT_NE(at, std::string::npos);
+        schema.replace(at, old_check.size(), "draft IN (18, 21, 22)");
+    }
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    exec_or_fail(raw, schema);
+    exec_or_fail(raw, kVersionTwoToThreeMigration);
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+}
+
+// Three runs with a row in every child table between them, written by raw SQL.
+void seed_runs_with_children(const std::filesystem::path& path) {
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    exec_or_fail(raw, "PRAGMA foreign_keys=ON");
+    exec_or_fail(
+        raw,
+        "INSERT INTO runs(id,draft,transport,mode,timeout_ms,state,created_at_unix_ns,"
+        "finalized_at_unix_ns) VALUES"
+        "('run-a',18,0,0,1000,0,100,NULL),"
+        "('run-b',21,1,1,2500,1,200,250),"
+        "('run-c',21,0,1,0,1,300,301);"
+        "INSERT INTO run_builds VALUES('run-a','0.1','abc'),('run-b','0.2''q','d|e'),"
+        "('run-c','0.3','a'||char(0)||'bc');"
+        "INSERT INTO build_dependencies VALUES('run-b','sqlite3','3.46'),"
+        "('run-b','quiche','rev,1'),('run-c','picoquic','r2');"
+        "INSERT INTO selected_scenarios VALUES('run-a',0,'session/setup'),"
+        "('run-b',0,'fetch-publisher-track-range'),('run-b',1,'x,y|z');"
+        "INSERT INTO run_track_fixtures VALUES('run-b','track'),('run-c','other');"
+        "INSERT INTO run_track_namespace_fields VALUES('run-b',0,'scope'),"
+        "('run-b',1,'n s'),('run-c',0,'one');"
+        "INSERT INTO run_publisher_capabilities VALUES('run-b',0),('run-c',1);"
+        "INSERT INTO evidence_events VALUES"
+        "('run-a',0,10,20,'kind-a','{\"d\":1}',NULL,NULL,NULL,NULL,NULL),"
+        "('run-b',0,11,21,'kind''b','{}','c1','s1','r1','scenario/1','D21-MUST-1'),"
+        "('run-b',1,12,22,'kind-c','{\"x\":\"DELETE FROM runs\"}','c1',NULL,'r2',NULL,NULL);"
+        "INSERT INTO final_scores VALUES"
+        "('run-b',1,'18446744073709551610','18446744073709551615','1','2','3','4'),"
+        "('run-c',0,'0','0','0','0','0','0');"
+        "INSERT INTO outcomes VALUES('run-b',0,'D21-MUST-1',0),('run-b',1,'D21-SHOULD-2',3),"
+        "('run-c',0,'D21-MUST-1',4);");
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+}
+
+// Every row of every run table, with rowids, column types and exact bytes.
+std::string dump_run_tables(const std::filesystem::path& path) {
+    sqlite3* raw = nullptr;
+    EXPECT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    std::string dump;
+    for (const auto& table : kRunTables) {
+        dump += "[" + table + "]\n";
+        sqlite3_stmt* query = nullptr;
+        const auto sql = "SELECT rowid, * FROM " + table + " ORDER BY rowid";
+        EXPECT_EQ(sqlite3_prepare_v2(raw, sql.c_str(), -1, &query, nullptr), SQLITE_OK) << sql;
+        while (query != nullptr && sqlite3_step(query) == SQLITE_ROW) {
+            for (int column = 0; column < sqlite3_column_count(query); ++column) {
+                const auto type = sqlite3_column_type(query, column);
+                dump += std::to_string(type) + ":";
+                if (type == SQLITE_INTEGER) {
+                    dump += std::to_string(sqlite3_column_int64(query, column));
+                } else if (type != SQLITE_NULL) {
+                    const auto* bytes =
+                        static_cast<const char*>(sqlite3_column_blob(query, column));
+                    const auto size = sqlite3_column_bytes(query, column);
+                    dump += std::to_string(size) + "=" + std::string(bytes, bytes + size);
+                }
+                dump += "|";
+            }
+            dump += "\n";
+        }
+        sqlite3_finalize(query);
+    }
+    sqlite3_close(raw);
+    return dump;
+}
+
+std::int64_t query_integer(const std::filesystem::path& path, const std::string& sql) {
+    sqlite3* raw = nullptr;
+    EXPECT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    sqlite3_stmt* query = nullptr;
+    EXPECT_EQ(sqlite3_prepare_v2(raw, sql.c_str(), -1, &query, nullptr), SQLITE_OK) << sql;
+    std::int64_t value = -1;
+    if (query != nullptr && sqlite3_step(query) == SQLITE_ROW) value = sqlite3_column_int64(query, 0);
+    sqlite3_finalize(query);
+    sqlite3_close(raw);
+    return value;
+}
+
+std::string query_text(const std::filesystem::path& path, const std::string& sql) {
+    sqlite3* raw = nullptr;
+    EXPECT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    sqlite3_stmt* query = nullptr;
+    EXPECT_EQ(sqlite3_prepare_v2(raw, sql.c_str(), -1, &query, nullptr), SQLITE_OK) << sql;
+    std::string value;
+    if (query != nullptr && sqlite3_step(query) == SQLITE_ROW) {
+        const auto* bytes = sqlite3_column_text(query, 0);
+        if (bytes != nullptr) value = reinterpret_cast<const char*>(bytes);
+    }
+    sqlite3_finalize(query);
+    sqlite3_close(raw);
+    return value;
+}
+
+// The result code of one raw draft 22 insert, made without the store.
+int raw_draft22_insert(const std::filesystem::path& path) {
+    sqlite3* raw = nullptr;
+    EXPECT_EQ(sqlite3_open(path.c_str(), &raw), SQLITE_OK);
+    const auto result = sqlite3_exec(
+        raw,
+        "INSERT INTO runs(id,draft,transport,mode,timeout_ms,state,created_at_unix_ns) "
+        "VALUES('raw-draft22',22,0,0,1000,0,900)",
+        nullptr, nullptr, nullptr);
+    sqlite3_close(raw);
+    return result;
+}
+
+std::string file_bytes(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
 app::BuildInfo sample_build() {
     return {
         std::string{"0.1.0\0' ; DROP TABLE runs; --", 30},
@@ -182,7 +420,7 @@ TEST(RunStoreTest, CreatesCurrentSchemaAndEnablesForeignKeys) {
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());
 
-    EXPECT_EQ(store.schema_version(), 3);
+    EXPECT_EQ(store.schema_version(), 4);
     EXPECT_TRUE(store.foreign_keys_enabled());
 }
 
@@ -266,20 +504,19 @@ TEST(RunStoreTest, MigratesVersionOneMetadataAndPreservesExistingRuns) {
     TemporaryDatabase database;
     sqlite3* raw = nullptr;
     ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    // The real version 1 schema: the version 4 step copies every runs column, so the
+    // fixture needs the columns every shipped version 1 database had.
+    ASSERT_EQ(sqlite3_exec(raw, kVersionOneSchema, nullptr, nullptr, nullptr), SQLITE_OK);
     ASSERT_EQ(sqlite3_exec(
                   raw,
-                  "CREATE TABLE schema_meta(version INTEGER NOT NULL CHECK(version=1));"
-                  "INSERT INTO schema_meta VALUES(1);"
-                  "CREATE TABLE runs(id TEXT PRIMARY KEY,"
-                  "created_at_unix_ns INTEGER NOT NULL,"
-                  "finalized_at_unix_ns INTEGER);"
-                  "INSERT INTO runs VALUES('legacy-run',100,NULL);",
+                  "INSERT INTO runs(id,draft,transport,mode,timeout_ms,state,created_at_unix_ns) "
+                  "VALUES('legacy-run',21,0,0,1000,0,100);",
                   nullptr, nullptr, nullptr),
               SQLITE_OK);
     ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
 
     SqliteRunStore store(database.path(), sample_build());
-    EXPECT_EQ(store.schema_version(), 3);
+    EXPECT_EQ(store.schema_version(), 4);
     ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
     sqlite3_stmt* query = nullptr;
     ASSERT_EQ(sqlite3_prepare_v2(
@@ -348,7 +585,7 @@ TEST(RunStoreTest, RoundTripsCompleteConfigurationAndBuildIdentity) {
 }
 
 TEST(RunStoreTest, RoundTripsDraft22AndRejectsOutOfRangeStoredDrafts) {
-    // Draft 22 is known but not runnable; the store still has to represent it.
+    // Every schema version 4 database (new or migrated) stores draft 22 runs; this one is new.
     TemporaryDatabase database;
     SqliteRunStore store(database.path(), sample_build());
     auto config = sample_config();
@@ -656,7 +893,7 @@ TEST(RunStoreTest, MigratesVersionTwoDatabasesAndTreatsOldRunsAsCapable) {
 
     {
         SqliteRunStore store(database.path(), sample_build());
-        EXPECT_EQ(store.schema_version(), 3);
+        EXPECT_EQ(store.schema_version(), 4);
         const auto legacy = store.load("legacy-v2");
         EXPECT_EQ(legacy.config.scenario_ids, (std::vector<std::string>{"fetch-publisher-track-range"}));
         EXPECT_TRUE(legacy.config.publisher_capabilities.fetch);
@@ -666,7 +903,7 @@ TEST(RunStoreTest, MigratesVersionTwoDatabasesAndTreatsOldRunsAsCapable) {
     }
     // Reopening a migrated database is a no-op.
     SqliteRunStore reopened(database.path(), sample_build());
-    EXPECT_EQ(reopened.schema_version(), 3);
+    EXPECT_EQ(reopened.schema_version(), 4);
     EXPECT_EQ(reopened.list({10, 0}).total, 2u);
 }
 
@@ -684,6 +921,241 @@ TEST(RunStoreTest, SchemaRejectsAnUnknownCapabilityValue) {
         "UPDATE run_publisher_capabilities SET fetch=2 WHERE run_id='" + id + "'";
     EXPECT_EQ(sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, nullptr), SQLITE_CONSTRAINT);
     ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+}
+
+// Schema version 4 rebuilds `runs` so every database, not only new ones, accepts draft 22.
+
+TEST(RunStoreSchemaFourTest, VersionThreeDatabaseRejectsDraft22BeforeMigration) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    EXPECT_EQ(query_integer(database.path(), "SELECT version FROM schema_meta"), 3);
+    EXPECT_EQ(raw_draft22_insert(database.path()), SQLITE_CONSTRAINT);
+}
+
+TEST(RunStoreSchemaFourTest, MigratesVersionThreeKeepingEveryRowAndTheCascade) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    seed_runs_with_children(database.path());
+    const auto before = dump_run_tables(database.path());
+    ASSERT_NE(before.find("run-c"), std::string::npos);
+
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        EXPECT_EQ(store.schema_version(), 4);
+        EXPECT_TRUE(store.foreign_keys_enabled());
+        EXPECT_EQ(store.list({10, 0}).total, 3u);
+        const auto loaded = store.load("run-b");
+        EXPECT_EQ(loaded.config.scenario_ids,
+                  (std::vector<std::string>{"fetch-publisher-track-range", "x,y|z"}));
+        EXPECT_FALSE(loaded.config.publisher_capabilities.fetch);
+        EXPECT_EQ(loaded.events.size(), 2u);
+        EXPECT_EQ(loaded.outcomes.size(), 2u);
+    }
+    EXPECT_EQ(dump_run_tables(database.path()), before);
+
+    // Same table and index definitions as a database created at version 4 (the rename
+    // only quotes the table name).
+    TemporaryDatabase fresh;
+    { SqliteRunStore store(fresh.path(), sample_build()); }
+    const auto runs_sql = "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'";
+    auto migrated_sql = query_text(database.path(), runs_sql);
+    const std::string quoted = "CREATE TABLE \"runs\"";
+    ASSERT_EQ(migrated_sql.rfind(quoted, 0), 0u) << migrated_sql;
+    migrated_sql.replace(0, quoted.size(), "CREATE TABLE runs");
+    EXPECT_EQ(migrated_sql, query_text(fresh.path(), runs_sql));
+    const auto index_sql =
+        "SELECT group_concat(sql, ';') FROM (SELECT sql FROM sqlite_master "
+        "WHERE type='index' AND sql IS NOT NULL ORDER BY name)";
+    EXPECT_EQ(query_text(database.path(), index_sql), query_text(fresh.path(), index_sql));
+    EXPECT_EQ(query_integer(database.path(),
+                            "SELECT COUNT(*) FROM sqlite_master WHERE name='runs_new'"),
+              0);
+
+    // Deleting a run still cascades to every child table, including the namespace fields
+    // reached through run_track_fixtures; the other runs keep their rows.
+    sqlite3* raw = nullptr;
+    ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+    exec_or_fail(raw, "PRAGMA foreign_keys=ON");
+    exec_or_fail(raw, "DELETE FROM runs WHERE id='run-b'");
+    ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    for (const auto& table : kRunTables) {
+        const auto column = table == "runs" ? "id" : "run_id";
+        EXPECT_EQ(query_integer(database.path(), "SELECT COUNT(*) FROM " + table + " WHERE " +
+                                                     column + "='run-b'"),
+                  0)
+            << table;
+    }
+    EXPECT_EQ(query_integer(database.path(),
+                            "SELECT COUNT(*) FROM run_track_namespace_fields WHERE run_id='run-c'"),
+              1);
+    EXPECT_EQ(query_integer(database.path(), "SELECT COUNT(*) FROM evidence_events"), 1);
+}
+
+TEST(RunStoreSchemaFourTest, MigrationLeavesForeignKeysCheckedAndEnabled) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    seed_runs_with_children(database.path());
+    SqliteRunStore store(database.path(), sample_build());
+    EXPECT_TRUE(store.foreign_keys_enabled());
+    EXPECT_EQ(query_integer(database.path(), "SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+}
+
+TEST(RunStoreSchemaFourTest, MigratedVersionOneTwoAndThreeDatabasesAcceptDraft22) {
+    auto draft22 = sample_config();
+    draft22.draft = app::DraftVersion::Draft22;
+    const auto accepts = [&](const std::filesystem::path& path) {
+        SqliteRunStore store(path, sample_build());
+        EXPECT_EQ(store.schema_version(), 4);
+        const auto id = store.create_run(draft22);
+        EXPECT_EQ(store.load(id).config.draft, app::DraftVersion::Draft22);
+    };
+
+    TemporaryDatabase one;
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(one.path().c_str(), &raw), SQLITE_OK);
+        exec_or_fail(raw, kVersionOneSchema);
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    }
+    accepts(one.path());
+    EXPECT_EQ(raw_draft22_insert(one.path()), SQLITE_OK);
+
+    TemporaryDatabase two;
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(two.path().c_str(), &raw), SQLITE_OK);
+        exec_or_fail(raw, kVersionTwoSchema);
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    }
+    accepts(two.path());
+    EXPECT_EQ(raw_draft22_insert(two.path()), SQLITE_OK);
+
+    TemporaryDatabase three;
+    create_version_three_database(three.path());
+    accepts(three.path());
+    EXPECT_EQ(raw_draft22_insert(three.path()), SQLITE_OK);
+}
+
+TEST(RunStoreSchemaFourTest, MigratesAFreshVersionThreeDatabaseHoldingDraft22Runs) {
+    // A database created at version 3 after schema.sql accepted draft 22 already holds
+    // draft 22 runs; the rebuild keeps them.
+    TemporaryDatabase database;
+    create_version_three_database(database.path(), true);
+    ASSERT_EQ(raw_draft22_insert(database.path()), SQLITE_OK);
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+        exec_or_fail(raw, "INSERT INTO run_builds VALUES('raw-draft22','0.4','abc')");
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    }
+    const auto before = dump_run_tables(database.path());
+    SqliteRunStore store(database.path(), sample_build());
+    EXPECT_EQ(store.schema_version(), 4);
+    EXPECT_EQ(store.load("raw-draft22").config.draft, app::DraftVersion::Draft22);
+    EXPECT_EQ(dump_run_tables(database.path()), before);
+}
+
+TEST(RunStoreSchemaFourTest, ReopeningAVersionFourDatabaseChangesNothing) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    seed_runs_with_children(database.path());
+    { SqliteRunStore store(database.path(), sample_build()); }
+    const auto bytes = file_bytes(database.path());
+    const auto rows = dump_run_tables(database.path());
+    ASSERT_FALSE(bytes.empty());
+
+    {
+        SqliteRunStore reopened(database.path(), sample_build());
+        EXPECT_EQ(reopened.schema_version(), 4);
+        EXPECT_TRUE(reopened.foreign_keys_enabled());
+    }
+    EXPECT_EQ(file_bytes(database.path()), bytes);
+    EXPECT_EQ(dump_run_tables(database.path()), rows);
+}
+
+// Failure injection: a row the old schema accepted but the version 4 runs definition
+// rejects (draft 99, written with CHECK constraints ignored) makes the copy into runs_new
+// fail deterministically, after runs_new has been created.
+TEST(RunStoreSchemaFourTest, FailedCopyRollsBackToVersionThree) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    seed_runs_with_children(database.path());
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+        exec_or_fail(raw, "PRAGMA ignore_check_constraints=ON");
+        exec_or_fail(raw,
+                     "INSERT INTO runs(id,draft,transport,mode,timeout_ms,state,"
+                     "created_at_unix_ns) VALUES('run-bad',99,0,0,1000,0,400)");
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    }
+    const auto before = dump_run_tables(database.path());
+    const auto runs_sql = query_text(
+        database.path(), "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'");
+
+    try {
+        SqliteRunStore store(database.path(), sample_build());
+        ADD_FAILURE() << "migration accepted a draft 99 row";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("migrate SQLite schema version 3 to 4"),
+                  std::string::npos)
+            << error.what();
+    }
+
+    EXPECT_EQ(query_integer(database.path(), "SELECT version FROM schema_meta"), 3);
+    EXPECT_EQ(dump_run_tables(database.path()), before);
+    EXPECT_EQ(query_text(database.path(),
+                         "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'"),
+              runs_sql);
+    EXPECT_EQ(query_integer(database.path(),
+                            "SELECT COUNT(*) FROM sqlite_master WHERE name='runs_new'"),
+              0);
+    EXPECT_EQ(raw_draft22_insert(database.path()), SQLITE_CONSTRAINT);
+}
+
+// Failure injection: an orphan child row (written with foreign keys off) passes the copy
+// and fails PRAGMA foreign_key_check after `runs` has been dropped and replaced; the
+// rollback must undo the drop and the rename.
+TEST(RunStoreSchemaFourTest, FailedForeignKeyCheckRollsBackToVersionThree) {
+    TemporaryDatabase database;
+    create_version_three_database(database.path());
+    seed_runs_with_children(database.path());
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(database.path().c_str(), &raw), SQLITE_OK);
+        exec_or_fail(raw, "PRAGMA foreign_keys=OFF");
+        exec_or_fail(raw, "INSERT INTO selected_scenarios VALUES('run-ghost',0,'orphan')");
+        ASSERT_EQ(sqlite3_close(raw), SQLITE_OK);
+    }
+    const auto before = dump_run_tables(database.path());
+
+    try {
+        SqliteRunStore store(database.path(), sample_build());
+        ADD_FAILURE() << "migration accepted an orphan child row";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("foreign key"), std::string::npos)
+            << error.what();
+    }
+
+    EXPECT_EQ(query_integer(database.path(), "SELECT version FROM schema_meta"), 3);
+    EXPECT_EQ(dump_run_tables(database.path()), before);
+    EXPECT_EQ(query_integer(database.path(),
+                            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND "
+                            "name='runs_newest_idx' AND tbl_name='runs'"),
+              1);
+    EXPECT_EQ(raw_draft22_insert(database.path()), SQLITE_CONSTRAINT);
+}
+
+TEST(RunStoreSchemaFourTest, NewDatabaseIsCreatedAtVersionFourAndAcceptsDraft22) {
+    TemporaryDatabase database;
+    {
+        SqliteRunStore store(database.path(), sample_build());
+        EXPECT_EQ(store.schema_version(), 4);
+        auto config = sample_config();
+        config.draft = app::DraftVersion::Draft22;
+        EXPECT_EQ(store.load(store.create_run(config)).config.draft, app::DraftVersion::Draft22);
+    }
+    EXPECT_EQ(raw_draft22_insert(database.path()), SQLITE_OK);
 }
 
 }  // namespace

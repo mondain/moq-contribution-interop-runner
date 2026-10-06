@@ -24,7 +24,7 @@
     "run_id": { "type": "string", "minLength": 1 },
     "scenario_id": { "type": "string", "minLength": 1 },
     "endpoint": { "type": "string", "minLength": 1 },
-    "draft": { "enum": [18, 21] },
+    "draft": { "enum": [18, 21, 22] },
     "transport": { "enum": ["native_quic", "webtransport"] },
     "namespace_hex": {
       "type": "array",
