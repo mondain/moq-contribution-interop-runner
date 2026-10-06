@@ -14,7 +14,9 @@ namespace moq::interop::requirements {
 // shared draft 22 counterpart (lineage_data::kSharedRows, kSharedScenarios, kSharedEvaluators), translated with
 // draft = 22, ids d21 -> d22 and evidence kinds unchanged. A draft 21 id with several draft 22 counterparts yields
 // one binding per counterpart; one-to-many rows (several draft 21 rows onto one draft 22 row) collapse to one
-// binding per (row, scenario, evaluator), never doubled. Deterministic: sorted by (row, scenario, evaluator).
+// binding per (row, scenario), never doubled: the collapsed binding carries the sorted, deduplicated union of its
+// sources' evidence kinds, and sources that would put different evaluators on one (row, scenario) are refused
+// (std::logic_error) rather than resolved by input order. Deterministic: sorted by (row, scenario, evaluator).
 std::vector<ExecutableBinding> draft22_shared_bindings();
 
 // A draft 21 binding that was NOT translated and why. Reasons, in priority order:
@@ -36,7 +38,13 @@ struct Draft22Translation {
 };
 Draft22Translation translate_draft21_bindings(std::span<const ExecutableBinding> draft21);
 
-// Shared plus own bindings. The own half arrives with the own-row table; until then this equals the shared half.
+// The own half: bindings for the rows of lineage_data::kOwnRows22 that have an own scenario and evaluator
+// (src/requirements/draft22_bindings.cpp, one block per row). One binding per (row, scenario), sorted by
+// (row, scenario, evaluator). A unit test couples it to the catalog and to app::kOwnScenarioTraits22, so an own
+// scenario or evaluator cannot be named or registered without a binding.
+std::vector<ExecutableBinding> draft22_own_bindings();
+
+// Shared plus own bindings (disjoint: no own row has a shared binding), sorted by (row, scenario, evaluator).
 std::vector<ExecutableBinding> draft22_executable_bindings();
 
 // Draft 21 rows whose draft 22 successor (requirements/draft21-to-22-delta.json) is an own row of
