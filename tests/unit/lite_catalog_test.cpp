@@ -179,7 +179,21 @@ TEST(LiteCatalog, ScopeHelperSeparatesNeighbouringSections) {
     EXPECT_FALSE(may_hold_non_scope_review("9.1"));
 }
 
-// Pinned per task: Task 4 classified sections 1, 3 and 4.
+// Sections whose hand classification is finished: every row in them is reviewed (Task 4: 1, 3, 4;
+// Task 5: 5.1.1 with 5.1.1.1 and 5.1.1.2, 5.1.2, 6.3 with 6.3.1 and 6.3.2). Later tasks extend the list.
+TEST(LiteCatalog, ClassifiedSectionsHaveNoUnreviewedRow) {
+    const auto catalog = lite_catalog(lite_source());
+    for (const auto& row : catalog.requirements) {
+        bool classified = false;
+        for (const std::string_view parent : {"1", "3", "4", "5.1.1", "5.1.2", "6.3"}) {
+            if (within(row.source.section, parent)) classified = true;
+        }
+        if (classified) EXPECT_TRUE(row.reviewed) << row.id << " (section " << row.source.section << ")";
+    }
+}
+
+// Pinned per task: Task 4 classified sections 1, 3 and 4; Task 5 sections 5.1.1 (with 5.1.1.1 and
+// 5.1.1.2), 5.1.2 and 6.3 (with 6.3.1 and 6.3.2).
 TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
     const auto catalog = lite_catalog(lite_source());
     std::map<std::string, std::size_t> reviewed;
@@ -195,12 +209,12 @@ TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
         scenarios.insert(row.scenarios.begin(), row.scenarios.end());
         evaluators.insert(row.evaluators.begin(), row.evaluators.end());
     }
-    EXPECT_EQ(testable, 8u);
-    EXPECT_EQ(scenarios.size(), 7u);
-    EXPECT_EQ(evaluators.size(), 8u);
-    const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13}};
+    EXPECT_EQ(testable, 12u);
+    EXPECT_EQ(scenarios.size(), 10u);
+    EXPECT_EQ(evaluators.size(), 12u);
+    const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13}, {"5", 29}, {"6", 9}};
     EXPECT_EQ(reviewed, expected);
-    EXPECT_EQ(total, 36u);
+    EXPECT_EQ(total, 74u);
     EXPECT_EQ(catalog.requirements.size(), 212u);
 }
 
