@@ -278,7 +278,8 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/lite_probe.cpp
     src/scenarios/lite06_common.cpp
     src/scenarios/lite06_setup.cpp
-    src/scenarios/lite06_announce.cpp)
+    src/scenarios/lite06_announce.cpp
+    src/scenarios/lite06_subscribe.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution.cpp
@@ -1441,6 +1442,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
     add_test(NAME moqlite-announce
              COMMAND moq-interop-moqlite-announce-tests)
+
+    add_executable(moq-interop-moqlite-subscribe-tests
+                   tests/protocol/lite06_subscribe_test.cpp)
+    target_include_directories(moq-interop-moqlite-subscribe-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-subscribe-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-subscribe-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-subscribe
+             COMMAND moq-interop-moqlite-subscribe-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
