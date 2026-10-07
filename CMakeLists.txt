@@ -121,6 +121,12 @@ add_library(moq-interop-wire
     src/wire/draft22/location_filter.cpp
     src/wire/draft22/publish.cpp
     src/wire/draft22/publisher_request.cpp
+    src/wire/moqlite06/varint.cpp
+    src/wire/moqlite06/framing.cpp
+    src/wire/moqlite06/setup.cpp
+    src/wire/moqlite06/announce.cpp
+    src/wire/moqlite06/subscribe.cpp
+    src/wire/moqlite06/group.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -1265,6 +1271,59 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft22-location-filter
              COMMAND moq-interop-draft22-location-filter-tests)
+
+    add_executable(moq-interop-moqlite06-framing-tests
+                   tests/golden/moqlite06_framing_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-framing-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-framing
+             COMMAND moq-interop-moqlite06-framing-tests)
+
+    add_executable(moq-interop-moqlite06-setup-tests
+                   tests/golden/moqlite06_setup_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-setup-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-setup
+             COMMAND moq-interop-moqlite06-setup-tests)
+
+    add_executable(moq-interop-moqlite06-announce-tests
+                   tests/golden/moqlite06_announce_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-announce-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-announce
+             COMMAND moq-interop-moqlite06-announce-tests)
+
+    add_executable(moq-interop-moqlite06-subscribe-tests
+                   tests/golden/moqlite06_subscribe_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-subscribe-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-subscribe
+             COMMAND moq-interop-moqlite06-subscribe-tests)
+
+    add_executable(moq-interop-moqlite06-group-tests
+                   tests/golden/moqlite06_group_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-group-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-group
+             COMMAND moq-interop-moqlite06-group-tests)
+
+    add_executable(moq-interop-moqlite06-wire-audit-tests
+                   tests/golden/moqlite06_wire_audit_test.cpp)
+    target_compile_definitions(moq-interop-moqlite06-wire-audit-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-moqlite06-wire-audit-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-wire-audit
+             COMMAND moq-interop-moqlite06-wire-audit-tests)
+
+    add_executable(moq-interop-moqlite06-crosscheck-tests
+                   tests/golden/moqlite06_crosscheck_test.cpp)
+    target_compile_definitions(moq-interop-moqlite06-crosscheck-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-moqlite06-crosscheck-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-crosscheck
+             COMMAND moq-interop-moqlite06-crosscheck-tests)
 
     add_executable(moq-interop-draft22-shared-tests
                    tests/golden/draft22_shared_test.cpp)
