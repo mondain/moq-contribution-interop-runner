@@ -928,6 +928,48 @@ sees it.
 | `d22-location-filter-unknown-type` | SUBSCRIBE whose LOCATION_FILTER has Type 0x06, the first undefined value | pass on a PROTOCOL_VIOLATION close, fail on another close code, no verdict without a close in the reaction window (Section 9.20.9: any other Location Filter Type is a PROTOCOL_VIOLATION) |
 | `d22-location-filter-absolute-origin` | SUBSCRIBE whose LOCATION_FILTER is Absolute Start (Type 0x02) {0, 0}, a form no draft 21 field list can express | pass when the publisher answers SUBSCRIBE_OK and delivers an Object, fail on a PROTOCOL_VIOLATION close (the valid filter read as malformed), no verdict otherwise; a control for the probe above |
 
+## moq-lite-06 scenarios (L1d)
+
+Counts: 19 scenarios, 30 evaluators, 34 evaluator bindings (29 single-scenario rows and row `L06-4-4-MUST-027`, which is
+bound once per scenario on five scenarios). They are defined by `requirements/moq-lite-06.json`, a staged
+catalog (`complete: false`, 137 of 212 rows reviewed, 75 unreviewed, 40 of those required). The publisher under test is the
+CLIENT that dials the runner; the runner is the server and the subscriber. A moq-lite-06 run is scored with the staged
+scorer: its verdict is Fail when a required reviewed row failed and otherwise Incomplete, never Pass. Every unreviewed row
+is reported as not tested (reason "Unreviewed: classification pending"). The scenarios exist in the registry and the
+audit CLI (`moq-interop-audit --draft moq-lite-06` reports 26 of 26 required reviewed rows covered), but the HTTP API
+refuses moq-lite-06 runs until L1e. They are exercised through the native run manager (library
+level) and the tests.
+
+Scenarios marked "track" need the track fixture (broadcast path = namespace fields joined with `/`, plus the track name).
+Every probe ends with an ungated allowance wait, so a late violation is still seen; a probe whose deadline cannot cover
+its windows is refused as a harness error for that context.
+
+| Scenario | Stimulus (runner to publisher) | Evaluators (rows) | Not run when |
+|---|---|---|---|
+| `l06-setup-stream` | The runner's SETUP stream, then a 2 s allowance | `l06-setup-stream-single-setup` (014), `l06-setup-parameters-unique` (111) | No publisher SETUP was decoded, or the publisher closed or reset before the allowance ended |
+| `l06-setup-unknown-parameter` | SETUP carrying undefined Parameter 0x7f, then ANNOUNCE_REQUEST with the empty prefix | `l06-setup-unknown-parameter-ignored` (110) | The publisher closed early, or the stimulus was not delivered |
+| `l06-setup-duplicate-parameter` | SETUP carrying Cost (0x4) twice | `l06-setup-duplicate-parameter-close` (112), `l06-errors-code-space` (027) | The publisher did not close within the allowance and no close can be attributed |
+| `l06-setup-duplicate-stream` | The ordinary SETUP, then a second SETUP stream | `l06-setup-duplicate-stream-close` (092), 027 | As above |
+| `l06-setup-server-path` | SETUP carrying Path "/" (client-only) | `l06-setup-server-path-close` (126), 027 | As above; WebTransport binding (no server Path to send) |
+| `l06-setup-server-role` | SETUP carrying Role 0 (client-only) | `l06-setup-server-role-close` (131), 027 | As above |
+| `l06-setup-client-path` | The ordinary SETUP; the publisher's own SETUP Path is judged against the session URL the adapter used | `l06-setup-path-query-appended` (120), `l06-setup-path-sent` (124), `l06-setup-path-absent-on-uri-binding` (125) | Binding unknown; session URL path or query not declared (124 and 125 also need a query); 120 and 124 run on native QUIC only, 125 on WebTransport only |
+| `l06-announce-prefix` (track) | Three ANNOUNCE_REQUESTs: empty prefix, the broadcast's first segment, a disjoint prefix; response window | `l06-announce-ok-then-starts` (139), `l06-announce-hop-list-excludes-own` (141), `l06-announce-ok-hop-assigned` (143) | The broadcast or the response streams are undecodable, the stimulus was not delivered, or the publisher closed early |
+| `l06-announce-lifecycle` (track) | One ANNOUNCE_REQUEST held open for the window while the adapter ends and restarts the broadcast | `l06-announce-retired-id-unused` (152) | No retraction was observed (the adapter did not end the broadcast) |
+| `l06-session-stream-close` (track) | ANNOUNCE_REQUEST and SUBSCRIBE, wait for the first answer on both, then the runner FINs both request streams | `l06-session-peer-closes-send` (025) | The publisher never answered on both streams, or closed the session |
+| `l06-subscribe-latest` (track) | Announce exchange, then the default SUBSCRIBE (latest group, unbounded) and an observation window | `l06-group-starts-with-group` (093), `l06-group-unique-sequence` (097), `l06-group-sequence-increments` (190) | The announce or SUBSCRIBE got no usable answer, or no Group stream arrived |
+| `l06-subscribe-refused` (track) | SUBSCRIBE for an uncovered path and SUBSCRIBE for an unknown track | `l06-subscribe-refused-reset` (062) | Neither refusal was observable, or the stimulus was not delivered |
+| `l06-subscribe-invalid-frame-bounds` (track) | SUBSCRIBE with Group End 0 and non-zero Frame End | `l06-subscribe-invalid-frame-bounds-reset` (023) | The stimulus was not delivered, or the publisher closed the session instead (judged by its code) |
+| `l06-subscribe-group-floor` (track) | Learning SUBSCRIBE (Max Age 0) to find the latest group L, then floored SUBSCRIBEs at L and at L+2 | `l06-subscribe-no-group-below-floor` (159), `l06-subscribe-ok-group-at-floor` (172) | No Group arrived on the learning subscription within its allowance (the probe then times out) |
+| `l06-subscribe-abutting-frame-start` (track) | Learning SUBSCRIBE gives group G; a subscription for frames 0..N-1 of G, then one starting at frame N | `l06-subscribe-resolved-start` (020) | The learning or first subscription did not reach frame N-1 |
+| `l06-errors-unknown-stream-type` | A bidirectional stream with unregistered STREAM_TYPE 0x3f, then a conforming ANNOUNCE_REQUEST | `l06-errors-unknown-stream-type-reset` (108), `l06-errors-unknown-stream-type-not-fatal` (109) | The stimulus was not delivered, or the publisher closed before reacting |
+| `l06-errors-unknown-reset-code` (track) | Two live SUBSCRIBEs; STOP_SENDING on a Group stream, then RESET_STREAM and STOP_SENDING of one with unregistered code 0x4d1, then a later SUBSCRIBE; about 9 s | `l06-errors-unknown-code-tolerated` (030), `l06-errors-no-assumed-unauthorized` (032) | The subscriptions were not both answered, or the live transport refused the Group STOP_SENDING |
+| `l06-errors-reserved-reset-code` (track) | As above with reserved code 0x2a | `l06-errors-reserved-code-tolerated` (033) | As above |
+| `l06-errors-code-space` | SUBSCRIBE for an unserved broadcast (stream half), then an ANNOUNCE_REQUEST whose Message Length covers extra bytes (session half) | `l06-errors-code-space` (027), `l06-errors-message-length-close` (107) | Either half missing for 027 (it needs both); 107 when the publisher did not close |
+
+Where the table says "the publisher closed early", an evaluator that gates on stimulus proof treats a close before
+the stimulus as no verdict; a close that is itself the observation (the four close probes and 107) is judged by its code.
+A transcript flagged as harness-failed, event-limit reached or timed out drops all its verdicts to not run.
+
 ## What NOT_RUN means for each family
 
 | Family | Typical reasons for `NOT_RUN` |

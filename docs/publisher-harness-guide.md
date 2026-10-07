@@ -744,6 +744,32 @@ is the only capability so far. To see which scenarios are affected, read
 `requires_fetch` in `GET /healthz`, or the list in
 [scenario-reference.md](scenario-reference.md#scenarios-that-need-fetch).
 
+### 7.1 moq-lite-06 publishers (L1d)
+
+These notes describe what an adapter for a moq-lite-06 publisher (for example the moq CLI) must provide. moq-lite-06
+runs are not startable through the HTTP API yet (L1e flips that); the expectations below are what the scenarios
+already assume.
+
+- **The publisher under test is the client.** It dials the runner; the runner is the server and the subscriber. The
+  runner sends its own SETUP stream first (except in the violation probes) and does not offer QUIC DATAGRAM
+  or require it: a moq-lite-06 listener accepts a peer that did not negotiate datagrams. The ALPN is `moq-lite-06`
+  for native QUIC; a publisher that offers another ALPN ends the run with a harness error (verdict `error`).
+- **Endpoint forms are provisional.** Native QUIC is `moql://host:port` and WebTransport is `https://host:port/moq`.
+  Both are fixed in L1e against the moq CLI and may change; do not hard-code them in a published adapter.
+- **Capabilities some scenarios need from the adapter:**
+  - `l06-setup-client-path` needs the publisher to be given a session URL with a path and a query (unreserved
+    characters only, for example `/moq?token=l1d`) and to put them in its SETUP Path (native QUIC; the path and query
+    appended) or send no Path (WebTransport). Without them rows 120, 124 and 125 are `not_run`.
+  - `l06-announce-lifecycle` needs the publisher to end a broadcast and start it again within one session. Without that,
+    row 152 is `not_run`.
+  - The unknown-code and reserved-code probes (`l06-errors-unknown-reset-code`, `l06-errors-reserved-reset-code`) run
+    about 9 s and 6 s. The publisher needs a media source that keeps producing for that long; a source that ends
+    inside the probe makes the publisher close the session with NO_ERROR, which those rows judge as a Fail.
+  - Ten scenarios need the track fixture (broadcast path and track name); the adapter must publish exactly that
+    broadcast and track.
+- **Results are staged.** A moq-lite-06 run covers 30 testable rows of a catalog with 75 still-unreviewed rows, so its
+  verdict is `incomplete` or `fail`, never `pass`; unreviewed rows are listed as not tested.
+
 ## 8. Interpreting results
 
 | Outcome | Meaning |

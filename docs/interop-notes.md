@@ -837,6 +837,26 @@ with that build; they do not describe MoQT behavior.
   Group 7, Object 9, so the scenarios that need that Location do not score. See
   [scenario-reference.md](scenario-reference.md).
 
+## moq-lite-06 (L1d)
+
+L1d implements the moq-lite-06 session layer and its 19 scenarios (see
+[scenario-reference.md](scenario-reference.md)): a session recorder over bidirectional streams, a scripted probe
+engine, 30 evaluators bound to catalog rows, and a lite family in the native run manager. The expected behavior is
+`docs/draft-lcurley-moq-lite-06.txt` through `requirements/moq-lite-06.json`.
+
+- **Staged results.** The catalog is `complete: false` (75 of 212 rows unreviewed), so a run is scored with the staged
+  scorer: Fail when a required reviewed row fails, otherwise Incomplete. It is never Pass. `moq-interop-audit --draft
+  moq-lite-06` reports 26 of 26 required reviewed rows covered and exits 0 while saying the catalog is staged.
+- **Evidence.** A passing row records exactly the evidence kinds its binding declares; a transcript that is
+  harness-failed, hit the event limit or timed out contributes no verdicts.
+- **Not reachable yet.** The HTTP API and the server refuse moq-lite-06 runs, `runnable(MoqLite06)` is false, and no
+  adapter ships; L1e flips these and runs the 19 scenarios against the real moq CLI. Until then the family runs only
+  through the native run manager in tests, against a scripted conforming publisher. No sweep against a real
+  publisher has been done, so there are no observed results to record here.
+- **Known limitation.** A second ANNOUNCE_OK at the end of a covered announce response stream is not flagged, and
+  `l06-announce-ok-then-starts` can then pass wrongly; this is tracked in the L1d hand-off in
+  `requirements/draft21-to-22-delta.json`.
+
 ## Other publishers
 
 A different publisher integrates through the same driver contract with no change
