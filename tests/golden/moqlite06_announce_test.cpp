@@ -141,6 +141,56 @@ TEST(Moqlite06Announce, OkViolations) {
 
 // ANNOUNCE_START: Type 00; body = suffix "b" (01 62) + Hop Count 02 + hops 07 09 + warm 00 + cold 01
 // = 2 + 1 + 2 + 1 + 1 = 7 bytes, so Message Length 07.
+// A failed decode leaves the input cursor exactly where it was, for every error class.
+TEST(Moqlite06Announce, ErrorsLeaveTheCursorUnmoved) {
+    const std::vector<Bytes> request_cases = {
+        bytes({0x02, 0x05, 0x61}),        // string length beyond the body
+        bytes({0x03, 0x01, 0x61, 0x00}),  // trailing byte
+        bytes({0x00}),                    // empty body
+    };
+    for (const auto& wire : request_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_announce_request(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+    const std::vector<Bytes> ok_cases = {
+        bytes({0x01, 0x07}),
+        bytes({0x03, 0x01, 0x02, 0x03}),
+        bytes({0x01, 0x52, 0x34}),
+    };
+    for (const auto& wire : ok_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_announce_ok(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+    const std::vector<Bytes> message_cases = {
+        bytes({0x01, 0x00}),              // END with Message Length 0: no announce id
+        bytes({0x01, 0x02, 0x05, 0x00}),  // END with a trailing byte
+    };
+    for (const auto& wire : message_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_announce_message(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+}
+
+// The string limit is judged from the length prefix alone: a 0x3f-byte string with the body cut off right
+// after the prefix is LengthExceedsLimit, not a body shortfall (ProtocolViolation) or short input (NeedMore).
+TEST(Moqlite06Announce, StringLimitIsCheckedBeforeTheBytesAreRead) {
+    DecodeLimits limits;
+    limits.max_string_length = 1;
+    // ANNOUNCE_REQUEST: Message Length 1, body = 3f.
+    const auto request_wire = bytes({0x01, 0x3f});
+    Cursor request_input(request_wire);
+    EXPECT_EQ(error_code(decode_announce_request(request_input, limits)), DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(request_input.remaining(), request_wire.size());
+    // ANNOUNCE_START (Type 00): Message Length 1, body = 3f.
+    const auto start_wire = bytes({0x00, 0x01, 0x3f});
+    Cursor start_input(start_wire);
+    EXPECT_EQ(error_code(decode_announce_message(start_input, limits)), DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(start_input.remaining(), start_wire.size());
+}
+
 TEST(Moqlite06Announce, StartTwoHops) {
     const AnnounceMessage message = AnnounceStart{"b", RouteMetadata{{7, 9}, 0, 1}};
     const auto wire = bytes({0x00, 0x07, 0x01, 0x62, 0x02, 0x07, 0x09, 0x00, 0x01});

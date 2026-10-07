@@ -296,6 +296,60 @@ TEST(Moqlite06Subscribe, LimitsAreEnforcedBeforeAllocation) {
               DecodeErrorCode::LengthExceedsLimit);
 }
 
+// A failed decode leaves the input cursor exactly where it was, for every error class.
+TEST(Moqlite06Subscribe, ErrorsLeaveTheCursorUnmoved) {
+    const std::vector<Bytes> subscribe_cases = {
+        // Frame End 3 with Group End 0 (range coupling), then trailing byte, then one byte short.
+        bytes({0x0b, 0x00, 0x01, 0x62, 0x01, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03}),
+        bytes({0x0c, 0x00, 0x01, 0x62, 0x01, 0x74, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}),
+        bytes({0x0a, 0x00, 0x01, 0x62, 0x01, 0x74, 0x80, 0x00, 0x00, 0x00, 0x00}),
+        bytes({0x00}),
+    };
+    for (const auto& wire : subscribe_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_subscribe(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+    const std::vector<Bytes> update_cases = {
+        bytes({0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03}),
+        bytes({0x07, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}),
+        bytes({0x05, 0x10, 0x00, 0x00, 0x00, 0x00}),
+        bytes({0x00}),
+    };
+    for (const auto& wire : update_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_subscribe_update(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+    const std::vector<Bytes> response_cases = {
+        bytes({0x00, 0x02, 0x06, 0x00}),
+        bytes({0x00, 0x00}),
+        bytes({0x02, 0x02, 0x03, 0x03}),
+    };
+    for (const auto& wire : response_cases) {
+        Cursor input(wire);
+        EXPECT_EQ(error_code(decode_subscribe_response(input)), DecodeErrorCode::ProtocolViolation);
+        EXPECT_EQ(input.remaining(), wire.size());
+    }
+}
+
+// The string limit is judged from the length prefix alone: a 0x3f-byte path with the body cut off right after
+// the prefix is LengthExceedsLimit, not a body shortfall (ProtocolViolation) or short input (NeedMore).
+TEST(Moqlite06Subscribe, StringLimitIsCheckedBeforeTheBytesAreRead) {
+    DecodeLimits limits;
+    limits.max_string_length = 1;
+    // Message Length 2, body = 00 (id) 3f (path length 63) and nothing more.
+    const auto path_wire = bytes({0x02, 0x00, 0x3f});
+    Cursor path_input(path_wire);
+    EXPECT_EQ(error_code(decode_subscribe(path_input, limits)), DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(path_input.remaining(), path_wire.size());
+    // Same for the track name: body = 00 (id) 01 62 ("b") 3f, Message Length 4.
+    const auto track_wire = bytes({0x04, 0x00, 0x01, 0x62, 0x3f});
+    Cursor track_input(track_wire);
+    EXPECT_EQ(error_code(decode_subscribe(track_input, limits)), DecodeErrorCode::LengthExceedsLimit);
+    EXPECT_EQ(track_input.remaining(), track_wire.size());
+}
+
 TEST(Moqlite06Subscribe, EncoderRefusals) {
     ByteWriter out(256);
     const SubscribeRange ok_range{};
