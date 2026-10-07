@@ -6,8 +6,9 @@ runner in this repository against `openmoq-publisher 0.4.1 (commit 9bda5c9)`, wi
 the evidence and draft citation recorded below. The item bodies keep that original
 evidence; the status tables that follow record what later sweeps against moqxr
 `0993cf7` and `4b615f4` showed. The D22- items come from the first draft 22 sweep,
-against `4b615f4`, and its re-sweep after the F1 runner fixes. Background and the full result set
-are in [interop-notes.md](interop-notes.md).
+against `4b615f4`, its re-sweep after the F1 runner fixes, and a dig into every draft 22
+failure against `1883b9f` (see "Status against moqxr 1883b9f"). Background and the full
+result set are in [interop-notes.md](interop-notes.md).
 
 ## Status against moqxr 0993cf7
 
@@ -83,11 +84,66 @@ same build was swept again on both transports. One row changed: `D22-8-9-MUST-28
 `not_run` to `fail`, because a SUBSCRIBE for the run's track that uses an unregistered token
 alias is served (D22-10). Every status above is unchanged.
 
+## Status against moqxr 1883b9f
+
+moqxr `main` moved after the sweeps above. On 2026-10-06 the checkout was at
+`1883b9febe35c4173f3a8e6ccf439cfdf0d913ae` (`v0.4.3-2-g1883b9f`, `--version` `0.4.3-dev`), nine
+commits after `4b615f4`. Those commits change only `src/transport/moqt_session.cpp` (a wait for a
+forward=1 REQUEST_UPDATE in the `--forward 1` file-publish path, and a split of multi-traf moof
+boxes in live stdin ingest) and the CMAF segmenter; `moqt_control_messages.cpp`,
+`picoquic_client.cpp` and `webtransport_client.cpp` are byte-identical, and `moqt_session.cpp` is
+identical up to line 5731. A scratch build of `1883b9f` was swept at draft 22 on both transports
+with the runner at `ef47f8b` and the bundled adapter unchanged, by the method of the `4b615f4`
+sweep (every executable id as a single run, then the 41 row-completion groups).
+
+Result: no row changed. Every run's verdict and pass and fail counts, and every row outcome, equal
+the `4b615f4` re-sweep after the F1 fixes: native QUIC 69 pass, 6 fail, 72 not_run; WebTransport
+69 pass, 6 fail, 69 not_run. Nothing was fixed upstream and nothing regressed. The dig then read
+moqxr's code for every failure and every non-pass row classed as a moqxr question, and ran the four
+adapter-mode experiments listed below. The D22- items now carry the source location, a repro, the
+severity, a fix direction and a confidence label.
+
+| Item | Status on 1883b9f | Dig result |
+|------|-------------------|------------|
+| D22-01 Range Filter error code | Open | Confirmed: the SUBSCRIBE decoder has no Range Filter branch |
+| D22-02 unknown control message | Open | Confirmed; cause corrected: the framing helper does not know the type (D22-11), not a silent erase while serving |
+| D22-03 padding stream closes | Open | Confirmed; cause found: the session's integer decoder stops at 4-byte integers |
+| D22-04 control-stream GOAWAY | Open | Confirmed by source |
+| D22-05 REQUEST_UPDATE then close | Refined | The close is caused by the TRACK_STATUS that follows the update (D22-11); the REQUEST_UPDATE is not shown to be at fault. The intermittent "truncated REQUEST_UPDATE" close has its own likely cause |
+| D22-06 silence | Refined | Three legs confirmed by source (still unscored); the TRACK_STATUS leg is D22-11 |
+| D22-07 WebTransport datagrams | Open | A paced WebTransport run now reaches the datagram: no close in 12 s, as the source predicts |
+| D22-08 second GOAWAY on SUBSCRIBE_NAMESPACE | Open | Confirmed by source |
+| D22-09 SUBSCRIBE_TRACKS overlap | Open | Confirmed by source |
+| D22-10 unregistered token alias | Open | Confirmed by source |
+| D22-11 message framing knows a fixed list of types | New | Root cause of D22-02, of the D22-05 close and of one D22-06 leg; also leaves `D22-9-10-MUST-381` unscored |
+| D22-C1 refused PUBLISH ends the session | Unchanged | Not re-examined |
+
+Adapter-mode experiments (scratch copy of the adapter, `1883b9f`, native QUIC unless noted). None
+changed a verdict, so `adapters/moqxr/run.sh` is unchanged:
+
+| Scenario | Bundled options | Tried | Result |
+|----------|-----------------|-------|--------|
+| `d22-unknown-request-stream-message` | `--forward 1` | `--forward 0 --paced`, timeout+3 | Still `not_run`, now for moqxr's behavior: it answers the SUBSCRIBE (`04 0002 01 00`), serves every Object and PUBLISH_DONE, and ignores the trailing `7e 00 00` for 12 s (D22-11). The probe has no liveness follow-up, so silence is not scored. With `--forward 1` moqxr never answered the request: it waited 2 s on its own PUBLISH for `catalog`, reset and closed with code 0. `D22-9-MUST-295` stays `fail` through the control-stream scenario |
+| `d22-unknown-datagram-type` | `--forward 1` | `--forward 0 --paced`, timeout+3 | Native QUIC: `D22-11-MUST-488` passes either way. WebTransport: still `not_run`; the paced run delivers the datagram (`f0 13 2b 3e 2a`) and moqxr neither closes nor reacts for 12 s, which matches D22-07. Silence after a datagram is not scored |
+| `d22-publish-established-subscriber-sends-publish-state-notify` | `--forward 0 --paced`, timeout+3 | `--forward 1` | Worse: an `error` run. moqxr's first PUBLISH is for `catalog` (`1d 0012 02 01 05 media 07 catalog 00 00`); the probe waits for a PUBLISH of the run's track, so nobody answers, and moqxr resets the stream after 2 s and closes with code 0. `D22-9-10-MUST-381` stays `not_run` |
+| `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` | `--forward 0` | `--forward 1` | Still `not_run`. The probe grants the publisher one bidirectional stream; moqxr opens its PUBLISH_NAMESPACE on it, sends no PUBLISH in either mode and resets that stream after about 2 s. moqxr has no PUBLISH_SKIPPED message at all (no encoder for it), so the condition the row constrains never arises: `D22-3-6-3-MUST-NOT-086` is not applicable to moqxr, not adapter-hidden |
+
 ## Draft 22 items
 
 From the same sweep, with draft 22 rows and line numbers in
 `docs/draft-ietf-moq-transport-22.txt`. They follow the ground rules above; read the
 cited lines first. Items that carry an M- item over to draft 22 say so.
+
+Source locations (the **Where** lines) are from the scratch copy of moqxr `1883b9f` that the
+dig ran; `moqt_session.cpp` up to line 5731 and all of `moqt_control_messages.cpp`,
+`picoquic_client.cpp` and `webtransport_client.cpp` are byte-identical in `4b615f4`, so these
+numbers hold for both revisions. The read-only checkout can move, so its line numbers can differ.
+Wire bytes are as the runner recorded them (draft 22 control messages: type, 16-bit length,
+body). **Repro** names the scenarios to run together: start the runner as in "How to reproduce a
+finding" below and post them with `"draft": 22, "transport": "native-quic"` (or
+`"webtransport"`), `"timeout_ms": 12000` and the reference track; the bundled adapter picks
+moqxr's options. **Confidence:** confirmed (wire evidence and the code that produces it),
+likely (one of the two), suspected (neither settles it).
 
 ### D22-01 A Range Filter with no advertised MAX_FILTER_RANGES gets UNAUTHORIZED (carries M-11)
 
@@ -96,8 +152,26 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   `d22-range-filter-default-zero-limit`.
 - **Draft:** lines 1501-1505 and 4039-4044: with no MAX_FILTER_RANGES advertised the
   limit is zero, and a Range Filter must be rejected with INVALID_FILTER (0x36, line 7975).
-- **Observed:** REQUEST_ERROR code 0x1 (UNAUTHORIZED), reason "invalid SUBSCRIBE"
-  (`05 0014 01 00 11 ...`).
+- **Observed:** the SUBSCRIBE `03 0015 01 01 05 media 06 vide_1 01 26 03 00 01 00` (one
+  OBJECTID_FILTER, type 0x26) is answered with REQUEST_ERROR code 0x1 (UNAUTHORIZED), reason
+  "invalid SUBSCRIBE" (`05 0014 01 00 11 ...`, with FIN). The same on `1883b9f`.
+- **Where:** `decode_subscribe_message` (`moqt_control_messages.cpp` lines 1643-1742) has no
+  branch for the Range Filter types 0x25-0x29, so the parameter falls to the "unknown parameter"
+  `return false` (lines 1687-1691 for even types, 1733-1737 for odd). The session then answers
+  every undecodable SUBSCRIBE with REQUEST_ERROR 0x1 and closes with PROTOCOL_VIOLATION
+  (`moqt_session.cpp` lines 4256-4263; the runner has its verdict before the close). SUBSCRIBE_TRACKS
+  already does this right: `decode_subscribe_tracks_message` skips a well-framed Range Filter and
+  sets `has_unnegotiated_range_filter` (lines 1784-1795), and the session answers INVALID_FILTER
+  (`moqt_session.cpp` lines 4492-4507).
+- **Repro:** `d22-range-filter-with-zero-negotiated-limit` alone (row 077 also names
+  `d22-range-filter-total-exceeds-negotiated-limit`, which waits for an advertised limit and
+  sends nothing).
+- **Severity:** MUST (both rows). A subscriber that sends a Range Filter by mistake gets a
+  misleading UNAUTHORIZED and loses the session instead of a retryable INVALID_FILTER.
+- **Fix direction:** mirror the SUBSCRIBE_TRACKS handling in `decode_subscribe_message` (skip a
+  well-framed 0x25-0x29 parameter and flag it), then answer INVALID_FILTER (0x36) on the request
+  stream without closing the session.
+- **Confidence:** confirmed.
 - **Required:** use INVALID_FILTER for a filter over the negotiated limit.
 
 ### D22-02 An unknown control message type is skipped (carries M-09)
@@ -106,13 +180,30 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Scenario:** `d22-unknown-control-message`.
 - **Draft:** lines 3877-3878: "An endpoint that receives an unknown message type MUST
   close the session."
-- **Observed:** after `7e 00 00` on the control stream moqxr keeps the session and serves
-  the liveness SUBSCRIBE (SUBSCRIBE_OK and Objects).
-- **Where:** the behavior depends on the session phase. Before serving, the control loop
-  closes on an unknown type (`moqt_session.cpp` lines 4684-4691, which is why the GOAWAY of
-  D22-04 closes); while serving, the control loop (around lines 10462-10533) handles only
-  REQUEST_UPDATE, SUBSCRIBE and SUBSCRIBE_NAMESPACE and erases any other message silently.
-  0x7e arrived while serving. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+- **Observed:** the runner writes its SETUP and then `7e 00 00` on its control stream (draft
+  22: the unidirectional stream that starts with SETUP), right after moqxr's SETUP and before the
+  runner's first request. moqxr never closes; 500 ms later it answers the liveness SUBSCRIBE
+  (`03 0010 07 01 05 media 06 vide_1 00`) with SUBSCRIBE_OK (`04 0002 01 00`), serves all four
+  Objects and PUBLISH_DONE (`0b 0003 02 02 00`). The same on `1883b9f`.
+- **Where (corrected by the dig):** the file publisher (`--input` with an MP4) serves through
+  `serve_subscriptions`, whose control loop (`moqt_session.cpp` lines 4636-4702) would close with
+  PROTOCOL_VIOLATION on any message it does not handle (lines 4689-4692, "received unknown or
+  unsupported control-stream message", which is why the GOAWAY of D22-04 closes). The loop never
+  sees 0x7e: it extracts messages with `next_control_message` (`moqt_control_messages.cpp` lines
+  664-757), which knows a fixed list of types and returns "incomplete" for any other type (line
+  755-756). `7e 00 00` therefore stays in the buffer as an unfinished message forever, and every
+  later control message queues behind it. This is D22-11. The earlier statement that a
+  "while serving" loop around lines 10462-10533 erases unknown messages was wrong: those lines are
+  in `publish_live_objects`, the DASH live path, which the file publisher does not run.
+- **Repro:** `d22-unknown-control-message` (row 295 also names
+  `d22-unknown-request-stream-message`; run both for the row). By hand: after SETUP, write
+  `7e 00 00` on the control stream, wait 500 ms, then send a valid SUBSCRIBE on a new
+  bidirectional stream: it is served.
+- **Severity:** MUST (3877-3878). The session survives, but its control stream is wedged: any
+  later control message (a GOAWAY, for instance) is never read.
+- **Fix direction:** fix D22-11 (frame every draft 22 message by its 16-bit length), after which
+  the existing close at lines 4689-4692 applies to unknown types.
+- **Confidence:** confirmed.
 - **Required:** close the session on an unknown control message type.
 
 ### D22-03 A padding stream closes the session
@@ -124,11 +215,24 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   "The receiver MUST discard all data received on a padding stream".
 - **Observed:** moqxr logs "received unknown or malformed unidirectional stream type" and
   closes with PROTOCOL_VIOLATION.
-- **Where (hypothesis):** `is_known_peer_unidirectional_stream_type` already accepts
-  0x132b3e28 (`moqt_session.cpp` line 1571), so the close probably comes from the stream
-  prefix read (lines 4190-4207): it reads with a 0 ms timeout and decodes the type with
-  `decode_moqint`, so a partial read of the 5-byte type (or a decode of it) fails before the
-  type is checked. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+- **Evidence:** the padding stream starts `f0 13 2b 3e 28` (the 5-byte vi64 for 0x132B3E28,
+  draft lines 3253-3280: 28 bits fit in 4 bytes, this type needs 29) and ends with FIN; moqxr
+  closes 0x3 at once. The same on `1883b9f`.
+- **Where (cause found by the dig; the earlier partial-read hypothesis is withdrawn):**
+  `is_known_peer_unidirectional_stream_type` accepts 0x132b3e28 (`moqt_session.cpp` line
+  1571), but the type never gets there. The prefix is decoded with `decode_moqint`
+  (lines 4204-4207), which at drafts 18 and later calls the session's own `decode_vi64` (lines
+  574-605); that decoder knows only the 1- to 4-byte forms and returns false for a first byte of
+  0xf0 or more (lines 593-594). The decoder in `moqt_control_messages.cpp`
+  (`decode_vi64_impl`, lines 326-370) handles all nine forms. Any session-level read of a value
+  of 2^28 or more (stream types, Request IDs, parameter types) fails the same way.
+- **Repro:** `d22-inbound-padding-stream`. By hand: open a unidirectional stream to moqxr
+  and write `f0 13 2b 3e 28` followed by any bytes.
+- **Severity:** MUST (6646-6647). A peer that pads loses the session; the row itself stays
+  unscored because its evaluator judges only the liveness follow-up.
+- **Fix direction:** make `decode_vi64` in `moqt_session.cpp` decode the 5- to 9-byte forms
+  (or call the full decoder), then drain and discard padding streams.
+- **Confidence:** confirmed.
 - **Required:** accept and discard padding streams.
 
 ### D22-04 A control-stream GOAWAY with a New Session URI closes the session (carries M-19)
@@ -137,12 +241,26 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Scenario:** `d22-publisher-goaway-alternate-uri`.
 - **Draft:** lines 4127-4130: "The client MUST use this URI for the new session if
   provided."
-- **Observed:** after SUBSCRIBE_OK, GOAWAY with a URI on the control stream draws "received
-  unknown or unsupported control-stream message" and close 0x3.
+- **Observed:** after SUBSCRIBE_OK, the GOAWAY
+  `10 0021 1f moqt://127.0.0.1:<port>/moq-next 00` on the control stream draws "received
+  unknown or unsupported control-stream message" and close 0x3; moqxr exits. The same on
+  `1883b9f`.
+- **Where:** the `serve_subscriptions` control loop handles only REQUEST_UPDATE (and, before
+  draft 18, SUBSCRIBE and SUBSCRIBE_NAMESPACE) and closes on every other complete message at
+  drafts 18 and later (`moqt_session.cpp` lines 4684-4692). GOAWAY is framed by
+  `next_control_message`, so it reaches that close. A GOAWAY on a request stream is handled
+  (`send_request_stream_and_wait`, lines 1403-1414, resets the request and reports a retryable
+  failure), but not one on the control stream.
+- **Repro:** `d22-publisher-goaway-alternate-uri`.
+- **Severity:** MUST (4129-4130) for the migration; closing with PROTOCOL_VIOLATION on a valid
+  GOAWAY is also wrong in itself. Low interop impact while relays rarely migrate publishers.
+- **Fix direction:** decode GOAWAY in the control loop, stop new requests, and reconnect to the
+  New Session URI (or the current one if empty) after the current work drains.
+- **Confidence:** confirmed.
 - **Required:** decode GOAWAY on the control stream and reconnect to the given URI. Lowest
   priority, as M-19.
 
-### D22-05 A valid REQUEST_UPDATE on an accepted SUBSCRIBE is followed by close 0x3 (medium confidence)
+### D22-05 A valid REQUEST_UPDATE on an accepted SUBSCRIBE is followed by close 0x3 (refined: the TRACK_STATUS causes the close)
 
 - **Rows:** D22-9-5-MUST-356, D22-9-5-1-MUST-363 (not_run).
 - **Scenarios:** `d22-single-request-update-response`,
@@ -150,18 +268,43 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Draft:** lines 4304-4308: "The receiver of a REQUEST_UPDATE MUST respond with exactly
   one REQUEST_UPDATE_OK or REQUEST_UPDATE_ERROR"; coalescing at 4406-4408.
 - **Observed:** after SUBSCRIBE_OK the runner sends REQUEST_UPDATE (`02 0004 03 01 20 64`,
-  SUBSCRIBER_PRIORITY 100; three for the coalesced probe) and then a TRACK_STATUS with FIN
-  on a new request stream. moqxr sends no REQUEST_OK and closes 0x3 "request stream closed
-  before a complete message". Which request triggers the close is not settled. Separately,
-  `d21-cancel-subscription-with-concurrent-fill-streams` (and once its draft 22 twin)
-  drew REQUEST_OK and then close 0x3 "retained SUBSCRIBE stream closed with a truncated
-  REQUEST_UPDATE" when the update was sent with FIN; this is intermittent.
-- **Where:** `read_request_stream_message` (the "request stream closed before a complete
-  message" return) and the retained-SUBSCRIBE update reader in `moqt_session.cpp`.
+  SUBSCRIBER_PRIORITY 100; three for the coalesced probe) on the SUBSCRIBE stream and then a
+  TRACK_STATUS with FIN on a new request stream
+  (`0d 0010 05 01 05 media 06 vide_1 00`, FIN; Request ID 9 in the coalesced probes). moqxr sends
+  no REQUEST_OK and closes 0x3 "request stream closed before a complete message" in all three
+  scenarios. The same on `1883b9f`.
+- **Where (the dig settles which request closes the session):** the TRACK_STATUS. The serve
+  loop accepts the new request stream and reads it with `read_request_stream_message`
+  (`moqt_session.cpp` lines 4232-4244, 3520-3558), which waits for `next_control_message` to
+  report a complete message. `next_control_message` does not list TRACK_STATUS (0x0D)
+  (`moqt_control_messages.cpp` lines 671-756, D22-11), so the complete TRACK_STATUS looks
+  incomplete, and the FIN produces the "request stream closed before a complete message"
+  PROTOCOL_VIOLATION (line 3555). The NOT_SUPPORTED answer that moqxr has for TRACK_STATUS
+  (`moqt_session.cpp` lines 4443-4459) is unreachable for that reason. In each pass of the
+  serve loop the new-stream accept (lines 4213-4244) runs before the retained-stream update
+  reader (lines 4553-4629), so when the update and the TRACK_STATUS arrive together the session
+  closes before the update is read; the REQUEST_UPDATE is not shown to be at fault. moqxr does answer a REQUEST_UPDATE on a
+  SUBSCRIBE when nothing else intervenes (REQUEST_OK `07 0004 01 09 00 01` in D22-10's
+  probes).
+- **Separately (likely):** `d21-cancel-subscription-with-concurrent-fill-streams` (and once its
+  draft 22 twin) drew REQUEST_OK and then close 0x3 "retained SUBSCRIBE stream closed with a
+  truncated REQUEST_UPDATE" when the update was sent with FIN; this is intermittent. The reader
+  at lines 4602-4627 closes when a read reports FIN and the pending bytes are not a complete
+  message, but it does not check whether the pending bytes are empty. When the FIN arrives in
+  its own read, after the update has been consumed, the empty buffer counts as a truncated
+  update. The other retained-stream reader has the check (lines 3621-3624); whether the FIN
+  arrives with the data or alone depends on packetization, which fits the intermittency.
+- **Repro:** `d22-single-request-update-response` (the row names all three scenarios). By
+  hand: on a new bidirectional stream send `0d 0010 05 01 05 media 06 vide_1 00` with FIN.
+- **Severity:** MUST for the rows; the practical effect is larger: any TRACK_STATUS sent with
+  FIN ends the session, and one sent without FIN stalls moqxr (D22-11).
+- **Fix direction:** fix D22-11 so that TRACK_STATUS reaches its NOT_SUPPORTED branch; in the
+  retained-SUBSCRIBE reader treat FIN with an empty buffer as a clean end, as lines 3621-3624 do.
+- **Confidence:** confirmed for the TRACK_STATUS close; likely for the truncated-update close.
 - **Required:** answer each REQUEST_UPDATE; a complete message followed by FIN is not
   truncated. Confirm with moqxr's own tests before changing anything.
 
-### D22-06 Silence where an answer or a close is required (suspected; a question, not a confirmed defect)
+### D22-06 Silence where an answer or a close is required (refined: three legs confirmed by source, unscored)
 
 - **Rows:** D22-4-2-MUST-110, D22-9-20-18-MUST-445, D22-9-5-MUST-355 (not_run).
 - **Scenarios:** `d22-discover-original-publisher-namespaces`,
@@ -175,19 +318,39 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   NAMESPACE for `media`; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS gets no
   answer and no close; a REQUEST_UPDATE on its own PUBLISH_NAMESPACE (sent after the
   runner's REQUEST_OK) gets no answer and no close.
-- **Not evidence:** the TRACK_STATUS leg (`d22-update-on-track-status`) is confounded by the
-  runner's fixed request for track "x" (see the runner-side follow-ups): moqxr did not answer
-  even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED as soon as it reads the
-  request stream (`moqt_session.cpp` around lines 10379-10395), so it probably never read that
-  stream. After the F1 runner fixes the probe asks for the run's track, and moqxr (in its
-  await-subscribe mode) still answered nothing, neither to the TRACK_STATUS nor to the
-  REQUEST_UPDATE: the names are no longer the confound, but this leg is still silence, which
-  fits the reading that moqxr does not read that request stream while it awaits a SUBSCRIBE.
-  In `d22-subscriber-update-on-publish` (a permitted case, lines 4298-4299) moqxr
-  reset its PUBLISH streams before the update arrived and sent no REQUEST_UPDATE_OK, so
-  nothing was observed there. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
-- **Question:** is the silence real for the remaining legs? Silence is not proof, so the
-  runner leaves these rows unscored; check each against moqxr's code before changing it.
+- **Where (the dig reads the code for each leg; all the same on `1883b9f`):**
+  - NAMESPACE (`D22-4-2-MUST-110`): after an accepted SUBSCRIBE_NAMESPACE moqxr writes
+    REQUEST_OK and keeps only the prefix for the overlap check (`moqt_session.cpp` lines
+    4431-4440); `moqt_control_messages.cpp` has no encoder for NAMESPACE (0x08) at all, so no
+    NAMESPACE is ever sent. Confirmed.
+  - FORWARD 255 on SUBSCRIBE_TRACKS (`D22-9-20-18-MUST-445`): after REQUEST_OK on SUBSCRIBE_TRACKS
+    (lines 4509-4549) the request stream is never read again, so the update is never seen.
+    Confirmed. (The SUBSCRIBE legs `d22-forward-value-two` and `-255` close 0x3 correctly.)
+  - REQUEST_UPDATE on moqxr's own PUBLISH_NAMESPACE (`D22-9-5-MUST-355`): once
+    `send_request_stream_and_wait` has the REQUEST_OK (lines 1339-1448), the namespace stream is
+    not read again while serving (`serve_subscriptions` uses `namespace_stream_id` only to send
+    PUBLISH_NAMESPACE_DONE, lines 5618 and 5643). Confirmed.
+  - TRACK_STATUS followed by REQUEST_UPDATE on the same stream (`d22-update-on-track-status`,
+    `0d 0010 01 01 05 media 06 vide_1 00 02 0002 03 00`, no FIN): moqxr answers nothing for the
+    whole 12 s context. Cause: TRACK_STATUS is not framed (D22-11), so
+    `read_request_stream_message` waits for the rest of a message that is already complete, for
+    up to moqxr's `--timeout` (lines 4234-4241), and the whole serve loop waits with it. The
+    earlier explanations (the fixed track "x", or moqxr not reading the stream while it awaits a
+    SUBSCRIBE) are withdrawn. Confirmed; tracked as D22-11.
+  - `d22-subscriber-update-on-publish` (a permitted case, lines 4298-4299): moqxr reset its
+    PUBLISH streams before the update arrived and sent no REQUEST_UPDATE_OK, so nothing was
+    observed there.
+- **Repro:** `d22-discover-original-publisher-namespaces`; `d22-discovery-update-invalid-forward`
+  with `d22-forward-value-two` and `d22-forward-value-255`; `d22-update-on-track-status`,
+  `d22-responder-update-on-publish-namespace` and `d22-subscriber-update-on-publish`.
+- **Severity:** MUST for each row. Silence is not proof, so the runner keeps these rows
+  unscored; the code shows the silence is real. A relay that uses SUBSCRIBE_NAMESPACE to find
+  moqxr's namespace learns nothing from it.
+- **Fix direction:** keep accepted SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS request streams and
+  the PUBLISH_NAMESPACE stream in the set the serve loop reads (as it does for retained SUBSCRIBE
+  streams), validate REQUEST_UPDATE and GOAWAY there, close on a responder REQUEST_UPDATE, and send
+  NAMESPACE for the publisher's own namespace when a SUBSCRIBE_NAMESPACE prefix matches it.
+- **Confidence:** confirmed by source for the three legs; the rows stay unscored by the runner.
 
 ### D22-07 WebTransport does not reject an unknown datagram type (carries M-18)
 
@@ -198,11 +361,21 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
 - **Observed:** over native QUIC moqxr closes 0x3 "invalid MOQT datagram". The WebTransport
   run is confounded: the adapter runs this probe `--forward 1`, and moqxr sent its PUBLISH,
   reset it and closed with code 0 ("timed out waiting for stream data") before anything
-  about the datagram showed.
+  about the datagram showed. The dig ran the probe with `--forward 0 --paced` from a scratch
+  copy of the adapter against `1883b9f`: moqxr waits for requests, the datagram
+  `f0 13 2b 3e 2a` (type 0x132B3E2A) is delivered, and moqxr neither closes nor reacts for the
+  12 s context. The row stays `not_run` (silence after a datagram is never scored, since a
+  datagram can be lost), but the run is no longer confounded and agrees with the source.
 - **Where (the evidence for this item):** `webtransport_client.cpp` lines 666-669 return 0
   for `picohttp_callback_post_datagram` (incoming datagrams are dropped), while
   `picoquic_client.cpp` lines 581-589 validate each datagram and close with 0x3.
-  moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+- **Repro:** `d22-unknown-datagram-type` over WebTransport; with the bundled adapter the run is
+  confounded as above, so run moqxr with `--forward 0 --paced` (see the adapter-mode table).
+- **Severity:** MUST (5955-5956), WebTransport only. moqxr also never validates object
+  datagrams there (M-18).
+- **Fix direction:** in the WebTransport datagram callback run the same
+  `validate_publisher_datagram` check as the native client and close the session on failure.
+- **Confidence:** confirmed by source; the paced run is consistent with it.
 - **Required:** validate datagrams on the WebTransport path as on native QUIC.
 
 ### D22-08 A second GOAWAY on an accepted SUBSCRIBE_NAMESPACE stream is not detected
@@ -216,7 +389,19 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   (`10 0003 00 a7 10`) on that request stream draw no close, and the liveness SUBSCRIBE is
   served. moqxr stops reading the request stream after accepting SUBSCRIBE_NAMESPACE, so
   it never sees them. The distinct-streams control (one GOAWAY on each of two streams)
-  correctly drew no close.
+  correctly drew no close. The same on `1883b9f`.
+- **Where:** after an accepted SUBSCRIBE_NAMESPACE the serve loop writes REQUEST_OK and
+  `continue`s (`moqt_session.cpp` lines 4431-4440); the request stream is not kept in any set
+  the loop reads, unlike a SUBSCRIBE's stream (kept in `ActiveSubscription::request_stream_id`
+  and read at lines 4553-4629).
+- **Repro:** `d22-duplicate-request-goaway` with `d22-goaway-on-distinct-request-streams`. By
+  hand: send SUBSCRIBE_NAMESPACE `50 ...` for prefix `media`, wait for `07 0001 00`, then write
+  `10 0003 00 a7 10` twice on that stream.
+- **Severity:** MUST (4113-4115). Low direct interop impact; the same unread stream also
+  hides REQUEST_UPDATE (D22-06) and any later message on it.
+- **Fix direction:** retain accepted SUBSCRIBE_NAMESPACE streams and read them in the serve loop;
+  count GOAWAYs per stream and close with PROTOCOL_VIOLATION on the second.
+- **Confidence:** confirmed.
 - **Required:** keep reading accepted SUBSCRIBE_NAMESPACE request streams (also needed
   for REQUEST_UPDATE on them, D22-06) and close on a second GOAWAY.
 
@@ -228,7 +413,19 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   an established SUBSCRIBE_TRACKS MUST get SUBSCRIBE_TRACKS_ERROR with PREFIX_OVERLAP.
 - **Observed:** a second SUBSCRIBE_TRACKS for `media`, and one for the empty prefix, are
   accepted with REQUEST_OK. The same check for SUBSCRIBE_NAMESPACE works
-  (D22-4-2-MUST-111 passes).
+  (D22-4-2-MUST-111 passes). The same on `1883b9f`.
+- **Where:** the SUBSCRIBE_NAMESPACE branch checks `established_namespace_prefixes` with
+  `namespace_prefixes_overlap` and answers PREFIX_OVERLAP (`moqt_session.cpp` lines
+  4403-4419); the SUBSCRIBE_TRACKS branch (lines 4462-4515) checks only that the prefix matches
+  the publisher's namespace and goes straight to REQUEST_OK. No SUBSCRIBE_TRACKS prefixes are
+  recorded.
+- **Repro:** `d22-subscribe-tracks-overlap` with `d22-discovery-independent-overlap-spaces`.
+  By hand: two SUBSCRIBE_TRACKS (`51 ...`) for prefix `media` on two request streams.
+- **Severity:** MUST (1716-1719). A relay that repeats SUBSCRIBE_TRACKS gets duplicate
+  PUBLISHes rather than an error it can act on.
+- **Fix direction:** keep a second prefix list for SUBSCRIBE_TRACKS and run the same
+  `namespace_prefixes_overlap` check against it, answering REQUEST_ERROR 0x30.
+- **Confidence:** confirmed.
 - **Required:** apply the overlap check to SUBSCRIBE_TRACKS, in its own overlap space.
 
 ### D22-10 A message that references an unregistered token alias is not rejected (SUBSCRIBE and REQUEST_UPDATE)
@@ -254,12 +451,77 @@ fixes shows the same missing check on SUBSCRIBE, where it is scored.
   SUBSCRIBE_TRACKS. The run also stores an `unresolved_error_mapping` event reading
   `result=NOT_RUN`; that text is about a REQUEST_ERROR answer (draft 22 assigns
   UNKNOWN_AUTH_TOKEN_ALIAS no REQUEST_ERROR code) and does not contradict the FAIL.
+  The same on `1883b9f`.
 - **Where:** `valid_authorization_token` (`moqt_control_messages.cpp` lines 478-505) checks
-  only the structure (USE_ALIAS is an Alias Type followed by one Alias), and the REQUEST_UPDATE
-  decoder (around lines 1995-2017) likewise; moqxr keeps no alias registry, so a well-formed
-  reference to any alias is accepted. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+  only the structure (USE_ALIAS and DELETE are an Alias Type followed by one Alias), and the
+  REQUEST_UPDATE decoder (around lines 1995-2017) likewise; the session only acts on a
+  malformed token or a REGISTER (`authorization_token_status`, called at `moqt_session.cpp`
+  lines 4265-4268 for SUBSCRIBE). moqxr keeps no alias registry, so a well-formed reference to
+  any alias is accepted.
+- **Repro:** `d22-request-unknown-token-alias` with `d22-request-deleted-token-alias`. By hand:
+  `03 0014 01 01 05 media 06 vide_1 01 03 02 02 00` on a new request stream.
+- **Severity:** MUST (3708-3709). moqxr never checks tokens, so the practical risk is a client
+  that believes an alias is registered and is not told otherwise.
+- **Fix direction:** while moqxr advertises no token cache, treat every USE_ALIAS and DELETE as
+  a reference to an unregistered alias and reject the message (the draft names
+  UNKNOWN_AUTH_TOKEN_ALIAS, 0x17, a session error code in the table at line 7913).
+- **Confidence:** confirmed.
 - **Required:** reject a reference to an unregistered alias. With no token cache
   (ground rule 3) every alias is unregistered, so every USE_ALIAS reference is rejected.
+
+### D22-11 Message framing knows a fixed list of types (new; root cause of D22-02, the D22-05 close and a D22-06 leg)
+
+- **Rows:** D22-9-MUST-295 (fail, through D22-02), D22-9-10-MUST-381 (not_run), and the
+  TRACK_STATUS effects in D22-05 (D22-9-5-MUST-356, D22-9-5-1-MUST-363) and D22-06
+  (D22-9-5-MUST-355).
+- **Scenarios:** `d22-unknown-control-message`, `d22-unknown-request-stream-message`,
+  `d22-subscriber-sends-publish-state-notify`, `d22-single-request-update-response`,
+  `d22-update-on-track-status`.
+- **Draft:** lines 3876-3880 (an unknown message type MUST close the session; every control
+  message carries its length "to simplify parsing", and none is meant to be ignored); 4711-4712
+  (PUBLISH_STATE_NOTIFY from the subscriber MUST close the session with PROTOCOL_VIOLATION);
+  the message table at 3826-3872 (TRACK_STATUS 0x0D, PUBLISH_STATE_NOTIFY 0x22, PUBLISH_SKIPPED
+  0x0F).
+- **Where:** `next_control_message` (`moqt_control_messages.cpp` lines 664-757) decides where a
+  control or request message ends by switching on its type. Only the types it lists are framed;
+  any other type returns false (lines 755-756), which every caller reads as "not complete yet".
+  At draft 22 every control and request message is a type, a 16-bit length and a body (lines
+  3876-3880), so the length is known for any type, listed or not. The list lacks TRACK_STATUS (0x0D), PUBLISH_STATE_NOTIFY
+  (0x22), PUBLISH_SKIPPED (0x0F) and every unknown type. The callers then wait for bytes that
+  never come: the control loop (`moqt_session.cpp` lines 4636-4702), `read_request_stream_message`
+  (lines 3520-3558, which closes "request stream closed before a complete message" at FIN and
+  otherwise blocks up to `--timeout`) and the retained-stream readers (lines 3561-3653,
+  4553-4629).
+- **Observed (draft 22, `1883b9f`; each is a separate effect of the same cause):**
+  - `7e 00 00` on the control stream: no close, the session goes on (D22-02, row 295 FAIL).
+  - `03 0010 01 01 05 media 06 vide_1 00 7e 00 00` on one request stream (a SUBSCRIBE with an
+    unknown message after it; moqxr run `--forward 0 --paced` in the adapter-mode experiment):
+    SUBSCRIBE_OK, every Object and PUBLISH_DONE, no close in 12 s. Unscored (the probe has no
+    liveness follow-up).
+  - `22 00 01 00` (PUBLISH_STATE_NOTIFY) from the subscriber on the SUBSCRIBE stream after
+    SUBSCRIBE_OK (`d22-subscriber-sends-publish-state-notify`): moqxr keeps serving and sends
+    PUBLISH_DONE, no close in 12 s. Row 381 stays `not_run`; its other scenario,
+    `d22-publish-established-subscriber-sends-publish-state-notify`, cannot reach its stimulus
+    against moqxr in either adapter mode (see the adapter-mode table above), so it was
+    `not_run` for that reason and not, as earlier noted, only because of the adapter mode.
+  - TRACK_STATUS with FIN: close 0x3 (D22-05); without FIN: silence for the whole context and a
+    stalled serve loop (D22-06).
+- **Repro:** the scenarios above. By hand, after SETUP: `7e 00 00` on the control stream (no
+  close); or `0d 0010 01 01 05 media 06 vide_1 00` on a new request stream without FIN (no answer
+  until moqxr's `--timeout`), then with FIN (close 0x3).
+- **Severity:** MUST (3877-3878, 4711-4712). The most consequential item of the draft 22 list:
+  one unknown or unlisted message wedges the stream it arrives on (the whole control stream, in
+  the D22-02 case), and a TRACK_STATUS, a request any subscriber may send, either ends the
+  session or stalls it.
+- **Fix direction:** at draft 22 (and at any other draft whose messages all share that framing;
+  check drafts 18 and 21 before changing them) frame every message by its 16-bit length whatever
+  its type, then dispatch on the type: close with PROTOCOL_VIOLATION on an unknown type (the
+  existing close at lines 4689-4692 then applies), answer TRACK_STATUS with NOT_SUPPORTED (the
+  existing branch at lines 4443-4459), and close on a PUBLISH_STATE_NOTIFY from the subscriber.
+  This does not require implementing PUBLISH_STATE_NOTIFY or PUBLISH_SKIPPED (ground rule 3).
+- **Confidence:** confirmed (wire evidence for each effect, and the code path).
+- **Required:** close the session on an unknown message type on any stream, and frame the
+  draft 22 messages moqxr does not implement so it can refuse or close on them.
 
 ### D22-C1 A refused PUBLISH ends the session, GREASE code included (expectation question)
 
@@ -831,20 +1093,23 @@ These come out of the same results but belong to the runner repository:
   frozen. At draft 22 the F1 work made the last 29 such probes send the run's names (three
   had done so since the first draft 22 sweep), `d22-unknown-request-stream-message` and
   `d22-update-on-track-status` included. Against moqxr this changed only D22-8-9-MUST-281
-  (D22-10). `d22-unknown-request-stream-message` still runs moqxr `--forward 1`, so the
-  request-stream half of D22-9-MUST-295 is still never exercised against moqxr (moqxr sends
-  its own PUBLISH and ends the session); in `d22-update-on-track-status` moqxr now answers
-  nothing to a TRACK_STATUS for the run's track, which leaves that leg of D22-06 silence, not
-  proof. `d22-unknown-datagram-type` also still runs `--forward 1`, which confounds its
-  WebTransport run (D22-07).
-- **Two draft 22 ids that may need moqxr `--forward 1`.** The imquic adapter (F1) found that
-  `d22-publish-established-subscriber-sends-publish-state-notify` and
-  `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` wait for the publisher's own
-  PUBLISH; the moqxr adapter runs both `--forward 0`, which likely explains why their rows,
-  D22-9-10-MUST-381 and D22-3-6-3-MUST-NOT-086, are `not_run` against moqxr. Those rows may
-  therefore be hidden by the adapter mode rather than not applicable (UNVERIFIED: not re-run
-  with `--forward 1`). Not changed (the moqxr command lines are pinned); a follow-up for the
-  moqxr adapter.
+  (D22-10). `d22-unknown-request-stream-message` still runs moqxr `--forward 1`, so with the
+  bundled adapter the request-stream half of D22-9-MUST-295 is never exercised against moqxr
+  (moqxr sends its own PUBLISH and ends the session). In `d22-update-on-track-status` moqxr
+  answers nothing to a TRACK_STATUS for the run's track; the dig traced that to D22-11.
+  `d22-unknown-datagram-type` also still runs `--forward 1`, which confounds its WebTransport
+  run (D22-07).
+- **Adapter-mode questions for four draft 22 ids: resolved, adapter unchanged.** The dig of
+  2026-10-06 against moqxr `1883b9f` ran each with the opposite mode from a scratch copy of the
+  adapter (the table under "Status against moqxr 1883b9f"). Pacing
+  `d22-unknown-request-stream-message` and `d22-unknown-datagram-type` lets the stimulus reach
+  moqxr, which then ignores it, but silence is unscored and no verdict changes, so they keep
+  `--forward 1`. `--forward 1` does not help
+  `d22-publish-established-subscriber-sends-publish-state-notify` (moqxr publishes `catalog`
+  first and the run ends `error`) or `d22-subscribe-tracks-publish-skipped-then-capacity-recovers`
+  (no PUBLISH on the single granted stream; moqxr has no PUBLISH_SKIPPED). So
+  D22-3-6-3-MUST-NOT-086 is not applicable to moqxr, and D22-9-10-MUST-381 is unscored because
+  of moqxr's behavior (D22-11), not the adapter mode.
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
 
