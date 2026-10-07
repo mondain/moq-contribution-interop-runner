@@ -150,6 +150,11 @@ struct LiteProbeDefinition {
     // Set when the session URL the publisher was given carried a path (Task 9 sets it; the client-path evaluators
     // read it from the transcript).
     bool session_url_has_path{false};
+    // That URL's path-abempty component and its query component (without the '?'), as given to the publisher; the
+    // client-path evaluators (rows 120, 124, 125) rebuild the expected SETUP Path value from them. Empty when the run
+    // gave the publisher no such URL. Copied to the transcript.
+    std::string session_url_path;
+    std::string session_url_query;
     // The track fixture (plan decision (d)): RunConfig::track namespace fields joined with '/' are the publisher's
     // configured broadcast path, track_name its track. Empty when the scenario needs no fixture. Copied to the
     // transcript so evaluators can rebuild the stimulus and judge coverage.
@@ -182,6 +187,8 @@ struct LiteProbeDefinition {
 struct LiteTranscript {
     std::string scenario_id;
     bool session_url_has_path{false};
+    std::string session_url_path;               // copied from the definition
+    std::string session_url_query;              // copied from the definition
     LiteBinding binding{LiteBinding::Unknown};  // copied from the definition
     std::string broadcast_path;                 // copied from the definition (the track fixture)
     std::string track_name;                     // copied from the definition (the track fixture)
