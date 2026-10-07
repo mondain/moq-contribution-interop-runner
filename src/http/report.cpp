@@ -106,7 +106,7 @@ std::string render_run_list(std::span<const storage::RunSummary> runs,
               "</tr></thead><tbody>";
     for (const auto& draft : completeness.at("drafts")) {
         for (const auto& transport : draft.at("transports")) {
-            output << "<tr><td>" << draft.at("draft").get<unsigned>() << "</td><td>"
+            output << "<tr><td>" << escape_html(detail::draft_cell(draft.at("draft"))) << "</td><td>"
                    << escape_html(transport.at("transport").get<std::string>())
                    << "</td><td>" << draft.at("required_covered").get<std::size_t>()
                    << "/" << draft.at("required_total").get<std::size_t>()

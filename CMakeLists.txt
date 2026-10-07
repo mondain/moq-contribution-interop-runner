@@ -1090,6 +1090,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>"
                      "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
+    add_test(NAME audit-cli-moqlite
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-moqlite.sh"
+                     "$<TARGET_FILE:moq-interop-audit>")
+    set_tests_properties(audit-cli-moqlite PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
                      --check-only)
@@ -1111,6 +1115,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
 
     add_executable(moq-interop-result-export-tests
                    tests/integration/result_export_test.cpp)
+    target_include_directories(moq-interop-result-export-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-result-export-tests PRIVATE
         moq-interop-http nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME result-export COMMAND moq-interop-result-export-tests)

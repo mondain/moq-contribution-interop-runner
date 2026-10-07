@@ -27,6 +27,13 @@ inline std::string draft_display(app::DraftVersion draft) {
     return app::is_moqt(draft) ? std::to_string(app::draft_number(draft)) : std::string(app::draft_text(draft));
 }
 
+// A completeness-JSON draft (an integer, or the moq-lite name) as table cell text; anything else is empty.
+inline std::string draft_cell(const nlohmann::json& value) {
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_number_integer()) return std::to_string(value.get<long long>());
+    return {};
+}
+
 // Accepts the integers 18, 21 and 22 and the string "moq-lite-06"; everything else (floats, negatives,
 // other strings, other types, and the internal integer 106) is refused.
 inline std::optional<app::DraftVersion> parse_draft_json(const nlohmann::json& value) {

@@ -361,9 +361,17 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
     std::vector<const requirements::RequirementCatalog*> catalogs{&draft18, &draft21};
     if (draft22) catalogs.push_back(draft22);
     for (const auto* catalog : catalogs) {
-        const auto bindings = executable_bindings(*app::parse_draft(catalog->draft));
-        const auto audit = requirements::audit_completeness(
-            *catalog, bindings, app::executable_scenarios(catalog->draft));
+        const auto catalog_draft = app::parse_draft(catalog->draft);
+        // A catalog of a draft this server has no bindings for (moq-lite) reports no coverage; an
+        // incomplete one is audited as staged.
+        const bool moqt = catalog_draft && app::is_moqt(*catalog_draft);
+        const auto bindings = moqt ? executable_bindings(*catalog_draft)
+                                   : std::vector<requirements::ExecutableBinding>{};
+        const auto audit = catalog->complete || moqt
+            ? requirements::audit_completeness(
+                  *catalog, bindings, app::executable_scenarios(catalog->draft))
+            : requirements::audit_completeness_staged(
+                  *catalog, bindings, app::executable_scenarios(catalog->draft));
         Json findings = Json::array();
         for (const auto& finding : audit.findings) {
             findings.push_back({{"code", finding.code},
@@ -757,7 +765,8 @@ public:
                 if (config.draft22_catalog) listed.push_back(config.draft22_catalog.get());
                 for (const auto* catalog : listed) {
                     auto entry = detail::catalog_json(*catalog);
-                    entry["runnable"] = app::runnable(*app::parse_draft(catalog->draft));
+                    const auto catalog_draft = app::parse_draft(catalog->draft);
+                    entry["runnable"] = catalog_draft && app::runnable(*catalog_draft);
                     drafts.push_back(std::move(entry));
                 }
                 json_response(response, {{"schema_version", 1}, {"drafts", std::move(drafts)}});
@@ -810,7 +819,7 @@ public:
                         if (!app::executable_scenario(draft_number, id))
                             throw ApiError{422, "unsupported_run_config",
                                 "Scenario '" + id + "' is not an executable scenario for draft " +
-                                std::to_string(draft_number) + "."};
+                                detail::draft_display(requested.draft) + "."};
                     }
                     if (requested.scenario_ids.size() > 1) {
                         for (const auto& id : requested.scenario_ids) {
@@ -827,7 +836,7 @@ public:
                             "--driver-executable or use observed mode."};
                     if (runs && !runs->supports(requested.draft))
                         throw ApiError{422, "unsupported_run_config",
-                            "Draft " + std::to_string(draft_number) +
+                            "Draft " + detail::draft_display(requested.draft) +
                             " is not supported by this runner's publisher listener."};
                 }
                 {
