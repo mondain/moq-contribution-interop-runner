@@ -1076,6 +1076,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-http-api-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
+    target_include_directories(moq-interop-http-api-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)

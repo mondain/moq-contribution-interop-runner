@@ -1,3 +1,4 @@
+#include "json.h"
 #include "detail.h"
 #include "moq/interop/http/result_schema.h"
 
@@ -134,7 +135,7 @@ std::string render_run_list(std::span<const storage::RunSummary> runs,
                    << escape_html(run.id) << "</a></th><td>"
                    << (run.state == storage::RunState::Active ? "ACTIVE" : "FINALIZED")
                    << "</td><td class=\"status " << verdict << "\">" << verdict
-                   << "</td><td>" << static_cast<unsigned>(run.config.draft) << "</td><td>"
+                   << "</td><td>" << detail::draft_display(run.config.draft) << "</td><td>"
                    << escape_html(transport_name(run.config.transport)) << "</td><td>"
                    << escape_html(mode_name(run.config.mode)) << "</td><td>";
             for (std::size_t i = 0; i < run.config.scenario_ids.size(); ++i) {
@@ -166,7 +167,7 @@ std::string render_run_detail(const storage::RunRecord& run,
            << report_styles() << "</style></head><body><main>"
               "<nav><a href=\"/results\">All runs</a></nav><h1>Run "
            << escape_html(run.id) << "</h1><p>Draft "
-           << catalog.draft << "; transport "
+           << (app::parse_draft(catalog.draft) ? detail::draft_display(*app::parse_draft(catalog.draft)) : std::to_string(catalog.draft)) << "; transport "
            << escape_html(transport_name(run.config.transport)) << "; mode "
            << escape_html(mode_name(run.config.mode)) << "; state "
            << (run.state == storage::RunState::Active ? "ACTIVE" : "FINALIZED")

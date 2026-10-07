@@ -1,4 +1,5 @@
 #include "moq/interop/http/server.h"
+#include "json.h"
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/scenario_registry.h"
@@ -172,17 +173,16 @@ app::RunConfig parse_run_config(const httplib::Request& request,
         throw ApiError{400, "invalid_run_config", "Run configuration must be an object."};
     }
     try {
-        const int draft = body.at("draft").get<int>();
+        const auto parsed_draft = detail::parse_draft_json(body.at("draft"));
         const auto transport = body.at("transport").get<std::string>();
         const auto mode = body.at("mode").get<std::string>();
         const auto scenarios = body.at("scenarios").get<std::vector<std::string>>();
         const auto timeout = body.at("timeout_ms").get<std::int64_t>();
-        const std::optional<app::DraftVersion> parsed_draft =
-            draft < 0 ? std::nullopt : app::parse_draft(static_cast<unsigned>(draft));
-        // The integer form is MoQ Transport only; moq-lite (106) is never accepted as a number.
-        if (!parsed_draft || !app::is_moqt(*parsed_draft)) {
+        // The integer form is MoQ Transport only and moq-lite is its string; 106 is never accepted.
+        if (!parsed_draft) {
             throw ApiError{400, "invalid_run_config", "draft must be 18, 21 or 22."};
         }
+        const unsigned draft = app::draft_number(*parsed_draft);
         if (transport != "native-quic" && transport != "webtransport") {
             throw ApiError{400, "invalid_run_config",
                            "transport must be native-quic or webtransport."};
@@ -439,7 +439,7 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                                   {"not_run_count", not_run.size()},
                                   {"not_run", std::move(not_run)}});
         }
-        drafts.push_back({{"draft", catalog->draft},
+        drafts.push_back({{"draft", detail::catalog_draft_json(catalog->draft)},
                           {"source_sha256", catalog->source_sha256},
                           {"catalog_rows", catalog->requirements.size()},
                           {"required_covered", audit.required_covered},
@@ -788,7 +788,7 @@ public:
                 }
                 const auto next = begin + count < catalog->requirements.size()
                                       ? std::optional<std::size_t>(begin + count) : std::nullopt;
-                json_response(response, {{"schema_version", 1}, {"draft", catalog->draft},
+                json_response(response, {{"schema_version", 1}, {"draft", detail::catalog_draft_json(catalog->draft)},
                     {"pagination", detail::pagination_json(page.limit, page.offset,
                                                             catalog->requirements.size(), next)},
                     {"items", std::move(items)}});
@@ -800,7 +800,7 @@ public:
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities);
                 if (!accepts_runs(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
-                        "Draft " + std::to_string(app::draft_number(requested.draft)) +
+                        "Draft " + detail::draft_display(requested.draft) +
                         " is not runnable on this runner."};
                 {
                     // Say which part of the selection is unsupported, and why, so the caller
@@ -1041,7 +1041,7 @@ public:
                 break;
             case app::DraftVersion::MoqLite06: break;  // no moq-lite catalog is configured yet
         }
-        const auto number = std::to_string(app::draft_number(draft));
+        const auto number = detail::draft_display(draft);
         throw ApiError{409, "draft_catalog_not_configured",
                        "Draft " + number + " results need the draft " + number +
                        " catalog, which this runner does not have configured."};

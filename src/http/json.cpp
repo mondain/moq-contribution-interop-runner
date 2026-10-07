@@ -1,4 +1,5 @@
 #include "detail.h"
+#include "json.h"
 #include "moq/interop/app/unscored_probe_event_22.h"
 
 #include <nlohmann/json.hpp>
@@ -97,7 +98,7 @@ Json score_json(const requirements::ScoreSummary& score) {
 }
 
 Json config_json(const app::RunConfig& config) {
-    Json result = {{"draft", static_cast<unsigned>(config.draft)},
+    Json result = {{"draft", draft_json(config.draft)},
             {"transport", name(config.transport)},
             {"mode", name(config.mode)},
             {"scenarios", config.scenario_ids},
@@ -148,7 +149,7 @@ Json catalog_json(const requirements::RequirementCatalog& catalog) {
             ++publisher_relevant;
         }
     }
-    return {{"draft", catalog.draft},
+    return {{"draft", catalog_draft_json(catalog.draft)},
             {"source_sha256", catalog.source_sha256},
             {"complete", catalog.complete},
             {"requirement_count", catalog.requirements.size()},
