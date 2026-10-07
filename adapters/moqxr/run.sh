@@ -21,7 +21,7 @@ fi
 
 jq -e '
     .schema_version == 1 and
-    (.draft == 18or .draft == 21 or .draft == 22) and
+    (.draft == 18 or .draft == 21 or .draft == 22) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and

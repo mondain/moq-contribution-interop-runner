@@ -1108,6 +1108,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-contract.sh")
     add_test(NAME driver-contract-schema
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/driver-contract-schema.sh")
+    set_tests_properties(driver-contract-schema PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME moqxr-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-matrix-plan.sh")
     foreach(moqxr_cmdline_draft 18 21 22)

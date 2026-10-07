@@ -2,6 +2,7 @@
 # adapters/contract.schema.json: the draft is the integer 18, 21 or 22 or the string "moq-lite-06".
 set -euo pipefail
 
+python3 -c 'import jsonschema' 2>/dev/null || { echo "SKIP: python3 jsonschema module required"; exit 77; }
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 python3 - "$root_dir/adapters/contract.schema.json" <<'PY'
 import json, sys
