@@ -328,6 +328,26 @@ TEST(Draft22FixtureRequests, Wire22CloseProofRebuildsTheRunsTrack) {
         EXPECT_EQ(evaluate_draft21_close_probe(renamed_track, *profile), true)
             << "any track the run named is rebuilt from the delivered request";
     }
+    // The gated duplicate-registration probe judges only a publisher that announced a token cache of at
+    // least 32 (MAX_AUTH_TOKEN_CACHE_SIZE, option 4); without that SETUP both verdicts above are empty and
+    // drift of its id in the run-names list would go unseen.
+    {
+        const auto* id = "d21-token-duplicate-registration";
+        SCOPED_TRACE(id);
+        const auto* definition = find(built, id);
+        const auto* profile = find(judged, id);
+        ASSERT_NE(definition, nullptr);
+        ASSERT_NE(profile, nullptr);
+        const auto code = profile->expected_close.value_or(3);
+        const auto cached = [](RawProbeTranscript t) {
+            t.events[1] = transport::StreamDataEvent{2, from_hex("af0000020420"), false};
+            return t;
+        };
+        EXPECT_EQ(evaluate_draft21_close_probe(cached(closed(definition->definition, code)), *profile), true);
+        EXPECT_EQ(evaluate_draft21_close_probe(cached(closed(definition->definition, 0)), *profile).value_or(false),
+                  false);
+        EXPECT_EQ(evaluate_draft21_close_probe(cached(closed(profile->definition, code)), *profile), true);
+    }
 }
 
 TEST(Draft22FixtureRequests, Wire21CloseProofIsUnchanged) {
