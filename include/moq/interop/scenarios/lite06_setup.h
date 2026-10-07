@@ -31,20 +31,24 @@ inline constexpr std::string_view kL06UnknownParameterValue = "l1d";
 // The step labels of the stimuli the evaluators prove.
 inline constexpr std::string_view kL06AnnounceLabel = "announce-request";
 inline constexpr std::string_view kL06SecondSetupLabel = "second-setup-stream";
-// The last step of every probe here: a Wait that executes only once the probe's allowance has elapsed after the
-// stimulus (or, for l06-setup-stream, once the publisher's Setup stream ended, its gate, or never: gate_expired
-// then records that the allowance elapsed). A peer close before it leaves it unexecuted; the deadline passing
-// before it sets timed_out. Its record is how an evaluator knows "still open at the end of the allowance".
+// The last step of every probe here: an UNGATED Wait (delay = the allowance) that executes only once the probe's
+// allowance has elapsed after the stimulus. A peer close before it leaves it unexecuted; the deadline passing
+// before it sets timed_out. Its record is how an evaluator knows "still open at the end of the allowance", and its
+// current_at / executed_at times are the recorded allowance.
 inline constexpr std::string_view kL06AllowanceLabel = lite06::kAllowanceLabel;
 // The Path value the server-path probe sends (row 126: a plain value such as "/").
 inline constexpr std::string_view kL06ServerPathValue = "/";
 
-// Each builder throws std::invalid_argument when `deadline` does not exceed `allowance` (the probe must end by
-// its allowance, never by the deadline, so a silent publisher is judged rather than timed out). The allowance is
-// a step (kL06AllowanceLabel) followed by a zero observation window, so the probe ends as soon as it executes.
+// Deadline and allowance: each builder throws std::invalid_argument when `allowance` is not positive or `deadline`
+// does not exceed `allowance` (the probe must end by its allowance, never by the deadline, so a silent publisher is
+// judged rather than timed out). The allowance runs from the allowance step's current_at, i.e. after the runner's
+// Setup stream write (and any earlier stimulus step), while the deadline runs from establishment; so pass a
+// deadline of at least allowance + a margin (a second or more on live runs) or a slow first write turns the
+// verdict into NotRun (timed_out). The allowance step is followed by a zero observation window, so the probe ends
+// as soon as it executes.
 
-// The runner's ordinary Setup stream, then the allowance step gated on the publisher's Setup stream having ended
-// (FIN or reset), expiring `allowance` after the runner's Setup stream was written.
+// The runner's ordinary Setup stream, then the allowance; the publisher's Setup stream(s) are judged when the
+// allowance ends (or on a peer close), so a FIN in a later frame and a late second Setup stream are both seen.
 LiteProbeDefinition l06_setup_stream_probe(std::chrono::milliseconds deadline,
                                            std::chrono::milliseconds allowance = kLiteSetupAllowance);
 // The runner's SETUP carries Parameter 0x7f = "l1d"; then ANNOUNCE_REQUEST with the empty prefix; ends

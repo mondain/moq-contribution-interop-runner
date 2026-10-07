@@ -138,9 +138,15 @@ struct LiteProbeContext {
 // Default bytes of the runner's Setup stream: STREAM_TYPE 0x1 then a SETUP with an empty parameter list.
 std::vector<std::byte> lite_default_runner_setup();
 
+// The binding the publisher's session runs on (draft 4.2): raw QUIC (binding 1) or WebTransport (binding 2).
+// Unknown when the caller did not say (unit tests); evaluators judge Unknown like either binding unless a row is
+// restricted to one binding. Task 9 sets it from the transport.
+enum class LiteBinding { Unknown, NativeQuic, WebTransport };
+
 struct LiteProbeDefinition {
     std::string id;
     bool requires_track{false};
+    LiteBinding binding{LiteBinding::Unknown};
     // Set when the session URL the publisher was given carried a path (Task 9 sets it; the client-path evaluators
     // read it from the transcript).
     bool session_url_has_path{false};
@@ -171,6 +177,7 @@ struct LiteProbeDefinition {
 struct LiteTranscript {
     std::string scenario_id;
     bool session_url_has_path{false};
+    LiteBinding binding{LiteBinding::Unknown};  // copied from the definition
     // Value copies of the recorder's state; evaluators use the session::peer_* accessors on these records.
     std::vector<session::LiteStreamRecord> streams;
     std::optional<session::PeerCloseInfo> peer_close;

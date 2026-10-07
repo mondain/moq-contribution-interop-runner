@@ -620,15 +620,31 @@ TEST(LiteProbe, AHarnessIssueOnAPeerStreamIsNotJudgeable) {
 
 // --- a full exchange and determinism ---
 
+TEST(LiteProbe, BindingDefaultsToUnknownAndIsCopiedToTheTranscript) {
+    for (const auto binding :
+         {scen::LiteBinding::Unknown, scen::LiteBinding::NativeQuic, scen::LiteBinding::WebTransport}) {
+        ConformingLitePublisher publisher;
+        ScriptedLitePeer peer(publisher.reaction());
+        ManualLiteClock clock;
+        auto definition = announce_then_subscribe();
+        EXPECT_EQ(definition.binding, scen::LiteBinding::Unknown);
+        definition.binding = binding;
+        EXPECT_EQ(run_lite_probe(peer, definition, clock).binding, binding);
+    }
+    EXPECT_EQ(LiteTranscript{}.binding, scen::LiteBinding::Unknown);
+}
+
 TEST(LiteProbe, FullExchangeTranscriptContents) {
     ConformingLitePublisher publisher;
     ScriptedLitePeer peer(publisher.reaction());
     ManualLiteClock clock;
     auto definition = announce_then_subscribe();
     definition.session_url_has_path = true;
+    definition.binding = scen::LiteBinding::WebTransport;
     const auto t = run_lite_probe(peer, definition, clock);
     EXPECT_EQ(t.scenario_id, "test-exchange");
     EXPECT_TRUE(t.session_url_has_path);
+    EXPECT_EQ(t.binding, scen::LiteBinding::WebTransport);
     EXPECT_TRUE(judgeable(t));
     ASSERT_FALSE(t.events.empty());
     EXPECT_TRUE(std::holds_alternative<transport::ConnectionEstablishedEvent>(t.events.front()));

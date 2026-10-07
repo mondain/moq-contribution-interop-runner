@@ -36,19 +36,9 @@ LiteProbeDefinition base(std::string_view id, std::chrono::milliseconds deadline
     LiteProbeDefinition definition;
     definition.id = std::string(id);
     definition.deadline = deadline;
-    // The probe ends as soon as its allowance step executed (or expired, for l06-setup-stream).
+    // The probe ends as soon as its allowance step executed.
     definition.observation_window = std::chrono::milliseconds{0};
     return definition;
-}
-
-// Whether the publisher's Setup stream has ended (FIN or reset), read from the recorder's peer streams.
-bool peer_setup_ended(const session::LiteSession& session) {
-    for (const auto* record : session::peer_streams(session)) {
-        if (record->bidirectional || record->stream_type != std::optional<std::uint64_t>{0x1}) continue;
-        if (record->fin_seen || record->reset_seen) return true;
-        if (!session::peer_issues(*record).empty()) return true;  // decoding stopped: nothing more to wait for
-    }
-    return false;
 }
 
 }  // namespace
@@ -72,10 +62,9 @@ std::vector<std::byte> l06_server_role_runner_setup() {
 
 LiteProbeDefinition l06_setup_stream_probe(std::chrono::milliseconds deadline, std::chrono::milliseconds allowance) {
     auto definition = base(kL06SetupStream, deadline, allowance);
-    auto step = lite_wait(std::chrono::milliseconds{0}, std::string(kL06AllowanceLabel));
-    step.gate = peer_setup_ended;
-    step.gate_deadline = allowance;
-    definition.steps.push_back(std::move(step));
+    // Ungated: the whole allowance is observed, so a FIN in a later frame or a second Setup stream arriving after
+    // the first one finished is still seen.
+    definition.steps.push_back(allowance_step(allowance));
     return definition;
 }
 
@@ -131,8 +120,8 @@ const LiteStepRecord* step_labelled(const LiteTranscript& transcript, std::strin
 }
 
 // The common gate of rows 014 and 111: the l06-setup-stream transcript, judgeable, and the runner's ordinary Setup
-// stream delivered. The allowance step is an observation timer, not a stimulus, so judgeable_with_stimulus() (which
-// counts it) is not used: it ends unexecuted, by design, when the publisher's Setup stream never ends.
+// stream delivered. judgeable() rather than judgeable_with_stimulus(): a peer close before the allowance step ran
+// (peer_closed_early) still ends the observation, and nothing more can arrive after it.
 bool setup_stream_gate(const LiteTranscript& transcript) {
     return transcript.scenario_id == kL06SetupStream && judgeable(transcript) &&
            proved_stimulus(transcript, lite06::kRunnerSetupLabel, lite_default_runner_setup()) != nullptr;
@@ -142,17 +131,16 @@ bool setup_stream_gate(const LiteTranscript& transcript) {
 
 std::optional<bool> evaluate_l06_setup_stream_single_setup(const LiteTranscript& transcript) {
     if (!setup_stream_gate(transcript)) return std::nullopt;
-    // The observation is over: the publisher's Setup stream ended (the gate opened), the allowance elapsed (the gate
-    // expired), or the peer closed the session (nothing more can arrive).
+    // Judged only once the observation is over: the whole allowance elapsed (the ungated allowance step executed)
+    // or the peer closed the session. So a FIN in a later frame and a later second Setup stream are both seen.
     const auto* allowance = step_labelled(transcript, kL06AllowanceLabel);
-    const bool over = transcript.peer_close.has_value() ||
-                      (allowance && (allowance->executed() || allowance->gate_expired));
+    const bool over = transcript.peer_close.has_value() || (allowance && allowance->executed());
+    if (!over) return std::nullopt;
     const auto setup = lite06::peer_setup_message(transcript);
-    if (!setup) return over ? std::optional<bool>{false} : std::nullopt;
+    if (!setup) return false;
     if (setup->setup_streams > 1 || setup->reset || setup->malformed || setup->trailing) return false;
     // A SETUP whose only defect is a repeated Parameter ID is decoded here (row 111 judges the repetition).
-    if (!setup->message || !setup->fin) return over ? std::optional<bool>{false} : std::nullopt;
-    return true;
+    return setup->message.has_value() && setup->fin;
 }
 
 std::optional<bool> evaluate_l06_setup_parameters_unique(const LiteTranscript& transcript) {
@@ -214,6 +202,9 @@ std::optional<bool> evaluate_l06_setup_duplicate_stream_close(const LiteTranscri
 }
 
 std::optional<bool> evaluate_l06_setup_server_path_close(const LiteTranscript& transcript) {
+    // Row 126 tests the "only the client sends Path" half on binding 1 only; on WebTransport a Path is also a
+    // URI-binding violation, so the reaction cannot be attributed to this half. Unknown is judged.
+    if (transcript.binding == LiteBinding::WebTransport) return std::nullopt;
     return lite06::judge_close_probe(
         transcript, kL06SetupServerPath,
         proved_stimulus(transcript, lite06::kRunnerSetupLabel, l06_server_path_runner_setup()));

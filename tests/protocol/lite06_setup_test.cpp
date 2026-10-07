@@ -75,7 +75,9 @@ ConformingLitePublisherConfig with_defect(LiteDefect defect) {
 bool is_runner_setup(const LiteRunnerRequest& request) { return !request.bidirectional && request.stream_type == 0x1; }
 
 // Two distinct, well-formed parameters (Cost 1, Hop 7), so row 111 has something to judge.
-std::vector<l06::SetupParameter> two_parameters() { return {{l06::kParamCost, value({1})}, {l06::kParamHop, value({7})}}; }
+std::vector<l06::SetupParameter> two_parameters() {
+    return {{l06::kParamCost, value({1})}, {l06::kParamHop, value({7})}};
+}
 
 ConformingLitePublisherConfig two_parameter_publisher() {
     ConformingLitePublisherConfig config;
@@ -130,7 +132,8 @@ TEST(Lite06Common, PeerSetupIsReadLenientlyFromThePeerOnly) {
     ASSERT_TRUE(t.runner_setup.delivered());
     EXPECT_FALSE(lite06::peer_setup_message(t).has_value());
 
-    t = run(scen::l06_setup_stream_probe(kDeadline), own_setup(lite06::raw_setup_stream({{0x4, value({1})}, {0x4, value({2})}})));
+    t = run(scen::l06_setup_stream_probe(kDeadline),
+            own_setup(lite06::raw_setup_stream({{0x4, value({1})}, {0x4, value({2})}})));
     const auto setup = lite06::peer_setup_message(t);
     ASSERT_TRUE(setup.has_value());
     EXPECT_EQ(setup->setup_streams, 1u);
@@ -199,14 +202,22 @@ TEST(Lite06Common, ProbeStimuli) {
     // Every probe ends on its allowance step: a Wait whose execution proves the allowance elapsed.
     for (const auto& probe : {scen::l06_setup_stream_probe(kDeadline), unknown, stream,
                               scen::l06_setup_duplicate_parameter_probe(kDeadline),
-                              scen::l06_setup_server_path_probe(kDeadline), scen::l06_setup_server_role_probe(kDeadline)}) {
+                              scen::l06_setup_server_path_probe(kDeadline),
+                              scen::l06_setup_server_role_probe(kDeadline)}) {
         ASSERT_FALSE(probe.steps.empty()) << probe.id;
         EXPECT_EQ(probe.steps.back().kind, scen::LiteStep::Kind::Wait) << probe.id;
         EXPECT_EQ(probe.steps.back().label, scen::kL06AllowanceLabel) << probe.id;
+        EXPECT_FALSE(probe.steps.back().gate) << probe.id;  // ungated: the whole allowance is observed
+        EXPECT_EQ(probe.steps.back().delay, probe.id == scen::kL06SetupStream ? scen::kLiteSetupAllowance
+                                            : probe.id == scen::kL06SetupUnknownParameter
+                                                ? scen::kLiteResponseAllowance
+                                                : scen::kLiteCloseAllowance)
+            << probe.id;
     }
     for (const auto& probe : {scen::l06_setup_stream_probe(kDeadline), unknown, stream,
                               scen::l06_setup_duplicate_parameter_probe(kDeadline),
-                              scen::l06_setup_server_path_probe(kDeadline), scen::l06_setup_server_role_probe(kDeadline)})
+                              scen::l06_setup_server_path_probe(kDeadline),
+                              scen::l06_setup_server_role_probe(kDeadline)})
         EXPECT_FALSE(probe.requires_track) << probe.id;
 }
 
@@ -227,8 +238,113 @@ TEST(Lite06SetupStream, ConformingPublisherPassesBoth) {
     const auto v = stream_verdicts(t);
     EXPECT_EQ(v.single, true);
     EXPECT_EQ(v.unique, true);
-    // The probe ended on the publisher's FIN, well before the allowance.
-    EXPECT_LT(t.ended_ns - t.established_ns, 1000000000u);
+    // The whole allowance is observed (a later second Setup stream would still be seen), never cut by the deadline.
+    EXPECT_GE(t.ended_ns - t.established_ns, 2000000000u);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_TRUE(t.stimulus_delivered);
+}
+
+// --- review regressions (C1, I1): the publisher's FIN in a later frame, a late second Setup stream -------------
+
+// The publisher's Setup bytes in one event, its FIN alone `fin_after` polls later (a separate STREAM frame).
+ConformingLitePublisherConfig split_fin(Bytes bytes, int fin_after = 5) {
+    auto id = std::make_shared<std::optional<transport::StreamId>>();
+    auto polls = std::make_shared<int>(0);
+    LitePublisherHooks hooks;
+    hooks.on_start = [bytes = std::move(bytes), id](ConformingLitePublisher&, ScriptedLitePeer& peer) {
+        *id = peer.open_peer_uni();
+        peer.data(**id, bytes, false);
+        return true;
+    };
+    hooks.on_poll = [id, polls, fin_after](ConformingLitePublisher&, ScriptedLitePeer& peer) {
+        if (*id && ++*polls == fin_after) peer.fin(**id);
+    };
+    return with_hooks(std::move(hooks));
+}
+
+TEST(Lite06SetupStream, RepeatedIdWithTheFinInALaterFrameFailsOnlyUniqueness) {
+    const auto t = run(scen::l06_setup_stream_probe(kDeadline),
+                       split_fin(lite06::raw_setup_stream({{0x4, value({1})}, {0x5, value({7})}, {0x4, value({1})}})));
+    ASSERT_TRUE(judgeable(t));
+    const auto setup = lite06::peer_setup_message(t);
+    ASSERT_TRUE(setup.has_value());
+    EXPECT_TRUE(setup->fin);
+    const auto v = stream_verdicts(t);
+    EXPECT_EQ(v.unique, false);
+    EXPECT_EQ(v.single, true);  // row 014 rationale: one defect never fails both rows
+}
+
+TEST(Lite06SetupStream, DistinctIdsWithTheFinInALaterFramePassBoth) {
+    const auto v = stream_verdicts(
+        run(scen::l06_setup_stream_probe(kDeadline), split_fin(lite06::raw_setup_stream(two_parameters()))));
+    EXPECT_EQ(v.single, true);
+    EXPECT_EQ(v.unique, true);
+}
+
+TEST(Lite06SetupStream, SecondSetupStreamInALaterPollFailsOnlySingleSetup) {
+    // A correct Setup stream first, a second one 70 ms later (after the first finished).
+    auto polls = std::make_shared<int>(0);
+    LitePublisherHooks hooks;
+    hooks.on_poll = [polls](ConformingLitePublisher& publisher, ScriptedLitePeer& peer) {
+        if (++*polls == 8) publisher.send_setup(peer);
+    };
+    auto config = with_hooks(std::move(hooks));
+    config.setup_parameters = two_parameters();
+    const auto t = run(scen::l06_setup_stream_probe(kDeadline), config);
+    const auto setup = lite06::peer_setup_message(t);
+    ASSERT_TRUE(setup.has_value());
+    EXPECT_EQ(setup->setup_streams, 2u);
+    const auto v = stream_verdicts(t);
+    EXPECT_EQ(v.single, false);
+    EXPECT_EQ(v.unique, true);
+}
+
+// Hand-built transcripts (the reviewer's cases): an established, complete transcript whose runner Setup stream
+// (`setup`) was delivered in full, plus the allowance step, unexecuted.
+LiteTranscript hand_built(std::string_view id, Bytes setup) {
+    LiteTranscript t;
+    t.scenario_id = std::string(id);
+    t.established = true;
+    t.complete = true;
+    t.runner_setup.label = std::string(lite06::kRunnerSetupLabel);
+    t.runner_setup.bytes = setup;
+    t.runner_setup.accepted = setup.size();
+    t.runner_setup.fin = true;
+    t.runner_setup.fin_accepted = true;
+    t.runner_setup.executed_at_ns = 1;
+    t.runner_setup.stream_id = 3;
+    scen::LiteStepRecord allowance;
+    allowance.label = std::string(scen::kL06AllowanceLabel);
+    allowance.kind = scen::LiteStep::Kind::Wait;
+    t.steps.push_back(allowance);
+    return t;
+}
+
+TEST(Lite06SetupStream, HandBuiltTranscripts) {
+    auto t = hand_built(scen::kL06SetupStream, scen::lite_default_runner_setup());
+    // The allowance has not run and the peer did not close: not over.
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), std::nullopt);
+    EXPECT_EQ(scen::evaluate_l06_setup_parameters_unique(t), std::nullopt);
+    t.steps[0].executed_at_ns = 5;
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), false);  // no Setup stream at the end
+    EXPECT_EQ(scen::evaluate_l06_setup_parameters_unique(t), std::nullopt);
+    auto record = moq::interop::session::make_lite_stream_record(2, moq::interop::session::LiteOrigin::Peer, false);
+    record.stream_type = 0x1;
+    record.fin_seen = true;
+    t.streams.push_back(record);
+    auto bytes = lite06::raw_setup_stream({{0x2, value({0x61})}, {0x2, value({0x62})}});
+    t.events.push_back(transport::StreamDataEvent{2, bytes, true});
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), true);
+    EXPECT_EQ(scen::evaluate_l06_setup_parameters_unique(t), false);
+    bytes.pop_back();  // FIN inside the SETUP
+    t.events.back() = transport::StreamDataEvent{2, bytes, true};
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), false);
+    EXPECT_EQ(scen::evaluate_l06_setup_parameters_unique(t), std::nullopt);
+    // A huge Parameter Count in a small body: malformed, and no loop over the count.
+    t.events.back() = transport::StreamDataEvent{2, value({0x01, 0x05, 0xbf, 0xff, 0xff, 0xff, 0x00}), true};
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), false);
+    t.events.back() = transport::StreamDataEvent{2, {}, true};
+    EXPECT_EQ(scen::evaluate_l06_setup_stream_single_setup(t), false);
 }
 
 TEST(Lite06SetupStream, EmptyParameterListPassesSingleSetupAndLeavesUniquenessNotRun) {
@@ -342,7 +458,8 @@ TEST(Lite06SetupUnknownParameter, TheRunnerSetupCarriesTheUnknownId) {
 
 TEST(Lite06SetupUnknownParameter, ClosingOnTheUnknownIdFails) {
     LitePublisherHooks hooks;
-    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer, const LiteRunnerRequest& request) {
+    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                          const LiteRunnerRequest& request) {
         const auto* setup = std::get_if<l06::SetupMessage>(&request.message);
         if (!setup) return false;
         for (const auto& parameter : setup->parameters)
@@ -367,7 +484,8 @@ TEST(Lite06SetupUnknownParameter, ClosingLaterInTheWindowFails) {
 
 TEST(Lite06SetupUnknownParameter, RefusingTheRequestFails) {
     LitePublisherHooks hooks;
-    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer, const LiteRunnerRequest& request) {
+    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                          const LiteRunnerRequest& request) {
         if (!std::holds_alternative<l06::AnnounceRequest>(request.message)) return false;
         publisher.refuse(peer, request.stream, 0x0);
         return true;
@@ -535,7 +653,8 @@ TEST(Lite06CloseProbes, SessionOnlyCodeOnAStreamTerminationFailsOnlyTheCodeSpace
     // The publisher stops the offending Setup stream with GOAWAY_TIMEOUT (0x10, session table only), then closes
     // correctly: one defect, row 027 only.
     LitePublisherHooks hooks;
-    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer, const LiteRunnerRequest& request) {
+    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                          const LiteRunnerRequest& request) {
         if (!is_runner_setup(request)) return false;
         const bool offending = request.setup_streams_seen > 1 || request.message.index() == 0 ||
                                !std::get<l06::SetupMessage>(request.message).parameters.empty();
@@ -571,7 +690,8 @@ TEST(Lite06CloseProbes, CloseBeforeTheStimulusIsNotRun) {
 TEST(Lite06CloseProbes, DuplicateStreamCloseBeforeTheSecondStreamIsNotRun) {
     // A close right after the first runner Setup stream, before the second one went out, was not provoked by it.
     LitePublisherHooks hooks;
-    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer, const LiteRunnerRequest& request) {
+    hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                          const LiteRunnerRequest& request) {
         if (!is_runner_setup(request)) return false;
         if (request.setup_streams_seen == 1) publisher.close(peer, 0x3);
         return true;
@@ -587,6 +707,89 @@ TEST(Lite06CloseProbes, DuplicateStreamCloseBeforeTheSecondStreamIsNotRun) {
     EXPECT_EQ(scen::evaluate_l06_setup_duplicate_stream_close(t), std::nullopt);
     // The close itself still carries a session code, judged for its space only.
     EXPECT_EQ(evaluate_l06_errors_code_space(t), true);
+}
+
+TEST(Lite06CloseProbes, CodeSpaceJudgesOnlyItsBoundScenarios) {
+    // Row 027 binds l06-errors-code-space and the four close probes; elsewhere a close is another row's matter.
+    for (const auto& definition :
+         {scen::l06_setup_stream_probe(kDeadline), scen::l06_setup_unknown_parameter_probe(kDeadline)}) {
+        auto polls = std::make_shared<int>(0);  // fresh per run
+        LitePublisherHooks hooks;
+        hooks.on_poll = [polls](ConformingLitePublisher& publisher, ScriptedLitePeer& peer) {
+            if (++*polls == 20) publisher.close(peer, 0x33);
+        };
+        auto config = with_hooks(std::move(hooks));
+        config.setup_parameters = two_parameters();
+        const auto t = run(definition, config);
+        ASSERT_TRUE(t.peer_close.has_value()) << t.scenario_id;
+        EXPECT_EQ(evaluate_l06_errors_code_space(t), std::nullopt) << t.scenario_id;
+    }
+    // The same stream-only close on a bound scenario is judged (and fails).
+    auto t = hand_built(scen::kL06SetupServerRole, scen::l06_server_role_runner_setup());
+    t.peer_close = moq::interop::session::PeerCloseInfo{transport::CloseErrorSpace::Application, 0x33, {}, 0};
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), false);
+    t.scenario_id = "l06-some-other-scenario";
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), std::nullopt);
+}
+
+TEST(Lite06CloseProbes, HandBuiltCloseProbe) {
+    auto t = hand_built(scen::kL06SetupServerRole, scen::l06_server_role_runner_setup());
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), std::nullopt);  // no close, allowance not run
+    t.peer_close = moq::interop::session::PeerCloseInfo{transport::CloseErrorSpace::Application, 0x3, {}, 0};
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), true);
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), true);
+    t.peer_close->code = 0x6;  // KEY_VALUE_FORMATTING_ERROR: session table
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), false);
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), true);
+    t.peer_close->code = 0x4;  // GOING_AWAY: stream table only
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), false);
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), false);
+    t.peer_close->code = 0x3;
+    t.runner_setup.bytes = scen::lite_default_runner_setup();  // not this probe's stimulus
+    t.runner_setup.accepted = t.runner_setup.bytes.size();
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), std::nullopt);
+    t = hand_built(scen::kL06SetupServerRole, scen::l06_server_role_runner_setup());
+    t.steps[0].executed_at_ns = 5;  // the allowance ran, no close
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(t), false);
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), std::nullopt);
+}
+
+TEST(Lite06CloseProbes, CodeSpaceNeedsBothHalvesOnItsOwnScenario) {
+    // On l06-errors-code-space (Task 7 owns the scenario) a Pass needs a stream code AND a session close.
+    auto t = hand_built(scen::kL06ErrorsCodeSpace, scen::lite_default_runner_setup());
+    t.peer_close = moq::interop::session::PeerCloseInfo{transport::CloseErrorSpace::Application, 0x3, {}, 0};
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), std::nullopt);  // session half alone
+    auto refused = moq::interop::session::make_lite_stream_record(1, moq::interop::session::LiteOrigin::Runner, true);
+    refused.reset_seen = true;
+    refused.reset_code = 0x33;  // NOT_FOUND: stream table
+    t.streams.push_back(refused);
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), true);
+    t.peer_close.reset();
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), std::nullopt);  // stream half alone
+    t.streams.back().reset_code = 0x10;  // GOAWAY_TIMEOUT: session table only
+    EXPECT_EQ(evaluate_l06_errors_code_space(t), false);
+    // On a probe the session half alone is enough.
+    auto probe = hand_built(scen::kL06SetupDuplicateParameter, scen::l06_duplicate_parameter_runner_setup());
+    probe.peer_close = moq::interop::session::PeerCloseInfo{transport::CloseErrorSpace::Application, 0x3, {}, 0};
+    EXPECT_EQ(evaluate_l06_errors_code_space(probe), true);
+}
+
+TEST(Lite06CloseProbes, ServerPathIsJudgedOnlyOffWebTransport) {
+    // Row 126 is the binding 1 half; on WebTransport it is NotRun while row 027 stays judged.
+    for (const auto binding :
+         {scen::LiteBinding::Unknown, scen::LiteBinding::NativeQuic, scen::LiteBinding::WebTransport}) {
+        auto definition = scen::l06_setup_server_path_probe(kDeadline);
+        definition.binding = binding;
+        const auto t = run(std::move(definition));
+        ASSERT_EQ(t.binding, binding);
+        const Verdict expected = binding == scen::LiteBinding::WebTransport ? std::nullopt : Verdict{true};
+        EXPECT_EQ(scen::evaluate_l06_setup_server_path_close(t), expected);
+        EXPECT_EQ(evaluate_l06_errors_code_space(t), true);
+    }
+    // The other probes do not depend on the binding.
+    auto definition = scen::l06_setup_server_role_probe(kDeadline);
+    definition.binding = scen::LiteBinding::WebTransport;
+    EXPECT_EQ(scen::evaluate_l06_setup_server_role_close(run(std::move(definition))), true);
 }
 
 // --- NotRun conditions common to all scenarios -----------------------------------------------------------------

@@ -184,6 +184,7 @@ LiteProbeController::LiteProbeController(LiteProbeDefinition definition, transpo
     : definition_(std::move(definition)), transport_(transport), clock_(clock), session_(definition_.limits) {
     transcript_.scenario_id = definition_.id;
     transcript_.session_url_has_path = definition_.session_url_has_path;
+    transcript_.binding = definition_.binding;
     LiteStep setup;
     setup.kind = LiteStep::Kind::SendUni;
     setup.bytes = definition_.runner_setup;

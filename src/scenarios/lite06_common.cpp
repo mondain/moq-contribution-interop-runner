@@ -1,5 +1,7 @@
 #include "moq/interop/scenarios/lite06_common.h"
 
+#include "moq/interop/scenarios/lite06_setup.h"
+
 #include <algorithm>
 #include <variant>
 
@@ -53,7 +55,8 @@ Lenient read_setup(wire::Cursor& cursor, l06::SetupMessage& out) {
 }  // namespace
 
 bool is_session_code(std::uint64_t code) {
-    return std::find(std::begin(kSessionErrorCodes), std::end(kSessionErrorCodes), code) != std::end(kSessionErrorCodes);
+    return std::find(std::begin(kSessionErrorCodes), std::end(kSessionErrorCodes), code) !=
+           std::end(kSessionErrorCodes);
 }
 
 bool is_stream_code(std::uint64_t code) {
@@ -184,7 +187,12 @@ std::optional<bool> judge_close_probe(const LiteTranscript& transcript, std::str
 }  // namespace lite06
 
 std::optional<bool> evaluate_l06_errors_code_space(const LiteTranscript& transcript) {
-    if (!judgeable(transcript) || !lite06::proved_stimulus(transcript, lite06::kRunnerSetupLabel)) return std::nullopt;
+    // Bound (catalog row 027) to its own scenario and the four MUST-level close probes only.
+    const auto& id = transcript.scenario_id;
+    const bool bound = id == kL06ErrorsCodeSpace || id == kL06SetupDuplicateParameter ||
+                       id == kL06SetupDuplicateStream || id == kL06SetupServerPath || id == kL06SetupServerRole;
+    if (!bound || !judgeable(transcript) || !lite06::proved_stimulus(transcript, lite06::kRunnerSetupLabel))
+        return std::nullopt;
     // Stream half: the peer's RESET_STREAM and STOP_SENDING codes (record fields of the peer's direction only).
     bool stream_half = false;
     for (const auto& record : transcript.streams) {

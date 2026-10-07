@@ -29,7 +29,9 @@ inline constexpr std::string_view kL06ErrorsCodeSpace = "l06-errors-code-space";
 //            also in the stream table included (they cannot show the space);
 //   Fail:    an application close whose code is registered ONLY in the stream table (draft 4.4.2, Table 3), or a
 //            RESET_STREAM / STOP_SENDING from the peer whose code is registered ONLY in the session table;
-//   NotRun:  no judgeable transcript, the runner's Setup stream not delivered, no peer close (or a QUIC
+//   NotRun:  a scenario the row does not bind (only l06-errors-code-space, l06-setup-duplicate-parameter,
+//            l06-setup-duplicate-stream, l06-setup-server-path and l06-setup-server-role are judged, on either
+//            binding), no judgeable transcript, the runner's Setup stream not delivered, no peer close (or a QUIC
 //            transport-space close, which carries no moq-lite code), an unregistered close code. On the
 //            l06-errors-code-space scenario itself both halves (a stream code and a session close code) must
 //            be observed for a Pass; on the probes the session half alone suffices.

@@ -318,7 +318,8 @@ struct ConformingLitePublisherConfig {
 // each GROUP plus frames and FIN, for the configured broadcast/track; NOT_FOUND reset for other tracks; resets (bidi)
 // or stops (uni) runner streams of unknown or unserved types; a second runner Setup stream, a malformed SETUP
 // (a repeated Parameter ID included) or a runner SETUP carrying Path or Role (client-only, draft 7.3.2/7.3.3)
-// closes the session with PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3). Deterministic. The publisher must outlive the peer it reacts for.
+// closes the session with PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3). Deterministic. The
+// publisher must outlive the peer it reacts for.
 //
 // Defaults that are the implementer's choices, NOT draft rules (Tasks 4-7 set what their rows need):
 //   - unknown_stream_code 0x0 for resetting/stopping unknown or unserved streams (the draft names no code);
