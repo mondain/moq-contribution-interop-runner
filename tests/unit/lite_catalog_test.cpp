@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace moq::interop::requirements {
 namespace {
@@ -114,6 +115,30 @@ TEST(LiteCatalog, PlannedIdsFollowTheGrammarAndAreUniquePerRow) {
     }
 }
 
+// A planned evaluator judges one fixed set of scenarios: every row naming an evaluator names the
+// same scenario list with it (a scenario may still feed several evaluators).
+TEST(LiteCatalog, EachEvaluatorPairsWithOneScenarioSet) {
+    const auto catalog = lite_catalog(lite_source());
+    std::map<std::string, std::vector<std::string>> scenarios_of;
+    for (const auto& row : catalog.requirements) {
+        for (const auto& evaluator : row.evaluators) {
+            const auto [it, inserted] = scenarios_of.emplace(evaluator, row.scenarios);
+            if (!inserted) EXPECT_EQ(it->second, row.scenarios) << row.id << ": " << evaluator;
+        }
+    }
+}
+
+// The plan lets front-matter rows be classified Informative/NotApplicable, but the moq-lite-06
+// text has no normative keyword before section 1: every row carries a numbered section. If a
+// later draft text adds front-matter rows, extend may_hold_non_scope_review deliberately.
+TEST(LiteCatalog, NoFrontMatterRows) {
+    const auto catalog = lite_catalog(lite_source());
+    const std::regex numbered(R"(^[0-9]+(\.[0-9]+)*$)");
+    for (const auto& row : catalog.requirements) {
+        EXPECT_TRUE(std::regex_match(row.source.section, numbered)) << row.id << ": " << row.source.section;
+    }
+}
+
 TEST(LiteCatalog, UnreviewedRowsKeepThePlaceholderShape) {
     const auto catalog = lite_catalog(lite_source());
     for (const auto& row : catalog.requirements) {
@@ -159,11 +184,20 @@ TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
     const auto catalog = lite_catalog(lite_source());
     std::map<std::string, std::size_t> reviewed;
     std::size_t total = 0;
+    std::size_t testable = 0;
+    std::set<std::string> scenarios;
+    std::set<std::string> evaluators;
     for (const auto& row : catalog.requirements) {
         if (!row.reviewed) continue;
         ++reviewed[section_group(row.source.section)];
         ++total;
+        if (row.testability == Testability::Testable) ++testable;
+        scenarios.insert(row.scenarios.begin(), row.scenarios.end());
+        evaluators.insert(row.evaluators.begin(), row.evaluators.end());
     }
+    EXPECT_EQ(testable, 8u);
+    EXPECT_EQ(scenarios.size(), 7u);
+    EXPECT_EQ(evaluators.size(), 8u);
     const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13}};
     EXPECT_EQ(reviewed, expected);
     EXPECT_EQ(total, 36u);

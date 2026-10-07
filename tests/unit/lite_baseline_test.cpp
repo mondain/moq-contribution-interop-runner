@@ -145,7 +145,10 @@ TEST_F(LiteBaselineTest, CommittedCatalogEqualsGeneratorOutputByteForByte) {
     ASSERT_TRUE(std::filesystem::exists(committed));
     const auto generated_text = read_file(directory_ / "moq-lite-06.json");
     const auto generated = nlohmann::ordered_json::parse(generated_text);
-    auto document = nlohmann::ordered_json::parse(read_file(committed));
+    const auto committed_text = read_file(committed);
+    auto document = nlohmann::ordered_json::parse(committed_text);
+    // Raw formatting check: classification edits keep the generator's serialization.
+    EXPECT_EQ(committed_text, document.dump(2) + "\n");
     ASSERT_EQ(document["requirements"].size(), generated["requirements"].size());
     for (std::size_t i = 0; i < generated["requirements"].size(); ++i) {
         auto& row = document["requirements"][i];

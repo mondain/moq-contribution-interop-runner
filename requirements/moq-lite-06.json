@@ -364,12 +364,12 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "l06-subscribe-partial-group-start"
+        "l06-subscribe-abutting-frame-start"
       ],
       "evaluators": [
         "l06-subscribe-resolved-start"
       ],
-      "rationale": "Observable from the GROUP headers of the publisher's Group streams: the runner subscribes with a non-zero Frame Start in an older Group (which the publisher may or may not still hold) and, separately, with the default start. The first Group stream must be either the requested Group at exactly the requested Frame Start or a later Group at Frame Start 0, and a subscription that did not ask for a partial Group must never receive a non-zero Frame Start. Both outcomes of the stimulus are conforming, so only a third Position fails."
+      "rationale": "Observable from the GROUP headers of the publisher's Group streams, using the draft's abutting pattern (Section 3.6): the runner first subscribes with Group Start = G, Group End = G and Frame End = N-1 and receives frames 0 through N-1 of Group G, then subscribes with Group Start = G and Frame Start = N, so the non-zero Frame Start names a Group the runner has received, as the draft requires. The first Group stream of the second subscription must be Group G at Frame Start exactly N, or a later Group at Frame Start 0 when the publisher cannot serve G from frame N; any other Position is a Fail. A separate default subscription must never receive a non-zero Frame Start. Both conforming outcomes are accepted, so the evaluator never depends on whether the publisher still holds Group G."
     },
     {
       "id": "L06-3-6-MUST-021",
@@ -387,7 +387,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself send Frame Start 0 in every ordinary subscription; the only exception is a probe that deliberately violates a bound and is judged under L06-3-6-MUST-023."
+      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself comply without exception: it sends Frame Start 0 unless it has already received frames of the Group that Group Start names, which happens only in the abutting second subscription of the L06-3-6-MUST-020 probe."
     },
     {
       "id": "L06-3-6-MUST-022",
@@ -405,7 +405,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself send Frame End 0 whenever Group End is 0, except in the deliberate invalid-bounds probe judged under L06-3-6-MUST-023."
+      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself send Frame End 0 whenever Group End is 0; its single deliberate exception is the invalid-bounds probe that exists to judge the publisher under L06-3-6-MUST-023."
     },
     {
       "id": "L06-3-6-MUST-023",
@@ -427,7 +427,7 @@
       "evaluators": [
         "l06-subscribe-invalid-frame-bounds-reset"
       ],
-      "rationale": "The runner sends a SUBSCRIBE with Group End = 0 and a non-zero Frame End (the only violation a publisher can detect from the message alone, since it cannot know which Groups the subscriber has seen) and observes that the publisher resets the subscribe stream instead of answering SUBSCRIBE_OK or delivering Groups. The stream error table has no protocol-violation code, so the evaluator requires a reset (or a session close with PROTOCOL_VIOLATION) but does not require a specific stream code; an unrelated close does not satisfy it."
+      "rationale": "The runner sends a SUBSCRIBE with Group End = 0 and a non-zero Frame End (the only violation a publisher can detect from the message alone, since it cannot know which Groups the subscriber has received). The draft says \"reset the stream\" and uses session-level wording where it means a session close, so the evaluator requires a RESET_STREAM on the subscribe stream with no SUBSCRIBE_OK and no Group stream for it. Any stream code is accepted because the stream error table has no protocol-violation code. A session close instead of the reset is a Fail (the reason recorded in the evidence), and an unrelated close or no reaction does not satisfy it."
     },
     {
       "id": "L06-4-2-MUST-NOT-024",
@@ -467,7 +467,7 @@
       "evaluators": [
         "l06-session-peer-closes-send"
       ],
-      "rationale": "The publisher is the peer when the runner ends a transaction: the runner opens an ANNOUNCE_REQUEST and a SUBSCRIBE stream, then closes its send direction with FIN, and observes that the publisher closes its own send direction (FIN or RESET_STREAM) within a stated timing allowance; no close within the allowance is a Fail, a session close is not a substitute. The runner must itself close its send direction whenever the publisher closes one."
+      "rationale": "The publisher is the peer when the runner ends a transaction: the runner opens an ANNOUNCE_REQUEST and a SUBSCRIBE stream, then closes its send direction with FIN, and observes that the publisher closes its own send direction (FIN or RESET_STREAM). The draft sets no deadline, so the evaluator states a generous time allowance (seconds, not a round-trip estimate) and records it in the evidence; a Fail means \"not closed within the stated allowance\" and says so, and a session close is not a substitute. The runner must itself close its send direction whenever the publisher closes one."
     },
     {
       "id": "L06-4-3-MAY-026",
@@ -507,7 +507,7 @@
       "evaluators": [
         "l06-errors-code-space"
       ],
-      "rationale": "The runner provokes a stream refusal (SUBSCRIBE to a broadcast the publisher does not serve) and a session termination (a malformed control message) and checks each code the publisher sends: a RESET_STREAM or STOP_SENDING code must be in the stream table (Table 3) or the application range (64 and above), a session close code in the session table (Table 2) or the application range. A code registered only in the other space, or in the reserved range 32-47, is a Fail; overlapping values present in both tables cannot distinguish the space and are accepted."
+      "rationale": "The runner provokes a stream refusal (SUBSCRIBE to a broadcast the publisher does not serve) and a session termination (a malformed control message) and checks each code the publisher sends: a RESET_STREAM or STOP_SENDING code must not be one registered only in the session table (Table 2), and a session close code must not be one registered only in the stream table (Table 3). Values present in both tables cannot show the space and are accepted; unregistered values are not judged here. If either provocation produces no code (for example no session close), the evaluator reports NotRun for that half and never Pass on the other half alone."
     },
     {
       "id": "L06-4-4-MUST-028",
@@ -565,7 +565,7 @@
       "evaluators": [
         "l06-errors-unknown-code-tolerated"
       ],
-      "rationale": "The publisher receives codes when the runner cancels: the runner ends one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying an unregistered application code (64 or above) and observes that the publisher only ends that subscription (closes its send direction) while the session and the other subscription keep working; a session close or a refusal of later requests is a Fail."
+      "rationale": "The publisher receives codes when the runner cancels: the runner ends one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying an unregistered application code (64 or above). The evaluator requires the end of that subscription to be observed (the publisher closes its send direction with FIN or RESET_STREAM, per L06-4-3-MUST-025), so a publisher that ignores the cancel cannot pass, while the session and the other subscription keep working; a session close or a refusal of later requests is a Fail."
     },
     {
       "id": "L06-4-4-MUST-NOT-031",
@@ -580,14 +580,10 @@
       "actor": "endpoint",
       "summary": "An endpoint does not infer a meaning for an unregistered error code.",
       "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "l06-errors-unknown-reset-code"
-      ],
-      "evaluators": [
-        "l06-errors-unknown-code-tolerated"
-      ],
-      "rationale": "Inference is internal, but its consequences are visible in the same unknown-code probe: a publisher that attached a meaning to the runner's unregistered code would react beyond ending that one stream (closing the session, dropping the other subscription or refusing later requests), which the evaluator fails."
+      "testability": "NotTestable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "Inference is internal. Its only observable consequences are the ones judged elsewhere: reacting to an unregistered code as more than an unspecified error (L06-4-4-MUST-030) or as an authorization failure (L06-4-4-MUST-NOT-032). Scoring this row from the same probe evidence would credit or debit a third required row for one observation."
     },
     {
       "id": "L06-4-4-MUST-NOT-032",
@@ -607,9 +603,9 @@
         "l06-errors-unknown-reset-code"
       ],
       "evaluators": [
-        "l06-errors-unknown-code-tolerated"
+        "l06-errors-no-assumed-unauthorized"
       ],
-      "rationale": "In the unknown-code probe an authorization inference would surface as a session close with UNAUTHORIZED (0x2) or as later requests refused; the evaluator fails either, and passes when the publisher keeps serving the session after ending only the cancelled stream."
+      "rationale": "In the unknown-code probe the runner cancels a subscription with an unregistered code; the evaluator requires the end of that subscription to be observed (publisher FIN or RESET_STREAM) and then fails only a session close with UNAUTHORIZED (session code 0x2). A refusal with any other code, or stream code 0x2 (DELIVERY_TIMEOUT), is not an authorization inference and is left to L06-4-4-MUST-030."
     },
     {
       "id": "L06-4-4-MUST-NOT-033",
@@ -626,12 +622,12 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "l06-errors-unknown-reset-code"
+        "l06-errors-reserved-reset-code"
       ],
       "evaluators": [
-        "l06-errors-unknown-code-tolerated"
+        "l06-errors-reserved-code-tolerated"
       ],
-      "rationale": "The unknown-code probe also cancels a subscription with a reserved code (32-47); the publisher must treat it like any unrecognized code, ending only that stream while the session continues. A publisher sending a reserved code itself is judged under L06-4-4-MUST-027."
+      "rationale": "A distinct stimulus: the runner cancels one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying a reserved code (32 through 47). The evaluator requires the end of that subscription to be observed (publisher FIN or RESET_STREAM) and the session and the other subscription to keep working; any reaction that gives the reserved value a meaning (a session close or refused later requests) is a Fail."
     },
     {
       "id": "L06-4-4-MUST-034",
