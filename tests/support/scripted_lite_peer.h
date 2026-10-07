@@ -316,8 +316,9 @@ struct ConformingLitePublisherConfig {
 // Replies per the draft: its own Setup stream first; ANNOUNCE_OK (Hop ID, Active Count) then one ANNOUNCE_START for
 // the configured broadcast when the prefix covers it; SUBSCRIBE_OK (latest group) then one Group stream per poll,
 // each GROUP plus frames and FIN, for the configured broadcast/track; NOT_FOUND reset for other tracks; resets (bidi)
-// or stops (uni) runner streams of unknown or unserved types; a second runner Setup stream or a malformed SETUP
-// closes the session with PROTOCOL_VIOLATION. Deterministic. The publisher must outlive the peer it reacts for.
+// or stops (uni) runner streams of unknown or unserved types; a second runner Setup stream, a malformed SETUP
+// (a repeated Parameter ID included) or a runner SETUP carrying Path or Role (client-only, draft 7.3.2/7.3.3)
+// closes the session with PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3). Deterministic. The publisher must outlive the peer it reacts for.
 //
 // Defaults that are the implementer's choices, NOT draft rules (Tasks 4-7 set what their rows need):
 //   - unknown_stream_code 0x0 for resetting/stopping unknown or unserved streams (the draft names no code);
@@ -454,7 +455,8 @@ private:
 
     void handle_request(ScriptedLitePeer& peer, const LiteRunnerRequest& request, bool malformed) {
         if (!request.bidirectional && request.stream_type == 0x1) {
-            if (malformed || request.setup_streams_seen > 1) close(peer, config_.protocol_violation_code);
+            if (malformed || request.setup_streams_seen > 1 || carries_client_only_parameter(request))
+                close(peer, config_.protocol_violation_code);
             return;
         }
         if (malformed) {
@@ -471,6 +473,16 @@ private:
         }
         if (config_.defect == LiteDefect::IgnoreUnknownStreams) return;
         refuse(peer, request.stream, config_.unknown_stream_code);
+    }
+
+    // Draft 7.3.2 and 7.3.3: only the client sends Path and Role; this publisher is the client, so a runner
+    // (server) SETUP carrying either is a PROTOCOL_VIOLATION.
+    static bool carries_client_only_parameter(const LiteRunnerRequest& request) {
+        const auto* setup = std::get_if<l06::SetupMessage>(&request.message);
+        if (!setup) return false;
+        for (const auto& parameter : setup->parameters)
+            if (parameter.id == l06::kParamPath || parameter.id == l06::kParamRole) return true;
+        return false;
     }
 
     void emit_one_group(ScriptedLitePeer& peer) {
