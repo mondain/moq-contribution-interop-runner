@@ -1,15 +1,15 @@
 CREATE TABLE schema_meta (
-    version INTEGER NOT NULL CHECK (version = 4)
+    version INTEGER NOT NULL CHECK (version = 5)
 );
-INSERT INTO schema_meta(version) VALUES (4);
+INSERT INTO schema_meta(version) VALUES (5);
 
--- Schema version 4 accepts draft 22. The version 3 to 4 migration in sqlite_run_store.cpp
--- rebuilds `runs` with this exact definition (and recreates runs_newest_idx), so a
--- change to `runs` here must be made there too.
+-- Schema version 5 accepts draft 106 (moq-lite-06) besides 18, 21 and 22. The version 4 to 5
+-- migration in sqlite_run_store.cpp rebuilds `runs` with this exact definition (and
+-- recreates runs_newest_idx), so a change to `runs` here must be made there too.
 
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
-    draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22)),
+    draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22, 106)),
     transport INTEGER NOT NULL CHECK (transport IN (0, 1)),
     mode INTEGER NOT NULL CHECK (mode IN (0, 1)),
     timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),

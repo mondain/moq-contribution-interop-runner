@@ -1,5 +1,7 @@
 #include "moq/interop/app/publisher_driver.h"
 
+#include "moq/interop/app/draft_traits.h"
+
 #include <nlohmann/json.hpp>
 #include <openssl/evp.h>
 
@@ -129,7 +131,8 @@ std::string serialize_driver_request(const DriverRequest& request) {
     return nlohmann::json{
         {"schema_version", 1}, {"run_id", request.run_id},
         {"scenario_id", request.scenario_id}, {"endpoint", request.endpoint},
-        {"draft", static_cast<unsigned>(request.draft)},
+        {"draft", is_moqt(request.draft) ? nlohmann::json(draft_number(request.draft))
+                                        : nlohmann::json(std::string(draft_text(request.draft)))},
         {"transport", request.transport == TransportKind::WebTransport
                           ? "webtransport" : "native_quic"},
         {"namespace_hex", names}, {"track_name_hex", hex(request.track.track_name)},

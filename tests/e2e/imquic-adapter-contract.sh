@@ -172,6 +172,10 @@ for draft in 18 21 23; do
     run_adapter
     expect_refused "draft $draft is not supported (supported drafts: 22)"
 done
+# A moq-lite draft is refused with its name, not as a malformed request.
+make_request '"moq-lite-06"' native_quic
+run_adapter
+expect_refused "draft moq-lite-06 is not supported (supported drafts: 22)"
 # An unknown transport, another namespace or track, and malformed requests are refused.
 make_request 22 quic
 run_adapter

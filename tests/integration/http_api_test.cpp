@@ -1,3 +1,4 @@
+#include "json.h"
 #include "moq/interop/http/server.h"
 #include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/scenario_registry.h"
@@ -1332,5 +1333,85 @@ TEST_F(HttpApiDraft22Test, OwnDraft22ScenariosPreflightTheirFixture) {
     }
     EXPECT_EQ(own, 8u);
 }
+
+// ---- the moq-lite-06 identifier at the API ----
+
+TEST(DraftJsonTest, ParsesTheMoqTransportIntegersAndTheMoqLiteStringOnly) {
+    using detail::parse_draft_json;
+    EXPECT_EQ(parse_draft_json(Json(18)), app::DraftVersion::Draft18);
+    EXPECT_EQ(parse_draft_json(Json(21)), app::DraftVersion::Draft21);
+    EXPECT_EQ(parse_draft_json(Json(22)), app::DraftVersion::Draft22);
+    EXPECT_EQ(parse_draft_json(Json("moq-lite-06")), app::DraftVersion::MoqLite06);
+    for (const auto& refused : {Json(106), Json(17), Json("22"), Json("moq-lite-05"), Json(nullptr), Json(18.5),
+                                Json(18.0), Json(true), Json::array(), Json(-18), Json(4294967314ull)}) {
+        EXPECT_FALSE(parse_draft_json(refused)) << refused.dump();
+    }
+}
+
+TEST(DraftJsonTest, EmitsIntegersForMoqTransportAndTheNameForMoqLite) {
+    EXPECT_EQ(detail::draft_json(app::DraftVersion::Draft18), Json(18));
+    EXPECT_EQ(detail::draft_json(app::DraftVersion::Draft21), Json(21));
+    EXPECT_EQ(detail::draft_json(app::DraftVersion::Draft22), Json(22));
+    EXPECT_EQ(detail::draft_json(app::DraftVersion::MoqLite06), Json("moq-lite-06"));
+    EXPECT_TRUE(detail::draft_json(app::DraftVersion::Draft18).is_number_unsigned());
+}
+
+TEST_F(HttpApiTest, MoqLiteRunRequestsAreRefusedAsNotRunnableAndTheIntegerFormIsInvalid) {
+    const auto post = [&](Json draft, Json scenarios = Json::array({"x"})) {
+        const auto response = client_->Post(
+            "/api/v1/runs",
+            Json{{"draft", std::move(draft)}, {"transport", "native-quic"}, {"mode", "observed"},
+                 {"scenarios", std::move(scenarios)}, {"timeout_ms", 1000}}.dump(),
+            "application/json");
+        EXPECT_TRUE(response);
+        return std::pair{response->status, Json::parse(response->body).at("error")};
+    };
+    // Reached after parsing and before scenario validation: an unknown scenario does not change the answer.
+    const auto [lite_status, lite] = post("moq-lite-06");
+    EXPECT_EQ(lite_status, 422);
+    EXPECT_EQ(lite.at("code"), "draft_not_runnable");
+    EXPECT_EQ(lite.at("message"), "Draft moq-lite-06 is not runnable on this runner.");
+    for (const auto& invalid : {Json(106), Json("moq-lite-05"), Json("22"), Json(18.5)}) {
+        const auto [status, error] = post(invalid);
+        EXPECT_EQ(status, 400) << invalid.dump();
+        EXPECT_EQ(error.at("code"), "invalid_run_config") << invalid.dump();
+    }
+    EXPECT_EQ(store_->list({1, 0}).total, 0u);
+}
+
+TEST_F(HttpApiTest, MoqLiteIsNotListedAndHasNoRequirementCatalogRoute) {
+    EXPECT_EQ(get_json("/api/v1/drafts").at("drafts").size(), 2u);
+    EXPECT_EQ(get_json("/healthz").at("supported_drafts"), Json::array({18, 21}));
+    const auto lite = get_json("/api/v1/requirements?draft=moq-lite-06", 400);
+    const auto unknown = get_json("/api/v1/requirements?draft=19", 400);
+    EXPECT_EQ(lite.at("error"), unknown.at("error"));
+    EXPECT_EQ(get_json("/api/v1/requirements?draft=106", 400).at("error"), unknown.at("error"));
+}
+
+TEST_F(HttpApiTest, StoredMoqLiteRunIsReadWithoutAnInternalError) {
+    app::RunConfig config{app::DraftVersion::MoqLite06, app::TransportKind::NativeQuic, app::RunMode::Observed,
+                          {"x"}, 1s};
+    const auto id = store_->create_run(config);
+    store_->finalize(id, requirements::ScoreSummary{}, {});
+    // No lite catalog is configurable yet, so the catalog-backed routes answer the D4 conflict.
+    for (const auto& path : {"/results/" + id + ".json", "/results/" + id + ".tap", "/results/" + id}) {
+        const auto error = get_json(path, 409);
+        EXPECT_EQ(error.at("error").at("code"), "draft_catalog_not_configured") << path;
+        EXPECT_EQ(error.at("error").at("message"),
+                  "Draft moq-lite-06 results need the draft moq-lite-06 catalog, which this runner does not have "
+                  "configured.");
+    }
+    // The catalog-free routes carry the identifier as text.
+    EXPECT_EQ(get_json("/api/v1/runs/" + id).at("run").at("config").at("draft"), "moq-lite-06");
+    const auto list = get_json("/api/v1/runs");
+    EXPECT_EQ(list.at("items").at(0).at("config").at("draft"), "moq-lite-06");
+    const auto page = client_->Get("/results");
+    ASSERT_TRUE(page);
+    EXPECT_EQ(page->status, 200);
+    EXPECT_NE(page->body.find("<td>moq-lite-06</td>"), std::string::npos);
+    EXPECT_EQ(page->body.find("<td>106</td>"), std::string::npos);
+    EXPECT_EQ(get_json("/results/completeness.json").at("drafts").size(), 2u);
+}
+
 
 }  // namespace moq::interop::http

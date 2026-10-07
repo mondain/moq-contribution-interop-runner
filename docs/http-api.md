@@ -54,13 +54,15 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18`, `21` or `22`. Drafts are scored independently. A runner that did not load a draft's catalog refuses runs of that draft with `422 draft_not_runnable` before any scenario is validated (the production runner always loads all three or does not start). Any other number is `400 invalid_run_config`. |
+| `draft` | `18`, `21` or `22`. Drafts are scored independently. A runner that did not load a draft's catalog refuses runs of that draft with `422 draft_not_runnable` before any scenario is validated (the production runner always loads all three or does not start). Any other number is `400 invalid_run_config`. The moq-lite draft is the string `"moq-lite-06"` (a string, never a number: the integer 106 is an internal storage form and is `400 invalid_run_config` like any other unlisted value, as are floats, booleans and other strings; a float such as `18.0` is refused even though it equals an integer draft). moq-lite runs are not runnable yet: `"moq-lite-06"` is accepted by the parser and then refused with `422 draft_not_runnable` (`Draft moq-lite-06 is not runnable on this runner.`), before scenario validation. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
 | `timeout_ms` | 2 to 3600000. For multi-scenario runs it applies to each context. |
 | `track` | Optional for receiver-error probes in observed mode, required for most scenarios and always required in driven mode. `namespace_hex` is an array of 0 to 32 nonempty hex strings; `name_hex` is the possibly empty hex Track Name. The decoded namespace plus name is limited to 4096 bytes. Hex preserves arbitrary bytes. |
 | `publisher_capabilities` | Optional object declaring what the publisher does not implement; see below. Absent means the publisher is fully capable. |
+
+A draft is echoed the way it is requested: an integer for MoQ Transport (`18`, `21`, `22`) and the string `"moq-lite-06"` for moq-lite, in `config.draft` of a run and in a result's `run`. A stored moq-lite run is readable through `/api/v1/runs`; its `/results/{id}` routes answer `409 draft_catalog_not_configured` until a moq-lite catalog exists.
 
 Draft 22 runs take draft 22 scenario IDs. The 221 executable ones are the 213
 scenarios draft 22 shares with draft 21, named by the draft 21 ID with `d21-`

@@ -1651,6 +1651,8 @@ NativeRunManager::~NativeRunManager() = default;
 // catalog, API answers). `execution` is what the scenario layer runs: the same run for drafts 18 and 21, and for
 // draft 22 the draft 21 family with each shared scenario's draft 21 implementation id.
 RunStartResult NativeRunManager::start(const RunConfig& requested) {
+    // The API refuses moq-lite before it gets here (draft_not_runnable); reaching this is a caller bug.
+    if (!is_moqt(requested.draft)) throw std::logic_error("moq-lite is not runnable yet");
     // Identity: whether this runner can run the requested draft (its catalogs).
     if (!supports(requested.draft) ||
         (requested.mode == RunMode::Driven && !supports_driven()))
@@ -1973,6 +1975,7 @@ bool NativeRunManager::supports(DraftVersion draft) const noexcept {
         case DraftVersion::Draft21: return impl_->draft21 != nullptr;
         // Draft 22 runs its shared scenarios on draft 21's family (lineage).
         case DraftVersion::Draft22: return impl_->draft22 != nullptr && impl_->draft21 != nullptr;
+        case DraftVersion::MoqLite06: return false;  // identification only; no run support yet
     }
     return false;
 }

@@ -17,6 +17,18 @@ static_assert(draft_number(DraftVersion::Draft22) == 22);
 static_assert(alpn(DraftVersion::Draft22) == "moqt-22");
 static_assert(runnable(DraftVersion::Draft18) && runnable(DraftVersion::Draft21));
 static_assert(runnable(DraftVersion::Draft22));
+static_assert(draft_number(DraftVersion::MoqLite06) == 106);
+static_assert(alpn(DraftVersion::MoqLite06) == "moq-lite-06");
+static_assert(!runnable(DraftVersion::MoqLite06));
+static_assert(parse_draft(106) == DraftVersion::MoqLite06);
+static_assert(!parse_draft(107).has_value() && !parse_draft(100).has_value());
+static_assert(draft_text(DraftVersion::MoqLite06) == "moq-lite-06");
+static_assert(parse_draft_text("moq-lite-06") == DraftVersion::MoqLite06);
+static_assert(!parse_draft_text("moq-lite-05").has_value());
+static_assert(known_alpn("moq-lite-06") && !known_alpn("moq-lite-05"));
+static_assert(is_moqt(DraftVersion::Draft18) && is_moqt(DraftVersion::Draft21) &&
+              is_moqt(DraftVersion::Draft22) && !is_moqt(DraftVersion::MoqLite06));
+static_assert(family_draft(DraftVersion::MoqLite06) == DraftVersion::MoqLite06);
 
 TEST(DraftTraits, EveryFunctionHandlesEveryDraft) {
     for (const auto draft : kAllDrafts) {
@@ -43,6 +55,45 @@ TEST(DraftTraits, KnownAlpnIsExactlyTheThreeProtocols) {
                               "h3", "moq-00"}) {
         EXPECT_FALSE(known_alpn(other)) << other;
     }
+}
+
+TEST(DraftTraits, MoqLite06Facts) {
+    EXPECT_EQ(draft_number(DraftVersion::MoqLite06), 106u);
+    EXPECT_EQ(static_cast<unsigned>(DraftVersion::MoqLite06), 106u);
+    EXPECT_EQ(std::string(alpn(DraftVersion::MoqLite06)), "moq-lite-06");
+    EXPECT_FALSE(runnable(DraftVersion::MoqLite06));
+    ASSERT_TRUE(parse_draft(106).has_value());
+    EXPECT_EQ(*parse_draft(106), DraftVersion::MoqLite06);
+    EXPECT_FALSE(parse_draft(107).has_value());
+    EXPECT_FALSE(parse_draft(100).has_value());
+    EXPECT_EQ(family_draft(DraftVersion::MoqLite06), DraftVersion::MoqLite06);
+}
+
+TEST(DraftTraits, DraftTextIsOnlyForMoqLite) {
+    EXPECT_EQ(std::string(draft_text(DraftVersion::MoqLite06)), "moq-lite-06");
+    for (const auto draft : kAllDrafts) EXPECT_TRUE(draft_text(draft).empty());
+    ASSERT_TRUE(parse_draft_text("moq-lite-06").has_value());
+    EXPECT_EQ(*parse_draft_text("moq-lite-06"), DraftVersion::MoqLite06);
+    for (const char* other : {"moq-lite-05", "moqt-22", "", "MOQ-LITE-06", "22", "moq-lite-06 "}) {
+        EXPECT_FALSE(parse_draft_text(other).has_value()) << other;
+    }
+}
+
+TEST(DraftTraits, IsMoqtTruthTable) {
+    for (const auto draft : kAllDrafts) EXPECT_TRUE(is_moqt(draft));
+    EXPECT_FALSE(is_moqt(DraftVersion::MoqLite06));
+}
+
+TEST(DraftTraits, KnownAlpnIncludesMoqLite06Only) {
+    EXPECT_TRUE(known_alpn("moq-lite-06"));
+    EXPECT_FALSE(known_alpn("moq-lite-05"));
+}
+
+TEST(DraftTraits, ByDraftRefusesMoqLite) {
+    int ran = 0;
+    EXPECT_THROW(by_draft(DraftVersion::MoqLite06, [&] { ++ran; return 0; }, [&] { ++ran; return 0; }),
+                 std::logic_error);
+    EXPECT_EQ(ran, 0);
 }
 
 TEST(DraftTraits, ByDraftRunsOnlyTheMatchingCallable) {

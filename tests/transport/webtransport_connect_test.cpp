@@ -217,4 +217,53 @@ TEST(WebTransportConnect, Draft22ProfileDecidesLikeDraft21ForEveryOtherInput) {
     }
 }
 
+H3Request lite_request(const std::string& offers) {
+    return {"CONNECT", "webtransport-h3", "https", "runner.test:4433", "/moq",
+            {{"origin", "https://publisher.test"}, {"wt-available-protocols", offers}}};
+}
+
+RunEndpoint lite_endpoint(const std::string& protocol) {
+    return {"runner.test:4433", "/moq", {"https://publisher.test"}, protocol};
+}
+
+TEST(WebTransportConnectMoqLite, AnswersTheOfferedMoqLiteProtocol) {
+    const auto result = validate_connect(lite_request("\"other\", \"moq-lite-06\""), capabilities(),
+                                         lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+    EXPECT_TRUE(result.accepted()) << result.evidence;
+    EXPECT_EQ(result.selected_protocol, "moq-lite-06");
+}
+
+TEST(WebTransportConnectMoqLite, RefusesUnknownAndMoqTransportOffers) {
+    for (const char* offers : {"\"moq-lite-07\"", "\"moqt-22\"", "\"moqt-21\""}) {
+        const auto result = validate_connect(lite_request(offers), capabilities(),
+                                             lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+        EXPECT_FALSE(result.accepted()) << offers;
+        EXPECT_TRUE(result.selected_protocol.empty());
+    }
+}
+
+TEST(WebTransportConnectMoqLite, ProfileAndEndpointMustAgree) {
+    EXPECT_FALSE(validate_connect(lite_request("\"moq-lite-06\""), capabilities(),
+                                  lite_endpoint("moqt-22"), WebTransportProfile::MoqLite06).accepted());
+    EXPECT_FALSE(validate_connect(lite_request("\"moq-lite-06\""), capabilities(),
+                                  lite_endpoint("moq-lite-06"), WebTransportProfile::Draft22Wt16).accepted());
+}
+
+TEST(WebTransportConnectMoqLite, MoqTransportProfilesStillAnswerOnlyTheirOwnProtocol) {
+    const auto d22 = validate_connect(lite_request("\"moqt-22\", \"moq-lite-06\""), capabilities(),
+                                      lite_endpoint("moqt-22"), WebTransportProfile::Draft22Wt16);
+    EXPECT_TRUE(d22.accepted());
+    EXPECT_EQ(d22.selected_protocol, "moqt-22");
+    EXPECT_FALSE(validate_connect(lite_request("\"moq-lite-06\""), capabilities(),
+                                  lite_endpoint("moqt-22"), WebTransportProfile::Draft22Wt16).accepted());
+}
+
+TEST(WebTransportConnectMoqLite, ProtocolMapsToTheProfileBothWays) {
+    EXPECT_EQ(profile_for_application_protocol("moq-lite-06"), WebTransportProfile::MoqLite06);
+    EXPECT_EQ(profile_for_application_protocol("moqt-22"), WebTransportProfile::Draft22Wt16);
+    EXPECT_EQ(application_protocol_for(WebTransportProfile::MoqLite06), "moq-lite-06");
+    EXPECT_EQ(application_protocol_for(WebTransportProfile::Draft18Wt15), "moqt-18");
+    EXPECT_THROW(profile_for_application_protocol("moq-lite-07"), std::logic_error);
+}
+
 }  // namespace

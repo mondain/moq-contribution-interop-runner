@@ -1,3 +1,4 @@
+#include "json.h"
 #include "moq/interop/http/result_schema.h"
 
 #include "moq/interop/app/publisher_capabilities.h"
@@ -106,7 +107,7 @@ std::string serialize_tap14(const storage::RunRecord& run,
                              summary.incomplete ? "incomplete" :
                              skipped ? "skip" : "pass";
         nlohmann::json diagnostic{
-            {"run_id", run.id}, {"draft", catalog.draft},
+            {"run_id", run.id}, {"draft", detail::catalog_draft_json(catalog.draft)},
             {"scenario_id", scenario}, {"result", result},
             {"scoring_profile", std::any_of(run.events.begin(), run.events.end(), [](const auto& event) {
                 return event.kind == "compatibility_error_mapping";

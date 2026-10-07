@@ -214,5 +214,22 @@ TEST(PublisherDriver, ChildDoesNotInheritTheRunnersSockets) {
     EXPECT_EQ(text.find("inherited"), std::string::npos) << text;
 }
 
+TEST(PublisherDriver, SerializesTheDraftAsAnIntegerForMoqtAndAsTextForMoqLite) {
+    DriverDirectory directory;
+    auto value = request(directory, "ok");
+    const std::pair<DraftVersion, nlohmann::json> expected[] = {
+        {DraftVersion::Draft18, 18}, {DraftVersion::Draft21, 21}, {DraftVersion::Draft22, 22},
+        {DraftVersion::MoqLite06, "moq-lite-06"}};
+    for (const auto& [draft, wanted] : expected) {
+        value.draft = draft;
+        const auto json = nlohmann::json::parse(serialize_driver_request(value));
+        EXPECT_EQ(json.at("draft"), wanted);
+    }
+    value.draft = DraftVersion::Draft22;
+    EXPECT_NE(serialize_driver_request(value).find("\"draft\":22,"), std::string::npos);
+    value.draft = DraftVersion::MoqLite06;
+    EXPECT_NE(serialize_driver_request(value).find("\"draft\":\"moq-lite-06\","), std::string::npos);
+}
+
 }  // namespace
 }  // namespace moq::interop::app

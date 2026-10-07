@@ -447,6 +447,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME draft21-d21b-live COMMAND moq-interop-draft21-d21b-live-tests)
+    add_executable(moq-interop-moqlite-start-guard-tests
+                   tests/integration/moqlite_start_guard_test.cpp)
+    target_link_libraries(moq-interop-moqlite-start-guard-tests PRIVATE
+        moq-interop-runs GTest::gtest_main)
+    target_compile_definitions(moq-interop-moqlite-start-guard-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME moqlite-start-guard COMMAND moq-interop-moqlite-start-guard-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -1076,6 +1083,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-http-api-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
+    target_include_directories(moq-interop-http-api-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-http-api-tests PRIVATE moq-interop-http
                           httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME http-api COMMAND moq-interop-http-api-tests)
@@ -1104,6 +1113,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME publisher-driver COMMAND moq-interop-publisher-driver-tests)
     add_test(NAME moqxr-adapter-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-contract.sh")
+    add_test(NAME driver-contract-schema
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/driver-contract-schema.sh")
+    set_tests_properties(driver-contract-schema PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME moqxr-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-matrix-plan.sh")
     foreach(moqxr_cmdline_draft 18 21 22)
