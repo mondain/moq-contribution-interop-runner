@@ -255,5 +255,35 @@ TEST_F(CatalogTest, AcceptsExplicitNonApplicableAndInformativeRecords) {
     EXPECT_EQ(load(value).requirements[0].applicability, Applicability::NotApplicable);
 }
 
+TEST_F(CatalogTest, AbsentReviewedFlagMeansReviewed) {
+    EXPECT_TRUE(load(valid_catalog()).requirements[0].reviewed);
+    auto value = valid_catalog();
+    value["requirements"][0]["reviewed"] = true;
+    EXPECT_TRUE(load(value).requirements[0].reviewed);
+}
+
+TEST_F(CatalogTest, RejectsUnreviewedRowInCompleteCatalogAndNonBooleanFlag) {
+    auto value = valid_catalog();
+    value["requirements"][0]["reviewed"] = false;
+    EXPECT_THROW(load(value), std::runtime_error);
+    EXPECT_THROW(load(value, CatalogLoadMode::AllowIncomplete), std::runtime_error);
+    for (const auto& invalid : {nlohmann::json("no"), nlohmann::json(0), nlohmann::json(nullptr)}) {
+        value = valid_catalog();
+        value["complete"] = false;
+        value["requirements"][0]["reviewed"] = invalid;
+        EXPECT_THROW(load(value, CatalogLoadMode::AllowIncomplete), std::runtime_error);
+    }
+}
+
+TEST_F(CatalogTest, AcceptsUnreviewedRowInIncompleteCatalogOnlyWhenAllowed) {
+    auto value = valid_catalog();
+    value["complete"] = false;
+    value["requirements"][0]["reviewed"] = false;
+    const auto catalog = load(value, CatalogLoadMode::AllowIncomplete);
+    ASSERT_EQ(catalog.requirements.size(), 1u);
+    EXPECT_FALSE(catalog.requirements[0].reviewed);
+    EXPECT_THROW(load(value, CatalogLoadMode::RequireComplete), std::runtime_error);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

@@ -1,6 +1,7 @@
 #include "moq/interop/requirements/carry_forward.h"
 #include "moq/interop/requirements/lineage.h"
 #include "moq/interop/requirements/lineage_policy.h"
+#include "moq/interop/requirements/lite_baseline.h"
 
 #include <filesystem>
 #include <fstream>
@@ -17,12 +18,19 @@ int main(int argc, char** argv) {
     const auto digests = requirements / "draft-digests.json";
     const std::string mode = argc > 1 ? argv[1] : "";
     const bool force = argc > 2 && std::string(argv[2]) == "--force";
-    if (mode != "generate" && mode != "merge" && mode != "lineage") {
-        std::cerr << "usage: moq-interop-catalog-carry generate [--force] | merge | lineage"
+    if (mode != "generate" && mode != "merge" && mode != "lineage" && mode != "lite-baseline") {
+        std::cerr << "usage: moq-interop-catalog-carry generate [--force] | merge | lineage | lite-baseline [--force]"
                      "   (generate writes an unreviewed baseline for a fresh draft; after hand review use only merge)\n";
         return 2;
     }
     try {
+        if (mode == "lite-baseline") {
+            const auto source = load_draft_source(106, docs, digests);
+            write_lite_baseline(source, LiteBaselineOptions{requirements, force});
+            std::cout << "wrote " << (requirements / "moq-lite-06.json").string() << " ("
+                      << lite_baseline_rows(source).size() << " unreviewed rows)\n";
+            return 0;
+        }
         if (mode == "lineage") {
             // Derived file: always overwritten, never hand-edited (a test regenerates it and compares).
             const auto source21 = load_draft_source(21, docs, digests);

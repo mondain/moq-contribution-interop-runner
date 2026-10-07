@@ -246,5 +246,213 @@ TEST(ScoringTest, ScoresEachDraftInputIndependently) {
     expect_ratio(result21.weighted, 0, 1);
 }
 
+// ---- score_staged -------------------------------------------------------------------------
+// Placeholder row the baseline generates: Applicable/NotTestable, reviewed == false.
+Requirement unreviewed(std::string id, Strength strength) {
+    auto placeholder = requirement(std::move(id), strength, Applicability::Applicable,
+                                   Testability::NotTestable);
+    placeholder.reviewed = false;
+    return placeholder;
+}
+
+RequirementCatalog staged_catalog(std::vector<Requirement> requirements) {
+    auto result = catalog(std::move(requirements), 106);
+    result.complete = false;
+    return result;
+}
+
+// Rows: A reviewed Must scored (10), B reviewed Should scored (3), C reviewed NotTestable,
+// D reviewed NotApplicable, E unreviewed Must (10, required), F unreviewed May (1).
+// required.possible = A + E = 20; weighted.possible = coverage.possible = 10+3+10+1 = 24.
+RequirementCatalog staged_table() {
+    return staged_catalog({
+        requirement("A", Strength::Must),
+        requirement("B", Strength::Should),
+        requirement("C", Strength::Must, Applicability::Applicable, Testability::NotTestable),
+        requirement("D", Strength::Must, Applicability::NotApplicable,
+                    Testability::NotApplicable),
+        unreviewed("E", Strength::Must),
+        unreviewed("F", Strength::May)});
+}
+
+std::vector<Outcome> staged_outcomes(OutcomeState a, OutcomeState b,
+                                     OutcomeState e = OutcomeState::NotRun,
+                                     OutcomeState f = OutcomeState::NotRun) {
+    return {{"A", a}, {"B", b}, {"C", OutcomeState::NotTestable},
+            {"D", OutcomeState::NotApplicable}, {"E", e}, {"F", f}};
+}
+
+TEST(StagedScoringTest, AllReviewedPassIsIncompleteNeverPass) {
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Pass, OutcomeState::Pass));
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 10, 20);   // A earned 10; E counts in possible only
+    expect_ratio(summary.weighted, 13, 24);   // A 10 + B 3 earned
+    expect_ratio(summary.coverage, 13, 24);   // A and B were run: 13
+}
+
+TEST(StagedScoringTest, ReviewedRequiredFailIsFail) {
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Fail, OutcomeState::Pass));
+    EXPECT_EQ(summary.verdict, RunVerdict::Fail);
+    expect_ratio(summary.required, 0, 20);
+    expect_ratio(summary.weighted, 3, 24);    // only B earned
+    expect_ratio(summary.coverage, 13, 24);   // a failed row was still run
+}
+
+TEST(StagedScoringTest, ReviewedOptionalFailIsIncomplete) {
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Pass, OutcomeState::Fail));
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 10, 20);
+    expect_ratio(summary.weighted, 10, 24);   // B failed: only A earned
+    expect_ratio(summary.coverage, 13, 24);
+}
+
+TEST(StagedScoringTest, ReviewedNotRunIsIncomplete) {
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Pass, OutcomeState::NotRun));
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 10, 20);
+    expect_ratio(summary.weighted, 10, 24);
+    expect_ratio(summary.coverage, 10, 24);   // B not run: only A (10)
+}
+
+TEST(StagedScoringTest, ReviewedRequiredFailBeatsNotRun) {
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Fail, OutcomeState::NotRun));
+    EXPECT_EQ(summary.verdict, RunVerdict::Fail);
+}
+
+TEST(StagedScoringTest, ScoredRowDeclaredNotApplicableLeavesDenominators) {
+    // As score(): a scored row the run declares NotApplicable leaves every denominator.
+    const auto summary = score_staged(staged_table(),
+        staged_outcomes(OutcomeState::Pass, OutcomeState::NotApplicable));
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 10, 20);
+    expect_ratio(summary.weighted, 10, 21);   // possible 24 - 3
+    expect_ratio(summary.coverage, 10, 21);
+}
+
+TEST(StagedScoringTest, EveryNonNotRunOutcomeForUnreviewedRowIsError) {
+    for (const auto state : {OutcomeState::Pass, OutcomeState::Fail, OutcomeState::NotTestable,
+                             OutcomeState::NotApplicable}) {
+        expect_error(score_staged(staged_table(),
+            staged_outcomes(OutcomeState::Pass, OutcomeState::Pass, state)));
+        expect_error(score_staged(staged_table(),
+            staged_outcomes(OutcomeState::Pass, OutcomeState::Pass, OutcomeState::NotRun, state)));
+    }
+}
+
+TEST(StagedScoringTest, DuplicateUnknownAndMissingOutcomesAreErrors) {
+    auto duplicate = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    duplicate.push_back({"E", OutcomeState::NotRun});
+    expect_error(score_staged(staged_table(), duplicate));
+
+    auto duplicate_reviewed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    duplicate_reviewed.push_back({"A", OutcomeState::Pass});
+    // Two Pass outcomes for a scored row are valid in score() (evidence accumulates).
+    EXPECT_EQ(score_staged(staged_table(), duplicate_reviewed).verdict, RunVerdict::Incomplete);
+
+    auto mixed_reviewed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    mixed_reviewed.push_back({"A", OutcomeState::NotRun});
+    expect_error(score_staged(staged_table(), mixed_reviewed));
+
+    auto unknown = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    unknown.push_back({"nope", OutcomeState::NotRun});
+    expect_error(score_staged(staged_table(), unknown));
+
+    auto missing_unreviewed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    missing_unreviewed.erase(missing_unreviewed.begin() + 4);  // E
+    expect_error(score_staged(staged_table(), missing_unreviewed));
+
+    auto missing_reviewed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    missing_reviewed.erase(missing_reviewed.begin());          // A
+    expect_error(score_staged(staged_table(), missing_reviewed));
+}
+
+TEST(StagedScoringTest, WrongStatesForReviewedRowKindsAreErrors) {
+    auto not_testable_passed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    not_testable_passed[2].state = OutcomeState::Pass;         // C is NotTestable
+    expect_error(score_staged(staged_table(), not_testable_passed));
+
+    auto not_applicable_passed = staged_outcomes(OutcomeState::Pass, OutcomeState::Pass);
+    not_applicable_passed[3].state = OutcomeState::Pass;       // D is NotApplicable
+    expect_error(score_staged(staged_table(), not_applicable_passed));
+
+    expect_error(score_staged(staged_table(),
+        staged_outcomes(OutcomeState::NotTestable, OutcomeState::Pass)));
+}
+
+TEST(StagedScoringTest, InvalidCatalogRowsAreErrors) {
+    expect_error(score_staged(staged_catalog({unreviewed("E", Strength::Must),
+                                              unreviewed("E", Strength::May)}),
+        std::vector<Outcome>{{"E", OutcomeState::NotRun}}));
+    expect_error(score_staged(staged_catalog({requirement("", Strength::Must)}),
+        std::vector<Outcome>{{"", OutcomeState::Pass}}));
+}
+
+TEST(StagedScoringTest, CompleteCatalogIsErrorAndScoreStillRejectsIncomplete) {
+    auto complete_catalog = staged_table();
+    complete_catalog.complete = true;
+    expect_error(score_staged(complete_catalog,
+        staged_outcomes(OutcomeState::Pass, OutcomeState::Pass)));
+    // score() is untouched: the same incomplete catalog is an Error there.
+    expect_error(score(staged_table(), staged_outcomes(OutcomeState::Pass, OutcomeState::Pass)));
+}
+
+TEST(StagedScoringTest, ZeroUnreviewedRowsStillNeverPasses) {
+    const auto input = staged_catalog({requirement("A", Strength::Must),
+                                       requirement("B", Strength::Should)});
+    const std::vector<Outcome> outcomes{{"A", OutcomeState::Pass}, {"B", OutcomeState::Pass}};
+    const auto summary = score_staged(input, outcomes);
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 10, 10);
+    expect_ratio(summary.weighted, 13, 13);
+    expect_ratio(summary.coverage, 13, 13);
+    // The same rows in a complete catalog pass.
+    EXPECT_EQ(score(catalog({requirement("A", Strength::Must),
+                             requirement("B", Strength::Should)}), outcomes).verdict,
+              RunVerdict::Pass);
+}
+
+TEST(StagedScoringTest, OnlyUnreviewedRows) {
+    // MustNot 10 required, ShouldNot 3, May 1: required 0/10, weighted 0/14, coverage 0/14.
+    const auto input = staged_catalog({unreviewed("U1", Strength::MustNot),
+                                       unreviewed("U2", Strength::ShouldNot),
+                                       unreviewed("U3", Strength::May)});
+    const auto summary = score_staged(input, std::vector<Outcome>{
+        {"U1", OutcomeState::NotRun}, {"U2", OutcomeState::NotRun}, {"U3", OutcomeState::NotRun}});
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 0, 10);
+    expect_ratio(summary.weighted, 0, 14);
+    expect_ratio(summary.coverage, 0, 14);
+}
+
+TEST(StagedScoringTest, ReviewedNotTestableAndNotApplicableRowsOnly) {
+    const auto input = staged_catalog({
+        requirement("C", Strength::Must, Applicability::Applicable, Testability::NotTestable),
+        requirement("D", Strength::Should, Applicability::Informative,
+                    Testability::NotApplicable)});
+    const auto summary = score_staged(input, std::vector<Outcome>{
+        {"C", OutcomeState::NotTestable}, {"D", OutcomeState::NotApplicable}});
+    EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
+    expect_ratio(summary.required, 0, 0);
+    expect_ratio(summary.weighted, 0, 0);
+    expect_ratio(summary.coverage, 0, 0);
+}
+
+TEST(StagedScoringTest, StagedCountsOverTheTable) {
+    // 6 rows; reviewed A B C D; unreviewed E (Must, required) and F (May).
+    const auto counts = staged_counts(staged_table());
+    EXPECT_EQ(counts.rows, 6u);
+    EXPECT_EQ(counts.reviewed, 4u);
+    EXPECT_EQ(counts.unreviewed, 2u);
+    EXPECT_EQ(counts.unreviewed_required, 1u);
+    const auto none = staged_counts(staged_catalog({}));
+    EXPECT_EQ(none.rows, 0u);
+    EXPECT_EQ(none.unreviewed_required, 0u);
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

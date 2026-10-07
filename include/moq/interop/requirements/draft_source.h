@@ -18,6 +18,10 @@ struct DraftSource {
     std::string_view lines(std::size_t first, std::size_t last) const;
 };
 
+// File name of the draft text under docs_root: "draft-ietf-moq-transport-<n>.txt" for 18/21/22,
+// "draft-lcurley-moq-lite-06.txt" for 106. Throws std::invalid_argument for any other number.
+std::string draft_source_filename(unsigned draft);
+
 DraftSource load_draft_source(unsigned draft, const std::filesystem::path& docs_root,
                               const std::filesystem::path& digest_file);
 

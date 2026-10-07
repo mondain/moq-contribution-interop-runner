@@ -33,7 +33,7 @@ struct Heading {
 // crosses a page break is contiguous. Original line numbers are preserved on kept lines.
 std::vector<Line> clean_lines(const DraftSource& source) {
     static const std::regex footer(R"(\[Page [0-9]+\]\s*$)");
-    static const std::regex header(R"(^\f?Internet-Draft\s+moq-transport)");
+    static const std::regex header(R"(^\f?Internet-Draft\s+(moq-transport|moql)\b)");
     std::vector<Line> raw;
     for (std::size_t n = 1; n <= source.line_offsets.size(); ++n) {
         std::string text(source.lines(n, n));
@@ -243,6 +243,36 @@ std::string normalize_text(std::string_view raw) {
         }
     }
     return result;
+}
+
+std::string requirement_id(const std::string& prefix, const std::string& section,
+                           Strength strength, unsigned sequence) {
+    std::string dashed = section;
+    std::replace(dashed.begin(), dashed.end(), '.', '-');
+    std::ostringstream id;
+    id << prefix << '-' << dashed << '-' << strength_token(strength) << '-' << std::setfill('0')
+       << std::setw(3) << sequence;
+    return id.str();
+}
+
+void write_catalog_file(const std::filesystem::path& path, const DraftSource& source,
+                        const std::vector<Requirement>& rows, bool complete) {
+    Json json_rows = Json::array();
+    for (const auto& row : rows) {
+        OccurrenceContext target;
+        target.section = row.source.section;
+        target.first_line = row.source.first_line;
+        target.last_line = row.source.last_line;
+        target.occurrence_on_line = row.source.occurrence;
+        auto json = row_json(row.id, row.strength, target, row.source.clause, row.actor, row.summary,
+                             row.applicability, row.testability, row.scenarios, row.evaluators,
+                             row.rationale);
+        if (!row.reviewed) {
+            json["reviewed"] = false;
+        }
+        json_rows.push_back(std::move(json));
+    }
+    write_json(path, catalog_json(source, std::move(json_rows), complete));
 }
 
 std::vector<OccurrenceContext> extract_contexts(const DraftSource& source) {
@@ -547,12 +577,8 @@ void write_catalog_outputs(const CarryResult& result, const RequirementCatalog& 
         }
         const bool carried = match.change != DeltaClass::New && !match.sources.empty();
         const auto make_id = [&](Strength strength) {
-            std::string section = target.section;
-            std::replace(section.begin(), section.end(), '.', '-');
-            std::ostringstream id;
-            id << "D" << new_source.number << '-' << section << '-' << strength_token(strength) << '-'
-               << std::setfill('0') << std::setw(3) << ++counter;
-            return id.str();
+            return requirement_id("D" + std::to_string(new_source.number), target.section, strength,
+                                  ++counter);
         };
         const bool reviewed = tags.empty() &&
             (match.change == DeltaClass::Identical || match.change == DeltaClass::Moved);

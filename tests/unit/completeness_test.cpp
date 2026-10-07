@@ -199,5 +199,119 @@ TEST(CompletenessTest, UnknownEvidenceKindCannotClaimCoverage) {
         }));
 }
 
+// ---- audit_completeness_staged --------------------------------------------------------------
+ExecutableBinding lite_binding(std::string id, unsigned draft = 106) {
+    return {draft, std::move(id), "scenario", "evaluator", {"request_observed"}};
+}
+
+Requirement unreviewed_row(std::string id, Strength strength) {
+    auto placeholder = row(std::move(id), strength, Testability::NotTestable);
+    placeholder.scenarios.clear();
+    placeholder.evaluators.clear();
+    placeholder.reviewed = false;
+    return placeholder;
+}
+
+bool has_finding(const CompletenessReport& report, const std::string& code, bool blocking) {
+    return std::any_of(report.findings.begin(), report.findings.end(), [&](const auto& finding) {
+        return finding.code == code && finding.blocking == blocking;
+    });
+}
+
+// R1 reviewed Must Testable, R2 reviewed Should Testable, R3 reviewed Must NotTestable,
+// U1 unreviewed Must, U2 unreviewed May.
+RequirementCatalog staged_lite_catalog(bool with_unreviewed = true) {
+    RequirementCatalog catalog{106, "source", false,
+        {row("R1", Strength::Must), row("R2", Strength::Should),
+         row("R3", Strength::Must, Testability::NotTestable)}};
+    if (with_unreviewed) {
+        catalog.requirements.push_back(unreviewed_row("U1", Strength::Must));
+        catalog.requirements.push_back(unreviewed_row("U2", Strength::May));
+    }
+    return catalog;
+}
+
+TEST(StagedCompletenessTest, PlannedButUnboundScenariosAreNonBlocking) {
+    const auto report = audit_completeness_staged(staged_lite_catalog(), {}, kSyntheticScenarios);
+    EXPECT_EQ(report.draft, 106u);
+    EXPECT_EQ(report.required_total, 1u);      // only R1 is Applicable+Testable and Must
+    EXPECT_EQ(report.required_covered, 0u);
+    EXPECT_EQ(report.optional_total, 1u);      // R2
+    EXPECT_EQ(report.optional_covered, 0u);
+    EXPECT_EQ(report.unreviewed_total, 2u);    // U1, U2
+    EXPECT_EQ(report.unreviewed_required, 1u); // U1
+    EXPECT_FALSE(report.complete());
+    EXPECT_FALSE(has_finding(report, "incomplete_catalog", true));
+    EXPECT_TRUE(has_finding(report, "missing_required_evaluator", false));
+    EXPECT_TRUE(has_finding(report, "missing_optional_evaluator", false));
+    EXPECT_TRUE(has_finding(report, "unreviewed_rows", false));
+    EXPECT_TRUE(std::none_of(report.findings.begin(), report.findings.end(),
+                             [](const auto& finding) { return finding.blocking; }));
+    const auto summary = std::find_if(report.findings.begin(), report.findings.end(),
+        [](const auto& finding) { return finding.code == "unreviewed_rows"; });
+    ASSERT_NE(summary, report.findings.end());
+    EXPECT_NE(summary->detail.find('2'), std::string::npos);
+}
+
+TEST(StagedCompletenessTest, FullyBoundWithUnreviewedRowsIsStillIncomplete) {
+    const std::vector bindings{lite_binding("R1"), lite_binding("R2")};
+    const auto report = audit_completeness_staged(staged_lite_catalog(), bindings,
+                                                  kSyntheticScenarios);
+    EXPECT_EQ(report.required_total, report.required_covered);
+    EXPECT_EQ(report.unreviewed_total, 2u);
+    EXPECT_FALSE(report.complete());
+}
+
+TEST(StagedCompletenessTest, FullyBoundWithZeroUnreviewedRowsIsComplete) {
+    const std::vector bindings{lite_binding("R1"), lite_binding("R2")};
+    const auto report = audit_completeness_staged(staged_lite_catalog(false), bindings,
+                                                  kSyntheticScenarios);
+    EXPECT_EQ(report.required_total, 1u);
+    EXPECT_EQ(report.required_covered, 1u);
+    EXPECT_EQ(report.optional_covered, 1u);
+    EXPECT_EQ(report.unreviewed_total, 0u);
+    EXPECT_TRUE(report.findings.empty());
+    EXPECT_TRUE(report.complete());
+}
+
+TEST(StagedCompletenessTest, ZeroUnreviewedButMissingRequiredCoverageIsIncomplete) {
+    const auto report = audit_completeness_staged(staged_lite_catalog(false), {},
+                                                  kSyntheticScenarios);
+    EXPECT_EQ(report.unreviewed_total, 0u);
+    EXPECT_FALSE(report.complete());
+}
+
+TEST(StagedCompletenessTest, WrongDraftAndOrphanBindingsStayBlocking) {
+    const std::vector bindings{lite_binding("R1", 18), lite_binding("ghost")};
+    const auto report = audit_completeness_staged(staged_lite_catalog(), bindings,
+                                                  kSyntheticScenarios);
+    EXPECT_TRUE(has_finding(report, "wrong_draft_binding", true));
+    EXPECT_TRUE(has_finding(report, "orphan_binding", true));
+    EXPECT_FALSE(report.complete());
+}
+
+TEST(StagedCompletenessTest, BindingOnUnreviewedRowIsBlockingMismatch) {
+    const std::vector bindings{lite_binding("U1")};
+    const auto report = audit_completeness_staged(staged_lite_catalog(), bindings,
+                                                  kSyntheticScenarios);
+    EXPECT_TRUE(has_finding(report, "mismatched_binding", true));
+    const auto it = std::find_if(report.findings.begin(), report.findings.end(), [](const auto& f) {
+        return f.code == "mismatched_binding";
+    });
+    ASSERT_NE(it, report.findings.end());
+    EXPECT_NE(it->detail.find("unreviewed"), std::string::npos);
+    EXPECT_FALSE(report.complete());
+}
+
+TEST(StagedCompletenessTest, AuditCompletenessIsUnchangedForIncompleteCatalogs) {
+    const auto report = audit_completeness(staged_lite_catalog(), {}, kSyntheticScenarios);
+    EXPECT_TRUE(has_finding(report, "incomplete_catalog", true));
+    EXPECT_TRUE(has_finding(report, "missing_required_evaluator", true));
+    EXPECT_EQ(report.unreviewed_total, 0u);
+    EXPECT_EQ(report.unreviewed_required, 0u);
+    EXPECT_FALSE(has_finding(report, "unreviewed_rows", false));
+    EXPECT_FALSE(report.complete());
+}
+
 }  // namespace
 }  // namespace moq::interop::requirements

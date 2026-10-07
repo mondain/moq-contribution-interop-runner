@@ -3,12 +3,22 @@
 #include "moq/interop/app/version.h"
 #include "moq/interop/http/server.h"
 
+#include "moq/interop/requirements/completeness.h"
+
 #include <nlohmann/json_fwd.hpp>
 
 #include <span>
 #include <string>
+#include <vector>
 
 namespace moq::interop::http::detail {
+
+// The executable bindings and the completeness audit the server reports for a configured catalog.
+struct CatalogAudit {
+    std::vector<requirements::ExecutableBinding> bindings;
+    requirements::CompletenessReport report;
+};
+CatalogAudit audit_catalog(const requirements::RequirementCatalog& catalog);
 
 nlohmann::json error_json(const ApiError& error);
 nlohmann::json build_json(const app::BuildInfo& build);

@@ -1,3 +1,4 @@
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/version.h"
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/requirements/catalog.h"
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,7 +45,7 @@ struct Options {
 };
 
 void usage() {
-    std::cerr << "Usage: moq-interop-audit --draft 18|21|22 [--format text|json] "
+    std::cerr << "Usage: moq-interop-audit --draft 18|21|22|moq-lite-06 [--format text|json] "
                  "[--docs DIR] [--requirements DIR] [--database PATH]\n";
 }
 
@@ -57,7 +59,9 @@ Options parse(int argc, char* argv[]) {
             if (value == "18") result.draft = 18;
             else if (value == "21") result.draft = 21;
             else if (value == "22") result.draft = 22;
-            else throw std::invalid_argument("draft must be 18, 21 or 22");
+            else if (value == moq::interop::app::draft_text(moq::interop::app::DraftVersion::MoqLite06))
+                result.draft = moq::interop::app::draft_number(moq::interop::app::DraftVersion::MoqLite06);
+            else throw std::invalid_argument("draft must be 18, 21, 22 or moq-lite-06");
         } else if (flag == "--format") {
             if (value != "text" && value != "json")
                 throw std::invalid_argument("format must be text or json");
@@ -76,6 +80,80 @@ Options parse(int argc, char* argv[]) {
     return result;
 }
 
+bool is_lite(unsigned draft) {
+    const auto parsed = moq::interop::app::parse_draft(draft);
+    return parsed && !moq::interop::app::is_moqt(*parsed);
+}
+
+// The staged audit of the moq-lite-06 catalog: incomplete by design, never a pass. No executable
+// bindings exist yet (a later sub-project supplies them), so every reviewed Applicable+Testable row is a
+// non-blocking "missing evaluator" finding and the exit status reflects only real catalog errors.
+int audit_lite(const Options& options) {
+    using namespace moq::interop;
+    if (options.database)
+        throw std::invalid_argument("--database does not apply to moq-lite-06");
+    const std::string name(app::draft_text(app::DraftVersion::MoqLite06));
+    const auto source = requirements::load_draft_source(
+        options.draft, options.docs, options.requirements / "draft-digests.json");
+    const auto catalog = requirements::RequirementCatalog::load(
+        source, options.requirements / (name + ".json"),
+        requirements::CatalogLoadMode::AllowIncomplete);
+    const auto source_audit = requirements::audit_normative_occurrences_staged(source, catalog);
+    const std::vector<requirements::ExecutableBinding> no_bindings;
+    const auto report = requirements::audit_completeness_staged(
+        catalog, no_bindings, app::executable_scenarios(options.draft));
+    const auto counts = requirements::staged_counts(catalog);
+    std::set<std::string> planned;
+    for (const auto& row : catalog.requirements)
+        planned.insert(row.scenarios.begin(), row.scenarios.end());
+    const bool blocking = std::any_of(report.findings.begin(), report.findings.end(),
+        [](const auto& finding) { return finding.blocking; });
+    const bool ok = source_audit.ok() && !blocking;
+    const std::string verdict = "STAGED: incomplete catalog (not a pass)";
+    if (options.format == "text") {
+        std::cout << "Draft " << name << " source " << source.sha256 << '\n'
+                  << "Rows: " << counts.rows << '\n'
+                  << "Reviewed: " << counts.reviewed << '\n'
+                  << "Unreviewed: " << counts.unreviewed << '\n'
+                  << "Unreviewed required (MUST/MUST NOT): " << counts.unreviewed_required << '\n'
+                  << "Required applicable testable (reviewed rows): " << report.required_total << '\n'
+                  << "Planned scenarios: " << planned.size() << '\n'
+                  << "Source-keyword audit: " << (source_audit.ok() ? "complete" : "failed") << '\n'
+                  << "Findings: " << report.findings.size() << '\n';
+        for (const auto& finding : report.findings) {
+            std::cout << "  [" << (finding.blocking ? "blocking" : "non-blocking") << "] "
+                      << finding.code;
+            if (!finding.requirement_id.empty()) std::cout << ' ' << finding.requirement_id;
+            std::cout << ": " << finding.detail << '\n';
+        }
+        std::cout << verdict << '\n';
+    } else {
+        Json findings = Json::array();
+        for (const auto& finding : report.findings) {
+            findings.push_back({{"code", finding.code},
+                                {"requirement_id", finding.requirement_id},
+                                {"detail", finding.detail},
+                                {"blocking", finding.blocking}});
+        }
+        const Json output = {
+            {"schema_version", 1}, {"draft", name},
+            {"source_sha256", source.sha256},
+            {"source_audit", {{"complete", source_audit.ok()},
+                              {"missing_count", source_audit.missing.size()},
+                              {"multiply_classified_count", source_audit.multiply_classified.size()},
+                              {"errors", source_audit.errors}}},
+            {"rows", counts.rows}, {"reviewed", counts.reviewed},
+            {"unreviewed", counts.unreviewed},
+            {"unreviewed_required", counts.unreviewed_required},
+            {"required_applicable_testable", report.required_total},
+            {"planned_scenarios", planned.size()},
+            {"staged", true}, {"complete", false}, {"verdict", verdict},
+            {"findings", std::move(findings)}};
+        std::cout << output.dump(2) << '\n';
+    }
+    return ok ? 0 : 1;
+}
+
 const char* classification(const moq::interop::requirements::Requirement& row) {
     if (row.applicability == Applicability::Informative) return "informative";
     if (row.applicability == Applicability::NotApplicable) return "not_applicable";
@@ -88,6 +166,7 @@ const char* classification(const moq::interop::requirements::Requirement& row) {
 int main(int argc, char* argv[]) {
     try {
         const auto options = parse(argc, argv);
+        if (is_lite(options.draft)) return audit_lite(options);
         const auto source = moq::interop::requirements::load_draft_source(
             options.draft, options.docs,
             options.requirements / "draft-digests.json");
@@ -214,6 +293,7 @@ int main(int argc, char* argv[]) {
         }
         return static_complete && (!execution || execution->consistent()) ? 0 : 1;
     } catch (const std::exception& error) {
+        // A loader or argument error exits 2 with the usage text, for every draft (unchanged for 18/21/22).
         std::cerr << "moq-interop-audit: " << error.what() << '\n';
         usage();
         return 2;

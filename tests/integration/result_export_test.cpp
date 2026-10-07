@@ -1,3 +1,5 @@
+#include "detail.h"
+#include "json.h"
 #include "moq/interop/http/result_schema.h"
 
 #include <gtest/gtest.h>
@@ -252,6 +254,108 @@ TEST(ResultExport, RejectsMismatchedCatalogDraft) {
     wrong.draft = 21;
     EXPECT_THROW(serialize_result(run(), wrong), std::invalid_argument);
     EXPECT_THROW(serialize_tap14(run(), wrong), std::invalid_argument);
+}
+
+// A moq-lite-06 catalog (draft number 106) with a reviewed row and a still-unreviewed baseline row.
+requirements::RequirementCatalog lite_catalog() {
+    auto reviewed = requirement("L06-1", requirements::Strength::Must,
+                                requirements::Applicability::Applicable,
+                                requirements::Testability::Testable, "lite-scenario");
+    auto pending = requirement("L06-2", requirements::Strength::MustNot,
+                               requirements::Applicability::Applicable,
+                               requirements::Testability::Testable, "lite-scenario");
+    pending.reviewed = false;
+    return {106, "sha256-lite", false, {std::move(reviewed), std::move(pending)}};
+}
+
+storage::RunRecord lite_run() {
+    auto value = run();
+    value.config.draft = app::DraftVersion::MoqLite06;
+    value.config.scenario_ids = {"lite-scenario"};
+    value.outcomes = {{"L06-1", requirements::OutcomeState::NotRun},
+                      {"L06-2", requirements::OutcomeState::NotRun}};
+    value.events.clear();
+    value.score = requirements::ScoreSummary{requirements::RunVerdict::Incomplete,
+                                             {0, 20}, {0, 20}, {0, 20}};
+    return value;
+}
+
+TEST(ResultExport, LiteCatalogSerializesTheDraftNameEverywhere) {
+    const auto lite = lite_catalog();
+    const auto document = serialize_result(lite_run(), lite);
+    EXPECT_EQ(document.dump().find("106"), std::string::npos) << document.dump();
+    EXPECT_EQ(document.at("run").at("config").at("draft"), "moq-lite-06");
+    ASSERT_EQ(document.at("requirements").size(), 2u);
+
+    const auto tap = serialize_tap14(lite_run(), lite);
+    EXPECT_NE(tap.find("\"draft\":\"moq-lite-06\""), std::string::npos) << tap;
+    EXPECT_EQ(tap.find("106"), std::string::npos) << tap;
+
+    const auto summary = detail::catalog_json(lite);
+    EXPECT_EQ(summary.at("draft"), "moq-lite-06");
+    EXPECT_EQ(summary.at("requirement_count"), 2);
+    EXPECT_FALSE(summary.at("complete").get<bool>());
+
+    const auto page = detail::render_run_detail(lite_run(), lite, {});
+    EXPECT_NE(page.find("Draft moq-lite-06;"), std::string::npos);
+    EXPECT_EQ(page.find("Draft 106"), std::string::npos);
+}
+
+TEST(ResultExport, LiteCatalogRowsReviewedFalseSerializeWithoutThrowing) {
+    const auto lite = lite_catalog();
+    EXPECT_NO_THROW({
+        const auto document = serialize_result(lite_run(), lite);
+        EXPECT_EQ(document.at("requirements").at(1).at("id"), "L06-2");
+        EXPECT_EQ(document.at("requirements").at(1).at("outcome"), "not_run");
+        (void)serialize_tap14(lite_run(), lite);
+        (void)detail::render_run_detail(lite_run(), lite, {});
+    });
+}
+
+TEST(ResultExport, LiteCatalogAuditIsStagedWithoutBindings) {
+    const auto selection = detail::audit_catalog(lite_catalog());
+    EXPECT_TRUE(selection.bindings.empty());
+    EXPECT_EQ(selection.report.unreviewed_total, 1u);
+    EXPECT_EQ(selection.report.unreviewed_required, 1u);
+    for (const auto& finding : selection.report.findings) EXPECT_FALSE(finding.blocking) << finding.code;
+    EXPECT_FALSE(selection.report.complete());
+}
+
+TEST(ResultExport, MoqtCatalogAuditKeepsBindingsAndTheNonStagedAudit) {
+    auto complete = catalog();
+    complete.draft = 18;
+    const auto selection = detail::audit_catalog(complete);
+    EXPECT_FALSE(selection.bindings.empty());
+    EXPECT_EQ(selection.report.unreviewed_total, 0u);
+    // Non-staged: the synthetic rows have no real bindings, so required rows are blocking findings.
+    EXPECT_TRUE(std::any_of(selection.report.findings.begin(), selection.report.findings.end(),
+                            [](const auto& finding) { return finding.blocking; }));
+}
+
+TEST(ResultExport, RejectsALiteRunAgainstAMoqtCatalogAndBack) {
+    EXPECT_THROW(serialize_result(lite_run(), catalog()), std::invalid_argument);
+    EXPECT_THROW(serialize_tap14(run(), lite_catalog()), std::invalid_argument);
+}
+
+TEST(ResultExport, DraftCellShowsNumbersAndNamesAndNeverThrows) {
+    EXPECT_EQ(detail::draft_cell(nlohmann::json(22)), "22");
+    EXPECT_EQ(detail::draft_cell(nlohmann::json("moq-lite-06")), "moq-lite-06");
+    EXPECT_EQ(detail::draft_cell(nlohmann::json(nullptr)), "");
+    EXPECT_EQ(detail::draft_cell(nlohmann::json::array()), "");
+}
+
+TEST(ResultExport, RunListShowsALiteCompletenessEntryByName) {
+    const nlohmann::json completeness = {
+        {"drafts", nlohmann::json::array({{
+            {"draft", detail::catalog_draft_json(106)},
+            {"required_covered", 0}, {"required_total", 3},
+            {"optional_covered", 0}, {"optional_total", 1},
+            {"transports", nlohmann::json::array({{
+                {"transport", "native-quic"}, {"run_count", 0},
+                {"observed_requirement_count", 0}}})}}})}};
+    std::string html;
+    EXPECT_NO_THROW(html = detail::render_run_list({}, completeness));
+    EXPECT_NE(html.find("<td>moq-lite-06</td>"), std::string::npos);
 }
 
 }  // namespace

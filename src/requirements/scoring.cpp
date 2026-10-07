@@ -91,18 +91,27 @@ bool exactly_not_applicable(const Observations& observations) {
            observations.not_testable == 0 && observations.not_applicable == 1;
 }
 
-}  // namespace
+bool is_staged_unreviewed(const Requirement& requirement, bool staged) {
+    return staged && !requirement.reviewed;
+}
 
-std::uint64_t score_weight(Strength strength) { return weight(strength); }
+// An unreviewed row carries exactly one NotRun outcome and nothing else.
+bool exactly_not_run(const Observations& observations) {
+    return !observations.pass && !observations.fail && observations.not_run == 1 &&
+           observations.not_testable == 0 && observations.not_applicable == 0;
+}
 
-ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> outcomes) {
-    if (!catalog.complete) return error_summary();
+// Shared by score() (staged == false: complete catalogs only, every row classified) and
+// score_staged() (staged == true: incomplete catalogs only, unreviewed rows allowed).
+ScoreSummary score_rows(const RequirementCatalog& catalog, std::span<const Outcome> outcomes,
+                        bool staged) {
+    if (catalog.complete == staged) return error_summary();
 
     std::map<std::string, const Requirement*> requirements;
     for (const auto& requirement : catalog.requirements) {
         if (requirement.id.empty() || weight(requirement.strength) == 0 ||
-            (!is_scored(requirement) && !is_not_testable(requirement) &&
-             !is_not_applicable(requirement)) ||
+            (!is_staged_unreviewed(requirement, staged) && !is_scored(requirement) &&
+             !is_not_testable(requirement) && !is_not_applicable(requirement)) ||
             !requirements.emplace(requirement.id, &requirement).second) {
             return error_summary();
         }
@@ -125,6 +134,15 @@ ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> o
         if (found == observed.end()) return error_summary();
         const auto& observations = found->second;
 
+        if (is_staged_unreviewed(requirement, staged)) {
+            if (!exactly_not_run(observations)) return error_summary();
+            const auto requirement_weight = weight(requirement.strength);
+            summary.weighted.possible += requirement_weight;
+            summary.coverage.possible += requirement_weight;
+            if (is_required(requirement.strength)) summary.required.possible += requirement_weight;
+            incomplete = true;
+            continue;
+        }
         if (is_not_testable(requirement)) {
             if (!exactly_not_testable(observations)) return error_summary();
             continue;
@@ -162,10 +180,35 @@ ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> o
 
     if (required_failed) {
         summary.verdict = RunVerdict::Fail;
-    } else if (incomplete) {
+    } else if (incomplete || staged) {
         summary.verdict = RunVerdict::Incomplete;
     }
     return summary;
+}
+
+}  // namespace
+
+std::uint64_t score_weight(Strength strength) { return weight(strength); }
+
+ScoreSummary score(const RequirementCatalog& catalog, std::span<const Outcome> outcomes) {
+    return score_rows(catalog, outcomes, false);
+}
+
+ScoreSummary score_staged(const RequirementCatalog& catalog, std::span<const Outcome> outcomes) {
+    return score_rows(catalog, outcomes, true);
+}
+
+StagedCounts staged_counts(const RequirementCatalog& catalog) {
+    StagedCounts counts{catalog.requirements.size(), 0, 0, 0};
+    for (const auto& requirement : catalog.requirements) {
+        if (requirement.reviewed) {
+            ++counts.reviewed;
+        } else {
+            ++counts.unreviewed;
+            if (is_required(requirement.strength)) ++counts.unreviewed_required;
+        }
+    }
+    return counts;
 }
 
 }  // namespace moq::interop::requirements

@@ -140,6 +140,7 @@ add_library(moq-interop-requirements
     src/requirements/completeness.cpp
     src/requirements/scoring.cpp
     src/requirements/carry_forward.cpp
+    src/requirements/lite_baseline.cpp
     src/requirements/lineage.cpp
     src/requirements/lineage_policy.cpp
     src/requirements/lineage_translate.cpp
@@ -986,6 +987,19 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-carry-forward-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
+    add_executable(moq-interop-lite-baseline-tests tests/unit/lite_baseline_test.cpp)
+    target_compile_definitions(moq-interop-lite-baseline-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lite-baseline-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME lite-baseline COMMAND moq-interop-lite-baseline-tests)
+    add_executable(moq-interop-lite-catalog-tests tests/unit/lite_catalog_test.cpp)
+    target_compile_definitions(moq-interop-lite-catalog-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lite-catalog-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME lite-catalog COMMAND moq-interop-lite-catalog-tests)
+    add_test(NAME lite-catalog-schema
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-catalog-schema.sh")
+    set_tests_properties(lite-catalog-schema PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(moq-interop-lineage-tests tests/unit/lineage_test.cpp)
     target_link_libraries(moq-interop-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lineage COMMAND moq-interop-lineage-tests)
@@ -1076,6 +1090,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
                      "$<TARGET_FILE:moq-interop-runner>"
                      "$<TARGET_FILE:moq-interop-audit>"
                      "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
+    add_test(NAME audit-cli-moqlite
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-moqlite.sh"
+                     "$<TARGET_FILE:moq-interop-audit>")
+    set_tests_properties(audit-cli-moqlite PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
                      --check-only)
@@ -1097,6 +1115,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
 
     add_executable(moq-interop-result-export-tests
                    tests/integration/result_export_test.cpp)
+    target_include_directories(moq-interop-result-export-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-result-export-tests PRIVATE
         moq-interop-http nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME result-export COMMAND moq-interop-result-export-tests)

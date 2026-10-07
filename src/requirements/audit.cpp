@@ -75,13 +75,15 @@ std::vector<NormativeOccurrence> scan_normative_occurrences(const DraftSource& s
     return occurrences;
 }
 
-AuditReport audit_normative_occurrences(const DraftSource& source,
-                                         const RequirementCatalog& catalog) {
+namespace {
+
+AuditReport audit_occurrences(const DraftSource& source, const RequirementCatalog& catalog,
+                              bool require_complete) {
     AuditReport report;
     if (catalog.draft != source.number || catalog.source_sha256 != source.sha256) {
         report.errors.push_back("Catalog draft or SHA-256 does not match source");
     }
-    if (!catalog.complete) {
+    if (require_complete && !catalog.complete) {
         report.errors.push_back("Incomplete catalog cannot pass the full-corpus audit");
     }
     const auto occurrences = scan_normative_occurrences(source);
@@ -124,6 +126,18 @@ AuditReport audit_normative_occurrences(const DraftSource& source,
         }
     }
     return report;
+}
+
+}  // namespace
+
+AuditReport audit_normative_occurrences(const DraftSource& source,
+                                         const RequirementCatalog& catalog) {
+    return audit_occurrences(source, catalog, true);
+}
+
+AuditReport audit_normative_occurrences_staged(const DraftSource& source,
+                                               const RequirementCatalog& catalog) {
+    return audit_occurrences(source, catalog, false);
 }
 
 }  // namespace moq::interop::requirements
