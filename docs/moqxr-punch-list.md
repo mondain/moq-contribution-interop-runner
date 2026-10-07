@@ -840,9 +840,11 @@ These come out of the same results but belong to the runner repository:
 - **Two draft 22 ids that may need moqxr `--forward 1`.** The imquic adapter (F1) found that
   `d22-publish-established-subscriber-sends-publish-state-notify` and
   `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` wait for the publisher's own
-  PUBLISH; the moqxr adapter runs both `--forward 0`, which likely explains their `not_run`
-  against moqxr. Not changed (the moqxr command lines are pinned); a follow-up for the moqxr
-  adapter.
+  PUBLISH; the moqxr adapter runs both `--forward 0`, which likely explains why their rows,
+  D22-9-10-MUST-381 and D22-3-6-3-MUST-NOT-086, are `not_run` against moqxr. Those rows may
+  therefore be hidden by the adapter mode rather than not applicable (UNVERIFIED: not re-run
+  with `--forward 1`). Not changed (the moqxr command lines are pinned); a follow-up for the
+  moqxr adapter.
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
 

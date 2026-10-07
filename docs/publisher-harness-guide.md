@@ -298,8 +298,8 @@ ASCII without spaces (the adapter accepts only the reference `media` / `vide_1`)
 registers no FETCH handler, so start the runner with `--publisher-no-fetch` (or declare
 `"publisher_capabilities": {"fetch": false}`); it has no SUBSCRIBE_NAMESPACE or
 SUBSCRIBE_TRACKS handler of its own (the library answers NOT_SUPPORTED); and the adapter
-passes none of moq-pub's emission options (`-P` padding, `-f` / `-F` prior group or object
-gap, `-x` Object properties), so the rows that need them stay unscored. The draft 22 sweep
+passes no emission option other than `-D datagram` (no `-P` padding, no `-f` / `-F` prior
+group or object gap, no `-x` Object properties), so the rows that need them stay unscored. The draft 22 sweep
 against imquic and its triage are in
 [interop-notes.md](interop-notes.md#draft-22-sweep-against-imquic-6836173); the imquic findings
 are in [imquic-punch-list.md](imquic-punch-list.md).

@@ -19,6 +19,12 @@ Confidence labels: **confirmed** (wire evidence in the final sweep and the sourc
 the evidence is open; worded as a question). An item whose evidence was confounded by a
 runner defect in the first sweep says so.
 
+Where the fault lies: the peer under test is moq-pub built on imquic. Each item says whether
+the fault is in the imquic **library** (it applies to every imquic application) or in the
+moq-pub **example** (a demo limit, reported but labeled as such, not a library defect). One
+former item, I-12, turned out to be a runner evaluator assumption and is withdrawn; its id is
+kept so the numbering stays stable.
+
 ## Status in the final sweep
 
 | Item | Status | Rows |
@@ -26,21 +32,22 @@ runner defect in the first sweep says so.
 | I-01 WebTransport never connects | Confirmed (unchanged) | every WebTransport row `not_run` |
 | I-02 GOAWAY Request ID parity check | Confirmed | D22-9-2-MUST-338 fail; D22-9-2-MUST-340 not_run |
 | I-03 zero-field Track Namespace closed | Observed in the first sweep only; no row depends on it after R2 | none |
-| I-04 crash on an oversized Full Track Name | Confirmed | D22-8-7-MUST-272 not_run (error run) |
-| I-05 absent FORWARD treated as 0 | Confirmed | D22-3-1-2-MUST-047 not_run |
-| I-06 REQUEST_UPDATE never answered | Confirmed | D22-9-5-MUST-356, D22-9-1-7-MUST-328, D22-9-5-1-MUST-357, D22-6-4-2-2-MUST-172, D22-9-9-MUST-376, D22-9-5-MUST-355 not_run |
+| I-04 crash on an oversized Full Track Name | Confirmed (library check missing; crash in the example) | D22-8-7-MUST-272 not_run (error run) |
+| I-05 absent FORWARD treated as 0 | Confirmed (example) | D22-3-1-2-MUST-047 not_run |
+| I-06a REQUEST_UPDATE never answered by moq-pub | Confirmed (example) | D22-9-5-MUST-356, D22-9-5-1-MUST-357, D22-6-4-2-2-MUST-172, D22-9-9-MUST-376, D22-9-5-MUST-355 not_run |
+| I-06b REQUEST_UPDATE overrun closed with the wrong code | Confirmed (library) | D22-9-1-7-MUST-328 not_run |
 | I-07 malformed or unknown input ignored | Confirmed | D22-6-4-1-MUST-167, D22-6-3-MUST-156, D22-9-MUST-296, D22-8-3-MUST-251, D22-9-20-9-MUST-424, D22-8-3-MUST-249, D22-8-3-MUST-250 fail; D22-11-MUST-488 not_run |
 | I-08 native QUIC SETUP without AUTHORITY and PATH | Confirmed | D22-6-3-2-MUST-164, D22-9-1-1-MUST-307, D22-9-1-2-MUST-314 fail |
 | I-09 server AUTHORITY closed with INVALID_PATH | Confirmed | D22-9-1-1-MUST-304 fail |
 | I-10 namespace REDIRECT with a Track Name ends with NO_ERROR | Confirmed | D22-9-4-1-MUST-352 fail |
 | I-11 INVALID_FILTER never sent | Confirmed | D22-3-3-2-MUST-077, D22-9-1-6-MUST-326 not_run |
-| I-12 SUBGROUP_DELIVERY_TIMEOUT not enforced | Confirmed | D22-5-2-MUST-144 fail |
+| I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT | Not an imquic defect: runner evaluator assumption (triage A4) | D22-5-2-MUST-144 fail is a false FAIL for this peer |
 | I-13 duplicate Request ID not detected | Confirmed | D22-6-4-2-1-MUST-169 not_run |
 | I-14 `.session` namespace request gets NOT_SUPPORTED | Confirmed | D22-6-5-MUST-186 fail |
 | I-15 requests answered before SETUP completes | Observed (MAY row, low) | D22-6-3-MAY-159 not_run |
-| I-16 absolute LOCATION_FILTER start computed as relative | Observed | none |
-| I-17 REQUEST_ERROR 0x19 is not a draft 22 code | Observed | none (it limits the D-sub1 rows of the triage) |
-| I-18 SUBSCRIBE_OK always `04 0002 00 00` | Question | none |
+| I-16 absolute LOCATION_FILTER start not honored | Observed (example) | none |
+| I-17 REQUEST_ERROR 0x19 is not a draft 22 code | Observed (example) | none (it limits the D-sub1 rows of the triage) |
+| I-18 SUBSCRIBE_OK always `04 0002 00 00` | Question (example) | none |
 | I-19 AUTHORIZATION_TOKEN never decoded | Confirmed (new; confounded in the first sweep) | D22-8-9-MUST-279, -281, -289 fail |
 | I-20 GROUP_ORDER 0 accepted | Confirmed (new; a false pass in the first sweep) | D22-9-20-8-MUST-421 fail |
 | I-21 parameters accepted outside their message scope | Confirmed (new) | D22-9-20-1-MUST-396 fail |
@@ -51,6 +58,11 @@ The runner fixes between the two sweeps (all in this repository, none in imquic)
 adapter keeps a small supervisor so that moq-pub's 40 to 160 ms shutdown no longer ends runs
 in a SIGKILL `error`; R2, 29 shared probes send the run's namespace and track on the draft 22
 wire instead of namespace () and track "x"; R3, three SETUP probes run announce-and-wait.
+Rows per triage category (final native sweep, 101 non-pass rows): (a) 1 (D22-5-2-MUST-144,
+the evaluator assumption that withdrew I-12), (b) 34 (19 fail, 15 not_run; the items above
+except I-01, which covers WebTransport), (c) 3 (I-C1), (d) 63 (not applicable to this demo;
+see interop-notes.md). Items not labeled example or withdrawn are library items.
+
 R2 is what turned the token and parameter probes (I-19 to I-22) from confounded results into
 evidence about imquic.
 
@@ -85,8 +97,8 @@ contradict each other.
 - **Draft:** lines 4116-4122 (GOAWAY carries a New Session URI and a timeout, no Request
   ID), 4113-4115 (a second GOAWAY is a PROTOCOL_VIOLATION), 4129-4130 (use the URI).
 - **Observed:** the first control-stream GOAWAY (`10 0003 00 a7 10`, or with a URI
-  `10 0021 1f moqt://...`) closes the session with 0x4 INVALID_REQUEST_ID: "imquic_moq_parse_goaway:5031
-  Invalid Request ID".
+  `10 0021 1f moqt://...`) closes the session with 0x4 INVALID_REQUEST_ID:
+  "imquic_moq_parse_goaway:5031 Invalid Request ID".
 - **Where:** `src/moq.c` lines 5029-5031 apply the draft 18 parity check for every version
   `>= 18`, while the field is parsed only at version 18, so `request_id` stays 0.
 - **Required:** apply the check only where the field exists; then close on the second GOAWAY
@@ -113,12 +125,14 @@ contradict each other.
 - **Draft:** lines 3576-3580 (a Full Track Name over 4,096 bytes is a PROTOCOL_VIOLATION).
 - **Observed:** "imquic_moq_namespace_str:285 Insufficient buffer to render namespace(s)",
   then a segmentation fault ("the monitored command dumped core").
-- **Where:** `src/imquic-moq.c` line 285 gives up on a too-small buffer; the crash follows
-  (hypothesis: a caller uses the unrendered result; not traced).
+- **Where:** `src/imquic-moq.c` line 285 gives up on a too-small buffer and returns NULL;
+  moq-pub then passes the result to `strcasecmp` (`examples/moq-pub.c` lines 188-197), which
+  most likely is the crash (not traced in a debugger). The missing 4,096-byte check is the
+  library's; the NULL dereference is the example's.
 - **Required:** check the length and close with PROTOCOL_VIOLATION; never dereference the
   failed rendering.
 
-### I-05 An absent FORWARD is treated as 0 (confirmed)
+### I-05 An absent FORWARD is treated as 0 (confirmed; example)
 
 - **Row:** D22-3-1-2-MUST-047 (not_run).
 - **Scenario:** `d22-cancel-subscribe-with-open-streams` (also why the unscored probe
@@ -131,28 +145,47 @@ contradict each other.
 - **Required:** default FORWARD to 1 in SUBSCRIBE, and leave it unchanged in a REQUEST_UPDATE
   that omits it.
 
-### I-06 REQUEST_UPDATE is never answered (confirmed)
+### I-06a moq-pub never answers a REQUEST_UPDATE (confirmed; example)
 
-- **Rows:** D22-9-5-MUST-356, D22-9-1-7-MUST-328, D22-9-5-1-MUST-357, D22-6-4-2-2-MUST-172,
-  D22-9-9-MUST-376, D22-9-5-MUST-355 (not_run).
-- **Scenarios:** `d22-single-request-update-response`, `d22-request-update-overrun`,
-  `d22-request-update-independent-streams`, `d22-failed-subscription-update-cleanup`,
+- **Rows:** D22-9-5-MUST-356, D22-9-5-1-MUST-357, D22-6-4-2-2-MUST-172, D22-9-9-MUST-376,
+  D22-9-5-MUST-355 (not_run).
+- **Scenarios:** `d22-single-request-update-response`, `d22-failed-subscription-update-cleanup`,
   `d22-established-subscription-publisher-fin`, `d22-publish-done-without-data-streams`,
   `d22-subscriber-update-on-publish`.
 - **Draft:** lines 4304-4308 (exactly one REQUEST_OK or REQUEST_ERROR per update), 4320-4321,
-  4395-4397 (a failed update ends the subscription with UPDATE_FAILED), 4068-4069
-  (TOO_MANY_REQUEST_UPDATES), 3708-3709.
-- **Observed:** no reply on the SUBSCRIBE stream after `02 0004 03 01 20 64`; an update that
-  must fail (USE_ALIAS of an unregistered alias, `02 0006 03 01 03 02 02 00`) is accepted and,
-  having no FORWARD, pauses delivery; a second outstanding update against imquic's own
-  MAX_REQUEST_UPDATES=1 closes 0x3 "Invalid use of REQUEST_UPDATE on bidirectional request"
-  instead of TOO_MANY_REQUEST_UPDATES. For D22-9-5-MUST-355 the TRACK_STATUS and
-  PUBLISH_NAMESPACE legs (since R2 on the run's track) correctly close 0x3; the permitted leg
-  on a subscription gets no answer, so the row stays unscored.
+  4395-4397 (a failed update ends the subscription with UPDATE_FAILED), 3708-3709.
+- **Observed:** no reply on the SUBSCRIBE stream after `02 0004 03 01 20 64`. In
+  `d22-failed-subscription-update-cleanup` the SUBSCRIBE carries no FORWARD, so delivery never
+  starts; the update that must fail (USE_ALIAS of an unregistered alias,
+  `02 0006 03 01 03 02 02 00`) logs "Incoming update (3) for request 1", gets no reply, and the
+  runner's FIN is then taken as an unsubscribe. In the scenarios where delivery is running
+  (`d22-subscriber-update-on-publish`, `d22-established-subscription-publisher-fin`,
+  `d22-publish-done-without-data-streams`) an update without FORWARD logs "Pausing delivery of
+  objects" (I-05). For D22-9-5-MUST-355 the TRACK_STATUS and PUBLISH_NAMESPACE legs (since R2 on
+  the run's track) correctly close 0x3 (library, `src/moq.c` lines 3440-3442); the permitted
+  leg on a subscription gets no answer, so the row stays unscored.
+- **Where:** the library is not at fault here. It hands every REQUEST_UPDATE to the
+  application's callback (`src/moq.c` lines 3513-3515), rejects it with NOT_SUPPORTED itself
+  only when there is no callback (line 3518), and offers `imquic_moq_accept_request_update`
+  and `imquic_moq_reject_request_update` (lines 7754, 7806). moq-pub's
+  `imquic_demo_request_updated` (`examples/moq-pub.c` lines 325-340) calls neither; it only
+  starts or pauses delivery by FORWARD.
+- **Required (example):** accept or reject every update from the callback, and end a
+  subscription whose update fails with PUBLISH_DONE UPDATE_FAILED.
+
+### I-06b A REQUEST_UPDATE overrun is closed with the wrong code (confirmed; library)
+
+- **Row:** D22-9-1-7-MUST-328 (not_run).
+- **Scenarios:** `d22-request-update-overrun`, `d22-request-update-independent-streams` (with
+  `d22-request-update-unlimited`).
+- **Draft:** lines 4068-4069 (TOO_MANY_REQUEST_UPDATES).
+- **Observed:** a second outstanding update against imquic's own MAX_REQUEST_UPDATES=1 closes
+  0x3 "Invalid use of REQUEST_UPDATE on bidirectional request" instead of
+  TOO_MANY_REQUEST_UPDATES.
 - **Where:** `src/moq.c` line 3439 ("FIXME State management needs to be fixed, because an
-  update will trigger OK/ERROR too") and the check at lines 3440-3442.
-- **Required:** answer every REQUEST_UPDATE, fail it with PUBLISH_DONE UPDATE_FAILED where
-  required, and use TOO_MANY_REQUEST_UPDATES for an overrun.
+  update will trigger OK/ERROR too") and the check at lines 3440-3442, which uses one
+  PROTOCOL_VIOLATION for every rejected update.
+- **Required:** close with TOO_MANY_REQUEST_UPDATES when the advertised limit is exceeded.
 
 ### I-07 Malformed or unknown input is logged and ignored (confirmed)
 
@@ -194,12 +227,13 @@ contradict each other.
 
 - **Row:** D22-9-1-1-MUST-304 (fail).
 - **Scenario:** `d22-server-sends-authority`.
-- **Draft:** lines 3929-3934; INVALID_AUTHORITY is 0x19 (line 7917).
+- **Draft:** lines 3935-3939 (an AUTHORITY option received from a server MUST close the
+  session with INVALID_AUTHORITY); the code is 0x19 (line 7917).
 - **Observed:** close 0x8 "AUTHORITY received from a server". A server PATH correctly gets 0x8.
 - **Where:** `src/moq.c` line 2716 uses `IMQUIC_MOQ_INVALID_PATH` for the AUTHORITY case.
 - **Required:** close with INVALID_AUTHORITY.
 
-### I-10 A namespace REDIRECT with a Track Name ends the session with NO_ERROR (confirmed)
+### I-10 A namespace REDIRECT with a Track Name ends the session with NO_ERROR (confirmed; library)
 
 - **Row:** D22-9-4-1-MUST-352 (fail).
 - **Scenario:** `d22-publish-namespace-redirect-nonempty-track-name`.
@@ -223,15 +257,21 @@ contradict each other.
   `imquic_moq_reject_subscribe`, which then refuses to send.
 - **Required:** send REQUEST_ERROR INVALID_FILTER.
 
-### I-12 SUBGROUP_DELIVERY_TIMEOUT is not enforced (confirmed)
+### I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT: not an imquic defect
 
-- **Row:** D22-5-2-MUST-144 (fail).
+- **Row:** D22-5-2-MUST-144 (fail; a false FAIL for this peer, triage line A4, category a).
 - **Scenario:** `d22-subgroup-completion-withheld-acknowledgments`.
-- **Draft:** lines 2309-2310.
-- **Observed:** SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`) and FORWARD 1; the
-  runner withholds acknowledgments; the subgroup stream stays open past the timer, one Object
-  per second, and is never reset.
-- **Required:** reset the subgroup stream when the timer expires.
+- **Draft:** lines 2301-2307: the timer starts "once it becomes aware that all of the objects
+  on the subgroup have been published"; only then must an uncommitted stream be reset
+  (lines 2307-2310).
+- **Observed:** SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`) and FORWARD 1 for
+  Group 0. moq-pub's Group 0 is a one-minute clock group: it sent Objects 35 to 42, one per
+  second, and the group was still being published when the 12 s window ended. The timer never
+  started, so no reset was owed.
+- **Why it was listed:** the evaluator (`uncommitted_subgroup_spec` in
+  `src/scenarios/draft21_contribution_residual_token.cpp`) assumes the fixture's Group 0 is
+  complete (true for moqxr's fixture) and FAILs any subgroup stream still open at the end of
+  the window. That is a runner item (interop-notes.md, open runner items), not imquic work.
 
 ### I-13 A duplicate Request ID is not detected (confirmed)
 
@@ -265,17 +305,21 @@ contradict each other.
   MAY row is inconclusive.
 - **Question:** should the library hold request streams until SETUP has been parsed?
 
-### I-16 An absolute LOCATION_FILTER start is computed as a relative one (observed)
+### I-16 An absolute LOCATION_FILTER start is not honored (observed; example)
 
 - **Rows:** none (the row this scenario scores, D22-6-3-MUST-NOT-160, passes).
 - **Scenario:** `d22-control-stream-lifetime` (SUBSCRIBE `... 02 10 01 11 02 07 09`: FORWARD 1,
   absolute start Group 7 Object 9).
-- **Observed:** "Starting delivery of objects: [0/9] --> [...]", Group 0 instead of Group 7.
-- **Where:** `examples/moq-pub.c` lines 276-280: for an absolute start the group is computed as
-  `group_id + 1 - start.group`, the relative-start formula.
-- **Required:** use the absolute group. Not scored by any row; fix with moq-pub's own tests.
+- **Observed:** "Starting delivery of objects: [0/9] --> [...]": delivery starts in Group 0,
+  not at Group 7.
+- **Where:** `examples/moq-pub.c` lines 276-281. For an absolute start moq-pub adjusts the group
+  only `if(group_id >= start.group)`; with the current group 0 and start 7 that branch is
+  skipped, the static default start group 0 (line 55) is kept, and only the object (9) is
+  taken from the filter.
+- **Required:** honor an absolute start that lies in the future. Not scored by any row; fix with
+  moq-pub's own tests.
 
-### I-17 REQUEST_ERROR 0x19 DUPLICATE_SUBSCRIPTION is not a draft 22 code (observed)
+### I-17 REQUEST_ERROR 0x19 DUPLICATE_SUBSCRIPTION is not a draft 22 code (observed; example)
 
 - **Rows:** none directly; it is how moq-pub refuses every SUBSCRIBE with `-X` and every second
   SUBSCRIBE once delivery started, which keeps the one-subscriber rows unscored (triage D-sub1).
@@ -285,7 +329,7 @@ contradict each other.
 - **Question:** which draft 22 code should a single-subscriber publisher use (EXCESSIVE_LOAD
   0x9 or INTERNAL_ERROR)?
 
-### I-18 SUBSCRIBE_OK is always `04 0002 00 00` (question)
+### I-18 SUBSCRIBE_OK is always `04 0002 00 00` (question; example)
 
 - **Rows:** none.
 - **Draft:** lines 4494-4510 (SUBSCRIBE_OK: Track Alias, parameters EXPIRES and LARGEST_OBJECT,
@@ -363,15 +407,30 @@ contradict each other.
   the nested parameter.
 - **Scenarios:** `d22-cancel-subscription-with-concurrent-fill-streams`,
   `d22-fill-fails-before-first-object`, every `d22-fill-*` probe.
-- **Draft:** lines 5478-5482: the value "is a sequence of Parameters ... encoded as if they
-  were Parameters for a separate message (see Section 16.7)". Every message that carries
-  parameters puts a Number of Parameters before them (for example lines 4498-4499).
-- **Observed:** the runner sends FILL_PARAMETERS `23 02 21 00` (one nested LOCATION_FILTER, no
-  count); imquic reads 0x21 as a count and closes 0x3 "Broken MoQ request parameter".
-- **Where:** `src/moq.c` lines 6758-6763 read a count first.
+- **Observed:** FILL_PARAMETERS is Parameter Type 0x23; on the wire it is a Type Delta. In
+  `d22-cancel-subscription-with-concurrent-fill-streams` the parameters are
+  `02 10 01 13 02 21 00`: two parameters, FORWARD 1, then delta 0x13 (0x10 + 0x13 = 0x23),
+  Length 2, and the value `21 00`, one nested LOCATION_FILTER with no count before it. (Where
+  FILL_PARAMETERS is the first parameter, the delta is `23`.) imquic reads 0x21 as a Number of
+  Parameters and closes 0x3 "Broken MoQ request parameter" (moq.c lines 6460 and 6778 in every
+  fill probe's log).
+- **The two readings:**
+  - Runner and moqxr: the value is a bare sequence of Message Parameters. The value is already
+    length-prefixed (lines 5478-5479); Figure 24 (lines 5053-5058) defines a Message Parameter
+    as Type Delta plus Value, and the Number of Parameters is a field of each message layout
+    (for example lines 4498-4499), not of the parameter encoding; "encoded as if they were
+    Parameters for a separate message" (lines 5480-5482) then means a fresh Type Delta base and
+    a separate scope (line 5527: "The value of FILL_PARAMETERS is a separate parameter scope").
+    moqxr `4b615f4` parses it this way (`validate_fill_parameters`,
+    `moqt_control_messages.cpp` lines 1496-1530 in the scratch copy of that revision).
+  - imquic: a parameter block is preceded by its count. Lines 5089-5090 say that, because
+    unknown parameters cannot be skipped, "the block is bounded by a parameter count rather
+    than a length", and a separate message's parameters start with a Number of Parameters.
+    `src/moq.c` lines 6758-6763 read a count first.
 - **Question for both sides:** does "encoded as if they were Parameters for a separate message"
-  include the Number of Parameters? Settle this before changing either the runner or imquic;
-  until then the fill rows above say nothing about imquic.
+  include the Number of Parameters? This list does not declare imquic wrong. Settle the reading
+  (ideally with the draft authors) before changing either the runner or imquic; until then the
+  fill rows above say nothing about imquic.
 
 ## Ground rules
 
@@ -386,8 +445,10 @@ contradict each other.
    Group per minute), serves one subscriber at a time, has no FETCH, SUBSCRIBE_NAMESPACE or
    SUBSCRIBE_TRACKS handling of its own and announces no token cache or filter ranges. Rows
    that need those (triage lines D-clock, D-pad, D-disc, D-sub1, D-tok, D-pub in
-   interop-notes.md) are not imquic work for this list. Library items (I-02, I-03, I-04, I-06,
-   I-07, I-09, I-11, I-13, I-14, I-19 to I-22) apply to every imquic application.
+   interop-notes.md) are not imquic work for this list. Library items (I-01, I-02, I-03, the
+   missing size check of I-04, I-06b, I-07 to I-11, I-13 to I-15, I-19 to I-22) apply to every
+   imquic application; example items (the crash of I-04, I-05, I-06a, I-16 to I-18) are
+   moq-pub's.
 4. **Do not hide a failure by weakening a check.** Fix the code, add imquic tests, and re-run
    the scenarios named in the item.
 
@@ -425,5 +486,6 @@ curl -s -X POST http://127.0.0.1:19811/api/v1/runs -H 'Content-Type: application
 ```
 
 moq-pub reads no fixture; the sweeps passed moqxr's `tests/fixtures/locmaf-publisher.mp4`
-to `--driver-fixture`, and the adapter ignores it. A row that names several scenarios is scored only when all of them run in
-one request (the catalog entry in `requirements/draft22.json` lists them).
+to `--driver-fixture`, and the adapter ignores it. A row that names several scenarios is
+scored only when all of them run in one request (the catalog entry in
+`requirements/draft22.json` lists them).
