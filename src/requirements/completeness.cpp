@@ -87,6 +87,11 @@ static CompletenessReport audit_rows(
                 "binding scenario is not registered by the runner", true});
             continue;
         }
+        if (staged && !row.reviewed) {
+            report.findings.push_back({"mismatched_binding", binding.requirement_id,
+                "binding names a row whose classification is still unreviewed", true});
+            continue;
+        }
         if (row.applicability != Applicability::Applicable ||
             row.testability != Testability::Testable ||
             !listed(row.scenarios, binding.scenario_id) ||

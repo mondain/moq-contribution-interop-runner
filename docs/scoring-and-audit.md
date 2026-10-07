@@ -228,7 +228,7 @@ STAGED: incomplete catalog (not a pass)
 
 Unreviewed rows are counted separately and are not part of the applicable testable total; the
 planned scenarios are the distinct scenario ids named by any row. JSON output carries the same
-fields (`rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
+fields (`schema_version`, `draft`, `source_sha256`, `rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
 `planned_scenarios`, `staged`, `complete`, `verdict`, `source_audit`, `findings`). It is a separate
 shape from the other drafts: there is no `source_revision`, `static_complete` or
 `executable_coverage`. Exit status is 0 unless the source-keyword audit fails or a finding is

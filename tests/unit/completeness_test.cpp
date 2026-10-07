@@ -295,6 +295,12 @@ TEST(StagedCompletenessTest, BindingOnUnreviewedRowIsBlockingMismatch) {
     const auto report = audit_completeness_staged(staged_lite_catalog(), bindings,
                                                   kSyntheticScenarios);
     EXPECT_TRUE(has_finding(report, "mismatched_binding", true));
+    const auto it = std::find_if(report.findings.begin(), report.findings.end(), [](const auto& f) {
+        return f.code == "mismatched_binding";
+    });
+    ASSERT_NE(it, report.findings.end());
+    EXPECT_NE(it->detail.find("unreviewed"), std::string::npos);
+    EXPECT_FALSE(report.complete());
 }
 
 TEST(StagedCompletenessTest, AuditCompletenessIsUnchangedForIncompleteCatalogs) {
