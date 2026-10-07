@@ -252,8 +252,9 @@ stops a driver with SIGTERM to its process group and SIGKILLs the group 100 ms l
 it records as a driver failure (run `error`, `term_signal` 9), and moq-pub needs about
 40-160 ms after SIGTERM to send PUBLISH_DONE and PUBLISH_NAMESPACE_DONE and close. So the
 adapter starts `timeout` and moq-pub in the background (same process group), and on SIGTERM,
-SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub already received the
-group's SIGTERM (plus the one `timeout` relays, so two in all) and finishes on its own.
+SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub was already sent the
+group's SIGTERM (and the one `timeout` relays, so two in all, of which it observes one or two,
+because pending standard signals coalesce) and finishes on its own.
 moq-pub also bumps its stop counter on connection loss, GOAWAY and a refused PUBLISH or
 PUBLISH_NAMESPACE, and a signal that takes the counter past two makes it exit(1) without
 cleanup: that happens in about 5 percent of runs. It is not a regression (the former
@@ -261,7 +262,10 @@ cleanup: that happens in about 5 percent of runs. It is not a regression (the fo
 no verdict. Without a signal it waits and exits with the publisher's status as
 `--preserve-status` reports it, also when the deadline fired. The trade-off: after a stop,
 moq-pub briefly outlives the adapter without the runner's SIGKILL backstop; it stays bounded
-by `timeout -k 2` (SIGKILL at most 2 s after the signal).
+by `timeout -k 2` (SIGKILL at most 2 s after the signal). When you run the adapter by hand, note
+that a background child of a shell without job control starts with SIGINT and SIGQUIT ignored:
+Ctrl-C ends only the adapter, and moq-pub runs on to its `timeout` deadline. The runner uses
+SIGTERM, so this affects interactive use only.
 
 The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
 is refused with DUPLICATE_SUBSCRIPTION, code 0x19, which draft 22 does not define) or

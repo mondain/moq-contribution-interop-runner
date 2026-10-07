@@ -177,8 +177,9 @@ through the environment; see
 request names the run's draft (`22` for a draft 22 run) and the scenario id as it
 was selected for the run, the same id the run's events carry (for a draft 22 run a
 `d22-` id, also for a scenario the runner executes with its draft 21
-implementation). The bundled adapters (`adapters/moqxr`, `adapters/moq5`) refuse
-draft 22 requests, so a driven draft 22 run needs an adapter of your own. If
+implementation). Of the bundled adapters, `adapters/moqxr` (drafts 18, 21 and 22) and
+`adapters/imquic` (draft 22 only) accept draft 22 requests, while `adapters/moq5` (drafts 18
+and 21) refuses them with exit 64. If
 the adapter exits before the publisher connects the run ends `error` with the
 logs retained. Once the publisher is connected, scores come from MoQT
 observations, not from the process exit status. `driven` requires `track` and a

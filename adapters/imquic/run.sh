@@ -26,6 +26,7 @@
 # minute) and stops on SIGTERM (PUBLISH_DONE, PUBLISH_NAMESPACE_DONE, exit 0), on connection loss or
 # GOAWAY. Each of these (and a refused PUBLISH or PUBLISH_NAMESPACE) bumps one stop counter; a signal
 # that takes it past two makes it exit(1) at once, without cleanup.
+# Run by hand, Ctrl-C ends only this adapter (moq-pub inherits SIGINT ignored; see the supervisor).
 set -euo pipefail
 
 fail() {
@@ -130,10 +131,11 @@ fi
 # moq-pub has no deadline of its own: `timeout` stops it at the scenario timeout (rounded up to whole
 # seconds) plus 3 seconds, so the runner, not the publisher, ends the context, as with moqxr's paced
 # runs. --foreground keeps `timeout` in the runner's process group and makes it signal only moq-pub,
-# not the whole group (the runner already signals the group). On a runner stop moq-pub still gets two
-# SIGTERMs, the group's and the one `timeout` relays; when its stop counter was already bumped
-# (connection loss, GOAWAY, a refused PUBLISH or PUBLISH_NAMESPACE) the second takes it past two
-# and moq-pub exits(1) without cleanup, in about 5 percent of runs. That is not new (the former `exec timeout` adapter did
+# not the whole group (the runner already signals the group). On a runner stop moq-pub is sent two
+# SIGTERMs, the group's and the one `timeout` relays, and observes one or two (pending standard
+# signals coalesce); when its stop counter was already bumped (connection loss, GOAWAY, a refused
+# PUBLISH or PUBLISH_NAMESPACE) a second one takes it past two and moq-pub exits(1) without
+# cleanup, in about 5 percent of runs. That is not new (the former `exec timeout` adapter did
 # the same in 43 of 186 runs of the first sweep) and changed no verdict.
 # --preserve-status reports moq-pub's own status (0 after SIGTERM) instead of 124;
 # -k 2 kills it if it hangs, also after the runner's SIGTERM (timeout arms -k on any signal it relays).
@@ -401,14 +403,17 @@ args+=(-d 4)
 # after SIGTERM (PUBLISH_DONE, PUBLISH_NAMESPACE_DONE, QUIC close), so this script does not exec the
 # publisher: it starts `timeout` and moq-pub in the background, in the same process group, and
 #   - on SIGTERM, SIGINT or SIGHUP exits 0 at once: the group signal has already reached moq-pub (and
-#     `timeout`, which relays it once, so moq-pub gets two SIGTERMs; see the stop counter above), which
-#     finishes its cleanup on its own; nothing is forwarded from here;
+#     `timeout`, which relays it once, so moq-pub is sent two SIGTERMs and observes one or two; see
+#     the stop counter above), which finishes its cleanup on its own; nothing is forwarded from here;
 #   - otherwise waits and exits with the status `timeout --preserve-status` reports (moq-pub's own,
 #     also when the deadline fired), as the former `exec timeout ...` did.
 # Trade-off: after a stop, moq-pub and `timeout` briefly outlive the adapter without the runner's
 # SIGKILL backstop; they stay bounded by `timeout -k 2` (SIGKILL 2 s after the signal at the latest).
 # The trap is set before the publisher starts; standard input is kept (`<&0`, a background command
 # would otherwise read /dev/null) and the output redirection is the same as before.
+# Interactive caveat: a background child of a shell without job control starts with SIGINT and
+# SIGQUIT ignored, so Ctrl-C ends only this adapter and moq-pub runs on to its deadline (`timeout`).
+# The runner stops drivers with SIGTERM, which is not affected.
 trap 'exit 0' TERM INT HUP
 timeout --foreground --preserve-status -k 2 -s TERM "$publisher_timeout" \
     "$publisher_bin" "${args[@]}" <&0 >"$log_dir/publisher.log" 2>&1 &

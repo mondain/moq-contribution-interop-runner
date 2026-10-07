@@ -265,9 +265,11 @@ contradict each other.
   on the subgroup have been published"; only then must an uncommitted stream be reset
   (lines 2307-2310).
 - **Observed:** SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`) and FORWARD 1 for
-  Group 0. moq-pub's Group 0 is a one-minute clock group: it sent Objects 35 to 42, one per
-  second, and the group was still being published when the 12 s window ended. The timer never
-  started, so no reset was owed.
+  Group 0. moq-pub's Group 0 is a one-minute clock group: after a date-prefix Object 0 it sent
+  one Object per second (Objects 1 to 8, whose 2-byte payloads are the clock seconds "35" to
+  "42") until the runner's 64-byte stream credit stalled the stream; its log shows Objects 9 to
+  11 produced after that, and the group was still being published when the 12 s window ended.
+  The timer never started, so no reset was owed.
 - **Why it was listed:** the evaluator (`uncommitted_subgroup_spec` in
   `src/scenarios/draft21_contribution_residual_token.cpp`) assumes the fixture's Group 0 is
   complete (true for moqxr's fixture) and FAILs any subgroup stream still open at the end of
@@ -421,6 +423,9 @@ contradict each other.
     (for example lines 4498-4499), not of the parameter encoding; "encoded as if they were
     Parameters for a separate message" (lines 5480-5482) then means a fresh Type Delta base and
     a separate scope (line 5527: "The value of FILL_PARAMETERS is a separate parameter scope").
+    The "(see Section 16.7)" in that sentence points to the IANA Message Parameters registry
+    table (line 7600), that is to a separate Type Delta base and scope, not to a message
+    body.
     moqxr `4b615f4` parses it this way (`validate_fill_parameters`,
     `moqt_control_messages.cpp` lines 1496-1530 in the scratch copy of that revision).
   - imquic: a parameter block is preceded by its count. Lines 5089-5090 say that, because
