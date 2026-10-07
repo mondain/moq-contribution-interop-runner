@@ -62,6 +62,19 @@ std::string_view DraftSource::lines(std::size_t first, std::size_t last) const {
     return std::string_view(text).substr(begin, end - begin);
 }
 
+std::string draft_source_filename(unsigned draft) {
+    switch (draft) {
+        case 18:
+        case 21:
+        case 22:
+            return "draft-ietf-moq-transport-" + std::to_string(draft) + ".txt";
+        case 106:
+            return "draft-lcurley-moq-lite-06.txt";
+        default:
+            throw std::invalid_argument("No draft source file for draft " + std::to_string(draft));
+    }
+}
+
 DraftSource load_draft_source(unsigned draft, const std::filesystem::path& docs_root,
                               const std::filesystem::path& digest_file) {
     const auto manifest = nlohmann::json::parse(read_bounded_file(digest_file, kMaxDigestBytes));
@@ -73,7 +86,7 @@ DraftSource load_draft_source(unsigned draft, const std::filesystem::path& docs_
 
     DraftSource source;
     source.number = draft;
-    source.path = docs_root / ("draft-ietf-moq-transport-" + key + ".txt");
+    source.path = docs_root / draft_source_filename(draft);
     source.text = read_bounded_file(source.path, kMaxDraftBytes);
     source.sha256 = sha256_hex(source.text);
     if (source.sha256 != expected) {
