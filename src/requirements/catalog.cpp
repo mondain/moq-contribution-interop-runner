@@ -19,8 +19,10 @@ using Json = nlohmann::json;
 constexpr std::uintmax_t kMaxCatalogBytes = 16 * 1024 * 1024;
 
 void exact_fields(const Json& value, std::initializer_list<std::string_view> expected,
-                  std::string_view context) {
-    if (!value.is_object() || value.size() != expected.size()) {
+                  std::string_view context, std::string_view optional = {}) {
+    const bool has_optional = !optional.empty() && value.is_object() &&
+                              value.contains(std::string(optional));
+    if (!value.is_object() || value.size() != expected.size() + (has_optional ? 1 : 0)) {
         throw std::runtime_error(std::string(context) + " has missing or unknown fields");
     }
     for (const auto field : expected) {
@@ -105,9 +107,21 @@ Testability parse_testability(const std::string& value) {
 using Anchor = std::pair<std::size_t, unsigned>;
 
 Requirement parse_requirement(const Json& value, std::size_t line_count,
-                              const std::map<Anchor, std::size_t>& occurrence_end_lines) {
+                              const std::map<Anchor, std::size_t>& occurrence_end_lines,
+                              bool catalog_complete) {
     exact_fields(value, {"id", "strength", "source", "actor", "summary", "applicability",
-                         "testability", "scenarios", "evaluators", "rationale"}, "requirement");
+                         "testability", "scenarios", "evaluators", "rationale"}, "requirement",
+                 "reviewed");
+    bool reviewed = true;
+    if (value.contains("reviewed")) {
+        if (!value.at("reviewed").is_boolean()) {
+            throw std::runtime_error("reviewed must be boolean");
+        }
+        reviewed = value.at("reviewed").get<bool>();
+        if (!reviewed && catalog_complete) {
+            throw std::runtime_error("A complete catalog cannot contain an unreviewed requirement");
+        }
+    }
     const auto& citation = value.at("source");
     exact_fields(citation, {"section", "first_line", "last_line", "occurrence", "clause"},
                  "source reference");
@@ -126,7 +140,7 @@ Requirement parse_requirement(const Json& value, std::size_t line_count,
                     parse_applicability(required_string(value, "applicability")),
                     parse_testability(required_string(value, "testability")),
                     identifiers(value, "scenarios"), identifiers(value, "evaluators"),
-                    required_string(value, "rationale")};
+                    required_string(value, "rationale"), reviewed};
 
     const auto end_line = occurrence_end_lines.find(
         Anchor{row.source.first_line, row.source.occurrence});
@@ -200,7 +214,7 @@ RequirementCatalog RequirementCatalog::load(const DraftSource& source,
     std::set<std::string> ids;
     std::set<std::tuple<std::size_t, unsigned, unsigned>> anchors;
     for (const auto& value : document.at("requirements")) {
-        auto row = parse_requirement(value, source.line_offsets.size(), occurrence_end_lines);
+        auto row = parse_requirement(value, source.line_offsets.size(), occurrence_end_lines, complete);
         if (!ids.insert(row.id).second) {
             throw std::runtime_error("Duplicate requirement ID: " + row.id);
         }

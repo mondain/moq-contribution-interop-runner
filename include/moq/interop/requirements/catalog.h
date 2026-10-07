@@ -33,6 +33,9 @@ struct Requirement {
     std::vector<std::string> scenarios;
     std::vector<std::string> evaluators;
     std::string rationale;
+    // False only for a staged baseline row whose classification is still pending. Absent in the
+    // JSON means true; a complete catalog cannot hold an unreviewed row.
+    bool reviewed{true};
 };
 
 struct RequirementCatalog {
@@ -64,5 +67,9 @@ struct AuditReport {
 std::vector<NormativeOccurrence> scan_normative_occurrences(const DraftSource& source);
 AuditReport audit_normative_occurrences(const DraftSource& source,
                                          const RequirementCatalog& catalog);
+// Same checks as audit_normative_occurrences except that an incomplete catalog is not an error,
+// for catalogs staged for review (rows may still be unreviewed).
+AuditReport audit_normative_occurrences_staged(const DraftSource& source,
+                                               const RequirementCatalog& catalog);
 
 }  // namespace moq::interop::requirements

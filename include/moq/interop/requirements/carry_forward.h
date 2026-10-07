@@ -53,6 +53,15 @@ struct OccurrenceContext {
 
 std::vector<OccurrenceContext> extract_contexts(const DraftSource& source);
 
+// "<prefix>-<section with dots as dashes>-<KEYWORD>-<NNN>", e.g. D22-1-3-MUST-NOT-002.
+std::string requirement_id(const std::string& prefix, const std::string& section, Strength strength,
+                           unsigned sequence);
+
+// Writes a catalog file in the same key order and formatting as the carry-forward outputs. A row
+// that is not reviewed gets a trailing "reviewed": false; reviewed rows omit the key.
+void write_catalog_file(const std::filesystem::path& path, const DraftSource& source,
+                        const std::vector<Requirement>& rows, bool complete);
+
 enum class DeltaClass { Identical, Moved, Reworded, New, Removed };
 
 const char* to_string(DeltaClass change);

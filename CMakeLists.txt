@@ -140,6 +140,7 @@ add_library(moq-interop-requirements
     src/requirements/completeness.cpp
     src/requirements/scoring.cpp
     src/requirements/carry_forward.cpp
+    src/requirements/lite_baseline.cpp
     src/requirements/lineage.cpp
     src/requirements/lineage_policy.cpp
     src/requirements/lineage_translate.cpp
@@ -986,6 +987,14 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-carry-forward-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME carry-forward COMMAND moq-interop-carry-forward-tests)
+    add_executable(moq-interop-lite-baseline-tests tests/unit/lite_baseline_test.cpp)
+    target_compile_definitions(moq-interop-lite-baseline-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lite-baseline-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
+    add_test(NAME lite-baseline COMMAND moq-interop-lite-baseline-tests)
+    add_test(NAME lite-catalog-schema
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-catalog-schema.sh")
+    set_tests_properties(lite-catalog-schema PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(moq-interop-lineage-tests tests/unit/lineage_test.cpp)
     target_link_libraries(moq-interop-lineage-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lineage COMMAND moq-interop-lineage-tests)
