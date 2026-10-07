@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <span>
+#include <utility>
 #include <unordered_set>
 #include <variant>
 
@@ -31,9 +32,9 @@ DecodeResult<std::uint64_t> read_single_varint(const SetupParameter& parameter) 
     return std::get<std::uint64_t>(result);
 }
 
-std::vector<std::byte> varint_bytes(std::uint64_t value) {
+std::optional<std::vector<std::byte>> varint_bytes(std::uint64_t value) {
     ByteWriter out(8);
-    if (!write_varint(value, out)) return {};
+    if (!write_varint(value, out)) return std::nullopt;
     const auto written = out.bytes();
     return std::vector<std::byte>(written.begin(), written.end());
 }
@@ -85,14 +86,17 @@ DecodeResult<SetupMessage> decode_setup(Cursor& input, const DecodeLimits& limit
     return message;
 }
 
-std::optional<EncodeError> encode_setup(const SetupMessage& message, ByteWriter& output) {
-    const auto& limits = kDefaultLimits;
+std::optional<EncodeError> encode_setup(const SetupMessage& message, ByteWriter& output,
+                                        const DecodeLimits& limits) {
     if (message.parameters.size() > limits.max_parameters) return EncodeError::LimitExceeded;
 
     std::unordered_set<std::uint64_t> seen;
     for (const auto& parameter : message.parameters) {
         if (parameter.id > kMaxVarint) return EncodeError::InvalidValue;
         if (!seen.insert(parameter.id).second) return EncodeError::InvalidValue;
+        if (parameter.id == kParamPath && parameter.value.size() > limits.max_string_length) {
+            return EncodeError::LimitExceeded;
+        }
     }
 
     ByteWriter body(limits.max_message_length);
@@ -138,13 +142,21 @@ DecodeResult<SetupCapabilities> read_capabilities(const SetupMessage& message, c
     return capabilities;
 }
 
-SetupMessage build_setup(const SetupCapabilities& capabilities) {
+std::optional<SetupMessage> build_setup(const SetupCapabilities& capabilities, const DecodeLimits& limits) {
     SetupMessage message;
-    const auto add_varint = [&message](std::uint64_t id, const std::optional<std::uint64_t>& value) {
-        if (value) message.parameters.push_back(SetupParameter{id, varint_bytes(*value)});
+    bool representable = true;
+    const auto add_varint = [&](std::uint64_t id, const std::optional<std::uint64_t>& value) {
+        if (!value) return;
+        auto encoded = varint_bytes(*value);
+        if (!encoded) {
+            representable = false;
+            return;
+        }
+        message.parameters.push_back(SetupParameter{id, std::move(*encoded)});
     };
     add_varint(kParamProbe, capabilities.probe);
     if (capabilities.path) {
+        if (capabilities.path->size() > limits.max_string_length) return std::nullopt;
         const auto* data = reinterpret_cast<const std::byte*>(capabilities.path->data());
         message.parameters.push_back(
             SetupParameter{kParamPath, std::vector<std::byte>(data, data + capabilities.path->size())});
@@ -152,6 +164,7 @@ SetupMessage build_setup(const SetupCapabilities& capabilities) {
     add_varint(kParamRole, capabilities.role);
     add_varint(kParamCost, capabilities.cost);
     add_varint(kParamHop, capabilities.hop_id);
+    if (!representable) return std::nullopt;
     return message;
 }
 

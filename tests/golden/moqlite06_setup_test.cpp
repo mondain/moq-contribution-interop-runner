@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -79,7 +80,7 @@ TEST(Moqlite06Setup, MoqDevCostVectorDecodesAndEncodes) {
 
     SetupCapabilities built;
     built.cost = 100;
-    EXPECT_EQ(encode(build_setup(built)), wire);
+    EXPECT_EQ(encode(*build_setup(built)), wire);
 }
 
 // Draft 6.3.1: an empty parameter list is how an endpoint with no capabilities speaks.
@@ -89,7 +90,7 @@ TEST(Moqlite06Setup, EmptySetupDecodesToNoParameters) {
     const auto result = decode(wire);
     EXPECT_TRUE(ok(result).parameters.empty());
     EXPECT_EQ(encode(SetupMessage{}), wire);
-    EXPECT_EQ(encode(build_setup(SetupCapabilities{})), wire);
+    EXPECT_EQ(encode(*build_setup(SetupCapabilities{})), wire);
 }
 
 TEST(Moqlite06Setup, AllFiveParametersRoundTripInEncodedOrder) {
@@ -99,7 +100,7 @@ TEST(Moqlite06Setup, AllFiveParametersRoundTripInEncodedOrder) {
     {
         SetupCapabilities caps;
         caps.path = "/a";
-        EXPECT_EQ(encode(build_setup(caps)), bytes({0x05, 0x01, 0x02, 0x02, 0x2f, 0x61}));
+        EXPECT_EQ(encode(*build_setup(caps)), bytes({0x05, 0x01, 0x02, 0x02, 0x2f, 0x61}));
     }
 
     // Everything at once. Bodies, in id order:
@@ -118,7 +119,7 @@ TEST(Moqlite06Setup, AllFiveParametersRoundTripInEncodedOrder) {
     caps.role = 1;
     caps.cost = 100;
     caps.hop_id = 7;
-    EXPECT_EQ(encode(build_setup(caps)), wire);
+    EXPECT_EQ(encode(*build_setup(caps)), wire);
 
     const auto decoded = decode(wire);
     const auto& message = ok(decoded);
@@ -262,13 +263,67 @@ TEST(Moqlite06Setup, KnownVarintParameterNeedsExactlyOneVarint) {
         for (const auto& value : {bytes({0x01, 0x01}),  // two varints
                                   bytes({}),            // none
                                   bytes({0x40}),        // a truncated two-byte varint
-                                  bytes({0x01, 0x00})}) {
+                                  bytes({0x01, 0x00}),
+                                  bytes({0xc0, 0, 0, 0, 0, 0, 0, 0x01, 0x00}),  // 8-byte varint plus a stray byte
+                                  bytes({0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})}) {
             const auto result = read_capabilities(with_param(id, value));
             const auto* error = std::get_if<DecodeError>(&result);
             ASSERT_NE(error, nullptr) << id;
             EXPECT_EQ(error->code, DecodeErrorCode::ProtocolViolation) << id;
         }
     }
+}
+
+TEST(Moqlite06Setup, NonMinimalSingleVarintValueIsAccepted) {
+    // RFC 9000 allows a sender to use more bytes than needed: 40 01 is the value 1, and the 8-byte form too.
+    EXPECT_EQ(capabilities_of(with_param(kParamCost, bytes({0x40, 0x01}))).cost, std::optional<std::uint64_t>(1));
+    EXPECT_EQ(capabilities_of(with_param(kParamCost, bytes({0xc0, 0, 0, 0, 0, 0, 0, 0x01}))).cost,
+              std::optional<std::uint64_t>(1));
+    EXPECT_EQ(capabilities_of(with_param(kParamHop, bytes({0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))).hop_id,
+              std::optional<std::uint64_t>(kMaxVarint));
+}
+
+TEST(Moqlite06Setup, BuildSetupRefusesValuesThatDoNotFitAVarint) {
+    using Field = std::optional<std::uint64_t> SetupCapabilities::*;
+    for (const Field field : {&SetupCapabilities::probe, &SetupCapabilities::role, &SetupCapabilities::cost,
+                              &SetupCapabilities::hop_id}) {
+        SetupCapabilities at_max;
+        at_max.*field = kMaxVarint;
+        const auto accepted = build_setup(at_max);
+        ASSERT_TRUE(accepted.has_value());
+        ASSERT_EQ(accepted->parameters.size(), 1u);
+        EXPECT_EQ(accepted->parameters[0].value.size(), 8u);
+        EXPECT_EQ(capabilities_of(*accepted).*field, std::optional<std::uint64_t>(kMaxVarint));
+
+        SetupCapabilities over;
+        over.*field = kMaxVarint + 1;
+        EXPECT_FALSE(build_setup(over).has_value());
+    }
+    SetupCapabilities long_path;
+    long_path.path = std::string(4, 'a');
+    DecodeLimits tight;
+    tight.max_string_length = 3;
+    EXPECT_FALSE(build_setup(long_path, tight).has_value());
+    long_path.path = std::string(3, 'a');
+    EXPECT_TRUE(build_setup(long_path, tight).has_value());
+}
+
+TEST(Moqlite06Setup, EncodeEnforcesTheGivenLimits) {
+    SetupMessage two;
+    two.parameters.push_back({kParamCost, bytes({0x01})});
+    two.parameters.push_back({kParamHop, bytes({0x01})});
+    DecodeLimits tight;
+    tight.max_parameters = 1;
+    ByteWriter out(64);
+    EXPECT_EQ(encode_setup(two, out, tight), std::optional<EncodeError>(EncodeError::LimitExceeded));
+    EXPECT_EQ(out.size(), 0u);
+
+    const auto path = with_param(kParamPath, bytes({'a', 'b', 'c', 'd'}));
+    DecodeLimits short_strings;
+    short_strings.max_string_length = 3;
+    EXPECT_EQ(encode_setup(path, out, short_strings), std::optional<EncodeError>(EncodeError::LimitExceeded));
+    EXPECT_EQ(out.size(), 0u);
+    EXPECT_FALSE(encode_setup(path, out).has_value());
 }
 
 TEST(Moqlite06Setup, HopZeroIsCarriedRaw) {
@@ -298,7 +353,7 @@ TEST(Moqlite06Setup, PathVariants) {
 
     SetupCapabilities caps;
     caps.path = "";
-    EXPECT_EQ(encode(build_setup(caps)), bytes({0x03, 0x01, 0x02, 0x00}));
+    EXPECT_EQ(encode(*build_setup(caps)), bytes({0x03, 0x01, 0x02, 0x00}));
 }
 
 TEST(Moqlite06Setup, BuildSetupEmitsKnownParametersInIdOrder) {
@@ -306,7 +361,9 @@ TEST(Moqlite06Setup, BuildSetupEmitsKnownParametersInIdOrder) {
     caps.hop_id = 1;
     caps.cost = 0;
     caps.probe = 1;
-    const auto message = build_setup(caps);
+    const auto built = build_setup(caps);
+    ASSERT_TRUE(built.has_value());
+    const auto& message = *built;
     ASSERT_EQ(message.parameters.size(), 3u);
     EXPECT_EQ(message.parameters[0].id, kParamProbe);
     EXPECT_EQ(message.parameters[1].id, kParamCost);
@@ -372,9 +429,15 @@ TEST(Moqlite06SetupRobustness, RandomInputsNeverCrashOrAdvanceOnFailure) {
             EXPECT_LE(input.offset(), data.size());
             const auto& message = std::get<SetupMessage>(result);
             (void)read_capabilities(message);
-            // A decoded message re-encodes to the exact bytes it was read from when the wire was minimal.
             ByteWriter out(4096);
             EXPECT_FALSE(encode_setup(message, out).has_value());
+            // The encoder is minimal, so when it is no longer than what was consumed the input used only
+            // minimal varints and the bytes must be identical; otherwise it is strictly shorter.
+            if (out.size() == input.offset()) {
+                EXPECT_TRUE(std::equal(out.bytes().begin(), out.bytes().end(), data.begin()));
+            } else {
+                EXPECT_LT(out.size(), input.offset());
+            }
         } else {
             EXPECT_EQ(input.offset(), 0u);
         }
