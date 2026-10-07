@@ -11,7 +11,15 @@
 //   lite_stream_opened         each publisher stream classified by STREAM_TYPE (session::kLiteStreamOpenedKind);
 //   lite_message               each decoded publisher message (session::kLiteMessageKind);
 //   lite_decode_error          each decode issue (session::kLiteDecodeErrorKind; never required for a Pass).
-// A binding names only kinds its evaluator's Pass condition guarantees, so a stored Pass always carries them.
+// A binding names only kinds its evaluator's Pass condition guarantees, so a stored Pass carries them when the run
+// hook records the kinds as defined above (tests/unit/lite_evaluators_test.cpp derives the kinds from transcripts
+// by this mapping and checks every Pass). The SETUP rows (014, 111, 120, 124, 125) declare no lite_message: they
+// judge a lenient re-read of the Setup stream bytes, and a SETUP with a repeated Parameter ID passes 014 while the
+// strict codec decodes no message from it (only a lite_decode_error).
+//
+// evaluate_lite drops a flagged transcript's verdicts entirely (harness_failed, event_limit_reached or timed_out,
+// the same flags judgeable() refuses): it still counts as a run of its scenario (so a second, clean run of the same
+// scenario cannot pass the row), but none of its evaluators is consulted, so it yields neither Pass nor Fail.
 // Evidence notes the row rationales ask for, for the run hook to record in the event details: the time-bounded
 // flag and the stated allowance/window of a Fail of 139, 025, 108 and 107; the first subscription's Position
 // (Group Start, Frame Start) for 020 (its extension check); the session URL path, query and binding for 120 (and

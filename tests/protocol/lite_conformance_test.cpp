@@ -6,6 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -15,6 +19,8 @@
 #include <string_view>
 #include <vector>
 
+#include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
 #include "moq/interop/scenarios/lite06_errors.h"
@@ -30,66 +36,53 @@ using namespace moq::interop::test::lite;
 using moq::interop::scenarios::LiteBinding;
 using moq::interop::scenarios::LiteTranscript;
 namespace s = moq::interop::scenarios;
+using moq::interop::requirements::Applicability;
+using moq::interop::requirements::CatalogLoadMode;
+using moq::interop::requirements::LiteEvaluator;
+using moq::interop::requirements::lite_evaluator_registry;
+using moq::interop::requirements::load_draft_source;
+using moq::interop::requirements::RequirementCatalog;
+using moq::interop::requirements::Testability;
 
 using Verdict = std::optional<bool>;
-using Evaluator = Verdict (*)(const LiteTranscript&);
 
 struct Entry {
-    std::string_view id;
-    Evaluator evaluate;
-    std::set<std::string_view> scenarios;  // the catalog's scenario list of the evaluator's row(s)
+    std::string id;
+    LiteEvaluator evaluate;
+    std::set<std::string> scenarios;  // the catalog's scenario lists of the evaluator's row(s)
 };
 
-// Evaluator id -> function -> the scenarios it judges (requirements/moq-lite-06.json).
+const RequirementCatalog& catalog() {
+    static const RequirementCatalog loaded = [] {
+        const std::filesystem::path root = MOQ_INTEROP_PROJECT_SOURCE_DIR;
+        const auto source = load_draft_source(106, root / "docs", root / "requirements/draft-digests.json");
+        return RequirementCatalog::load(source, root / "requirements/moq-lite-06.json",
+                                        CatalogLoadMode::AllowIncomplete);
+    }();
+    return loaded;
+}
+
+// Evaluator id -> function -> the scenarios it judges, derived from requirements/moq-lite-06.json (every
+// reviewed Applicable + Testable row's scenarios x evaluators) and lite_evaluator_registry(), so a catalog edit
+// cannot drift from the table silently.
 const std::vector<Entry>& evaluators() {
-    static const std::vector<Entry> table{
-        {"l06-setup-stream-single-setup", s::evaluate_l06_setup_stream_single_setup, {"l06-setup-stream"}},
-        {"l06-setup-parameters-unique", s::evaluate_l06_setup_parameters_unique, {"l06-setup-stream"}},
-        {"l06-setup-unknown-parameter-ignored", s::evaluate_l06_setup_unknown_parameter_ignored,
-         {"l06-setup-unknown-parameter"}},
-        {"l06-setup-duplicate-parameter-close", s::evaluate_l06_setup_duplicate_parameter_close,
-         {"l06-setup-duplicate-parameter"}},
-        {"l06-setup-duplicate-stream-close", s::evaluate_l06_setup_duplicate_stream_close,
-         {"l06-setup-duplicate-stream"}},
-        {"l06-setup-server-path-close", s::evaluate_l06_setup_server_path_close, {"l06-setup-server-path"}},
-        {"l06-setup-server-role-close", s::evaluate_l06_setup_server_role_close, {"l06-setup-server-role"}},
-        {"l06-errors-code-space", s::evaluate_l06_errors_code_space,
-         {"l06-errors-code-space", "l06-setup-duplicate-stream", "l06-setup-duplicate-parameter",
-          "l06-setup-server-path", "l06-setup-server-role"}},
-        {"l06-announce-ok-then-starts", s::evaluate_l06_announce_ok_then_starts, {"l06-announce-prefix"}},
-        {"l06-announce-ok-hop-assigned", s::evaluate_l06_announce_ok_hop_assigned, {"l06-announce-prefix"}},
-        {"l06-announce-hop-list-excludes-own", s::evaluate_l06_announce_hop_list_excludes_own,
-         {"l06-announce-prefix"}},
-        {"l06-announce-retired-id-unused", s::evaluate_l06_announce_retired_id_unused, {"l06-announce-lifecycle"}},
-        {"l06-session-peer-closes-send", s::evaluate_l06_session_peer_closes_send, {"l06-session-stream-close"}},
-        {"l06-group-starts-with-group", s::evaluate_l06_group_starts_with_group, {"l06-subscribe-latest"}},
-        {"l06-group-unique-sequence", s::evaluate_l06_group_unique_sequence, {"l06-subscribe-latest"}},
-        {"l06-group-sequence-increments", s::evaluate_l06_group_sequence_increments, {"l06-subscribe-latest"}},
-        {"l06-subscribe-refused-reset", s::evaluate_l06_subscribe_refused_reset, {"l06-subscribe-refused"}},
-        {"l06-subscribe-invalid-frame-bounds-reset", s::evaluate_l06_subscribe_invalid_frame_bounds_reset,
-         {"l06-subscribe-invalid-frame-bounds"}},
-        {"l06-subscribe-no-group-below-floor", s::evaluate_l06_subscribe_no_group_below_floor,
-         {"l06-subscribe-group-floor"}},
-        {"l06-subscribe-ok-group-at-floor", s::evaluate_l06_subscribe_ok_group_at_floor,
-         {"l06-subscribe-group-floor"}},
-        {"l06-subscribe-resolved-start", s::evaluate_l06_subscribe_resolved_start,
-         {"l06-subscribe-abutting-frame-start"}},
-        {"l06-errors-unknown-stream-type-reset", s::evaluate_l06_errors_unknown_stream_type_reset,
-         {"l06-errors-unknown-stream-type"}},
-        {"l06-errors-unknown-stream-type-not-fatal", s::evaluate_l06_errors_unknown_stream_type_not_fatal,
-         {"l06-errors-unknown-stream-type"}},
-        {"l06-errors-unknown-code-tolerated", s::evaluate_l06_errors_unknown_code_tolerated,
-         {"l06-errors-unknown-reset-code"}},
-        {"l06-errors-no-assumed-unauthorized", s::evaluate_l06_errors_no_assumed_unauthorized,
-         {"l06-errors-unknown-reset-code"}},
-        {"l06-errors-reserved-code-tolerated", s::evaluate_l06_errors_reserved_code_tolerated,
-         {"l06-errors-reserved-reset-code"}},
-        {"l06-errors-message-length-close", s::evaluate_l06_errors_message_length_close, {"l06-errors-code-space"}},
-        {"l06-setup-path-sent", s::evaluate_l06_setup_path_sent, {"l06-setup-client-path"}},
-        {"l06-setup-path-query-appended", s::evaluate_l06_setup_path_query_appended, {"l06-setup-client-path"}},
-        {"l06-setup-path-absent-on-uri-binding", s::evaluate_l06_setup_path_absent_on_uri_binding,
-         {"l06-setup-client-path"}},
-    };
+    static const std::vector<Entry> table = [] {
+        std::map<std::string, std::set<std::string>> scenarios;
+        for (const auto& row : catalog().requirements) {
+            if (!row.reviewed || row.applicability != Applicability::Applicable ||
+                row.testability != Testability::Testable)
+                continue;
+            for (const auto& evaluator : row.evaluators)
+                scenarios[evaluator].insert(row.scenarios.begin(), row.scenarios.end());
+        }
+        std::vector<Entry> out;
+        for (const auto& [id, judged] : scenarios) {
+            const auto found = lite_evaluator_registry().find(id);
+            if (found == lite_evaluator_registry().end()) throw std::logic_error("unregistered evaluator " + id);
+            out.push_back({id, found->second, judged});
+        }
+        return out;
+    }();
     return table;
 }
 
@@ -236,6 +229,64 @@ TEST(LiteConformance, PublisherBehaviorBehindTheTable) {
     const auto& floor = *by_id.at(std::string(s::kL06SubscribeGroupFloor));
     EXPECT_NE(s::lite06::step_labelled(floor, s::kL06FloorAtLatestLabel), nullptr);
     EXPECT_NE(s::lite06::step_labelled(floor, s::kL06FloorAboveLabel), nullptr);
+}
+
+// --- the fixture's SUBSCRIBE decode handling -----------------------------------------------------------------------
+
+// A probe opening one SUBSCRIBE stream with `bytes` (no FIN), observed for 500 ms.
+s::LiteProbeDefinition one_subscribe(std::vector<std::byte> bytes) {
+    s::LiteProbeDefinition definition;
+    definition.id = "fixture-subscribe";
+    definition.deadline = std::chrono::milliseconds(2000);
+    definition.steps.push_back(s::lite_open_bidi(std::move(bytes), false, "subscribe"));
+    definition.observation_window = std::chrono::milliseconds(500);
+    return definition;
+}
+
+const moq::interop::session::LiteStreamRecord* subscribe_stream(const LiteTranscript& t) {
+    const auto* step = s::lite06::step_labelled(t, "subscribe");
+    return step && step->stream_id ? s::lite06::find_stream(t, *step->stream_id) : nullptr;
+}
+
+// The bounds rule (Frame End without Group End, draft 3.6) alone: the SUBSCRIBE stream is reset, the session stays.
+TEST(ConformingLitePublisherSubscribe, TheBoundsViolationIsResetAndTheSessionStaysOpen) {
+    const auto t = run_conforming(
+        one_subscribe(s::l06_invalid_bounds_subscribe_bytes(kConformanceBroadcast, kConformanceTrack)),
+        LiteBinding::NativeQuic);
+    EXPECT_FALSE(t.peer_close.has_value());
+    const auto* record = subscribe_stream(t);
+    ASSERT_NE(record, nullptr);
+    EXPECT_TRUE(record->reset_seen);
+    EXPECT_EQ(record->reset_code, std::optional<std::uint64_t>(0x0));
+}
+
+// Any other undecodable SUBSCRIBE (here a Message Length of 0: no Subscribe ID) closes the session with
+// PROTOCOL_VIOLATION (draft 7.1), and nothing answers the stream first.
+TEST(ConformingLitePublisherSubscribe, AnyOtherUndecodableSubscribeClosesTheSession) {
+    for (const auto& bytes : {std::vector<std::byte>{std::byte{0x02}, std::byte{0x00}},
+                              std::vector<std::byte>{std::byte{0x02}, std::byte{0x02}, std::byte{0x00},
+                                                     std::byte{0x05}}}) {
+        const auto t = run_conforming(one_subscribe(bytes), LiteBinding::NativeQuic);
+        ASSERT_TRUE(t.peer_close.has_value());
+        EXPECT_EQ(t.peer_close->code, 0x3u);
+        const auto* record = subscribe_stream(t);
+        ASSERT_NE(record, nullptr);
+        EXPECT_FALSE(record->reset_seen);
+    }
+    // The named defect closes on the bounds violation too.
+    const auto closing = run_conforming(
+        one_subscribe(s::l06_invalid_bounds_subscribe_bytes(kConformanceBroadcast, kConformanceTrack)),
+        LiteBinding::NativeQuic, [](auto& config) { config.defect = LiteDefect::CloseOnInvalidSubscribe; });
+    ASSERT_TRUE(closing.peer_close.has_value());
+    EXPECT_EQ(closing.peer_close->code, 0x3u);
+}
+
+// A malformed runner SETUP (a repeated Parameter ID) still closes the session with PROTOCOL_VIOLATION.
+TEST(ConformingLitePublisherSubscribe, AMalformedSetupStillClosesTheSession) {
+    const auto t =
+        run_conforming(s::l06_setup_duplicate_parameter_probe(kConformanceDeadline), LiteBinding::NativeQuic);
+    ASSERT_TRUE(t.peer_close.has_value());
+    EXPECT_EQ(t.peer_close->code, 0x3u);
 }
 
 }  // namespace

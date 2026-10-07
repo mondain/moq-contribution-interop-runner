@@ -17,7 +17,10 @@ namespace {
 namespace s = scenarios;
 
 // Evidence kind sets, each the observation the evaluator's Pass condition guarantees (lite_evaluators.h).
-const std::vector<std::string> kSetupMessage{"raw_probe_stimulus", "lite_stream_opened", "lite_message"};
+// The SETUP rows judge a lenient re-read of the publisher's Setup stream bytes (lite06::peer_setup_message): a SETUP
+// with a repeated Parameter ID passes row 014 although the strict codec decodes no message from it, so these rows
+// can only rely on the stream itself, never on a decoded lite_message.
+const std::vector<std::string> kSetupStream{"raw_probe_stimulus", "lite_stream_opened"};
 const std::vector<std::string> kClose{"raw_probe_stimulus", "peer_close"};
 const std::vector<std::string> kMessages{"raw_probe_stimulus", "lite_message"};
 const std::vector<std::string> kGroups{"raw_probe_stimulus", "lite_stream_opened", "lite_message"};
@@ -37,8 +40,8 @@ struct BindingRow {
 // The (row, scenario, evaluator) triples of requirements/moq-lite-06.json's Applicable + Testable rows.
 const std::vector<BindingRow>& binding_rows() {
     static const std::vector<BindingRow> rows{
-        {"L06-3-1-MUST-014", "l06-setup-stream", "l06-setup-stream-single-setup", &kSetupMessage},
-        {"L06-7-3-MUST-NOT-111", "l06-setup-stream", "l06-setup-parameters-unique", &kSetupMessage},
+        {"L06-3-1-MUST-014", "l06-setup-stream", "l06-setup-stream-single-setup", &kSetupStream},
+        {"L06-7-3-MUST-NOT-111", "l06-setup-stream", "l06-setup-parameters-unique", &kSetupStream},
         {"L06-7-3-MUST-110", "l06-setup-unknown-parameter", "l06-setup-unknown-parameter-ignored", &kMessages},
         {"L06-7-3-MUST-112", "l06-setup-duplicate-parameter", "l06-setup-duplicate-parameter-close", &kClose},
         {"L06-6-3-1-MUST-092", "l06-setup-duplicate-stream", "l06-setup-duplicate-stream-close", &kClose},
@@ -52,9 +55,9 @@ const std::vector<BindingRow>& binding_rows() {
         {"L06-4-4-MUST-027", "l06-setup-duplicate-parameter", "l06-errors-code-space", &kClose},
         {"L06-4-4-MUST-027", "l06-setup-server-path", "l06-errors-code-space", &kClose},
         {"L06-4-4-MUST-027", "l06-setup-server-role", "l06-errors-code-space", &kClose},
-        {"L06-7-3-2-MUST-120", "l06-setup-client-path", "l06-setup-path-query-appended", &kSetupMessage},
-        {"L06-7-3-2-SHOULD-124", "l06-setup-client-path", "l06-setup-path-sent", &kSetupMessage},
-        {"L06-7-3-2-MUST-NOT-125", "l06-setup-client-path", "l06-setup-path-absent-on-uri-binding", &kSetupMessage},
+        {"L06-7-3-2-MUST-120", "l06-setup-client-path", "l06-setup-path-query-appended", &kSetupStream},
+        {"L06-7-3-2-SHOULD-124", "l06-setup-client-path", "l06-setup-path-sent", &kSetupStream},
+        {"L06-7-3-2-MUST-NOT-125", "l06-setup-client-path", "l06-setup-path-absent-on-uri-binding", &kSetupStream},
         {"L06-7-4-MUST-139", "l06-announce-prefix", "l06-announce-ok-then-starts", &kMessages},
         {"L06-7-5-MUST-NOT-141", "l06-announce-prefix", "l06-announce-hop-list-excludes-own", &kMessages},
         {"L06-7-5-SHOULD-143", "l06-announce-prefix", "l06-announce-ok-hop-assigned", &kMessages},

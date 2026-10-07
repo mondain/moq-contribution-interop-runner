@@ -193,6 +193,7 @@ ConformingLitePublisherConfig lifecycle(std::map<std::size_t, Bytes> later) {
 // How the publisher reacts when the runner closes the send direction of a bidirectional stream (row 025).
 enum class OnRunnerFin { Fin, Reset, CloseSession, Nothing, FinAnnounceOnly };
 ConformingLitePublisherConfig on_runner_fin(OnRunnerFin how, ConformingLitePublisherConfig config = base_config()) {
+    config.echo_runner_fin = false;  // the reaction to the runner's FIN is scripted below
     auto handled = std::make_shared<std::set<transport::StreamId>>();
     config.hooks.on_poll = [how, handled](ConformingLitePublisher& publisher, ScriptedLitePeer& peer) {
         for (const auto& [id, stream] : peer.runner_streams()) {

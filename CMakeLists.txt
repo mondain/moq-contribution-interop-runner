@@ -1488,8 +1488,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
                    tests/protocol/lite_conformance_test.cpp)
     target_include_directories(moq-interop-moqlite-conformance-tests PRIVATE
         "${PROJECT_SOURCE_DIR}/tests")
+    target_compile_definitions(moq-interop-moqlite-conformance-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-moqlite-conformance-tests PRIVATE
-                          moq-interop-scenarios GTest::gtest_main)
+                          moq-interop-lite-evaluators GTest::gtest_main)
     target_compile_options(moq-interop-moqlite-conformance-tests PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
     add_test(NAME moqlite-conformance

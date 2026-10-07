@@ -311,17 +311,17 @@ struct ConformingLitePublisherConfig {
     std::uint64_t not_found_code{0x33};
     // Session error code for a violation of the session rules (PROTOCOL_VIOLATION).
     std::uint64_t protocol_violation_code{0x3};
-    // Stream error code for resetting a SUBSCRIBE that fails decoding (INTERNAL_ERROR: the stream table has no
-    // protocol-violation code).
+    // Stream error code for resetting a SUBSCRIBE whose only defect is Frame End without Group End (INTERNAL_ERROR:
+    // the stream table has no protocol-violation code).
     std::uint64_t invalid_subscribe_code{0x0};
     // Stream error code for ending a subscription, or a Group stream, the runner cancelled (CANCELLED).
     std::uint64_t cancelled_code{0x1};
     // After the `groups_per_subscription` whole groups of an unbounded subscription, one more Group stream is opened
     // and left open (GROUP + frames, no FIN): the group still being produced.
     bool keep_live_group_open{true};
-    // Draft 4.3: close the send direction of a stream this publisher answered once the runner closed (FIN) its own.
-    // nullopt: on, unless hooks.on_poll is set (the scenario scripts of Tasks 5-7 own their stream endings there).
-    std::optional<bool> echo_runner_fin{};
+    // Draft 4.3: close the send direction (FIN) of a stream this publisher answered once the runner closed (FIN) its
+    // own. A test whose hooks script the reaction to the runner's FIN themselves (the row 025 tests) sets it false.
+    bool echo_runner_fin{true};
     // The session URL the adapter gave this publisher, and the binding (draft 7.3.2): on native QUIC the SETUP
     // carries Path = path + "?" + query (no '?' when the query is empty); on WebTransport (or Unknown) no Path.
     std::string session_url_path{};
@@ -342,18 +342,21 @@ struct ConformingLitePublisherConfig {
 //     Frame End); an unbounded subscription gets `groups_per_subscription` whole groups (FIN) and then, with
 //     `keep_live_group_open`, one more Group stream left open;
 //   - a later SUBSCRIBE is answered the same way (SUBSCRIBE_OK), whatever was cancelled before it;
-//   - NOT_FOUND reset (+ STOP_SENDING) for other broadcasts or tracks; a SUBSCRIBE that fails decoding (Frame End
-//     without Group End, draft 3.6) is reset with `invalid_subscribe_code`, the session stays open;
+//   - NOT_FOUND reset (+ STOP_SENDING) for other broadcasts or tracks; a SUBSCRIBE whose only decode failure is the
+//     bounds rule (Frame End without Group End, draft 3.6) is reset with `invalid_subscribe_code`, the session stays
+//     open; any other undecodable SUBSCRIBE closes the session (below);
 //   - the runner resetting or stopping a Subscribe stream this publisher serves ends that subscription: RESET_STREAM
 //     CANCELLED on the Subscribe stream and on its open Group streams, no further groups; a STOP_SENDING on an open
 //     Group stream resets only that stream (CANCELLED); the runner resetting or stopping an announce stream this
 //     publisher answered is answered by resetting its send direction (draft 4.3);
 //   - the runner closing (FIN) the send direction of a stream this publisher answered is answered by closing its own
-//     (FIN; a served subscription's open Group streams are reset first), see `echo_runner_fin` (draft 4.3);
+//     (FIN; a served subscription's open Group streams are reset first), unless `echo_runner_fin` is false (draft
+//     4.3);
 //   - resets (bidi) or stops (uni) runner streams of unknown or unserved types;
 //   - a second runner Setup stream, a malformed SETUP (a repeated Parameter ID included), a runner SETUP carrying
-//     Path or Role (client-only, draft 7.3.2/7.3.3) or another malformed request closes the session with
-//     PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3).
+//     Path or Role (client-only, draft 7.3.2/7.3.3) or another malformed request (an undecodable SUBSCRIBE other
+//     than the bounds rule included, draft 7.1) closes the session with PROTOCOL_VIOLATION; unknown Parameter IDs
+//     are ignored (draft 7.3).
 // Deterministic. The publisher must outlive the peer it reacts for.
 //
 // Defaults that are the implementer's choices, NOT draft rules (Tasks 4-7 set what their rows need):
@@ -513,11 +516,13 @@ private:
         LiteRunnerRequest request{id, bidi, *parse.type, std::monostate{}, runner_setups_};
         wire::Cursor body(std::span<const std::byte>(stream.bytes).subspan(parse.offset));
         bool malformed = false;
+        std::string error_detail;
         // False while the message is incomplete; true once decoded (into target) or malformed.
         const auto take = [&](auto result, auto& target) {
             if (std::holds_alternative<wire::NeedMore>(result)) return false;
-            if (std::holds_alternative<wire::DecodeError>(result)) {
+            if (const auto* error = std::get_if<wire::DecodeError>(&result)) {
                 malformed = true;
+                error_detail = error->detail;
                 return true;
             }
             target = std::move(std::get<0>(result));
@@ -539,18 +544,24 @@ private:
         parse.request_done = true;
         requests_.push_back(request);
         if (config_.hooks.on_request && config_.hooks.on_request(*this, peer, request)) return;
-        handle_request(peer, request, malformed);
+        handle_request(peer, request, malformed, error_detail);
     }
 
-    void handle_request(ScriptedLitePeer& peer, const LiteRunnerRequest& request, bool malformed) {
+    // The codec's detail for the one SUBSCRIBE decode failure that is a bounds violation (Frame End without Group
+    // End, src/wire/moqlite06/subscribe.cpp check_range_coupling); every other decode failure is a malformed message.
+    static constexpr std::string_view kSubscribeBoundsViolation = "frame end is set but group end is unbounded";
+
+    void handle_request(ScriptedLitePeer& peer, const LiteRunnerRequest& request, bool malformed,
+                        std::string_view error_detail) {
         if (!request.bidirectional && request.stream_type == 0x1) {
             if (malformed || request.setup_streams_seen > 1 || carries_client_only_parameter(request))
                 close(peer, config_.protocol_violation_code);
             return;
         }
         if (malformed && request.bidirectional && request.stream_type == 0x2 &&
-            config_.defect != LiteDefect::CloseOnInvalidSubscribe) {
-            // Draft 3.6: a SUBSCRIBE with Frame End but no Group End is refused by resetting its stream.
+            error_detail == kSubscribeBoundsViolation && config_.defect != LiteDefect::CloseOnInvalidSubscribe) {
+            // Draft 3.6: a SUBSCRIBE with Frame End but no Group End is refused by resetting its stream. Any other
+            // undecodable SUBSCRIBE falls through to the PROTOCOL_VIOLATION close below (draft 7.1).
             refuse(peer, request.stream, config_.invalid_subscribe_code);
             return;
         }
@@ -591,7 +602,7 @@ private:
 
     // Draft 4.3: the runner ending a stream this publisher answered (or one of its open Group streams).
     void react_to_runner_endings(ScriptedLitePeer& peer) {
-        const bool echo_fin = config_.echo_runner_fin.value_or(!config_.hooks.on_poll);
+        const bool echo_fin = config_.echo_runner_fin;
         for (const auto& [id, stream] : peer.runner_streams()) {
             if (publisher_uni(id)) {
                 // A STOP_SENDING on an open Group stream: reset only that stream.

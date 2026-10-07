@@ -8,7 +8,12 @@
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/requirements/scoring.h"
+#include "moq/interop/scenarios/lite06_common.h"
+#include "moq/interop/scenarios/lite06_errors.h"
 #include "moq/interop/scenarios/lite_probe.h"
+#include "moq/interop/session/lite_stream_reader.h"
+#include "moq/interop/transport/session_transport.h"
+#include "moq/interop/wire/moqlite06/setup.h"
 #include "support/lite_conformance.h"
 
 #include <gtest/gtest.h>
@@ -22,6 +27,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 namespace moq::interop::requirements {
@@ -336,6 +342,119 @@ TEST(LiteScore, OneFailedRequiredRowFailsTheRun) {
     const auto outcomes = evaluate_lite(catalog(), replaced(conforming(), wrong));
     EXPECT_EQ(by_id(outcomes).at("L06-3-6-MUST-023"), OutcomeState::Fail);
     EXPECT_EQ(score_staged(catalog(), outcomes).verdict, RunVerdict::Fail);
+}
+
+// --- declared evidence vs what a Pass really observes --------------------------------------------------------------
+
+// The evidence kinds a transcript really holds, by the mapping the run hook records (lite_evaluators.h):
+// a stimulus the runner wrote -> raw_probe_stimulus; a stream the publisher opened -> lite_stream_opened; a decoded
+// publisher message (on any stream) -> lite_message; a publisher FIN / RESET_STREAM / STOP_SENDING ->
+// raw_probe_transport_event; the publisher's session close -> peer_close; a decode issue on the publisher's bytes ->
+// lite_decode_error.
+std::set<std::string> observed_kinds(const LiteTranscript& t) {
+    std::set<std::string> kinds;
+    const auto wrote = [](const scenarios::LiteStepRecord& step) { return step.accepted > 0 || step.fin_accepted; };
+    if (wrote(t.runner_setup) || std::any_of(t.steps.begin(), t.steps.end(), wrote)) kinds.insert("raw_probe_stimulus");
+    if (!scenarios::lite06::peer_streams(t).empty()) kinds.insert("lite_stream_opened");
+    for (const auto& record : t.streams) {
+        if (!session::peer_messages(record).empty()) kinds.insert("lite_message");
+        if (!session::peer_issues(record).empty()) kinds.insert("lite_decode_error");
+    }
+    for (const auto& event : t.events) {
+        const auto* data = std::get_if<transport::StreamDataEvent>(&event);
+        if ((data && data->fin) || std::holds_alternative<transport::PeerResetEvent>(event) ||
+            std::holds_alternative<transport::PeerStopSendingEvent>(event))
+            kinds.insert("raw_probe_transport_event");
+    }
+    if (t.peer_close) kinds.insert("peer_close");
+    return kinds;
+}
+
+// Every Pass evaluate_lite gives over `transcripts` carries, in the transcript of each bound scenario, every kind
+// its binding declares. Returns the number of Pass rows checked.
+std::size_t check_declared_kinds_observed(const std::vector<LiteTranscript>& transcripts, const std::string& label) {
+    std::size_t checked = 0;
+    const auto bindings = lite_executable_bindings();
+    for (const auto& outcome : evaluate_lite(catalog(), transcripts)) {
+        if (outcome.state != OutcomeState::Pass) continue;
+        ++checked;
+        for (const auto& binding : bindings) {
+            if (binding.requirement_id != outcome.requirement_id) continue;
+            const auto t = std::find_if(transcripts.begin(), transcripts.end(),
+                                        [&](const LiteTranscript& x) { return x.scenario_id == binding.scenario_id; });
+            if (t == transcripts.end()) {
+                ADD_FAILURE() << label << ": " << outcome.requirement_id << " passed without " << binding.scenario_id;
+                continue;
+            }
+            const auto observed = observed_kinds(*t);
+            for (const auto& kind : binding.evidence_kinds)
+                EXPECT_TRUE(observed.contains(kind)) << label << ": " << outcome.requirement_id << " on "
+                                                     << binding.scenario_id << " declares " << kind;
+        }
+    }
+    return checked;
+}
+
+std::vector<LiteTranscript> run_all(LiteBinding binding,
+                                    const std::function<void(test::lite::ConformingLitePublisherConfig&)>& tweak) {
+    std::vector<LiteTranscript> out;
+    for (auto& definition : lite::conformance_probes(binding))
+        out.push_back(lite::run_conforming(std::move(definition), binding, tweak));
+    return out;
+}
+
+// The publisher's own Setup stream written raw with `parameters` (a repeated Parameter ID allowed).
+std::function<void(test::lite::ConformingLitePublisherConfig&)> raw_setup(
+    std::vector<wire::moqlite06::SetupParameter> parameters) {
+    return [parameters](test::lite::ConformingLitePublisherConfig& config) {
+        config.hooks.on_start = [parameters](test::lite::ConformingLitePublisher&, test::lite::ScriptedLitePeer& peer) {
+            peer.data(peer.open_peer_uni(), scenarios::lite06::raw_setup_stream(parameters), true);
+            return true;
+        };
+    };
+}
+
+TEST(LiteEvidence, EveryPassCarriesItsDeclaredKinds) {
+    namespace l06 = wire::moqlite06;
+    const auto bytes = [](std::string_view text) {
+        std::vector<std::byte> out;
+        for (const char c : text) out.push_back(static_cast<std::byte>(c));
+        return out;
+    };
+    const l06::SetupParameter hop{l06::kParamHop, {std::byte{0x07}}};
+    const l06::SetupParameter path{l06::kParamPath, bytes("/moq?token=l1d")};
+    // The conformance runs on every binding.
+    for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport, LiteBinding::Unknown})
+        EXPECT_GT(check_declared_kinds_observed(lite::conformance_transcripts(binding), "conforming"), 0u);
+    // A publisher SETUP with a repeated Parameter ID: 014 (and 120/124 on native QUIC, 125 on WebTransport) still
+    // pass on the lenient re-read, while the strict codec decodes no SETUP message (a decode issue only).
+    const auto native = run_all(LiteBinding::NativeQuic, raw_setup({path, hop, hop}));
+    const auto states = by_id(evaluate_lite(catalog(), native));
+    EXPECT_EQ(states.at("L06-3-1-MUST-014"), OutcomeState::Pass);
+    EXPECT_EQ(states.at("L06-7-3-MUST-NOT-111"), OutcomeState::Fail);
+    EXPECT_EQ(states.at("L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), OutcomeState::Pass);
+    for (const auto& t : native) {
+        if (t.scenario_id != "l06-setup-stream") continue;
+        const auto kinds = observed_kinds(t);
+        EXPECT_FALSE(kinds.contains("lite_message")) << "the strict codec decoded the repeated-id SETUP";
+        EXPECT_TRUE(kinds.contains("lite_decode_error"));
+    }
+    EXPECT_GT(check_declared_kinds_observed(native, "repeated-id native"), 0u);
+    const auto web = run_all(LiteBinding::WebTransport, raw_setup({hop, hop}));
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), web)).at("L06-7-3-2-MUST-NOT-125"), OutcomeState::Pass);
+    EXPECT_GT(check_declared_kinds_observed(web, "repeated-id webtransport"), 0u);
+    // The unknown stream type answered by STOP_SENDING alone (108 passes on either reaction).
+    const auto stop_only = run_all(LiteBinding::NativeQuic, [](test::lite::ConformingLitePublisherConfig& config) {
+        config.hooks.on_request = [](test::lite::ConformingLitePublisher&, test::lite::ScriptedLitePeer& peer,
+                                     const test::lite::LiteRunnerRequest& request) {
+            if (!request.bidirectional || request.stream_type != scenarios::kL06UnregisteredStreamType) return false;
+            peer.peer_stop_sending(request.stream, 0x0);
+            return true;
+        };
+    });
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), stop_only)).at("L06-7-2-MUST-108"), OutcomeState::Pass);
+    EXPECT_GT(check_declared_kinds_observed(stop_only, "stop-only"), 0u);
 }
 
 // --- execution audit of a stored lite run ------------------------------------------------------------------------
