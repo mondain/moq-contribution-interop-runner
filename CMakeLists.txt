@@ -992,6 +992,11 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-lite-baseline-tests PRIVATE moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME lite-baseline COMMAND moq-interop-lite-baseline-tests)
+    add_executable(moq-interop-lite-catalog-tests tests/unit/lite_catalog_test.cpp)
+    target_compile_definitions(moq-interop-lite-catalog-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-lite-catalog-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    add_test(NAME lite-catalog COMMAND moq-interop-lite-catalog-tests)
     add_test(NAME lite-catalog-schema
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-catalog-schema.sh")
     set_tests_properties(lite-catalog-schema PROPERTIES SKIP_RETURN_CODE 77)

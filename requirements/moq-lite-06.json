@@ -13,14 +13,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword MUST as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MUST-NOT-002",
@@ -32,14 +31,13 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword MUST NOT as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MUST-003",
@@ -51,14 +49,13 @@
         "occurrence": 3,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword REQUIRED as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MUST-004",
@@ -70,14 +67,13 @@
         "occurrence": 4,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHALL as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MUST-NOT-005",
@@ -89,14 +85,13 @@
         "occurrence": 5,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHALL NOT as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-SHOULD-006",
@@ -108,14 +103,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHOULD as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-SHOULD-NOT-007",
@@ -127,14 +121,13 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword SHOULD NOT as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-SHOULD-008",
@@ -146,14 +139,13 @@
         "occurrence": 3,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword RECOMMENDED as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-SHOULD-NOT-009",
@@ -165,14 +157,13 @@
         "occurrence": 4,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword NOT RECOMMENDED as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MAY-010",
@@ -184,14 +175,13 @@
         "occurrence": 5,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword MAY as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-1-MAY-011",
@@ -203,14 +193,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this docu",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "document",
+      "summary": "Define the uppercase keyword OPTIONAL as BCP 14 vocabulary.",
+      "applicability": "Informative",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This quoted word introduces normative vocabulary; it imposes no endpoint behavior."
     },
     {
       "id": "L06-3-1-MAY-012",
@@ -223,13 +212,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "When UDP is unavailable, moq-lite MAY also run over reliable byte- stream transports via Qmux [qmux]; see Section 4.2 for the specific bindings.",
+      "summary": "An endpoint may run moq-lite over a reliable byte-stream transport via Qmux when UDP is unavailable.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission: a publisher that never uses Qmux is conforming, so there is nothing to fail. The L1 runner listens only on bare QUIC and WebTransport (bindings 1 and 2), so Qmux bindings 3 and 4 are not exercised."
     },
     {
       "id": "L06-3-1-SHOULD-013",
@@ -242,13 +230,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "Both endpoints SHOULD begin sending and receiving streams right away to avoid an extra round-trip.",
+      "summary": "Both endpoints should begin sending and receiving streams as soon as the connection is established, without an extra round-trip.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The publisher's Setup stream and its answers to early requests are judged by the setup and announce scenarios, but \"right away\" has no deadline: whether a publisher waited internally is indistinguishable from scheduling and network delay, so a verdict would rest on a timing guess. The runner's own session must not wait for the publisher's SETUP before opening its request streams."
     },
     {
       "id": "L06-3-1-MUST-014",
@@ -261,13 +248,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "Each endpoint MUST open a unidirectional Setup Stream at the start of the session, send a single SETUP message advertising what it supports, and immediately clo",
+      "summary": "Each endpoint opens one unidirectional Setup Stream at session start, sends exactly one SETUP message on it and closes it with FIN.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-stream"
+      ],
+      "evaluators": [
+        "l06-setup-stream-single-setup"
+      ],
+      "rationale": "The publisher's half is observable on every session: after accepting the connection the runner records the publisher's unidirectional streams and checks that one carries the Setup STREAM_TYPE, decodes as exactly one SETUP (L1b codec, empty parameter list allowed) and ends with FIN rather than a reset or further bytes. The runner must itself open, fill and FIN its own Setup stream the same way."
     },
     {
       "id": "L06-3-1-MUST-015",
@@ -280,13 +270,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "An endpoint MUST buffer a stream whose behavior or encoding depends on a negotiated extension until the peer's SETUP arrives; everything else proceeds immediate",
+      "summary": "An endpoint buffers any stream whose behavior or encoding depends on a negotiated extension until the peer's SETUP has arrived.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Buffering is internal and the only extension-dependent streams of this draft (Probe and other optional capabilities) are out of the L1 scope, so the runner opens none and negotiates none; nothing on the wire distinguishes a buffering publisher. The runner's own session must likewise hold any extension stream from the publisher until the publisher's SETUP has been decoded."
     },
     {
       "id": "L06-3-1-MUST-NOT-016",
@@ -298,14 +287,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A negotiated capability applies only to this hop; each session is negotiated independently and relays MUST NOT forward SETUP.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward SETUP to another hop, because each session negotiates its capabilities independently.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The obligation is on relays; the implementation under test is an origin publisher whose session ends at the runner, so there is no next hop to forward SETUP to."
     },
     {
       "id": "L06-3-4-SHOULD-017",
@@ -317,14 +305,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The application SHOULD process or buffer groups out of order to avoid blocking on flow control.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber application",
+      "summary": "A receiving application should process or buffer Groups that arrive out of order rather than block on flow control.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This is a receiver obligation: the runner plays the subscriber, so it applies to the runner, not to the publisher under test. The runner must itself accept Group streams in any order and keep reading all of them, so that out-of-order arrival never stalls a publisher on flow control or turns into a false Fail."
     },
     {
       "id": "L06-3-4-MAY-018",
@@ -336,14 +323,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A small single-frame Group MAY instead be transmitted as a QUIC datagram when reliability is not required (see Section 6.4).",
+      "actor": "publisher",
+      "summary": "A publisher may send a small single-frame Group as a QUIC datagram when reliability is not required.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission with nothing to fail, and datagrams are out of the L1 scope. The runner must tolerate (ignore or record) datagrams on bindings 1 and 2 and must not count a Group delivered that way as missing from its stream evidence without saying so."
     },
     {
       "id": "L06-3-5-MAY-019",
@@ -355,14 +341,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A Group Stream normally starts at frame 0, but MAY start later when the publisher only holds (or was only asked for) part of the Group.",
+      "actor": "publisher",
+      "summary": "A publisher may start a Group stream at a frame index above 0 when it holds, or was asked for, only part of the Group.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission; its limit (a partial Group only for a subscriber that asked for one) is judged under L06-3-6-MUST-020. The runner's GROUP decoding must accept a non-zero Frame Start and number the following FRAMEs from it."
     },
     {
       "id": "L06-3-6-MUST-020",
@@ -374,14 +359,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher that cannot serve a Group from the frame the subscription names MUST skip that Group entirely and resolve the subscription to a later one, rather th",
+      "actor": "publisher",
+      "summary": "A publisher that cannot serve a Group from the requested frame skips that Group and starts the subscription at the beginning of a later Group instead of delivering the part it holds.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-subscribe-partial-group-start"
+      ],
+      "evaluators": [
+        "l06-subscribe-resolved-start"
+      ],
+      "rationale": "Observable from the GROUP headers of the publisher's Group streams: the runner subscribes with a non-zero Frame Start in an older Group (which the publisher may or may not still hold) and, separately, with the default start. The first Group stream must be either the requested Group at exactly the requested Frame Start or a later Group at Frame Start 0, and a subscription that did not ask for a partial Group must never receive a non-zero Frame Start. Both outcomes of the stimulus are conforming, so only a third Position fails."
     },
     {
       "id": "L06-3-6-MUST-021",
@@ -393,14 +381,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber that has seen no such group MUST send Frame Start = 0, since it cannot number the frames of a group it has not received.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber that has not received the Group named by Group Start sends Frame Start = 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself send Frame Start 0 in every ordinary subscription; the only exception is a probe that deliberately violates a bound and is judged under L06-3-6-MUST-023."
     },
     {
       "id": "L06-3-6-MUST-022",
@@ -412,14 +399,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* A Frame End is meaningless without a Group End; an unbounded subscription (Group End = 0) MUST send Frame End = 0.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "An unbounded subscription (Group End = 0) sends Frame End = 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "This constrains the SUBSCRIBE a subscriber sends; the runner plays the subscriber, so it does not apply to the publisher under test. The runner must itself send Frame End 0 whenever Group End is 0, except in the deliberate invalid-bounds probe judged under L06-3-6-MUST-023."
     },
     {
       "id": "L06-3-6-MUST-023",
@@ -431,14 +417,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher MUST treat a violation of either rule as a protocol violation and reset the stream.",
+      "actor": "publisher",
+      "summary": "A publisher treats a SUBSCRIBE that violates the Frame Start or Frame End rule as a protocol violation and resets the subscription stream.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-subscribe-invalid-frame-bounds"
+      ],
+      "evaluators": [
+        "l06-subscribe-invalid-frame-bounds-reset"
+      ],
+      "rationale": "The runner sends a SUBSCRIBE with Group End = 0 and a non-zero Frame End (the only violation a publisher can detect from the message alone, since it cannot know which Groups the subscriber has seen) and observes that the publisher resets the subscribe stream instead of answering SUBSCRIBE_OK or delivering Groups. The stream error table has no protocol-violation code, so the evaluator requires a reset (or a session close with PROTOCOL_VIOLATION) but does not require a specific stream code; an unrelated close does not satisfy it."
     },
     {
       "id": "L06-4-2-MUST-NOT-024",
@@ -450,14 +439,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "QUIC datagrams (see Section 6.4) are supported by bindings 1 and 2 only; a publisher MUST NOT emit datagrams on bindings 3 and 4.",
+      "actor": "publisher",
+      "summary": "A publisher does not send QUIC datagrams on the Qmux bindings (3 and 4).",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The obligation binds a publisher, but only on bindings 3 and 4; the L1 runner accepts only bare QUIC and WebTransport (bindings 1 and 2), where datagrams are allowed, so the condition never arises in a run."
     },
     {
       "id": "L06-4-3-MUST-025",
@@ -470,13 +458,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "If an endpoint closes the send direction of a stream, the peer MUST also close their send direction. moq-lite contains many long-lived transactions, such as sub",
+      "summary": "When one endpoint closes the send direction of a bidirectional stream, the peer also closes its send direction.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-session-stream-close"
+      ],
+      "evaluators": [
+        "l06-session-peer-closes-send"
+      ],
+      "rationale": "The publisher is the peer when the runner ends a transaction: the runner opens an ANNOUNCE_REQUEST and a SUBSCRIBE stream, then closes its send direction with FIN, and observes that the publisher closes its own send direction (FIN or RESET_STREAM) within a stated timing allowance; no close within the allowance is a Fail, a session close is not a substitute. The runner must itself close its send direction whenever the publisher closes one."
     },
     {
       "id": "L06-4-3-MAY-026",
@@ -489,13 +480,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "After resetting the send direction, an endpoint MAY close the recv direction (STOP_SENDING).",
+      "summary": "After resetting the send direction of a stream, an endpoint may also close its receive direction with STOP_SENDING.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission: a publisher that resets without STOP_SENDING, or with it, is conforming, so there is nothing to fail. Closing the other direction remains the peer's duty under L06-4-3-MUST-025."
     },
     {
       "id": "L06-4-4-MUST-027",
@@ -508,13 +498,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "The same numeric value means different things in each, so an endpoint MUST select the code from the space matching what it is terminating.",
+      "summary": "An endpoint takes a termination code from the space matching what it terminates: session codes for a session close, stream codes for RESET_STREAM and STOP_SENDING.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-code-space"
+      ],
+      "evaluators": [
+        "l06-errors-code-space"
+      ],
+      "rationale": "The runner provokes a stream refusal (SUBSCRIBE to a broadcast the publisher does not serve) and a session termination (a malformed control message) and checks each code the publisher sends: a RESET_STREAM or STOP_SENDING code must be in the stream table (Table 3) or the application range (64 and above), a session close code in the session table (Table 2) or the application range. A code registered only in the other space, or in the reserved range 32-47, is a Fail; overlapping values present in both tables cannot distinguish the space and are accepted."
     },
     {
       "id": "L06-4-4-MUST-028",
@@ -526,14 +519,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "An endpoint bridging protocols MUST translate codes according to the negotiated version and error-code space; moq-lite's reserved, own, and application ranges h",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "bridging endpoint",
+      "summary": "An endpoint bridging moq-lite and MoQ Transport translates error codes according to the negotiated version and code space.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The obligation binds a protocol bridge; the publisher under test speaks moq-lite natively to the runner and bridges nothing."
     },
     {
       "id": "L06-4-4-MUST-NOT-029",
@@ -546,13 +538,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "The codes moq-lite uses are listed in full below; an endpoint MUST NOT assign a moq-lite specific meaning to any code below 32.",
+      "summary": "An endpoint does not give any error code below 32 a moq-lite-specific meaning.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The meaning an implementation attaches to a code is internal. A sub-32 code outside the moq-lite tables could still be a shared MoQ Transport code, so the wire value alone does not show a moq-lite-specific assignment; the observable part, codes drawn from the matching registered space, is judged under L06-4-4-MUST-027."
     },
     {
       "id": "L06-4-4-MUST-030",
@@ -565,13 +556,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "An endpoint MUST ignore a code it does not recognize, treating it as an unspecified error.",
+      "summary": "An endpoint treats an error code it does not recognize as an unspecified error and otherwise ignores it.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-reset-code"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-code-tolerated"
+      ],
+      "rationale": "The publisher receives codes when the runner cancels: the runner ends one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying an unregistered application code (64 or above) and observes that the publisher only ends that subscription (closes its send direction) while the session and the other subscription keep working; a session close or a refusal of later requests is a Fail."
     },
     {
       "id": "L06-4-4-MUST-NOT-031",
@@ -584,13 +578,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "An endpoint MUST NOT infer a meaning for an unregistered code; in particular, it MUST NOT assume a code is an authorization failure unless it is UNAUTHORIZED.",
+      "summary": "An endpoint does not infer a meaning for an unregistered error code.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-reset-code"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-code-tolerated"
+      ],
+      "rationale": "Inference is internal, but its consequences are visible in the same unknown-code probe: a publisher that attached a meaning to the runner's unregistered code would react beyond ending that one stream (closing the session, dropping the other subscription or refusing later requests), which the evaluator fails."
     },
     {
       "id": "L06-4-4-MUST-NOT-032",
@@ -603,13 +600,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "An endpoint MUST NOT infer a meaning for an unregistered code; in particular, it MUST NOT assume a code is an authorization failure unless it is UNAUTHORIZED.",
+      "summary": "An endpoint does not treat an error code as an authorization failure unless the code is UNAUTHORIZED.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-reset-code"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-code-tolerated"
+      ],
+      "rationale": "In the unknown-code probe an authorization inference would surface as a session close with UNAUTHORIZED (0x2) or as later requests refused; the evaluator fails either, and passes when the publisher keeps serving the session after ending only the cancelled stream."
     },
     {
       "id": "L06-4-4-MUST-NOT-033",
@@ -622,13 +622,16 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "Codes 32 through 47 are reserved for a future revision: nothing is assigned there and a value in it MUST NOT be interpreted.",
+      "summary": "An endpoint does not interpret an error code in the reserved range 32 through 47.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-reset-code"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-code-tolerated"
+      ],
+      "rationale": "The unknown-code probe also cancels a subscription with a reserved code (32-47); the publisher must treat it like any unrecognized code, ending only that stream while the session continues. A publisher sending a reserved code itself is judged under L06-4-4-MUST-027."
     },
     {
       "id": "L06-4-4-MUST-034",
@@ -640,14 +643,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This is the one range that does not survive a bridge unchanged: an endpoint speaking both protocols MUST map a code here to the moq-transport code with the same",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "bridging endpoint",
+      "summary": "An endpoint speaking both moq-lite and MoQ Transport maps a moq-lite code in 48-63 to the MoQ Transport code with the same meaning instead of forwarding the value.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The obligation binds an endpoint bridging both protocols; the publisher under test speaks moq-lite natively to the runner and forwards no codes to MoQ Transport."
     },
     {
       "id": "L06-4-4-MUST-035",
@@ -659,14 +661,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This is the one range that does not survive a bridge unchanged: an endpoint speaking both protocols MUST map a code here to the moq-transport code with the same",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "bridging endpoint",
+      "summary": "An endpoint speaking both moq-lite and MoQ Transport maps a moq-lite code in 48-63 without a MoQ Transport equivalent to an unspecified error.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The obligation binds an endpoint bridging both protocols; the publisher under test speaks moq-lite natively to the runner and forwards no codes to MoQ Transport."
     },
     {
       "id": "L06-4-4-2-SHOULD-036",
@@ -679,13 +680,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "An endpoint terminating a stream because the session is ending SHOULD use SESSION_CLOSED rather than the session's own code, since the two spaces are disjoint.",
+      "summary": "An endpoint that terminates a stream because its session is ending should reset it with SESSION_CLOSED rather than with the session's close code.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the runner has no stimulus that makes the publisher end its session while streams are open (GOAWAY is out of scope), and a connection close ends every stream without per-stream reset codes, so the publisher's choice is not reliably observable. The runner must itself use SESSION_CLOSED when it resets streams while closing a session."
     },
     {
       "id": "L06-5-1-1-MUST-037",

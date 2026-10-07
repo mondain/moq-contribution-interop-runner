@@ -135,18 +135,35 @@ TEST_F(LiteBaselineTest, NormalizesRequiredAndRecommendedStrength) {
 }
 
 TEST_F(LiteBaselineTest, CommittedCatalogEqualsGeneratorOutputByteForByte) {
+    // Hand classification (L1c Tasks 4-6) replaces rows in place; every row still marked
+    // reviewed:false must be the generator's row, and putting the generator's rows back in place
+    // of the reviewed ones must reproduce the generator output byte for byte (same order, ids,
+    // sources, strengths and formatting).
     const auto source = lite_source();
     write_lite_baseline(source, LiteBaselineOptions{directory_, false});
     const auto committed = kRoot / "requirements/moq-lite-06.json";
     ASSERT_TRUE(std::filesystem::exists(committed));
-    EXPECT_EQ(read_file(directory_ / "moq-lite-06.json"), read_file(committed));
+    const auto generated_text = read_file(directory_ / "moq-lite-06.json");
+    const auto generated = nlohmann::ordered_json::parse(generated_text);
+    auto document = nlohmann::ordered_json::parse(read_file(committed));
+    ASSERT_EQ(document["requirements"].size(), generated["requirements"].size());
+    for (std::size_t i = 0; i < generated["requirements"].size(); ++i) {
+        auto& row = document["requirements"][i];
+        const auto& baseline = generated["requirements"][i];
+        EXPECT_EQ(row["id"], baseline["id"]);
+        EXPECT_EQ(row["strength"], baseline["strength"]) << row["id"];
+        EXPECT_EQ(row["source"], baseline["source"]) << row["id"];
+        if (row.contains("reviewed") && row["reviewed"] == false) {
+            EXPECT_EQ(row, baseline) << row["id"];
+        } else {
+            row = baseline;
+        }
+    }
+    EXPECT_EQ(document.dump(2) + "\n", generated_text);
     const auto catalog = RequirementCatalog::load(source, committed, CatalogLoadMode::AllowIncomplete);
     EXPECT_FALSE(catalog.complete);
     EXPECT_EQ(catalog.draft, 106u);
     EXPECT_EQ(catalog.source_sha256, source.sha256);
-    for (const auto& row : catalog.requirements) {
-        EXPECT_FALSE(row.reviewed) << row.id;
-    }
     EXPECT_EQ(catalog.requirements.size(), scan_normative_occurrences(source).size());
 }
 
@@ -171,7 +188,10 @@ TEST_F(LiteBaselineTest, RegeneratingOverAReviewedRowThrowsUnlessForced) {
                  std::runtime_error);
 
     EXPECT_NO_THROW(write_lite_baseline(source, LiteBaselineOptions{directory_, true}));
-    EXPECT_EQ(read_file(path), read_file(kRoot / "requirements/moq-lite-06.json"));
+    const auto fresh = directory_ / "fresh";
+    std::filesystem::create_directories(fresh);
+    write_lite_baseline(source, LiteBaselineOptions{fresh, false});
+    EXPECT_EQ(read_file(path), read_file(fresh / "moq-lite-06.json"));
 }
 
 TEST_F(LiteBaselineTest, StagedAuditPassesTheBaselineAndFailsWhenARowIsRemoved) {

@@ -17,20 +17,23 @@ lite = json.load(open(os.path.join(base, "moq-lite-06.json")))
 validator.validate(lite)
 assert lite["draft"] == 106 and lite["complete"] is False
 assert lite["requirements"], "baseline must have rows"
-assert all(row["reviewed"] is False for row in lite["requirements"])
+# Hand-classified rows drop the flag (absent means reviewed); every remaining flag is false.
+assert all(row.get("reviewed", False) is False for row in lite["requirements"])
+assert any(row.get("reviewed") is False for row in lite["requirements"]), "baseline must keep unreviewed rows"
+unreviewed = next(i for i, row in enumerate(lite["requirements"]) if row.get("reviewed") is False)
 
 for name in ("draft18.json", "draft21.json", "draft22.json"):
     validator.validate(json.load(open(os.path.join(base, name))))
 
 for bad in ("no", 0, None, 1):
     broken = copy.deepcopy(lite)
-    broken["requirements"][0]["reviewed"] = bad
+    broken["requirements"][unreviewed]["reviewed"] = bad
     assert not validator.is_valid(broken), f"reviewed={bad!r} must be invalid"
 extra = copy.deepcopy(lite)
 extra["requirements"][0]["unknown"] = True
 assert not validator.is_valid(extra)
 flagless = copy.deepcopy(lite)
-del flagless["requirements"][0]["reviewed"]
+del flagless["requirements"][unreviewed]["reviewed"]
 assert validator.is_valid(flagless)
 print("lite catalog schema passed")
 PY
