@@ -1054,6 +1054,24 @@ TEST(ContributionResidual, Draft22ResetSubgroupPasses) {
     EXPECT_EQ(judge22(probe, windowed(finished)), std::nullopt);
 }
 
+TEST(ContributionResidual, Draft22SubgroupFinishedBeforePublishDoneIsNotJudged) {
+    const auto probes22 = wire22_probes();
+    const auto& probe = find_probe(probes22, "d21-subgroup-completion-withheld-acknowledgments");
+    // imquic's moq-pub when its one-minute Group 0 ends early in the window: six 2-byte Objects
+    // and the End of Group marker fit in the 64-byte credit, the stream ends with a FIN, and
+    // PUBLISH_DONE ("Reached the end group") follows a second later. The stream was committed.
+    ContributionRun run(probe);
+    run.deliver(0);
+    run.reply(run.stream_of(0), subscribe_ok(5));
+    run.reply(kData1, subgroup(5, 0, object_data(1, cbytes({'5', '4'}))));
+    for (int object = 2; object <= 6; ++object) run.reply(kData1, object_data(0, cbytes({'5', '5'})));
+    run.reply(kData1, cbytes({0, 0, 0, 3}), true);  // Object Status 0x3, End of Group
+    run.reply(run.stream_of(0), subgroup_publish_done(), true);
+    EXPECT_EQ(judge22(probe, windowed(run)), std::nullopt);
+    // An old PUBLISH_DONE does not make a finished stream a failure either.
+    EXPECT_EQ(judge22(probe, timed(windowed(run), std::chrono::seconds(5))), std::nullopt);
+}
+
 // ---- Section 8.9: operator-configured credentials ----------------------------------------------------------
 const std::vector<Draft21ContributionProbe>& token_probes() {
     static const auto value = draft21_contribution_probes(

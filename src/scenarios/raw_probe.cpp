@@ -331,7 +331,10 @@ bool RawProbeController::coalesce(const transport::StreamDataEvent& incoming) {
     //  - that event is already bulk data (kRawProbeCoalesceMinimumBytes), so protocol
     //    messages keep their chunk boundaries, and it stays small enough that no per-event
     //    size check can start to refuse it.
-    // Arrival times are recorded per event; only closes read them and a close is never merged.
+    // Arrival times are recorded per event. They are read for closes (observe_close, and the
+    // window end of a contribution scenario) and for the PUBLISH_DONE of the draft 22 subgroup
+    // timer row; a close is never merged and PUBLISH_DONE arrives on a request stream, which is
+    // never merged either, so both keep their own arrival times.
     // The run manager stores an extendable tail only once it is settled (settled_event_count),
     // so the stored rows always equal the transcript that was scored.
     if (transcript_.events.empty()) return false;

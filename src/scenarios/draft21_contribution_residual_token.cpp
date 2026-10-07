@@ -228,6 +228,8 @@ Spec uncommitted_subgroup_spec() {
             }
             if (!view.window_ended()) return {false, std::nullopt};
             if (unfinished && current_wire_draft() == 22 && !timer_known_expired(view)) return {true, std::nullopt};
+            // A PUBLISH_DONE sent with a stream still open also breaks the PUBLISH_DONE ordering
+            // rule (lines 4613-4615); under this row it is judged as an unreset stream.
             // A stream still open at the end of the window, long after the timer, was never reset.
             return {true, unfinished ? std::optional<bool>{false} : std::nullopt};
         },
