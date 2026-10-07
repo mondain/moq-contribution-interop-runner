@@ -265,5 +265,41 @@ TEST(Draft22FixtureProbesLive, UnknownParameterProbeIsJudgedOnThePublishersAnswe
     EXPECT_EQ(state_of(run, "D22-9-20-MUST-390"), requirements::OutcomeState::Fail);
 }
 
+// SUBSCRIBE Request ID 1 for (n)/t with a PRIORITY_FILTER whose Start (256) or End (255 + 1) exceeds 255.
+Bytes priority_start_subscribe() { return b({3, 0, 12, 1, 1, 1, 'n', 1, 't', 1, 0x27, 3, 0, 0x81, 0}); }
+Bytes priority_end_subscribe() { return b({3, 0, 13, 1, 1, 1, 'n', 1, 't', 1, 0x27, 4, 0, 0x80, 0xff, 1}); }
+// REQUEST_ERROR INVALID_FILTER (0x36).
+Bytes invalid_filter() { return b({5, 0, 3, 0x36, 0, 0}); }
+
+TEST(Draft22FixtureProbesLive, PriorityFilterProbesNameTheRunsTrackAndReachTheFilter) {
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-priority-filter-start-above-255", "d22-priority-filter-end-above-255"},
+        1500ms, app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const std::vector<Bytes> expected{priority_start_subscribe(), priority_end_subscribe()};
+    for (unsigned ordinal = 1; ordinal <= 2; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        ASSERT_TRUE(context_ready(store, started.id, ordinal));
+        auto client = Client::create({.port = started.endpoint.port, .alpn = alpn_of("moqt-22")});
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto control = client->stream(3);
+            return control && control->data == setup();
+        }));
+        // The probes wait for a SETUP offering MAX_FILTER_RANGES (here 2).
+        EXPECT_TRUE(client->send_stream(2, b({0xaf, 0, 0, 2, 6, 2}), false));
+        if (const auto request = named_request(*client)) {
+            EXPECT_EQ(*request, expected[ordinal - 1]);
+            EXPECT_TRUE(client->send_stream(request_stream(0), invalid_filter(), true));
+        }
+        pump_until_context_ends(*client, store, started.id, ordinal);
+    }
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-9-20-12-MUST-425"), requirements::OutcomeState::Pass);
+}
+
 }  // namespace
 }  // namespace moq::interop

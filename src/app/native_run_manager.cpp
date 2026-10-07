@@ -659,8 +659,10 @@ public:
             if (auto value = find(scenarios::draft21_response_probes(run_config.timeout,
                     response_namespace, response_name))) return value;
             if (auto value = find(scenarios::draft21_peer_close_probes(run_config.timeout))) return value;
-            if (auto value = find(scenarios::draft21_request_profiles(run_config.timeout))) return value;
-            // The same names reach the SUBSCRIBE / TRACK_STATUS close probes (on wire 22 only).
+            // The same names reach the request profiles and the SUBSCRIBE / TRACK_STATUS close probes (on
+            // wire 22 only).
+            if (auto value = find(scenarios::draft21_request_profiles(run_config.timeout,
+                    response_namespace, response_name))) return value;
             return find(scenarios::draft21_close_probes(run_config.timeout, {}, {std::byte{'x'}},
                                                         std::move(response_namespace), std::move(response_name)));
             });

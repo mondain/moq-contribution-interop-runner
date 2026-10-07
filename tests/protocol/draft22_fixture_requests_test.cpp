@@ -358,5 +358,115 @@ TEST(Draft22FixtureRequests, Wire22CloseProbesBuildDegenerateFixturesWithoutCras
                  std::invalid_argument);
 }
 
+// --- request profiles --------------------------------------------------------------------------------------
+
+// A publisher SETUP offering MAX_FILTER_RANGES 2 (the range and priority filter probes wait for it).
+const Bytes kRangesSetup = from_hex("af0000020602");
+
+// `definition` delivered after kRangesSetup, answered on its request stream by `response` (with FIN).
+RawProbeTranscript answered(const RawProbeDefinition& definition, const Bytes& response) {
+    auto t = delivered(definition);
+    t.events[1] = transport::StreamDataEvent{2, kRangesSetup, false};
+    t.events.push_back(transport::StreamDataEvent{*t.writes.front().stream_id, response, true});
+    t.unknown_auth_token_alias_compatibility_code = 0x17;
+    return t;
+}
+
+// REQUEST_ERROR with `code`, no retry, empty reason.
+Bytes request_error(unsigned code) { return {std::byte{5}, std::byte{0}, std::byte{3}, static_cast<std::byte>(code),
+                                             std::byte{0}, std::byte{0}}; }
+
+TEST(Draft22FixtureRequests, Wire21RequestProfilesIgnoreTheFixture) {
+    EXPECT_EQ(fingerprint(draft21_request_profiles(kDeadline, kNamespace, kName)), kRequestFingerprint);
+}
+
+TEST(Draft22FixtureRequests, Wire22RequestProfilesNameTheRunsTrack) {
+    const ScopedWireDraft wire(22);
+    const auto built = draft21_request_profiles(kDeadline, kNamespace, kName);
+    const auto own = draft21_request_profiles();
+    std::size_t renamed_count = 0;
+    for (const auto& profile : built) {
+        SCOPED_TRACE(profile.definition.id);
+        const auto pin = kRequestNamePins.find(profile.definition.id);
+        if (pin == kRequestNamePins.end()) {
+            // The reserved-namespace requests keep their names: the name is what they test.
+            EXPECT_EQ(full(profile.definition), full(find(own, profile.definition.id)->definition));
+            continue;
+        }
+        ++renamed_count;
+        EXPECT_EQ(shape(profile.definition), renamed(pin->second));
+        EXPECT_NE(hex(profile.definition.writes.front().bytes).find(kFixtureNames), std::string::npos);
+        EXPECT_EQ(shape(find(own, profile.definition.id)->definition), pin->second);
+    }
+    EXPECT_EQ(renamed_count, kRequestNamePins.size());
+    for (const auto& profile : draft21_request_profiles(kDeadline, kNamespace, {}))
+        EXPECT_EQ(full(profile.definition), full(find(own, profile.definition.id)->definition))
+            << profile.definition.id;
+}
+
+TEST(Draft22FixtureRequests, Wire22RequestProofRebuildsTheRunsTrack) {
+    const ScopedWireDraft wire(22);
+    const auto built = draft21_request_profiles(kDeadline, kNamespace, kName);
+    const auto judged = draft21_request_profiles();
+    for (const auto& [id, pin] : kRequestNamePins) {
+        SCOPED_TRACE(id);
+        const auto* definition = find(built, id);
+        const auto* profile = find(judged, id);
+        ASSERT_NE(definition, nullptr);
+        ASSERT_NE(profile, nullptr);
+        const auto response = request_error(static_cast<unsigned>(
+            profile->compatibility_error ? 0x17 : profile->expected_error));
+        EXPECT_EQ(evaluate_draft21_request_profile(answered(profile->definition, response), *profile), true);
+        EXPECT_EQ(evaluate_draft21_request_profile(answered(definition->definition, response), *profile), true);
+        EXPECT_EQ(evaluate_draft21_request_profile(answered(definition->definition, request_error(0x10)), *profile),
+                  false);
+        auto altered = answered(definition->definition, response);
+        altered.writes[0].write.bytes.push_back(std::byte{0});
+        altered.writes[0].accepted += 1;
+        EXPECT_FALSE(evaluate_draft21_request_profile(altered, *profile).has_value());
+        auto renamed_track = answered(definition->definition, response);
+        renamed_track.writes[0].write.bytes[6] = std::byte{'M'};
+        EXPECT_EQ(evaluate_draft21_request_profile(renamed_track, *profile), true);
+    }
+    // The reserved-namespace requests are proved against their own bytes, as before.
+    const auto* reserved = find(judged, "d21-request-single-period-namespace");
+    EXPECT_EQ(evaluate_draft21_request_profile(answered(reserved->definition, request_error(0x10)), *reserved), true);
+}
+
+TEST(Draft22FixtureRequests, Wire21RequestProofIsUnchanged) {
+    std::vector<RequestProbeProfile> built;
+    {
+        const ScopedWireDraft wire(22);
+        built = draft21_request_profiles(kDeadline, kNamespace, kName);
+    }
+    const auto judged = draft21_request_profiles();
+    for (const auto& [id, pin] : kRequestNamePins) {
+        SCOPED_TRACE(id);
+        const auto* profile = find(judged, id);
+        const auto response = request_error(static_cast<unsigned>(
+            profile->compatibility_error ? 0x17 : profile->expected_error));
+        EXPECT_FALSE(evaluate_draft21_request_profile(answered(find(built, id)->definition, response), *profile)
+                         .has_value());
+        const auto own = answered(profile->definition, response);
+        EXPECT_EQ(evaluate_draft21_request_profile(own, *profile), evaluate_raw_probe_request_error(own, *profile));
+        EXPECT_EQ(evaluate_draft21_request_profile(own, *profile), true);
+    }
+}
+
+TEST(Draft22FixtureRequests, Wire22RequestProfilesBuildDegenerateFixturesWithoutCrashing) {
+    const ScopedWireDraft wire(22);
+    const auto judged = draft21_request_profiles();
+    const auto* profile = find(judged, "d21-priority-filter-start-above-255");
+    for (const auto& [name, fixture] : degenerate_fixtures()) {
+        SCOPED_TRACE(name);
+        std::vector<RequestProbeProfile> built;
+        ASSERT_NO_THROW(built = draft21_request_profiles(kDeadline, fixture.first, fixture.second));
+        const auto* definition = find(built, "d21-priority-filter-start-above-255");
+        EXPECT_EQ(evaluate_draft21_request_profile(answered(definition->definition, request_error(0x36)), *profile),
+                  true);
+    }
+    EXPECT_THROW(draft21_request_profiles(kDeadline, kOversized.first, kOversized.second), std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace moq::interop::scenarios

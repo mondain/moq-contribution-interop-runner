@@ -1695,7 +1695,10 @@ TEST(NativeRunManagerDraft22Fixtures, RunNamedRequestProbesBuildDegenerateFixtur
         "d22-unexpected-duplicate-message-parameter","d22-request-undecodable-authorization-token",
         "d22-request-token-cache-overflow","d22-request-alias-registration-with-default-zero-cache",
         "d22-token-duplicate-registration","d22-request-message-truncated-at-fin","d22-update-on-track-status",
-        "d22-unknown-request-stream-message"};
+        "d22-unknown-request-stream-message","d22-duplicate-range-filter-key-in-request",
+        "d22-range-filter-start-delta-overflow","d22-range-filter-end-delta-overflow",
+        "d22-priority-filter-start-above-255","d22-priority-filter-end-above-255",
+        "d22-object-property-filter-odd-property-type","d22-request-unknown-token-alias"};
     auto fixtures=degenerate_fixtures();
     fixtures.push_back({"too large for one probe frame",
         app::TrackFixture{std::vector<std::string>(32,std::string(4096,'n')),"t"}});
