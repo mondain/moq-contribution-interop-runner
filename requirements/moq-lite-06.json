@@ -369,7 +369,7 @@
       "evaluators": [
         "l06-subscribe-resolved-start"
       ],
-      "rationale": "Observable from the GROUP headers of the publisher's Group streams, using the draft's abutting pattern (Section 3.6): the runner first subscribes with Group Start = G, Group End = G and Frame End = N-1 and receives frames 0 through N-1 of Group G, then subscribes with Group Start = G and Frame Start = N, so the non-zero Frame Start names a Group the runner has received, as the draft requires. The first Group stream of the second subscription must be Group G at Frame Start exactly N, or a later Group at Frame Start 0 when the publisher cannot serve G from frame N; any other Position is a Fail. A separate default subscription must never receive a non-zero Frame Start. Both conforming outcomes are accepted, so the evaluator never depends on whether the publisher still holds Group G."
+      "rationale": "Observable from the GROUP headers of the publisher's Group streams, using the draft's abutting pattern (Section 3.6): the runner first subscribes with Group Start = G, Group End = G and Frame End = N-1 and receives frames 0 through N-1 of Group G, then subscribes with Group Start = G and Frame Start = N, so the non-zero Frame Start names a Group the runner has received, as the draft requires. The first Group stream of the second subscription must be Group G at Frame Start exactly N, or a later Group at Frame Start 0 when the publisher cannot serve G from frame N; any other Position is a Fail. A separate default subscription must never receive a non-zero Frame Start. Both conforming outcomes are accepted, so the evaluator never depends on whether the publisher still holds Group G. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw value, while draft 2056-2058 says Group Start is offset by 1. The runner sends the raw G; a first Group of exactly G-1 at Frame Start N (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail."
     },
     {
       "id": "L06-3-6-MUST-021",
@@ -569,7 +569,7 @@
       "evaluators": [
         "l06-errors-unknown-code-tolerated"
       ],
-      "rationale": "The publisher receives codes when the runner cancels: the runner ends one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying an unregistered application code (64 or above). The evaluator requires the end of that subscription to be observed (the publisher closes its send direction with FIN or RESET_STREAM, per L06-4-3-MUST-025), so a publisher that ignores the cancel cannot pass, while the session and the other subscription keep working; a session close or a refusal of later requests is a Fail."
+      "rationale": "The publisher receives codes when the runner cancels: the runner ends one of two live subscriptions with RESET_STREAM and STOP_SENDING carrying an unregistered application code (64 or above). The evaluator requires the end of that subscription to be observed (the publisher closes its send direction with FIN or RESET_STREAM, per L06-4-3-MUST-025), so a publisher that ignores the cancel cannot pass, while the session and the other subscription keep working; a session close with any code other than UNAUTHORIZED, or a refusal of later requests, is a Fail. A session close with UNAUTHORIZED (session code 0x2) after the cancel is not judged here: it is left to L06-4-4-MUST-NOT-032, so one defect never fails both rows."
     },
     {
       "id": "L06-4-4-MUST-NOT-031",
@@ -609,7 +609,7 @@
       "evaluators": [
         "l06-errors-no-assumed-unauthorized"
       ],
-      "rationale": "In the unknown-code probe the runner cancels a subscription with an unregistered code; the evaluator requires the end of that subscription to be observed (publisher FIN or RESET_STREAM) and then fails only a session close with UNAUTHORIZED (session code 0x2). A refusal with any other code, or stream code 0x2 (DELIVERY_TIMEOUT), is not an authorization inference and is left to L06-4-4-MUST-030."
+      "rationale": "In the unknown-code probe the runner cancels a subscription with an unregistered code; the evaluator requires the end of that subscription to be observed (publisher FIN or RESET_STREAM) and then fails only a session close with UNAUTHORIZED (session code 0x2). A refusal with any other code, or stream code 0x2 (DELIVERY_TIMEOUT), is not an authorization inference and is left to L06-4-4-MUST-030. L06-4-4-MUST-030 excludes this UNAUTHORIZED session close from its own Fail, so one defect never fails both rows."
     },
     {
       "id": "L06-4-4-MUST-NOT-033",
@@ -2309,7 +2309,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply, but the interpretation of Path is application-defined and opaque to moq-lite (draft 1634-1635), so the runner treats only a value that is not a path-abempty with an optional ? and query as invalid, and records it. A publisher Path defect stays attributable to L06-7-3-2-MUST-120 in l06-setup-client-path and is not turned into a session close in every scenario: in other scenarios the runner records the value and continues."
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply, but the interpretation of Path is application-defined and opaque to moq-lite (draft 1634-1635), so the runner treats only a value that is not a path-abempty with an optional ? and query as invalid, and records it. A publisher Path defect stays attributable to L06-7-3-2-MUST-120 in l06-setup-client-path and is not turned into a session close in every scenario: in other scenarios the runner records the value and continues. On a URI binding where the publisher sends a Path parameter, the runner records the value and continues in every session so the defect is attributed to L06-7-3-2-MUST-120 or L06-7-3-2-MUST-NOT-125; the runner closes with PROTOCOL_VIOLATION only on the dedicated l06-setup-server-path probe session."
     },
     {
       "id": "L06-7-3-2-MUST-123",
@@ -2327,7 +2327,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. Path interpretation is application-defined (draft 1634-1635) and the runner serves a single test endpoint, so it recognizes any path (absent and empty included) and records the received value; it never closes on an unrecognized path, which keeps a publisher Path defect attributable to L06-7-3-2-MUST-120 rather than ending every scenario."
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. Path interpretation is application-defined (draft 1634-1635) and the runner serves a single test endpoint, so it recognizes any path (absent and empty included) and records the received value; it never closes on an unrecognized path, which keeps a publisher Path defect attributable to L06-7-3-2-MUST-120 rather than ending every scenario. On a URI binding where the publisher sends a Path parameter, the runner records the value and continues in every session so the defect is attributed to L06-7-3-2-MUST-120 or L06-7-3-2-MUST-NOT-125; the runner closes with PROTOCOL_VIOLATION only on the dedicated l06-setup-server-path probe session."
     },
     {
       "id": "L06-7-3-2-SHOULD-124",
@@ -2393,7 +2393,7 @@
       "evaluators": [
         "l06-setup-server-path-close"
       ],
-      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. The sentence has two halves. A Path on a URI binding is received by the server (the runner), which must itself close the session with PROTOCOL_VIOLATION and record it. A Path sent by the server is received by the client, the publisher, so that half is tested with a named deliberate violation probe: on binding 1, so that only the \"only the client sends it\" rule is broken, the runner's SETUP carries a Path parameter (a plain value such as \"/\"). The evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone, a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded."
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. The sentence has two halves. A Path on a URI binding is received by the server (the runner), which must itself close the session with PROTOCOL_VIOLATION and record it, but only on the dedicated l06-setup-server-path probe session; in every other session the runner records the value and continues so the defect is attributed to L06-7-3-2-MUST-NOT-125 and L06-7-3-2-MUST-120. A Path sent by the server is received by the client, the publisher, so that half is tested with a named deliberate violation probe: on binding 1, so that only the \"only the client sends it\" rule is broken, the runner's SETUP carries a Path parameter (a plain value such as \"/\"). The evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone, a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded."
     },
     {
       "id": "L06-7-3-2-MUST-NOT-127",
@@ -3600,7 +3600,7 @@
       "evaluators": [
         "l06-group-sequence-increments"
       ],
-      "rationale": "Judged on the default subscription of l06-subscribe-latest, which states a large Subscriber Max Age (as in L06-7-9-MUST-NOT-159, recorded in the evidence) so staleness resets cannot explain a gap; with a small Max Age an unaccounted gap is inconclusive, not a Fail. It is judged over the window stated for L06-6-3-2-MUST-093. The evaluator orders the decoded GROUP sequences of the subscription and requires them to form a consecutive run; a gap is accounted for when a SUBSCRIBE_DROP range covers it, and makes the row inconclusive when a Group stream of the subscription was reset before its GROUP decoded. An unaccounted gap is a Fail of this SHOULD row, flagged as inferred from delivery (a group skipped in delivery without a SUBSCRIBE_DROP looks like a numbering gap; on a loopback path congestion is unlikely; the evidence keeps the gap). Fewer than two decoded groups is NotRun."
+      "rationale": "Judged on the default subscription of l06-subscribe-latest, which states a large Subscriber Max Age (as in L06-7-9-MUST-NOT-159, recorded in the evidence) so staleness resets cannot explain a gap; with a small Max Age an unaccounted gap is inconclusive, not a Fail. It is judged over the window stated for L06-6-3-2-MUST-093. The evaluator orders the decoded GROUP sequences of the subscription and requires them to form a consecutive run; a gap is accounted for when a SUBSCRIBE_DROP range covers it, and makes the row inconclusive when a Group stream of the subscription was reset before its GROUP decoded. An unaccounted gap is a Fail of this SHOULD row (the only evaluator that fails on a gap alone; L06-7-19-MUST-191 requires every other group evaluator to tolerate one), flagged as inferred from delivery (a group skipped in delivery without a SUBSCRIBE_DROP looks like a numbering gap; on a loopback path congestion is unlikely; the evidence keeps the gap). Fewer than two decoded groups is NotRun."
     },
     {
       "id": "L06-7-19-MUST-191",
@@ -3618,7 +3618,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: a gap is never a session error and no group evaluator fails on a gap alone (L06-7-19-SHOULD-190 judges only the numbering)."
+      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: a gap is never a session error and no group evaluator fails on a gap alone except L06-7-19-SHOULD-190, which judges only numbering gaps inferred from delivery."
     },
     {
       "id": "L06-7-19-MUST-NOT-192",
