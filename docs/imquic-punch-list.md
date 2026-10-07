@@ -24,7 +24,7 @@ the fault is in the imquic **library** (it applies to every imquic application) 
 moq-pub **example** (a demo limit, reported but labeled as such, not a library defect). One
 former item, I-12, turned out to be a runner evaluator assumption and is withdrawn; its id is
 kept so the numbering stays stable. The runner defect behind it is fixed (`92d3c58`), and
-re-runs since then found a genuine, phase-dependent library finding on the same row (see I-12).
+re-runs since then found a genuine, phase-dependent library finding on the same row (I-23).
 
 ## Status in the final sweep
 
@@ -42,7 +42,7 @@ re-runs since then found a genuine, phase-dependent library finding on the same 
 | I-09 server AUTHORITY closed with INVALID_PATH | Confirmed | D22-9-1-1-MUST-304 fail |
 | I-10 namespace REDIRECT with a Track Name ends with NO_ERROR | Confirmed | D22-9-4-1-MUST-352 fail |
 | I-11 INVALID_FILTER never sent | Confirmed | D22-3-3-2-MUST-077, D22-9-1-6-MUST-326 not_run |
-| I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT | The listed FAIL was a runner evaluator assumption (triage A4), fixed in the runner (`92d3c58`); a phase-dependent FAIL since the fix is genuine: the library does not enforce the timeout (confirmed) | D22-5-2-MUST-144: not_run or fail depending on the phase of moq-pub's one-minute group (was a false FAIL in the final sweep) |
+| I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT | The listed FAIL was a runner evaluator assumption (triage A4), fixed in the runner (`92d3c58`); the phase-dependent FAIL since the fix is genuine and tracked as I-23 | D22-5-2-MUST-144: not_run or fail depending on the phase of moq-pub's one-minute group (was a false FAIL in the final sweep) |
 | I-13 duplicate Request ID not detected | Confirmed | D22-6-4-2-1-MUST-169 not_run |
 | I-14 `.session` namespace request gets NOT_SUPPORTED | Confirmed | D22-6-5-MUST-186 fail |
 | I-15 requests answered before SETUP completes | Observed (MAY row, low) | D22-6-3-MAY-159 not_run |
@@ -53,6 +53,7 @@ re-runs since then found a genuine, phase-dependent library finding on the same 
 | I-20 GROUP_ORDER 0 accepted | Confirmed (new; a false pass in the first sweep) | D22-9-20-8-MUST-421 fail |
 | I-21 parameters accepted outside their message scope | Confirmed (new) | D22-9-20-1-MUST-396 fail |
 | I-22 duplicate parameters accepted | Confirmed (new; SHOULD) | D22-9-20-SHOULD-393 not_run |
+| I-23 SUBGROUP_DELIVERY_TIMEOUT not enforced | Confirmed from source and two live runs (library; observable only in some phases of the minute) | D22-5-2-MUST-144 fail in those phases, not_run otherwise |
 | I-C1 FILL_PARAMETERS encoding | Question (unchanged) | D22-3-4-1-MUST-079, -080, -081 not_run; confounds the D22-9-20-15-MUST-432 pass |
 
 The runner fixes between the two sweeps (all in this repository, none in imquic): R1, the
@@ -66,7 +67,7 @@ see interop-notes.md). Items not labeled example or withdrawn are library items.
 were taken before the evaluator fix `92d3c58`. With it, the re-run of D22-5-2-MUST-144's
 scenario in this sweep gave not_run, so the numbers of this sweep become 45 pass, 19 fail,
 82 not_run and the categories (a) 0, (b) 34, (c) 3, (d) 64. That row's outcome depends on
-when in the minute a run starts: in some phases it is a genuine FAIL (see I-12).
+when in the minute a run starts: in some phases it is a genuine FAIL (I-23).
 
 R2 is what turned the token and parameter probes (I-19 to I-22) from confounded results into
 evidence about imquic.
@@ -299,14 +300,8 @@ contradict each other.
   - Group 0 ending after 8 Objects or more (started at :50 and :49): the stream stalled at 64
     bytes with its end held back, PUBLISH_DONE arrived at 9.05 s and 10.06 s, and no reset came
     before the window ended at about 12 s: FAIL.
-- **That FAIL is a genuine finding (confirmed).** imquic parses SUBGROUP_DELIVERY_TIMEOUT
-  (`src/moq.c` lines 6514-6519) but only re-serializes it and logs it to qlog (lines 1566, 1702,
-  9608); nothing starts a timer, and its only stream resets are request-stream cancellations
-  with CANCELLED (lines 7296, 8215, 8391). So the library does not enforce the subgroup
-  delivery timeout (lines 2301-2310), and that becomes visible whenever Group 0 is complete,
-  but unacknowledged, while the window is still open. The original I-12 evidence (a group still
-  being published) did not show it, which is why the item was withdrawn; the id stays
-  withdrawn and this finding is recorded here.
+- **That FAIL is a genuine finding, tracked as I-23.** The original I-12 evidence (a group
+  still being published) did not show it, so I-12 stays withdrawn.
 
 ### I-13 A duplicate Request ID is not detected (confirmed)
 
@@ -434,6 +429,35 @@ contradict each other.
   never checks for a repeated type.
 - **Required (SHOULD):** close on a repeated parameter that its definition does not allow.
 
+### I-23 SUBGROUP_DELIVERY_TIMEOUT is parsed but never enforced (confirmed; library)
+
+- **Confidence:** confirmed from source and two live runs; observable only in some phases of
+  moq-pub's one-minute group (see below).
+- **Row:** D22-5-2-MUST-144 (fail in the runs where Group 0 completes in time; not_run in the
+  others, including the re-run behind this list's not_run figures).
+- **Scenario:** `d22-subgroup-completion-withheld-acknowledgments`.
+- **Draft:** lines 2301-2312: once the implementation is aware that all objects of the
+  subgroup have been published, it MUST start a SUBGROUP_DELIVERY_TIMEOUT timer and, if the
+  timer expires before the stream reaches "all data committed", MUST reset the stream. Lines
+  4613-4615: a sender MUST NOT send PUBLISH_DONE until it has closed all streams of the
+  subscription, so PUBLISH_DONE shows that the subgroup was complete.
+- **Observed:** SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`), FORWARD 1, Group 0
+  only; the runner holds the data stream at 64 bytes of credit. Runs started at :50 and :49 of
+  the minute (scratch labels `PHASE-500-d22-native` and `PHASE-490-d22-native` under
+  `/tmp/claude-1000/f-sweep`): Group 0 ended after 8 or more one-second Objects, so the stream
+  stalled at 64 bytes with its end held back; PUBLISH_DONE status 3 "Reached the end group"
+  arrived at 9.05 s and 10.06 s; no RESET_STREAM followed before the window ended at about
+  12 s. When Group 0 ends after 6 or 7 Objects the End of Group marker and FIN fit in the
+  credit and nothing is owed; when it does not end in the window there is no PUBLISH_DONE.
+  Both of those give not_run (I-12 has the phase table).
+- **Where** (source lines from the scratch copy at revision `6836173`): `src/moq.c` lines
+  6514-6519 parse the parameter; its only other uses re-serialize it (lines 1566, 1702) and log
+  it to qlog (line 9608). Nothing starts a timer, and the library's only stream resets (lines
+  7296, 8215, 8391) cancel request streams with CANCELLED; no data stream is ever reset.
+- **Required:** when a subgroup is complete, start the SUBGROUP_DELIVERY_TIMEOUT timer (the
+  smaller of the publisher's and subscriber's non-zero values) and reset the data stream if it
+  is not fully committed when the timer expires.
+
 ### I-C1 FILL_PARAMETERS: a bare parameter sequence or a count first? (expectation question)
 
 - **Rows:** D22-3-4-1-MUST-079, -080, -081 (not_run). It also confounds results that look
@@ -484,7 +508,7 @@ contradict each other.
    SUBSCRIBE_TRACKS handling of its own and announces no token cache or filter ranges. Rows
    that need those (triage lines D-clock, D-pad, D-disc, D-sub1, D-tok, D-pub in
    interop-notes.md) are not imquic work for this list. Library items (I-01, I-02, I-03, the
-   missing size check of I-04, I-06b, I-07 to I-11, I-13 to I-15, I-19 to I-22) apply to every
+   missing size check of I-04, I-06b, I-07 to I-11, I-13 to I-15, I-19 to I-23) apply to every
    imquic application; example items (the crash of I-04, I-05, I-06a, I-16 to I-18) are
    moq-pub's.
 4. **Do not hide a failure by weakening a check.** Fix the code, add imquic tests, and re-run
