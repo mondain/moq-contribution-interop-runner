@@ -729,13 +729,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
+      "actor": "subscriber",
       "summary": "Several Announce Streams, possibly with overlapping prefixes, may be open at once, each answered with its own ANNOUNCE_OK and announcements.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A permission, so there is nothing for a publisher to fail. The publisher's duty to answer every Announce Stream with ANNOUNCE_OK and its matching routes is the section 7.4 MUST, which L1d may exercise with two overlapping ANNOUNCE_REQUESTs; scoring this row from that evidence would credit a permission."
+      "rationale": "The permission is the subscriber's: it may open several Announce Streams with overlapping prefixes; the runner plays the subscriber. The publisher's duty to answer each with its own ANNOUNCE_OK and matching announcements is the section 7.4 MUST (draft 1755, L06-7-4-MUST-139), classified with section 7, which L1d may exercise with two overlapping ANNOUNCE_REQUESTs."
     },
     {
       "id": "L06-5-1-1-1-MUST-040",
@@ -789,7 +789,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "The publisher receives the runner's SETUP, so it is a receiver of the runner's Hop declaration and may hold such local state; it is a permission and internal, so there is nothing observable to fail."
+      "rationale": "Here \"receiver\" means the publisher, which receives the runner's SETUP Hop declaration (in L06-5-1-1-1-MUST-040 and MAY-041 the receiver of announcements is the runner). The publisher may hold such local state; it is a permission and internal, so there is nothing observable to fail."
     },
     {
       "id": "L06-5-1-1-1-MUST-NOT-043",
@@ -825,7 +825,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A publisher alone can violate it, so it is Applicable. The provocation is a known path with an entry equal to the Hop ID the runner declared in its SETUP. Against an origin publisher every reconstructed path is [the publisher's own ANNOUNCE_OK Hop ID], a fresh value per session that the runner learns only after it has had to send its own SETUP (3.1: neither endpoint waits for the peer's SETUP), and declaring another endpoint's Hop ID as its own is not conforming subscriber behaviour. Paths through the runner would need the runner to announce to the publisher, a relay topology outside L1. A probe would therefore always be NotRun, never Pass, so the row is NotTestable in L1 (an L2 two-session probe against a relay publisher with stable upstream Hop IDs could test it)."
+      "rationale": "A publisher alone can violate it, so it is Applicable. The provocation is a known path with an entry equal to the Hop ID the runner declared in its SETUP; against an origin publisher every reconstructed path is [the publisher's own ANNOUNCE_OK Hop ID]. Not testable in L1, but not impossible: the probe is conditional on a publisher whose Hop ID is stable across sessions (draft 1719-1722 lets an endpoint declare any identity; 1782-1783 only says a fresh random value per session suffices). Session 1 reads ANNOUNCE_OK.Hop ID; session 2 declares that value in the runner's SETUP Hop Parameter, a named deliberate loop probe like L06-6-3-1-MUST-092 (the runner declares another endpoint's identity). The moq CLI, the only known target, uses a per-session random Hop ID, so the probe would be NotRun against it; it is recorded as an optional L1d/L2 item. Evidence for this row would be the announcements on an Announce Stream of session 2: Pass when no ANNOUNCE_START advertises the looped route (every reconstructed path contains the declared Hop ID)."
     },
     {
       "id": "L06-5-1-1-1-SHOULD-045",
@@ -843,7 +843,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A publisher obligation, but choosing among several paths needs several upstream paths (a relay); an origin publisher has one. The provocation is a known path with an entry equal to the Hop ID the runner declared in its SETUP. Against an origin publisher every reconstructed path is [the publisher's own ANNOUNCE_OK Hop ID], a fresh value per session that the runner learns only after it has had to send its own SETUP (3.1: neither endpoint waits for the peer's SETUP), and declaring another endpoint's Hop ID as its own is not conforming subscriber behaviour. Paths through the runner would need the runner to announce to the publisher, a relay topology outside L1. A probe would therefore always be NotRun, never Pass, so the row is NotTestable in L1 (an L2 two-session probe against a relay publisher with stable upstream Hop IDs could test it)."
+      "rationale": "A publisher obligation. Choosing the best among several qualifying paths needs several upstream paths (a relay); an origin has one, so in L1 only the second half (advertise nothing when every known path contains the subscriber's Hop ID) could arise, and only through the stable-Hop-ID loop probe. Not testable in L1, but not impossible: the probe is conditional on a publisher whose Hop ID is stable across sessions (draft 1719-1722 lets an endpoint declare any identity; 1782-1783 only says a fresh random value per session suffices). Session 1 reads ANNOUNCE_OK.Hop ID; session 2 declares that value in the runner's SETUP Hop Parameter, a named deliberate loop probe like L06-6-3-1-MUST-092 (the runner declares another endpoint's identity). The moq CLI, the only known target, uses a per-session random Hop ID, so the probe would be NotRun against it; it is recorded as an optional L1d/L2 item. Evidence for this row would be the same session-2 Announce Stream: Pass when the publisher advertises nothing for the route whose only path contains the declared Hop ID (ANNOUNCE_OK with no ANNOUNCE_START for it); it shares that probe with L06-5-1-1-1-MUST-NOT-044, so L1d gives it its own evaluator or leaves it unscored rather than scoring one observation twice."
     },
     {
       "id": "L06-5-1-1-1-MUST-046",
@@ -861,7 +861,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Applicable because an origin publisher could still violate it (serving a subscription whose only source carries the subscriber's Hop ID), but selection between several sources is relay routing. The excluded condition needs the same unprovokable path as L06-5-1-1-1-MUST-NOT-044: The provocation is a known path with an entry equal to the Hop ID the runner declared in its SETUP. Against an origin publisher every reconstructed path is [the publisher's own ANNOUNCE_OK Hop ID], a fresh value per session that the runner learns only after it has had to send its own SETUP (3.1: neither endpoint waits for the peer's SETUP), and declaring another endpoint's Hop ID as its own is not conforming subscriber behaviour. Paths through the runner would need the runner to announce to the publisher, a relay topology outside L1. A probe would therefore always be NotRun, never Pass, so the row is NotTestable in L1 (an L2 two-session probe against a relay publisher with stable upstream Hop IDs could test it)."
+      "rationale": "Applicable because an origin publisher could still violate it (serving a subscription whose only source path carries the subscriber's Hop ID); selection between several sources is relay routing. Not testable in L1, but not impossible: the probe is conditional on a publisher whose Hop ID is stable across sessions (draft 1719-1722 lets an endpoint declare any identity; 1782-1783 only says a fresh random value per session suffices). Session 1 reads ANNOUNCE_OK.Hop ID; session 2 declares that value in the runner's SETUP Hop Parameter, a named deliberate loop probe like L06-6-3-1-MUST-092 (the runner declares another endpoint's identity). The moq CLI, the only known target, uses a per-session random Hop ID, so the probe would be NotRun against it; it is recorded as an optional L1d/L2 item. Evidence for this row is different from the announcement rows: in session 2 the runner SUBSCRIBEs to the broadcast path it learned in session 1, and Pass is a refusal of that subscription (a reset of the Subscribe Stream with no SUBSCRIBE_OK and no Group stream), since the only source is excluded and the subscription is unroutable."
     },
     {
       "id": "L06-5-1-1-1-SHOULD-047",
@@ -1131,7 +1131,7 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "A permission, so nothing to fail. L1d subscribe evaluators must accept a SUBSCRIBE_OK that arrives only with or after the first matching group (within their stated allowances), and a SUBSCRIBE_END without SUBSCRIBE_OK for an ended track."
+      "rationale": "A permission, so nothing to fail. L1d subscribe evaluators must accept a SUBSCRIBE_OK that arrives only with or after the first matching group (within their stated allowances), and a SUBSCRIBE_END without SUBSCRIBE_OK for an ended track. The non-keyword sentence about SUBSCRIBE_END with no preceding SUBSCRIBE_OK is used only as tolerance guidance for evaluators, not judged as a row."
     },
     {
       "id": "L06-5-1-2-MUST-062",
@@ -1153,7 +1153,7 @@
       "evaluators": [
         "l06-subscribe-refused-reset"
       ],
-      "rationale": "After an announce exchange the runner opens two Subscribe Streams, each with a conforming SUBSCRIBE: one for a track name the announced broadcast does not serve, one for a broadcast path no announced route covers. Both are requests the publisher cannot serve, so the provocation always occurs. The draft says \"reset the stream\", so per stream the evaluator requires a RESET_STREAM from the publisher on the subscribe stream's response side, with no SUBSCRIBE_OK and no Group stream for that Subscribe ID; any code is accepted here (the code space is L06-4-4-MUST-027). The draft gives no deadline for \"promptly\", so the evaluator uses a generous stated allowance (a few seconds, recorded in the evidence) and a Fail reads \"not reset within the allowance\". A SUBSCRIBE_END or FIN instead of a reset, a session close instead of the stream reset, or a pending stream at the end of the allowance is a Fail with the reason recorded."
+      "rationale": "After an announce exchange the runner opens two Subscribe Streams, each with a conforming SUBSCRIBE: (a) a broadcast path that no route the publisher announced covers (outside every announced prefix), which the publisher cannot serve, and (b) a track name the announced broadcast does not serve. The draft says \"reset the stream\", so per stream the evaluator requires a RESET_STREAM from the publisher on the subscribe stream, with no SUBSCRIBE_OK and no Group stream for that Subscribe ID; any code is accepted here (the code space is L06-4-4-MUST-027). The draft gives no deadline for \"promptly\", so the evaluator uses a generous stated allowance (a few seconds, recorded in the evidence). For case (a) a stream still pending at the end of the allowance is a Fail, flagged as time-bounded (\"not reset within the allowance\"). For case (b) a pending stream is NotRun, not Fail: for a live track the publisher MAY withhold SUBSCRIBE_OK until a matching group resolves the start (draft 1038-1039), and the runner cannot prove the track will never exist. In both cases a SUBSCRIBE_END or FIN instead of a reset, or a session close instead of the stream reset, is a Fail with the reason recorded."
     },
     {
       "id": "L06-5-1-2-MAY-063",
@@ -1744,7 +1744,7 @@
       "evaluators": [
         "l06-group-starts-with-group"
       ],
-      "rationale": "The runner announces, then subscribes to an announced track with a default SUBSCRIBE (latest group, unbounded) and observes Group streams for a stated window. For every unidirectional stream with STREAM_TYPE Group (0x0) the evaluator decodes the first message with the L1b codec and requires a GROUP whose Subscribe ID names the open subscription, before any FRAME. If no Group stream arrives within the window the row is NotRun (the publisher may legitimately reset a subscription), never a Pass."
+      "rationale": "The runner announces, then subscribes to an announced track with a default SUBSCRIBE (latest group, unbounded) and observes Group streams for a stated window long enough to see at least two groups of the target's group cadence (recorded in the evidence; the same window serves L06-6-3-2-MUST-NOT-097). For every unidirectional stream with STREAM_TYPE Group (0x0) the evaluator decodes the first message with the L1b codec and requires a GROUP before any FRAME. A Group stream reset before any byte after STREAM_TYPE is skipped, not failed (either side MAY reset a Group stream). Checking that the GROUP's Subscribe ID names the open subscription is an extension beyond the bare wording and is recorded as information, not judged by this row. If no Group stream arrives within the window the row is NotRun (the publisher may legitimately reset a subscription), never a Pass."
     },
     {
       "id": "L06-6-3-2-MAY-094",
@@ -1820,7 +1820,7 @@
       "evaluators": [
         "l06-group-unique-sequence"
       ],
-      "rationale": "Judged on the same default subscription as L06-6-3-2-MUST-093 but on a different property: across every Group stream carrying the subscription's Subscribe ID (completed or reset) no Group Sequence appears twice. The runner sends no SUBSCRIBE_UPDATE in this scenario, so nothing it does invites a resend. A violation needs at least two Group streams, so with fewer than two observed in the window the row is NotRun, not Pass."
+      "rationale": "Judged on the same default subscription as L06-6-3-2-MUST-093 but on a different property: across every Group stream carrying the subscription's Subscribe ID (completed or reset after its GROUP decoded) no Group Sequence appears twice. The observation window is the one stated for 093, long enough to see at least two groups. A Group stream reset before its GROUP decoded is skipped, not failed. The runner sends no SUBSCRIBE_UPDATE in this scenario, so nothing it does invites a resend. A violation needs at least two Group streams, so with fewer than two decoded in the window the row is NotRun, not Pass."
     },
     {
       "id": "L06-6-3-2-MAY-098",
