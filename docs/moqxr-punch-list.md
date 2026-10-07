@@ -88,7 +88,8 @@ alias is served (D22-10). Every status above is unchanged.
 
 moqxr `main` moved after the sweeps above. On 2026-10-06 the checkout was at
 `1883b9febe35c4173f3a8e6ccf439cfdf0d913ae` (`v0.4.3-2-g1883b9f`, `--version` `0.4.3-dev`), nine
-commits after `4b615f4`. Those commits change only `src/transport/moqt_session.cpp` (a wait for a
+commits after `4b615f4`. Besides a version bump in `CMakeLists.txt`, tests, docs and a CI
+workflow, the only source changes are in `src/transport/moqt_session.cpp` (a wait for a
 forward=1 REQUEST_UPDATE in the `--forward 1` file-publish path, and a split of multi-traf moof
 boxes in live stdin ingest) and the CMAF segmenter; `moqt_control_messages.cpp`,
 `picoquic_client.cpp` and `webtransport_client.cpp` are byte-identical, and `moqt_session.cpp` is
@@ -99,7 +100,8 @@ sweep (every executable id as a single run, then the 41 row-completion groups).
 Result: no row changed. Every run's verdict and pass and fail counts, and every row outcome, equal
 the `4b615f4` re-sweep after the F1 fixes: native QUIC 69 pass, 6 fail, 72 not_run; WebTransport
 69 pass, 6 fail, 69 not_run. Nothing was fixed upstream and nothing regressed. The dig then read
-moqxr's code for every failure and every non-pass row classed as a moqxr question, and ran the four
+moqxr's code for every failure and every other non-pass row classed as a moqxr defect (items
+D22-01 to D22-10; D22-C1, the expectation question, was not re-examined), and ran the four
 adapter-mode experiments listed below. The D22- items now carry the source location, a repro, the
 severity, a fix direction and a confidence label.
 
@@ -142,7 +144,9 @@ Wire bytes are as the runner recorded them (draft 22 control messages: type, 16-
 body). **Repro** names the scenarios to run together: start the runner as in "How to reproduce a
 finding" below and post them with `"draft": 22, "transport": "native-quic"` (or
 `"webtransport"`), `"timeout_ms": 12000` and the reference track; the bundled adapter picks
-moqxr's options. **Confidence:** confirmed (wire evidence and the code that produces it),
+moqxr's options. The "By hand" steps in a **Repro** line are derived from the recorded runner
+runs and from reading moqxr's code; they were not replayed by hand against moqxr, so the outcome
+they name is the one the runner observed, not a separate test. **Confidence:** confirmed (wire evidence and the code that produces it),
 likely (one of the two), suspected (neither settles it).
 
 ### D22-01 A Range Filter with no advertised MAX_FILTER_RANGES gets UNAUTHORIZED (carries M-11)
@@ -225,9 +229,11 @@ likely (one of the two), suspected (neither settles it).
   574-605); that decoder knows only the 1- to 4-byte forms and returns false for a first byte of
   0xf0 or more (lines 593-594). The decoder in `moqt_control_messages.cpp`
   (`decode_vi64_impl`, lines 326-370) handles all nine forms. Any session-level read of a value
-  of 2^28 or more (stream types, Request IDs, parameter types) fails the same way.
+  of 2^28 or more (message types, stream types, Request IDs) fails the same way; parameter types
+  go through the full decoder in `moqt_control_messages.cpp`.
 - **Repro:** `d22-inbound-padding-stream`. By hand: open a unidirectional stream to moqxr
-  and write `f0 13 2b 3e 28` followed by any bytes.
+  and write `f0 13 2b 3e 28` followed by zero bytes (the padding the draft defines; the runner
+  sent only zeros), then FIN.
 - **Severity:** MUST (6646-6647). A peer that pads loses the session; the row itself stays
   unscored because its evaluator judges only the liveness follow-up.
 - **Fix direction:** make `decode_vi64` in `moqt_session.cpp` decode the 5- to 9-byte forms
@@ -245,9 +251,12 @@ likely (one of the two), suspected (neither settles it).
   `10 0021 1f moqt://127.0.0.1:<port>/moq-next 00` on the control stream draws "received
   unknown or unsupported control-stream message" and close 0x3; moqxr exits. The same on
   `1883b9f`.
-- **Where:** the `serve_subscriptions` control loop handles only REQUEST_UPDATE (and, before
-  draft 18, SUBSCRIBE and SUBSCRIBE_NAMESPACE) and closes on every other complete message at
-  drafts 18 and later (`moqt_session.cpp` lines 4684-4692). GOAWAY is framed by
+- **Where:** at draft 22 the `serve_subscriptions` control loop handles no message type at all:
+  a request message on the control stream (REQUEST_UPDATE included) is a PROTOCOL_VIOLATION
+  (`moqt_session.cpp` lines 4646-4652), UNSUBSCRIBE closes too (4653-4656), the SUBSCRIBE and
+  SUBSCRIBE_NAMESPACE branches exist only for drafts without request streams (before draft 17),
+  and every other complete message closes with "received unknown or unsupported control-stream
+  message" at drafts 18 and later (lines 4684-4692). GOAWAY is framed by
   `next_control_message`, so it reaches that close. A GOAWAY on a request stream is handled
   (`send_request_stream_and_wait`, lines 1403-1414, resets the request and reports a retryable
   failure), but not one on the control stream.
@@ -477,7 +486,9 @@ fixes shows the same missing check on SUBSCRIBE, where it is scored.
 - **Scenarios:** `d22-unknown-control-message`, `d22-unknown-request-stream-message`,
   `d22-subscriber-sends-publish-state-notify`, `d22-single-request-update-response`,
   `d22-update-on-track-status`.
-- **Draft:** lines 3876-3880 (an unknown message type MUST close the session; every control
+- **Draft:** Figure 5, lines 3788-3797 (every message on a control or request stream is
+  Message Type, a 16-bit Message Length and the body); lines 3876-3880 (an unknown message
+  type MUST close the session; every control
   message carries its length "to simplify parsing", and none is meant to be ignored); 4711-4712
   (PUBLISH_STATE_NOTIFY from the subscriber MUST close the session with PROTOCOL_VIOLATION);
   the message table at 3826-3872 (TRACK_STATUS 0x0D, PUBLISH_STATE_NOTIFY 0x22, PUBLISH_SKIPPED
@@ -485,8 +496,9 @@ fixes shows the same missing check on SUBSCRIBE, where it is scored.
 - **Where:** `next_control_message` (`moqt_control_messages.cpp` lines 664-757) decides where a
   control or request message ends by switching on its type. Only the types it lists are framed;
   any other type returns false (lines 755-756), which every caller reads as "not complete yet".
-  At draft 22 every control and request message is a type, a 16-bit length and a body (lines
-  3876-3880), so the length is known for any type, listed or not. The list lacks TRACK_STATUS (0x0D), PUBLISH_STATE_NOTIFY
+  At draft 22 every message on a control or request stream is a type, a 16-bit length and a
+  body (Figure 5, lines 3788-3797; the rule at 3876-3880), so the length is known for any type,
+  listed or not. The list lacks TRACK_STATUS (0x0D), PUBLISH_STATE_NOTIFY
   (0x22), PUBLISH_SKIPPED (0x0F) and every unknown type. The callers then wait for bytes that
   never come: the control loop (`moqt_session.cpp` lines 4636-4702), `read_request_stream_message`
   (lines 3520-3558, which closes "request stream closed before a complete message" at FIN and
@@ -508,7 +520,8 @@ fixes shows the same missing check on SUBSCRIBE, where it is scored.
     stalled serve loop (D22-06).
 - **Repro:** the scenarios above. By hand, after SETUP: `7e 00 00` on the control stream (no
   close); or `0d 0010 01 01 05 media 06 vide_1 00` on a new request stream without FIN (no answer
-  until moqxr's `--timeout`), then with FIN (close 0x3).
+  within the runner's 12 s window; moqxr's own `--timeout` is longer, 15 s for this probe), then
+  with FIN (close 0x3).
 - **Severity:** MUST (3877-3878, 4711-4712). The most consequential item of the draft 22 list:
   one unknown or unlisted message wedges the stream it arrives on (the whole control stream, in
   the D22-02 case), and a TRACK_STATUS, a request any subscriber may send, either ends the

@@ -192,7 +192,12 @@ options are listed in `adapters/moqxr/run.sh` and pinned by
 With `--forward 1`, moqxr sends its own PUBLISH and blocks until it is answered, so every
 probe in which the runner is the subscriber and does not answer that PUBLISH gets
 `--forward 0 --paced`. Only `publisher-location-filter-parameter` answers it and keeps
-`--forward 1`:
+`--forward 1`. Two shared probes in which the runner is the subscriber are exceptions and keep
+their `d21-` twin's `--forward 1`: `d22-unknown-request-stream-message` and
+`d22-unknown-datagram-type`. Pacing them lets the stimulus reach moqxr, but in the dig of
+2026-10-06 against moqxr `1883b9f` it changed no verdict (see
+[the moqxr punch list](moqxr-punch-list.md#status-against-moqxr-1883b9f)). The own draft 22
+scenarios:
 
 | `d22-` scenario | moqxr options | Closest draft 21 scenario |
 |---|---|---|
