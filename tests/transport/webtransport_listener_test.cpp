@@ -50,6 +50,15 @@ TEST(WebTransportListener, RejectsInvalidProtocolAndMissingOriginPolicy) {
     EXPECT_EQ(no_origin.error, NativeQuicListenerError::InvalidConfiguration);
 }
 
+// moq-lite-06 is a known identifier, but no session handler opts in to it in this sub-project.
+TEST(WebTransportListener, RefusesMoqLiteWithoutASessionHandler) {
+    auto settings = config();
+    settings.application_protocol = "moq-lite-06";
+    const auto result = WebTransportListener::create(std::move(settings));
+    EXPECT_EQ(result.listener, nullptr);
+    EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
+}
+
 TEST(WebTransportListener, AcceptsDraft22ProtocolAndRejectsMoqt23) {
     auto settings = config();
     settings.application_protocol = "moqt-22";

@@ -2,12 +2,18 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace moq::interop::transport {
 
-enum class WebTransportProfile { Draft18Wt15, Draft21Wt16, Draft22Wt16 };
+enum class WebTransportProfile { Draft18Wt15, Draft21Wt16, Draft22Wt16, MoqLite06 };
+
+// The WT-Protocol value a profile negotiates, and the profile an application protocol selects.
+// profile_for_application_protocol throws std::logic_error for an unknown protocol.
+[[nodiscard]] std::string_view application_protocol_for(WebTransportProfile profile);
+[[nodiscard]] WebTransportProfile profile_for_application_protocol(std::string_view protocol);
 
 struct H3Request {
     std::string method;

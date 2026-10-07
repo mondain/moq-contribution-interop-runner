@@ -447,6 +447,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME draft21-d21b-live COMMAND moq-interop-draft21-d21b-live-tests)
+    add_executable(moq-interop-moqlite-start-guard-tests
+                   tests/integration/moqlite_start_guard_test.cpp)
+    target_link_libraries(moq-interop-moqlite-start-guard-tests PRIVATE
+        moq-interop-runs GTest::gtest_main)
+    target_compile_definitions(moq-interop-moqlite-start-guard-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME moqlite-start-guard COMMAND moq-interop-moqlite-start-guard-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)

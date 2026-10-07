@@ -130,6 +130,12 @@ TEST(PicoquicNativeListener, AcceptsExactDraftAlpn) {
     }
 }
 
+TEST(PicoquicNativeListener, RefusesMoqLiteAlpnWithoutASessionHandler) {
+    const auto result = NativeQuicListener::create(config_for("moq-lite-06"));
+    EXPECT_EQ(result.listener, nullptr);
+    EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
+}
+
 TEST(PicoquicNativeListener, RejectsWrongDraftAlpn) {
     auto result = NativeQuicListener::create(config_for("moqt-21"));
     ASSERT_NE(result.listener, nullptr);

@@ -30,13 +30,6 @@ extern "C" int picowt_set_wt_protocol(h3zero_stream_ctx_t* stream_ctx,
 namespace moq::interop::transport {
 namespace {
 
-WebTransportProfile profile_for_protocol(std::string_view protocol) {
-    if (protocol == app::alpn(app::DraftVersion::Draft18)) return WebTransportProfile::Draft18Wt15;
-    if (protocol == app::alpn(app::DraftVersion::Draft21)) return WebTransportProfile::Draft21Wt16;
-    if (protocol == app::alpn(app::DraftVersion::Draft22)) return WebTransportProfile::Draft22Wt16;
-    throw std::logic_error("unsupported WebTransport application protocol");
-}
-
 bool regular_file(const std::filesystem::path& path) {
     std::error_code error;
     return std::filesystem::is_regular_file(path, error) && !error;
@@ -378,7 +371,7 @@ WebTransportListenerCreateResult WebTransportListener::create(
                                      ? impl->endpoint.address
                                      : impl->config.advertised_host) + ":" +
                                  std::to_string(impl->endpoint.port);
-    impl->profile = profile_for_protocol(impl->config.application_protocol);
+    impl->profile = profile_for_application_protocol(impl->config.application_protocol);
     impl->run_endpoint = {impl->config.authority, impl->config.path,
                           impl->config.allowed_origins,
                           impl->config.application_protocol,
