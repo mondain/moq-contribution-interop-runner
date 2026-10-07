@@ -191,6 +191,19 @@ expect_refused 'unsupported or malformed request'
 printf '{"schema_version": 1, "draft": 22' >"$test_dir/request.json"
 run_adapter
 expect_refused 'unsupported or malformed request'
+# A scenario timeout written with a fraction or an exponent (2500.0, 1e3) is refused with a clear
+# message: jq passes such literals through unchanged and the shell arithmetic cannot use them.
+for literal in 2500.0 1e3; do
+    make_request 22 native_quic
+    sed -i "s/\"scenario_timeout_ms\": 2500,/\"scenario_timeout_ms\": $literal,/" "$test_dir/request.json"
+    grep -q "\"scenario_timeout_ms\": $literal," "$test_dir/request.json" || fail "could not write $literal"
+    run_adapter
+    expect_refused 'scenario_timeout_ms must be a whole number of milliseconds'
+done
+make_request 22 native_quic
+grep -q '"scenario_timeout_ms": 2500,' "$test_dir/request.json" || fail "request layout changed"
+run_adapter
+[[ "$status" -eq 0 && "$log" == *"<-M>"* ]] || fail "integer scenario timeout 2500 refused ($status: $err)"
 make_request 22 native_quic
 jq '.log_dir = "'"$test_dir"'/missing"' "$test_dir/request.json" >"$test_dir/request.next"
 mv "$test_dir/request.next" "$test_dir/request.json"

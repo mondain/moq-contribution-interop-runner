@@ -45,6 +45,11 @@ command -v timeout >/dev/null || fail 'coreutils timeout is required'
 malformed='unsupported or malformed request (supported drafts: 22)'
 draft=$(jq -er '.draft | numbers' "$request_file" 2>/dev/null) || fail "$malformed"
 [[ "$draft" == 22 ]] || fail "draft $draft is not supported (supported drafts: 22)"
+# jq passes number literals through unchanged (2500.0, 1E+3), which the shell arithmetic below cannot
+# use: the scenario timeout must be written as a plain integer.
+jq -e '.scenario_timeout_ms | type != "number" or (tostring | test("^[0-9]+$"))' "$request_file" \
+    >/dev/null 2>&1 ||
+    fail 'scenario_timeout_ms must be a whole number of milliseconds (no fraction or exponent)'
 jq -e '
     .schema_version == 1 and
     .draft == 22 and
