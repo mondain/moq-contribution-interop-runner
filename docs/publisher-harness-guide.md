@@ -308,6 +308,8 @@ against imquic and its triage are in
 [interop-notes.md](interop-notes.md#draft-22-sweep-against-imquic-6836173); the imquic findings
 are in [imquic-punch-list.md](imquic-punch-list.md).
 
+How to build, run and test against each bundled peer: [adapters/moqxr/README.md](../adapters/moqxr/README.md) and [adapters/imquic/README.md](../adapters/imquic/README.md).
+
 A real request file from a run:
 
 ```json
