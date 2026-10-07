@@ -193,5 +193,77 @@ TEST(Draft22FixtureProbesLive, SubscribeTracksUpdateCloseAnswersThePublishAndRea
     EXPECT_EQ(state_of(run, "D22-9-5-1-MUST-360"), requirements::OutcomeState::Pass);
 }
 
+// --- SUBSCRIBE / TRACK_STATUS probes that named (), "x" --------------------------------------------------
+
+// A request's Track Namespace field count, read after its type, length and one-byte Request ID.
+std::optional<std::uint64_t> namespace_fields(const Bytes& request) {
+    if (request.size() < 5) return std::nullopt;
+    return std::to_integer<std::uint64_t>(request[4]);
+}
+
+// Plays a publisher that, like imquic, closes 0x3 (PROTOCOL_VIOLATION) on a SUBSCRIBE or TRACK_STATUS with
+// no namespace field before it reads the rest. Returns the first request the runner sent, once it named
+// the run's track (n)/t; the caller then plays the probe's real condition.
+std::optional<Bytes> named_request(Client& client) {
+    const auto request = first_message(client, request_stream(0));
+    EXPECT_TRUE(request.has_value());
+    if (!request) return std::nullopt;
+    if (namespace_fields(*request) == 0u) {
+        EXPECT_TRUE(client.close(3, {})) << "Invalid number of namespaces";
+        ADD_FAILURE() << "the runner sent an empty namespace";
+        return std::nullopt;
+    }
+    return request;
+}
+
+// SUBSCRIBE Request ID 1 for (n)/t with one parameter: an undecodable AUTHORIZATION_TOKEN (Alias Type 3 with
+// no Token Type), and the unknown parameter 0x7e.
+Bytes undecodable_token_subscribe() { return b({3, 0, 10, 1, 1, 1, 'n', 1, 't', 1, 3, 1, 3}); }
+Bytes unknown_parameter_subscribe() { return b({3, 0, 9, 1, 1, 1, 'n', 1, 't', 1, 0x7e, 0}); }
+// The runner's liveness follow-up: SUBSCRIBE Request ID 7 for (n)/t, no parameters.
+Bytes liveness_subscribe() { return b({3, 0, 7, 7, 1, 1, 'n', 1, 't', 0}); }
+
+TEST(Draft22FixtureProbesLive, UndecodableTokenProbeNamesTheRunsTrackAndReachesTheToken) {
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-request-undecodable-authorization-token"}, 1500ms,
+        app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = connect(store, started, 1);
+    ASSERT_NE(client, nullptr);
+    if (const auto request = named_request(*client)) {
+        EXPECT_EQ(*request, undecodable_token_subscribe());
+        // Section 8.9: an undecodable token is a KEY_VALUE_FORMATTING_ERROR.
+        EXPECT_TRUE(client->close(6, {}));
+    }
+    pump_until_context_ends(*client, store, started.id);
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-8-9-MUST-279"), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft22FixtureProbesLive, UnknownParameterProbeIsJudgedOnThePublishersAnswerNotOnTheName) {
+    // The publisher accepts the unknown parameter (as if it ignored it) and stays live: that is a genuine
+    // failure of Section 9.20. Before, the empty namespace drew the 0x3 close the row expects: a false pass.
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-unknown-message-parameter"}, 3000ms, app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = connect(store, started, 1);
+    ASSERT_NE(client, nullptr);
+    if (const auto request = named_request(*client)) {
+        EXPECT_EQ(*request, unknown_parameter_subscribe());
+        EXPECT_TRUE(client->send_stream(request_stream(0), subscribe_ok(), false));
+        EXPECT_TRUE(answer(*client, request_stream(1), liveness_subscribe(), subscribe_ok()))
+            << "the liveness follow-up asks for the run's track";
+    }
+    pump_until_context_ends(*client, store, started.id);
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-9-20-MUST-390"), requirements::OutcomeState::Fail);
+}
+
 }  // namespace
 }  // namespace moq::interop
