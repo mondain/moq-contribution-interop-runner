@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <string>
 #include <string_view>
 #include <tuple>
 
@@ -38,17 +39,19 @@ struct BoundContexts {
 }  // namespace
 
 bool CompletenessReport::complete() const noexcept {
-    return required_total == required_covered &&
+    return required_total == required_covered && unreviewed_total == 0 &&
            std::none_of(findings.begin(), findings.end(),
                         [](const auto& finding) { return finding.blocking; });
 }
 
-CompletenessReport audit_completeness(
+// Shared by audit_completeness() (staged == false) and audit_completeness_staged().
+static CompletenessReport audit_rows(
     const RequirementCatalog& catalog,
     std::span<const ExecutableBinding> bindings,
-    std::span<const std::string_view> executable_scenarios) {
+    std::span<const std::string_view> executable_scenarios,
+    bool staged) {
     CompletenessReport report{catalog.draft};
-    if (!catalog.complete) {
+    if (!staged && !catalog.complete) {
         report.findings.push_back({"incomplete_catalog", "",
             "source-keyword catalog is not complete", true});
     }
@@ -104,6 +107,11 @@ CompletenessReport audit_completeness(
         contexts.evaluators.insert(binding.evaluator_id);
     }
     for (const auto& row : catalog.requirements) {
+        if (staged && !row.reviewed) {
+            ++report.unreviewed_total;
+            if (required(row.strength)) ++report.unreviewed_required;
+            continue;
+        }
         if (row.applicability != Applicability::Applicable ||
             row.testability != Testability::Testable) continue;
         const bool is_required = required(row.strength);
@@ -132,8 +140,13 @@ CompletenessReport audit_completeness(
             for (const auto& id : missing_evaluators) detail += " missing_evaluator=" + id;
             report.findings.push_back({is_required ? "missing_required_evaluator"
                                                    : "missing_optional_evaluator",
-                row.id, std::move(detail), is_required});
+                row.id, std::move(detail), is_required && !staged});
         }
+    }
+    if (report.unreviewed_total != 0) {
+        report.findings.push_back({"unreviewed_rows", "",
+            std::to_string(report.unreviewed_total) + " catalog rows are unreviewed (" +
+                std::to_string(report.unreviewed_required) + " required)", false});
     }
     std::sort(report.findings.begin(), report.findings.end(),
         [](const auto& left, const auto& right) {
@@ -141,6 +154,20 @@ CompletenessReport audit_completeness(
                    std::tie(right.requirement_id, right.code, right.detail);
         });
     return report;
+}
+
+CompletenessReport audit_completeness(
+    const RequirementCatalog& catalog,
+    std::span<const ExecutableBinding> bindings,
+    std::span<const std::string_view> executable_scenarios) {
+    return audit_rows(catalog, bindings, executable_scenarios, false);
+}
+
+CompletenessReport audit_completeness_staged(
+    const RequirementCatalog& catalog,
+    std::span<const ExecutableBinding> bindings,
+    std::span<const std::string_view> executable_scenarios) {
+    return audit_rows(catalog, bindings, executable_scenarios, true);
 }
 
 }  // namespace moq::interop::requirements
