@@ -116,7 +116,7 @@ int audit_lite(const Options& options) {
                   << "Reviewed: " << counts.reviewed << '\n'
                   << "Unreviewed: " << counts.unreviewed << '\n'
                   << "Unreviewed required (MUST/MUST NOT): " << counts.unreviewed_required << '\n'
-                  << "Required applicable testable: " << report.required_total << '\n'
+                  << "Required applicable testable (reviewed rows): " << report.required_total << '\n'
                   << "Planned scenarios: " << planned.size() << '\n'
                   << "Source-keyword audit: " << (source_audit.ok() ? "complete" : "failed") << '\n'
                   << "Findings: " << report.findings.size() << '\n';
@@ -293,6 +293,7 @@ int main(int argc, char* argv[]) {
         }
         return static_complete && (!execution || execution->consistent()) ? 0 : 1;
     } catch (const std::exception& error) {
+        // A loader or argument error exits 2 with the usage text, for every draft (unchanged for 18/21/22).
         std::cerr << "moq-interop-audit: " << error.what() << '\n';
         usage();
         return 2;

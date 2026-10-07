@@ -200,3 +200,36 @@ bash tests/e2e/fuzz-smoke.sh        # libFuzzer targets in build-fuzz/, bounded 
 address and undefined-behavior sanitizers. `fuzz-smoke.sh` builds the cursor,
 draft-18 message, draft-18 object and WebTransport stream fuzz targets and runs
 each for 500 executions with a 30 second limit. Both need Clang.
+
+### Staged moq-lite-06 audit
+
+```sh
+build/moq-interop-audit --draft moq-lite-06 [--format text|json]
+```
+
+`--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
+(`complete: false`). No evaluators are bound yet, so the audit reports the catalog's state
+instead of coverage, and its verdict is never a pass. Other spellings (`106`, `moq-lite-05`)
+are refused. `--database` does not apply.
+
+```text
+Draft moq-lite-06 source <sha256>
+Rows: <n>
+Reviewed: <n>
+Unreviewed: <n>
+Unreviewed required (MUST/MUST NOT): <n>
+Required applicable testable (reviewed rows): <n>
+Planned scenarios: <n>
+Source-keyword audit: complete
+Findings: <n>
+  [non-blocking] <code> <requirement_id>: <detail>
+STAGED: incomplete catalog (not a pass)
+```
+
+Unreviewed rows are counted separately and are not part of the applicable testable total; the
+planned scenarios are the distinct scenario ids named by any row. JSON output carries the same
+fields (`rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
+`planned_scenarios`, `staged`, `complete`, `verdict`, `source_audit`, `findings`). It is a separate
+shape from the other drafts: there is no `source_revision`, `static_complete` or
+`executable_coverage`. Exit status is 0 unless the source-keyword audit fails or a finding is
+blocking (none can be without bindings), 1 in that case, and 2 for an argument or loader error.

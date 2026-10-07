@@ -361,17 +361,9 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
     std::vector<const requirements::RequirementCatalog*> catalogs{&draft18, &draft21};
     if (draft22) catalogs.push_back(draft22);
     for (const auto* catalog : catalogs) {
-        const auto catalog_draft = app::parse_draft(catalog->draft);
-        // A catalog of a draft this server has no bindings for (moq-lite) reports no coverage; an
-        // incomplete one is audited as staged.
-        const bool moqt = catalog_draft && app::is_moqt(*catalog_draft);
-        const auto bindings = moqt ? executable_bindings(*catalog_draft)
-                                   : std::vector<requirements::ExecutableBinding>{};
-        const auto audit = catalog->complete || moqt
-            ? requirements::audit_completeness(
-                  *catalog, bindings, app::executable_scenarios(catalog->draft))
-            : requirements::audit_completeness_staged(
-                  *catalog, bindings, app::executable_scenarios(catalog->draft));
+        const auto selection = detail::audit_catalog(*catalog);
+        const auto& bindings = selection.bindings;
+        const auto& audit = selection.report;
         Json findings = Json::array();
         for (const auto& finding : audit.findings) {
             findings.push_back({{"code", finding.code},
@@ -464,6 +456,24 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
 }
 
 }  // namespace
+
+namespace detail {
+
+CatalogAudit audit_catalog(const requirements::RequirementCatalog& catalog) {
+    const auto draft = app::parse_draft(catalog.draft);
+    // A catalog of a draft this server has no bindings for (moq-lite) reports no coverage and is
+    // audited as staged; MoQ Transport catalogs keep their bindings and the non-staged audit.
+    const bool moqt = draft && app::is_moqt(*draft);
+    CatalogAudit result;
+    if (moqt) result.bindings = executable_bindings(*draft);
+    const auto scenarios = app::executable_scenarios(catalog.draft);
+    result.report = catalog.complete || moqt
+        ? requirements::audit_completeness(catalog, result.bindings, scenarios)
+        : requirements::audit_completeness_staged(catalog, result.bindings, scenarios);
+    return result;
+}
+
+}  // namespace detail
 
 class HttpServer::Impl {
 public:

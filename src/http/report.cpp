@@ -160,6 +160,9 @@ std::string render_run_detail(const storage::RunRecord& run,
     std::map<std::uint64_t, nlohmann::json> evidence;
     for (const auto& event : document.at("evidence"))
         evidence[event.at("sequence").get<std::uint64_t>()] = event;
+    const auto parsed_draft = app::parse_draft(catalog.draft);
+    const auto draft_text = parsed_draft ? detail::draft_display(*parsed_draft)
+                                         : std::to_string(catalog.draft);
     std::ostringstream output;
     output << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
               "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -167,7 +170,7 @@ std::string render_run_detail(const storage::RunRecord& run,
            << report_styles() << "</style></head><body><main>"
               "<nav><a href=\"/results\">All runs</a></nav><h1>Run "
            << escape_html(run.id) << "</h1><p>Draft "
-           << (app::parse_draft(catalog.draft) ? detail::draft_display(*app::parse_draft(catalog.draft)) : std::to_string(catalog.draft)) << "; transport "
+           << draft_text << "; transport "
            << escape_html(transport_name(run.config.transport)) << "; mode "
            << escape_html(mode_name(run.config.mode)) << "; state "
            << (run.state == storage::RunState::Active ? "ACTIVE" : "FINALIZED")

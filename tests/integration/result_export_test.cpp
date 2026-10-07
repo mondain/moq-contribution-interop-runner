@@ -312,6 +312,26 @@ TEST(ResultExport, LiteCatalogRowsReviewedFalseSerializeWithoutThrowing) {
     });
 }
 
+TEST(ResultExport, LiteCatalogAuditIsStagedWithoutBindings) {
+    const auto selection = detail::audit_catalog(lite_catalog());
+    EXPECT_TRUE(selection.bindings.empty());
+    EXPECT_EQ(selection.report.unreviewed_total, 1u);
+    EXPECT_EQ(selection.report.unreviewed_required, 1u);
+    for (const auto& finding : selection.report.findings) EXPECT_FALSE(finding.blocking) << finding.code;
+    EXPECT_FALSE(selection.report.complete());
+}
+
+TEST(ResultExport, MoqtCatalogAuditKeepsBindingsAndTheNonStagedAudit) {
+    auto complete = catalog();
+    complete.draft = 18;
+    const auto selection = detail::audit_catalog(complete);
+    EXPECT_FALSE(selection.bindings.empty());
+    EXPECT_EQ(selection.report.unreviewed_total, 0u);
+    // Non-staged: the synthetic rows have no real bindings, so required rows are blocking findings.
+    EXPECT_TRUE(std::any_of(selection.report.findings.begin(), selection.report.findings.end(),
+                            [](const auto& finding) { return finding.blocking; }));
+}
+
 TEST(ResultExport, RejectsALiteRunAgainstAMoqtCatalogAndBack) {
     EXPECT_THROW(serialize_result(lite_run(), catalog()), std::invalid_argument);
     EXPECT_THROW(serialize_tap14(run(), lite_catalog()), std::invalid_argument);
