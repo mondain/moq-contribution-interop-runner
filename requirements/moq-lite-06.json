@@ -2001,14 +2001,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "An implementation SHOULD close the connection with a PROTOCOL_VIOLATION if it receives a message with an unexpected length.",
+      "actor": "endpoint receiving a message",
+      "summary": "An endpoint that receives a message whose Message Length does not match its fields closes the session with PROTOCOL_VIOLATION.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-code-space"
+      ],
+      "evaluators": [
+        "l06-errors-message-length-close"
+      ],
+      "rationale": "The publisher is the receiver of the runner's control messages. This reuses the session half of l06-errors-code-space (L06-4-4-MUST-027), whose malformed control message L1d makes a Message Length mismatch: a well-formed ANNOUNCE_REQUEST whose Message Length covers the prefix string plus trailing bytes. 027 judges only the code space of the close; this evaluator judges a different property, that the session is closed with PROTOCOL_VIOLATION (session code 0x3). The draft says \"close the connection\", so a stream reset or STOP_SENDING alone, a close with another code, or a session still open at the end of a generous stated allowance (no deadline is given; seconds, recorded in the evidence) is a Fail of this SHOULD row, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION on a publisher message with an unexpected length (the L1b decoders report it as ProtocolViolation)."
     },
     {
       "id": "L06-7-2-MUST-108",
@@ -2020,14 +2023,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A receiver MUST reset the stream if it receives an unknown stream type.",
+      "actor": "receiver of a stream",
+      "summary": "A receiver resets a stream whose STREAM_TYPE it does not know.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-stream-type"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-stream-type-reset"
+      ],
+      "rationale": "The publisher receives the streams the runner opens. Opening an unknown stream type is anticipated by the draft (the fallback for an extension stream opened against a peer that did not negotiate it), so this is not a violation probe: after the setup exchange the runner opens a bidirectional stream whose STREAM_TYPE is an unregistered value (not 0x0-0x6; the value is recorded in the evidence) and writes nothing else. The draft says \"reset the stream\", so the evaluator requires the publisher to reset it: a RESET_STREAM on the publisher's send half or a STOP_SENDING on the runner's send half (the receiver's QUIC reset of that direction), whichever comes first, recorded. A FIN without a reset, or no reaction within a generous stated allowance (the draft gives no deadline; seconds, recorded), is a Fail, the latter flagged as time-bounded. A session close is judged by L06-7-2-MUST-NOT-109 only; for this row it makes the stream reset unobservable and the row NotRun, so one close never debits both rows. The runner must itself reset an unknown-type stream the publisher opens and keep the session."
     },
     {
       "id": "L06-7-2-MUST-NOT-109",
@@ -2039,14 +2045,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Unknown stream types MUST NOT be treated as fatal; this is the fallback when an extension stream is opened against a peer that did not negotiate it.",
+      "actor": "receiver of a stream",
+      "summary": "A receiver does not treat an unknown STREAM_TYPE as fatal to the session.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-errors-unknown-stream-type"
+      ],
+      "evaluators": [
+        "l06-errors-unknown-stream-type-not-fatal"
+      ],
+      "rationale": "Same stimulus as L06-7-2-MUST-108, a different property: after opening the unknown-type stream the runner sends a conforming ANNOUNCE_REQUEST on a new Announce Stream. The evaluator requires the session to stay open for the stated window and the request to be answered with ANNOUNCE_OK. A session close (any code) after the unknown stream, or a refusal of the follow-up request, is a Fail. Whether the unknown stream itself was reset is not judged here (that is 108)."
     },
     {
       "id": "L06-7-3-MUST-110",
@@ -2058,14 +2067,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A receiver MUST ignore unknown Parameter IDs, allowing new capabilities to be added without breaking older implementations.",
+      "actor": "SETUP receiver",
+      "summary": "A SETUP receiver ignores Parameter IDs it does not know.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-unknown-parameter"
+      ],
+      "evaluators": [
+        "l06-setup-unknown-parameter-ignored"
+      ],
+      "rationale": "The publisher receives the runner's SETUP. In this scenario the runner's SETUP carries, besides what it would send anyway, one parameter with an id the draft does not define (not 0x1-0x5) and that the target is not known to use, with a short value; the id is recorded in the evidence. This is conforming (the draft anticipates new capabilities). Ignoring is internal, so the evaluator judges its observable consequence: the publisher's own SETUP arrives, a following ANNOUNCE_REQUEST is answered with ANNOUNCE_OK, and the session stays open for the stated window. A session close (any code) or a refusal of the request is a Fail. The runner must itself ignore unknown Parameter IDs in the publisher's SETUP (read_capabilities does)."
     },
     {
       "id": "L06-7-3-MUST-NOT-111",
@@ -2077,14 +2089,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A Parameter ID MUST NOT appear more than once; a receiver MUST close the session with a PROTOCOL_VIOLATION if it does.",
+      "actor": "SETUP sender",
+      "summary": "A SETUP message does not carry the same Parameter ID more than once.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-stream"
+      ],
+      "evaluators": [
+        "l06-setup-parameters-unique"
+      ],
+      "rationale": "Observable by decoding the publisher's SETUP on every session with the L1b codec (decode_setup reports a repeated id as ProtocolViolation). This is a different property from L06-3-1-MUST-014 (one SETUP on one Setup stream ending with FIN): L1d's 014 evaluator must treat a SETUP whose framing is intact but whose only defect is a repeated id as a decoded SETUP, so one defect debits only this row. A Parameter ID appearing twice is a Fail. A duplicate needs at least two parameters, so with fewer than two the row is NotRun rather than a vacuous Pass. The runner must itself never repeat a Parameter ID except in the named probe of L06-7-3-MUST-112."
     },
     {
       "id": "L06-7-3-MUST-112",
@@ -2096,14 +2111,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A Parameter ID MUST NOT appear more than once; a receiver MUST close the session with a PROTOCOL_VIOLATION if it does.",
+      "actor": "SETUP receiver",
+      "summary": "A receiver closes the session with PROTOCOL_VIOLATION when a SETUP repeats a Parameter ID.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-duplicate-parameter"
+      ],
+      "evaluators": [
+        "l06-setup-duplicate-parameter-close"
+      ],
+      "rationale": "A named deliberate violation probe: the runner's SETUP carries the Cost parameter (0x4, which the runner may legally send once) twice with the same value, so the repetition is the only defect, and the runner sends nothing else that could provoke a close. The draft says \"close the session\", so the evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone (reset or STOP_SENDING of the runner's Setup stream), a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION when the publisher's SETUP repeats an id."
     },
     {
       "id": "L06-7-3-1-MUST-113",
@@ -2115,14 +2133,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber MUST consult the publisher's advertised level before relying on a Probe Stream:",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber consults the publisher's advertised Probe level before relying on a Probe Stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: Probe Streams are out of the L1 scope (design spec: L2), so the L1 runner opens none and records the publisher's Probe level only."
     },
     {
       "id": "L06-7-3-1-SHOULD-NOT-114",
@@ -2134,14 +2151,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* At None, the subscriber SHOULD NOT open a Probe Stream; if it does, the publisher MUST reset it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber does not open a Probe Stream to a publisher whose Probe level is None.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it and opens no Probe Stream in L1."
     },
     {
       "id": "L06-7-3-1-MUST-115",
@@ -2153,14 +2169,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* At None, the subscriber SHOULD NOT open a Probe Stream; if it does, the publisher MUST reset it.",
+      "actor": "publisher",
+      "summary": "A publisher at Probe level None resets any Probe Stream a subscriber opens.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A publisher obligation, but Probe Streams are out of the L1 scope (design spec: Probe, Fetch, Goaway and Track streams are L2). The provocation is itself a deviation (the subscriber SHOULD NOT open one at None) and only arises against a publisher that advertises None or omits the parameter. L2 can test it with a named probe that opens a Probe Stream (0x4) and requires a reset of that stream; the evaluator would be NotRun against a publisher advertising Report or Increase."
     },
     {
       "id": "L06-7-3-1-MAY-116",
@@ -2172,14 +2187,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* At Report, the subscriber MAY open a Probe Stream to monitor the estimated bitrate but MUST NOT expect the publisher to pad above its current sending rate.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "At Probe level Report a subscriber may open a Probe Stream to monitor the estimated bitrate.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of the subscriber; the runner plays it and opens no Probe Stream in L1."
     },
     {
       "id": "L06-7-3-1-MUST-NOT-117",
@@ -2191,14 +2205,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* At Report, the subscriber MAY open a Probe Stream to monitor the estimated bitrate but MUST NOT expect the publisher to pad above its current sending rate.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "At Probe level Report a subscriber does not expect the publisher to pad above its current sending rate.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber's expectations; the runner plays it and opens no Probe Stream in L1."
     },
     {
       "id": "L06-7-3-1-MUST-118",
@@ -2210,14 +2223,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber that needs to probe for additional bandwidth MUST use an alternative (e.g. speculatively switching to a higher rendition).",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber that needs to probe for more bandwidth from a Report-level publisher uses an alternative such as switching to a higher rendition.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it and does no bandwidth probing in L1."
     },
     {
       "id": "L06-7-3-1-MAY-119",
@@ -2229,14 +2241,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* At Increase, the subscriber MAY request a target bitrate and expect the publisher to actively probe up to it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "At Probe level Increase a subscriber may request a target bitrate and expect the publisher to probe up to it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of the subscriber; the runner plays it and opens no Probe Stream in L1."
     },
     {
       "id": "L06-7-3-2-MUST-120",
@@ -2248,14 +2259,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The Parameter Value is a UTF-8 string holding the path-abempty component of the URI [RFC3986]; when the URI carries a query, the client MUST append ? followed b",
+      "actor": "client",
+      "summary": "When the session URI carries a query, the client's Path parameter value is the URI path followed by ? and the query component.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-client-path"
+      ],
+      "evaluators": [
+        "l06-setup-path-query-appended"
+      ],
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. In l06-setup-client-path the runner (through the adapter) gives the publisher a session URL with a non-empty path and a harmless query component (both recorded in the evidence); L1d runs the scenario on both bindings. On binding 1 (raw QUIC, no request URI), when the publisher's SETUP carries a Path parameter, the evaluator requires its value to equal the path-abempty component followed by ? and the query; a value without the query, or with a different one, is a Fail. A missing Path parameter is judged by L06-7-3-2-SHOULD-124 and makes this row NotRun, as do binding 2 sessions (no Path is sent there) and an adapter that cannot pass a query to the publisher."
     },
     {
       "id": "L06-7-3-2-MAY-121",
@@ -2267,14 +2281,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The value MAY be empty, which is equivalent to omitting the parameter: both request the server's default path.",
+      "actor": "client",
+      "summary": "The Path value may be empty, which is equivalent to omitting it and requests the server's default path.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. A permission of the client (the publisher) with nothing to fail. The runner, as server, must itself treat an empty Path exactly like an absent one, and the l06-setup-client-path evaluators must accept it as such."
     },
     {
       "id": "L06-7-3-2-MUST-122",
@@ -2286,14 +2299,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A server that receives an invalid value MUST close the session with a PROTOCOL_VIOLATION, and one that does not recognize the requested path MUST close the sess",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A server that receives an invalid Path value closes the session with PROTOCOL_VIOLATION.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply: an invalid Path from the publisher (for example not a path-abempty with an optional query) closes the session with PROTOCOL_VIOLATION (session 0x3) and is recorded as evidence."
     },
     {
       "id": "L06-7-3-2-MUST-123",
@@ -2305,14 +2317,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A server that receives an invalid value MUST close the session with a PROTOCOL_VIOLATION, and one that does not recognize the requested path MUST close the sess",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A server that does not recognize the requested Path closes the session.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply: it recognizes the path it gave the publisher (and the empty/absent default) and closes the session on any other path, recording the received value."
     },
     {
       "id": "L06-7-3-2-SHOULD-124",
@@ -2324,14 +2335,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This parameter exists for the bindings that negotiate only an ALPN token and have no request URI of their own (bindings 1 and 3 in Section 4.2); a client using ",
+      "actor": "client",
+      "summary": "A client on a binding without a request URI (bindings 1 and 3) sends the Path parameter.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-client-path"
+      ],
+      "evaluators": [
+        "l06-setup-path-sent"
+      ],
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. Judged on the binding 1 (raw QUIC) sessions of l06-setup-client-path from the publisher's decoded SETUP: a Path parameter present (an empty value counts as sent) is a Pass and an absent one a Fail of this SHOULD row. Binding 2 sessions make the row NotRun. The value's format is judged separately by L06-7-3-2-MUST-120."
     },
     {
       "id": "L06-7-3-2-MUST-NOT-125",
@@ -2343,14 +2357,17 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MUST NOT be sent on a binding whose handshake carries a request URI (bindings 2 and 4), and only the client sends it; a receiver MUST close the session with ",
+      "actor": "client",
+      "summary": "The Path parameter is not sent on a binding whose handshake carries a request URI (bindings 2 and 4).",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-client-path"
+      ],
+      "evaluators": [
+        "l06-setup-path-absent-on-uri-binding"
+      ],
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. Judged on the binding 2 (WebTransport) sessions of l06-setup-client-path from the publisher's decoded SETUP: a Path parameter (any value, empty included) is a Fail; no Path is a Pass. Binding 1 sessions make the row NotRun. The runner listens only on bindings 1 and 2, so binding 4 never arises."
     },
     {
       "id": "L06-7-3-2-MUST-126",
@@ -2362,14 +2379,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MUST NOT be sent on a binding whose handshake carries a request URI (bindings 2 and 4), and only the client sends it; a receiver MUST close the session with ",
+      "actor": "SETUP receiver",
+      "summary": "A receiver closes the session with PROTOCOL_VIOLATION when the Path parameter is sent on a URI binding or by the server.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-server-path"
+      ],
+      "evaluators": [
+        "l06-setup-server-path-close"
+      ],
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. The sentence has two halves. A Path on a URI binding is received by the server (the runner), which must itself close the session with PROTOCOL_VIOLATION and record it. A Path sent by the server is received by the client, the publisher, so that half is tested with a named deliberate violation probe: on binding 1, so that only the \"only the client sends it\" rule is broken, the runner's SETUP carries a Path parameter (a plain value such as \"/\"). The evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone, a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded."
     },
     {
       "id": "L06-7-3-2-MUST-NOT-127",
@@ -2381,14 +2401,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay MUST NOT forward it; like other per-hop setup metadata it applies only to this hop.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward the Path parameter to another hop.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay; the publisher under test is an origin and the runner forwards nothing."
     },
     {
       "id": "L06-7-3-3-MUST-128",
@@ -2400,14 +2419,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A receiver that does not recognize the value MUST treat it as Both, so a newer client cannot break an older server.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A receiver of the Role parameter treats an unrecognized value as Both.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. Only the client sends Role, so its receiver is the server, which is the runner. The runner must itself comply: an unknown Role value from the publisher is treated as Both (effective_role in the L1b codec) and is not a reason to close."
     },
     {
       "id": "L06-7-3-3-MUST-129",
@@ -2419,14 +2437,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The role is a hint that only ever narrows the session: a server MUST still enforce the client's authorization on every publish and subscribe, and MAY close a se",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A server enforces the client's authorization on every publish and subscribe regardless of the advertised Role.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. Binds the server, which is the runner; the runner applies no authorization in L1 and accepts any publisher, so it never refuses on authorization grounds."
     },
     {
       "id": "L06-7-3-3-MAY-130",
@@ -2438,14 +2455,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The role is a hint that only ever narrows the session: a server MUST still enforce the client's authorization on every publish and subscribe, and MAY close a se",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A server may close a session whose advertised Role requires a direction the client's authorization does not grant.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. A permission of the server, which is the runner; the runner does not use it."
     },
     {
       "id": "L06-7-3-3-MUST-131",
@@ -2457,14 +2473,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Only the client sends it; a client that receives one MUST close the session with a PROTOCOL_VIOLATION.",
+      "actor": "client",
+      "summary": "A client that receives a Role parameter closes the session with PROTOCOL_VIOLATION.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-setup-server-role"
+      ],
+      "evaluators": [
+        "l06-setup-server-role-close"
+      ],
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. The publisher is the client, so this is testable with a named deliberate violation probe: the runner's SETUP carries a Role parameter (value 0, Both, so only the sender is wrong) and nothing else that could provoke a close. The evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone, a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded. The runner, as server, must itself never send Role outside this probe."
     },
     {
       "id": "L06-7-3-3-MUST-NOT-132",
@@ -2476,14 +2495,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay MUST NOT forward it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward the Role parameter.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay; the publisher under test is an origin and the runner forwards nothing."
     },
     {
       "id": "L06-7-3-4-MUST-NOT-133",
@@ -2495,14 +2513,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay MUST NOT forward it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward the Cost parameter.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay; the publisher under test is an origin and the runner forwards nothing."
     },
     {
       "id": "L06-7-3-4-MAY-134",
@@ -2514,14 +2531,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A declared cost is an assertion, not an instruction: a receiver MAY charge a locally configured value instead, so a peer cannot reprice its neighbours by declar",
+      "actor": "Cost receiver",
+      "summary": "A receiver may charge a locally configured cost instead of the Cost its peer declared.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of whichever endpoint receives Cost, the publisher included, with nothing to fail. The declared cost only affects announcements the declaring peer forwards, and the runner announces nothing to the publisher in L1, so its effect is not observable either."
     },
     {
       "id": "L06-7-3-5-MAY-135",
@@ -2534,13 +2550,12 @@
         "clause": 1
       },
       "actor": "endpoint",
-      "summary": "Either endpoint MAY send it; a subscriber-only endpoint with no identity MAY omit it, but a publisher SHOULD have a Hop ID regardless (see ANNOUNCE_OK (Section ",
+      "summary": "Either endpoint may send the Hop parameter declaring its Hop ID.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission for the publisher (and the runner) with nothing to fail. The publisher's declared value is recorded as information alongside its ANNOUNCE_OK Hop ID."
     },
     {
       "id": "L06-7-3-5-MAY-136",
@@ -2552,14 +2567,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Either endpoint MAY send it; a subscriber-only endpoint with no identity MAY omit it, but a publisher SHOULD have a Hop ID regardless (see ANNOUNCE_OK (Section ",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber-only endpoint",
+      "summary": "A subscriber-only endpoint with no identity may omit the Hop parameter.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of a subscriber-only endpoint, which is the runner's role; the publisher under test is not subscriber-only. The runner may omit it or declare a per-session Hop ID (as the optional L2 loop probe of L06-5-1-1-1-MUST-NOT-044 would)."
     },
     {
       "id": "L06-7-3-5-SHOULD-137",
@@ -2571,14 +2585,13 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Either endpoint MAY send it; a subscriber-only endpoint with no identity MAY omit it, but a publisher SHOULD have a Hop ID regardless (see ANNOUNCE_OK (Section ",
+      "actor": "publisher",
+      "summary": "A publisher has a Hop ID even when it could omit the Hop parameter.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The publisher's identity is observable as its ANNOUNCE_OK Hop ID, which L06-7-5-SHOULD-143 judges (non-zero means assigned). Scoring this row from the same value would count one observation twice. Whether this sentence also asks for the Hop parameter in SETUP is ambiguous (\"have\", with a pointer to ANNOUNCE_OK), so the SETUP value is recorded as information only."
     },
     {
       "id": "L06-7-3-5-MUST-NOT-138",
@@ -2590,14 +2603,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay MUST NOT forward it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward the Hop parameter.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay; the publisher under test is an origin and the runner forwards nothing."
     },
     {
       "id": "L06-7-4-MUST-139",
@@ -2609,14 +2621,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher MUST respond with an ANNOUNCE_OK message followed by ANNOUNCE_START messages for any matching routes, followed by ANNOUNCE_START, ANNOUNCE_END, an",
+      "actor": "publisher",
+      "summary": "A publisher answers an ANNOUNCE_REQUEST with ANNOUNCE_OK, then ANNOUNCE_START for every matching route, then ANNOUNCE_START, ANNOUNCE_END and ANNOUNCE_UPDATE for later changes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-prefix"
+      ],
+      "evaluators": [
+        "l06-announce-ok-then-starts"
+      ],
+      "rationale": "In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). Per stream the evaluator requires the first message to decode as ANNOUNCE_OK within a generous stated allowance (the draft gives no deadline; a missing ANNOUNCE_OK is a Fail flagged as time-bounded) and every later message to decode as ANNOUNCE_START, ANNOUNCE_END or ANNOUNCE_UPDATE. The Active Count of ANNOUNCE_OK announces the initial set, so the next Active Count messages must be ANNOUNCE_STARTs arriving within the allowance; fewer is a Fail, flagged as time-bounded. For the empty prefix and the broadcast's prefix an ANNOUNCE_START whose reconstructed route covers the configured broadcast path must arrive within the allowance, otherwise Fail (time-bounded). For the disjoint prefix only ANNOUNCE_OK is required; any routes there are recorded, since the runner cannot prove the publisher serves nothing under it. A session close or a reset instead of the answer is a Fail. The overlapping pair covers the publisher side of L06-5-1-1-MAY-039 (each stream answered on its own). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-4-SHOULD-140",
@@ -2628,14 +2643,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Implementations SHOULD consider reasonable limits on the number of matching broadcasts to prevent resource exhaustion.",
+      "actor": "implementation",
+      "summary": "An implementation limits the number of matching broadcasts it tracks for an ANNOUNCE_REQUEST to prevent resource exhaustion.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A resource-limit guideline with no stated threshold, internal to the publisher. Provoking it would need the runner to drive a large number of broadcasts, which an origin publisher with one broadcast cannot show, and the runner announces nothing."
     },
     {
       "id": "L06-7-5-MUST-NOT-141",
@@ -2647,14 +2661,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This is treated as the implicit trailing entry of every ANNOUNCE_START and ANNOUNCE_UPDATE Hop ID list on this stream; those messages MUST NOT repeat this value",
+      "actor": "publisher",
+      "summary": "ANNOUNCE_START and ANNOUNCE_UPDATE do not repeat the stream's ANNOUNCE_OK Hop ID as the last entry of their Hop ID list.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-prefix"
+      ],
+      "evaluators": [
+        "l06-announce-hop-list-excludes-own"
+      ],
+      "rationale": "In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). For every stream whose ANNOUNCE_OK Hop ID is non-zero, an ANNOUNCE_START or ANNOUNCE_UPDATE whose Hop ID list ends with that value is a Fail (a common bug: an origin listing itself with Hop Count 1). Pass needs at least one decoded ANNOUNCE_START or ANNOUNCE_UPDATE on such a stream. With an ANNOUNCE_OK Hop ID of 0 the row is NotRun (0 means unknown, and repeated 0 entries are legal), as it is when no ANNOUNCE_START or ANNOUNCE_UPDATE is decoded. An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-5-MUST-142",
@@ -2666,14 +2683,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher that assigns a Hop ID MUST choose a non-zero value, and SHOULD assign itself one (a fresh random value per session suffices), so downstream receiver",
+      "actor": "publisher",
+      "summary": "A publisher that assigns itself a Hop ID chooses a non-zero value.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "On the wire a Hop ID of 0 means \"unknown\": not assigned, or deliberately withheld, both legal. A publisher that assigned 0 is therefore indistinguishable from one that assigned nothing or withholds its identity, so no observation can show a violation. Whether the publisher has a Hop ID at all is the SHOULD of L06-7-5-SHOULD-143."
     },
     {
       "id": "L06-7-5-SHOULD-143",
@@ -2685,14 +2701,17 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher that assigns a Hop ID MUST choose a non-zero value, and SHOULD assign itself one (a fresh random value per session suffices), so downstream receiver",
+      "actor": "publisher",
+      "summary": "A publisher assigns itself a non-zero Hop ID (a fresh random value per session suffices) so downstream receivers can detect loops.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-prefix"
+      ],
+      "evaluators": [
+        "l06-announce-ok-hop-assigned"
+      ],
+      "rationale": "In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). The evaluator reads the Hop ID of each ANNOUNCE_OK: a non-zero value is a Pass, and 0 (no identity, or withheld) is a Fail of this SHOULD row. No ANNOUNCE_OK makes the row NotRun (L06-7-4-MUST-139 judges its absence). The publisher's SETUP Hop parameter is recorded alongside as information."
     },
     {
       "id": "L06-7-5-MAY-144",
@@ -2704,14 +2723,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber MAY block reporting any announcement to the application until all Active Count initial announcements have arrived, then deliver the initial set a",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber may hold back announcements until all Active Count initial announcements have arrived and deliver them as a batch.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of the subscriber; the runner plays it. The runner does not batch for judging: it records every announcement as it arrives."
     },
     {
       "id": "L06-7-5-SHOULD-145",
@@ -2723,14 +2741,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Any announcements beyond Active Count are live updates and SHOULD be reported as they arrive.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber reports announcements beyond the Active Count initial set as they arrive.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber's reporting to its application; the runner plays the subscriber and records live announcements as they arrive."
     },
     {
       "id": "L06-7-6-MUST-146",
@@ -2742,14 +2759,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A receiver MUST close the stream with a PROTOCOL_VIOLATION if the Hop Count does not match the number of subsequent Hop ID entries.",
+      "actor": "publisher (sender of the announcement; the close binds the runner)",
+      "summary": "A receiver closes the stream with PROTOCOL_VIOLATION when an announcement's Hop Count does not match its Hop ID entries, so a sender's Hop Count always equals the number of entries it writes.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-prefix"
+      ],
+      "evaluators": [
+        "l06-announce-hop-count-consistent"
+      ],
+      "rationale": "The close duty binds the receiver of announcements, which is the runner: it must itself close the stream (the publisher's Announce Stream) on a mismatch and record it. The draft states no separate keyword rule for the sender, so this row is the only one guarding the wire property, and the property is observable by decoding what the publisher sends; it is judged on the publisher as sender (unlike the draft 22 receiver-close rows, which had a separate sender rule). In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). For every decoded ANNOUNCE_START and ANNOUNCE_UPDATE the body after the suffix (or Announce ID) must decode as exactly Hop Count entries followed by the two Route Costs, ending at the Message Length; a shortfall or trailing bytes there is a Fail (the evaluator cannot tell a wrong Hop Count from another miscount in that region and records the raw body). A Hop Count above the L1b defensive cap is recorded, not failed (the draft states no limit). No ANNOUNCE_START or ANNOUNCE_UPDATE decoded makes the row NotRun. An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-6-MUST-147",
@@ -2761,14 +2781,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "When forwarding an announcement received from an upstream peer, a relay MUST append the upstream peer's ANNOUNCE_OK Hop ID to this list, since that ID is no lon",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay forwarding an upstream announcement appends the upstream peer's ANNOUNCE_OK Hop ID to the Hop ID list.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay forwarding announcements; the L1 publisher is an origin (its routes originate locally) and the runner forwards nothing."
     },
     {
       "id": "L06-7-6-MUST-NOT-148",
@@ -2780,14 +2799,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "An identity a receiver assigned that upstream is local selection state and MUST NOT be forwarded as a Hop ID.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay does not forward an identity it assigned to an upstream as a Hop ID.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a relay that assigns local identities to its upstreams; the L1 publisher is an origin and the runner forwards nothing."
     },
     {
       "id": "L06-7-6-MUST-149",
@@ -2799,14 +2817,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A receiver MUST close the session with a PROTOCOL_VIOLATION if a non- zero Hop ID appears twice in this list.",
+      "actor": "publisher (sender of the announcement; the close binds the runner)",
+      "summary": "A receiver closes the session with PROTOCOL_VIOLATION when a non-zero Hop ID appears twice in an announcement's Hop ID list, so a sender never lists a non-zero Hop ID twice.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-prefix"
+      ],
+      "evaluators": [
+        "l06-announce-hop-ids-unique"
+      ],
+      "rationale": "As for L06-7-6-MUST-146, the close duty binds the runner (it must itself close the session with PROTOCOL_VIOLATION and record it) and the row is judged on the publisher as sender, since no separate sender rule exists. In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). A decoded ANNOUNCE_START or ANNOUNCE_UPDATE whose Hop ID list holds the same non-zero value twice is a Fail (the L1b decoder reports it as ProtocolViolation; the evaluator attributes that error to this row only). Repeated 0 entries are legal. A duplicate needs at least two non-zero entries in one list, so Pass requires at least one such list; otherwise the row is NotRun. An origin such as the moq CLI sends Hop Count 0, so against it the row is NotRun; it becomes judgeable against a relay publisher. An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-6-MUST-150",
@@ -2818,14 +2839,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Saturation MUST cap each sum at the largest value a variable-length integer can carry, since the sums are re-encoded when forwarded: a peer may legally advertis",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay adding a declared Cost to Route Costs saturates each sum at the largest variable-length integer.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds a forwarding relay that adds costs; an origin seeds its Route Costs with its production cost and adds nothing, and the runner forwards nothing."
     },
     {
       "id": "L06-7-6-SHOULD-151",
@@ -2837,14 +2857,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay whose wire cannot express a Cold cost (an endpoint bridging from another protocol, or a peer that predates this field) advertises nothing, and a receive",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "announcement receiver",
+      "summary": "A receiver treats a missing Cold Route Cost (from a bridged or older peer) as the saturation ceiling, not as 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the receiver of announcements, which is the runner, and only for bridged or pre-06 peers; a moq-lite-06 publisher always carries the Cold cost field. The runner must itself comply if it ever ranks routes from such a peer (it does not in L1)."
     },
     {
       "id": "L06-7-7-MUST-NOT-152",
@@ -2856,14 +2875,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The id is retired and MUST NOT be referenced again.",
+      "actor": "publisher",
+      "summary": "After an ANNOUNCE_END retires an Announce ID, the publisher never references that id again on the stream.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-announce-lifecycle"
+      ],
+      "evaluators": [
+        "l06-announce-retired-id-unused"
+      ],
+      "rationale": "Observable by decoding the publisher's Announce Stream, but only once a route is retracted. In l06-announce-lifecycle the runner holds an ANNOUNCE_REQUEST for the broadcast's prefix open while the adapter or driver ends the publisher's broadcast and starts it again (if the target supports that within one session), for a stated window. The evaluator tracks assigned and retired ids (each ANNOUNCE_START assigns the next id): an ANNOUNCE_END or ANNOUNCE_UPDATE naming a retired id is a Fail. With no ANNOUNCE_END in the window (for example the moq CLI ending its session with the broadcast) the row is NotRun, never a Pass. References to never-assigned ids and a fresh id on re-announcement are recorded as information (not keyword rules). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-8-MAY-153",
@@ -2875,14 +2897,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The route's prefix is unchanged and the id stays live; the Hop ID list MAY differ from the original (e.g. after a relay failover or upstream restart).",
+      "actor": "publisher",
+      "summary": "An ANNOUNCE_UPDATE may carry a Hop ID list different from the route's original one.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission with nothing to fail. The l06-announce-* evaluators must accept a changed Hop ID list (and a cost-only change) in an ANNOUNCE_UPDATE for a live id."
     },
     {
       "id": "L06-7-9-MUST-NOT-154",
@@ -2894,14 +2915,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A Subscribe ID MUST NOT be reused within the same session, even if the prior subscription has been closed.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber does not reuse a Subscribe ID within a session, even after the earlier subscription closed.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The subscriber chooses Subscribe IDs; the runner plays it. The runner must itself comply: every SUBSCRIBE in a session (probes included) gets a new id, which also keeps GROUP attribution by Subscribe ID unambiguous for the group evaluators."
     },
     {
       "id": "L06-7-9-SHOULD-155",
@@ -2913,14 +2933,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher SHOULD transmit _higher_ values first during congestion.",
+      "actor": "publisher",
+      "summary": "During congestion a publisher sends higher Subscriber Priority values first.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A publisher obligation, but priority is out of the L1 scope (design spec: L2), and it needs controlled congestion that the L1 runner does not create; on an uncongested path any order is conforming."
     },
     {
       "id": "L06-7-9-SHOULD-156",
@@ -2932,14 +2951,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher SHOULD reset (at the QUIC level) Group Streams for groups whose age relative to the latest group exceeds this duration.",
+      "actor": "publisher",
+      "summary": "A publisher resets Group Streams for non-latest groups older than the subscription's Subscriber Max Age.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A publisher obligation, but max-age expiry is out of the L1 scope (design spec: L2) and depends on timestamps and Timescale from TRACK_INFO (7.12, L2). The L1 evaluators must accept such resets: a Group stream reset by the publisher is not a Fail."
     },
     {
       "id": "L06-7-9-MAY-157",
@@ -2951,14 +2969,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This is a delivery-time preference, not a retention rule: the publisher MAY still hold these groups for FETCH or future subscriptions (see Publisher Max Age in ",
+      "actor": "publisher",
+      "summary": "A publisher may keep groups that are stale for live delivery for FETCH or later subscriptions.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission with nothing to fail; retention is only visible through FETCH (L2)."
     },
     {
       "id": "L06-7-9-SHOULD-158",
@@ -2970,14 +2987,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher SHOULD start at the oldest group at or above the floor that Section 6.2 has not expired, and MUST NOT deliver an older one.",
+      "actor": "publisher",
+      "summary": "A publisher starts a subscription at the oldest group at or above the floor that Section 6.2 has not expired.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Which groups are unexpired depends on the publisher's retention and on Section 6.2 timing (Publisher Max Age in TRACK_INFO, L2), and reaching back is best-effort; the runner cannot know which groups the publisher still holds, so a later start cannot be shown to be a deviation. The hard bound (never older than the floor) is L06-7-9-MUST-NOT-159."
     },
     {
       "id": "L06-7-9-MUST-NOT-159",
@@ -2989,14 +3005,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The publisher SHOULD start at the oldest group at or above the floor that Section 6.2 has not expired, and MUST NOT deliver an older one.",
+      "actor": "publisher",
+      "summary": "A publisher never delivers a group older than the subscription's Group Start floor.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-subscribe-group-floor"
+      ],
+      "evaluators": [
+        "l06-subscribe-no-group-below-floor"
+      ],
+      "rationale": "In l06-subscribe-group-floor the runner first learns the latest Group Sequence L from a default subscription in the same session, then opens two floored subscriptions with new Subscribe IDs: Group Start F = L and F = L + 2 (a floor above the latest group, which simply waits), Frame Start 0, Group End 0, and a large Subscriber Max Age; the values are recorded. For each, any Group stream whose GROUP names that Subscribe ID with a Group Sequence below the floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. A subscription with no decoded Group stream in the stated window (seconds, long enough for two groups at the target's cadence) is NotRun, never a Pass. The runner must itself send only conforming floors (Frame Start 0, Frame End 0)."
     },
     {
       "id": "L06-7-9-MUST-160",
@@ -3008,14 +3027,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber that has received no group MUST send 0, since it cannot number the frames of a group it has not seen.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber that has received no group sends Frame Start 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it. Restates L06-3-6-MUST-021: the runner sends a non-zero Frame Start only for a group it has received (the abutting probe of L06-3-6-MUST-020)."
     },
     {
       "id": "L06-7-9-MUST-161",
@@ -3027,14 +3045,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "MUST be 0 when Group End is 0, since an unbounded subscription has no end group to qualify.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A SUBSCRIBE carries Frame End 0 whenever its Group End is 0.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the sender of SUBSCRIBE, the subscriber; the runner plays it. Restates L06-3-6-MUST-022: the runner complies except in the named probe of L06-3-6-MUST-023, which judges the publisher's reset."
     },
     {
       "id": "L06-7-10-MAY-162",
@@ -3046,14 +3063,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber MAY send multiple SUBSCRIBE_UPDATE messages to update the subscription.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber may send several SUBSCRIBE_UPDATE messages for one subscription.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission of the subscriber; the runner plays it. The draft gives the publisher no keyword obligation for SUBSCRIBE_UPDATE in this section."
     },
     {
       "id": "L06-7-12-MUST-NOT-163",
@@ -3236,14 +3252,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MUST be greater than or equal to the requested start group; any groups in between are unavailable and implicitly dropped, with no separate SUBSCRIBE_DROP req",
+      "actor": "publisher",
+      "summary": "The Group in SUBSCRIBE_OK is greater than or equal to the subscription's requested start group.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-subscribe-group-floor"
+      ],
+      "evaluators": [
+        "l06-subscribe-ok-group-at-floor"
+      ],
+      "rationale": "Judged on the same floored subscriptions as L06-7-9-MUST-NOT-159 but from a different message: the SUBSCRIBE_OK decoded with the L1b codec (Type 0x0, one Group varint). A Group below the requested floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. A default subscription (no floor) cannot violate the rule and is not judged. A floored subscription with no SUBSCRIBE_OK in the stated window is NotRun (the publisher may withhold SUBSCRIBE_OK until a group resolves the start, or refuse with a reset). Whether the first Group stream matches the SUBSCRIBE_OK Group is recorded as information."
     },
     {
       "id": "L06-7-14-MUST-NOT-173",
@@ -3255,14 +3274,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber MUST NOT wait for any group at or after this sequence.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber does not wait for any group at or after the SUBSCRIBE_END Group.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: the group evaluators stop expecting groups at or after SUBSCRIBE_END.Group (an exclusive bound) and never count them as missing."
     },
     {
       "id": "L06-7-14-MAY-174",
@@ -3274,14 +3292,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "SUBSCRIBE_END bounds the range but does not by itself end the stream: the publisher MAY still send SUBSCRIBE_DROP for groups below this sequence that it cannot ",
+      "actor": "publisher",
+      "summary": "After SUBSCRIBE_END a publisher may still send SUBSCRIBE_DROP for groups below the end it cannot deliver.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission with nothing to fail. The subscribe and group evaluators must accept SUBSCRIBE_DROP after SUBSCRIBE_END for groups below its Group."
     },
     {
       "id": "L06-7-15-MAY-175",
@@ -3293,14 +3310,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MAY arrive at any point after the subscription is opened, including after SUBSCRIBE_END for stragglers within the resolved range (a leading range is instead ",
+      "actor": "publisher",
+      "summary": "SUBSCRIBE_DROP may arrive at any point after the subscription opens, including after SUBSCRIBE_END.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission with nothing to fail. The subscribe and group evaluators must accept SUBSCRIBE_DROP before SUBSCRIBE_OK, between groups and after SUBSCRIBE_END."
     },
     {
       "id": "L06-7-16-MUST-176",
@@ -3578,14 +3594,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "This SHOULD increase by 1 for each new group.",
+      "actor": "publisher",
+      "summary": "A track's Group Sequence increases by 1 for each new group.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-subscribe-latest"
+      ],
+      "evaluators": [
+        "l06-group-sequence-increments"
+      ],
+      "rationale": "Judged on the default subscription of l06-subscribe-latest, over the window stated for L06-6-3-2-MUST-093. The evaluator orders the decoded GROUP sequences of the subscription and requires them to form a consecutive run; a gap is accounted for when a SUBSCRIBE_DROP range covers it, and makes the row inconclusive when a Group stream of the subscription was reset before its GROUP decoded. An unaccounted gap is a Fail of this SHOULD row (on a loopback path congestion is unlikely; the evidence keeps the gap). Fewer than two decoded groups is NotRun."
     },
     {
       "id": "L06-7-19-MUST-191",
@@ -3597,14 +3616,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A subscriber MUST handle gaps, potentially caused by congestion.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber handles gaps in Group Sequence.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: a gap is never a session error and no group evaluator fails on a gap alone (L06-7-19-SHOULD-190 judges only the numbering)."
     },
     {
       "id": "L06-7-19-MUST-NOT-192",
@@ -3616,14 +3634,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber MUST NOT assume it will receive the missing frames on another stream; they are a gap unless a separate subscription or FETCH covers them.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber does not assume that frames before a GROUP's non-zero Frame Start will arrive on another stream.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Binds the subscriber; the runner plays it. The runner must itself comply: leading frames missing from a Group stream with a non-zero Frame Start are a gap, not expected elsewhere, unless the runner opened a separate subscription covering them (as the abutting probe of L06-3-6-MUST-020 does)."
     },
     {
       "id": "L06-8-1-MAY-193",

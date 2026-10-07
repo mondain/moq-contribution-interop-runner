@@ -180,12 +180,15 @@ TEST(LiteCatalog, ScopeHelperSeparatesNeighbouringSections) {
 }
 
 // Sections whose hand classification is finished: every row in them is reviewed (Task 4: 1, 3, 4;
-// Task 5: 5.1.1 with 5.1.1.1 and 5.1.1.2, 5.1.2, 6.3 with 6.3.1 and 6.3.2). Later tasks extend the list.
+// Task 5: 5.1.1 with 5.1.1.1 and 5.1.1.2, 5.1.2, 6.3 with 6.3.1 and 6.3.2; Task 6: 7.1-7.10 with the
+// Setup parameters 7.3.1-7.3.5, 7.13-7.15, 7.19 and 7.20). With Task 6 this is the whole L1 scope.
 TEST(LiteCatalog, ClassifiedSectionsHaveNoUnreviewedRow) {
     const auto catalog = lite_catalog(lite_source());
     for (const auto& row : catalog.requirements) {
         bool classified = false;
-        for (const std::string_view parent : {"1", "3", "4", "5.1.1", "5.1.2", "6.3"}) {
+        for (const std::string_view parent : {"1", "3", "4", "5.1.1", "5.1.2", "6.3", "7.1", "7.2", "7.3", "7.4",
+                                              "7.5", "7.6", "7.7", "7.8", "7.9", "7.10", "7.13", "7.14", "7.15",
+                                              "7.19", "7.20"}) {
             if (within(row.source.section, parent)) classified = true;
         }
         if (classified) EXPECT_TRUE(row.reviewed) << row.id << " (section " << row.source.section << ")";
@@ -193,7 +196,8 @@ TEST(LiteCatalog, ClassifiedSectionsHaveNoUnreviewedRow) {
 }
 
 // Pinned per task: Task 4 classified sections 1, 3 and 4; Task 5 sections 5.1.1 (with 5.1.1.1 and
-// 5.1.1.2), 5.1.2 and 6.3 (with 6.3.1 and 6.3.2).
+// 5.1.1.2), 5.1.2 and 6.3 (with 6.3.1 and 6.3.2); Task 6 the section 7 rows of the L1 scope (63 rows; 7.11,
+// 7.12, 7.16, 7.17 and 7.18 stay unreviewed for L2).
 TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
     const auto catalog = lite_catalog(lite_source());
     std::map<std::string, std::size_t> reviewed;
@@ -209,13 +213,105 @@ TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
         scenarios.insert(row.scenarios.begin(), row.scenarios.end());
         evaluators.insert(row.evaluators.begin(), row.evaluators.end());
     }
-    EXPECT_EQ(testable, 12u);
-    EXPECT_EQ(scenarios.size(), 10u);
-    EXPECT_EQ(evaluators.size(), 12u);
-    const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13}, {"5", 29}, {"6", 9}};
+    EXPECT_EQ(testable, 32u);
+    EXPECT_EQ(scenarios.size(), 19u);
+    EXPECT_EQ(evaluators.size(), 32u);
+    const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13},
+                                                      {"5", 29}, {"6", 9},  {"7", 63}};
     EXPECT_EQ(reviewed, expected);
-    EXPECT_EQ(total, 74u);
+    EXPECT_EQ(total, 137u);
     EXPECT_EQ(catalog.requirements.size(), 212u);
+}
+
+// The L1d contract: the distinct planned scenario and evaluator ids of the classified catalog, sorted.
+// L1d implements exactly these; a change here is a deliberate change of the L1d work list.
+const std::vector<std::string> kPlannedScenarios{
+    "l06-announce-lifecycle",
+    "l06-announce-prefix",
+    "l06-errors-code-space",
+    "l06-errors-reserved-reset-code",
+    "l06-errors-unknown-reset-code",
+    "l06-errors-unknown-stream-type",
+    "l06-session-stream-close",
+    "l06-setup-client-path",
+    "l06-setup-duplicate-parameter",
+    "l06-setup-duplicate-stream",
+    "l06-setup-server-path",
+    "l06-setup-server-role",
+    "l06-setup-stream",
+    "l06-setup-unknown-parameter",
+    "l06-subscribe-abutting-frame-start",
+    "l06-subscribe-group-floor",
+    "l06-subscribe-invalid-frame-bounds",
+    "l06-subscribe-latest",
+    "l06-subscribe-refused",
+};
+
+const std::vector<std::string> kPlannedEvaluators{
+    "l06-announce-hop-count-consistent",
+    "l06-announce-hop-ids-unique",
+    "l06-announce-hop-list-excludes-own",
+    "l06-announce-ok-hop-assigned",
+    "l06-announce-ok-then-starts",
+    "l06-announce-retired-id-unused",
+    "l06-errors-code-space",
+    "l06-errors-message-length-close",
+    "l06-errors-no-assumed-unauthorized",
+    "l06-errors-reserved-code-tolerated",
+    "l06-errors-unknown-code-tolerated",
+    "l06-errors-unknown-stream-type-not-fatal",
+    "l06-errors-unknown-stream-type-reset",
+    "l06-group-sequence-increments",
+    "l06-group-starts-with-group",
+    "l06-group-unique-sequence",
+    "l06-session-peer-closes-send",
+    "l06-setup-duplicate-parameter-close",
+    "l06-setup-duplicate-stream-close",
+    "l06-setup-parameters-unique",
+    "l06-setup-path-absent-on-uri-binding",
+    "l06-setup-path-query-appended",
+    "l06-setup-path-sent",
+    "l06-setup-server-path-close",
+    "l06-setup-server-role-close",
+    "l06-setup-stream-single-setup",
+    "l06-setup-unknown-parameter-ignored",
+    "l06-subscribe-invalid-frame-bounds-reset",
+    "l06-subscribe-no-group-below-floor",
+    "l06-subscribe-ok-group-at-floor",
+    "l06-subscribe-refused-reset",
+    "l06-subscribe-resolved-start",
+};
+
+// The L1 coverage target: every Applicable + Testable required (Must/MustNot) row in the L1 scope names at
+// least one planned scenario, and each of its scenarios is on the pinned L1d work list.
+TEST(LiteCatalog, EveryTestableRequiredL1RowNamesAPlannedScenario) {
+    const auto catalog = lite_catalog(lite_source());
+    const std::set<std::string> work_list(kPlannedScenarios.begin(), kPlannedScenarios.end());
+    std::size_t required_testable = 0;
+    for (const auto& row : catalog.requirements) {
+        if (!row.reviewed || !in_l1_scope(row.source.section)) continue;
+        if (row.applicability != Applicability::Applicable || row.testability != Testability::Testable) continue;
+        if (row.strength != Strength::Must && row.strength != Strength::MustNot) continue;
+        ++required_testable;
+        EXPECT_FALSE(row.scenarios.empty()) << row.id;
+        for (const auto& scenario : row.scenarios) {
+            EXPECT_TRUE(work_list.contains(scenario)) << row.id << ": " << scenario << " is not on the work list";
+        }
+    }
+    EXPECT_EQ(required_testable, 28u);
+}
+
+// The sorted distinct planned ids derived from the catalog equal the pinned L1d contract.
+TEST(LiteCatalog, PlannedScenarioAndEvaluatorListsArePinned) {
+    const auto catalog = lite_catalog(lite_source());
+    std::set<std::string> scenarios;
+    std::set<std::string> evaluators;
+    for (const auto& row : catalog.requirements) {
+        scenarios.insert(row.scenarios.begin(), row.scenarios.end());
+        evaluators.insert(row.evaluators.begin(), row.evaluators.end());
+    }
+    EXPECT_EQ(std::vector<std::string>(scenarios.begin(), scenarios.end()), kPlannedScenarios);
+    EXPECT_EQ(std::vector<std::string>(evaluators.begin(), evaluators.end()), kPlannedEvaluators);
 }
 
 }  // namespace
