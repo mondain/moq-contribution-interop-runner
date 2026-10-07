@@ -751,8 +751,8 @@ runs are not startable through the HTTP API yet (L1e flips that); the expectatio
 already assume.
 
 - **The publisher under test is the client.** It dials the runner; the runner is the server and the subscriber. The
-  runner sends its own SETUP stream first (except in the violation probes) and does not offer QUIC DATAGRAM
-  or require it: a moq-lite-06 listener accepts a peer that did not negotiate datagrams. The ALPN is `moq-lite-06`
+  runner sends its own SETUP stream first (except in the violation probes) and still offers QUIC DATAGRAM
+  but does not require it: a moq-lite-06 listener accepts a peer that did not negotiate datagrams. The ALPN is `moq-lite-06`
   for native QUIC; a publisher that offers another ALPN ends the run with a harness error (verdict `error`).
 - **Endpoint forms are provisional.** Native QUIC is `moql://host:port` and WebTransport is `https://host:port/moq`.
   Both are fixed in L1e against the moq CLI and may change; do not hard-code them in a published adapter.

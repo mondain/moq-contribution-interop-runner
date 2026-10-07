@@ -853,9 +853,7 @@ engine, 30 evaluators bound to catalog rows, and a lite family in the native run
   adapter ships; L1e flips these and runs the 19 scenarios against the real moq CLI. Until then the family runs only
   through the native run manager in tests, against a scripted conforming publisher. No sweep against a real
   publisher has been done, so there are no observed results to record here.
-- **Known limitation.** A second ANNOUNCE_OK at the end of a covered announce response stream is not flagged, and
-  `l06-announce-ok-then-starts` can then pass wrongly; this is tracked in the L1d hand-off in
-  `requirements/draft21-to-22-delta.json`.
+- **Incomplete trailing messages.** An incomplete message still buffered on an announce response stream when the window ends (for example a second ANNOUNCE_OK, which reads as a message waiting for bytes) leaves rows 139, 141 and 152 not run instead of passing.
 
 ## Other publishers
 
