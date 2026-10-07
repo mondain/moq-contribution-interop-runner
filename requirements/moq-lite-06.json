@@ -257,7 +257,7 @@
       "evaluators": [
         "l06-setup-stream-single-setup"
       ],
-      "rationale": "The publisher's half is observable on every session: after accepting the connection the runner records the publisher's unidirectional streams and checks that one carries the Setup STREAM_TYPE, decodes as exactly one SETUP (L1b codec, empty parameter list allowed) and ends with FIN rather than a reset or further bytes. The runner must itself open, fill and FIN its own Setup stream the same way."
+      "rationale": "The publisher's half is observable on every session: after accepting the connection the runner records the publisher's unidirectional streams and checks that one carries the Setup STREAM_TYPE, decodes as exactly one SETUP (L1b codec, empty parameter list allowed) and ends with FIN rather than a reset or further bytes. The runner must itself open, fill and FIN its own Setup stream the same way. A SETUP whose framing is intact and whose only defect is a repeated Parameter ID counts as decoded for this row; the duplicate is judged by L06-7-3-MUST-NOT-111 alone, so one defect never fails both rows."
     },
     {
       "id": "L06-3-1-MUST-015",
@@ -502,12 +502,16 @@
       "applicability": "Applicable",
       "testability": "Testable",
       "scenarios": [
-        "l06-errors-code-space"
+        "l06-errors-code-space",
+        "l06-setup-duplicate-stream",
+        "l06-setup-duplicate-parameter",
+        "l06-setup-server-path",
+        "l06-setup-server-role"
       ],
       "evaluators": [
         "l06-errors-code-space"
       ],
-      "rationale": "The runner provokes a stream refusal (SUBSCRIBE to a broadcast the publisher does not serve) and a session termination (a malformed control message) and checks each code the publisher sends: a RESET_STREAM or STOP_SENDING code must not be one registered only in the session table (Table 2), and a session close code must not be one registered only in the stream table (Table 3). Values present in both tables cannot show the space and are accepted; unregistered values are not judged here. If either provocation produces no code (for example no session close), the evaluator reports NotRun for that half and never Pass on the other half alone."
+      "rationale": "The runner provokes a stream refusal (SUBSCRIBE to a broadcast the publisher does not serve) and a session termination (a malformed control message) and checks each code the publisher sends: a RESET_STREAM or STOP_SENDING code must not be one registered only in the session table (Table 2), and a session close code must not be one registered only in the stream table (Table 3). Values present in both tables cannot show the space and are accepted; unregistered values are not judged here. If either provocation produces no code (for example no session close), the evaluator reports NotRun for that half and never Pass on the other half alone. The session half also takes evidence from the session closes provoked by the MUST-level probes (l06-setup-duplicate-stream, l06-setup-duplicate-parameter, l06-setup-server-path, l06-setup-server-role, for L06-6-3-1-MUST-092, L06-7-3-MUST-112, L06-7-3-2-MUST-126 and L06-7-3-3-MUST-131), so it is not tied to the SHOULD-level reaction of L06-7-1-SHOULD-107; any one close code from those scenarios suffices for the half, and each is judged for its space only."
     },
     {
       "id": "L06-4-4-MUST-028",
@@ -2011,7 +2015,7 @@
       "evaluators": [
         "l06-errors-message-length-close"
       ],
-      "rationale": "The publisher is the receiver of the runner's control messages. This reuses the session half of l06-errors-code-space (L06-4-4-MUST-027), whose malformed control message L1d makes a Message Length mismatch: a well-formed ANNOUNCE_REQUEST whose Message Length covers the prefix string plus trailing bytes. 027 judges only the code space of the close; this evaluator judges a different property, that the session is closed with PROTOCOL_VIOLATION (session code 0x3). The draft says \"close the connection\", so a stream reset or STOP_SENDING alone, a close with another code, or a session still open at the end of a generous stated allowance (no deadline is given; seconds, recorded in the evidence) is a Fail of this SHOULD row, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION on a publisher message with an unexpected length (the L1b decoders report it as ProtocolViolation)."
+      "rationale": "The publisher is the receiver of the runner's control messages. This reuses the session half of l06-errors-code-space (L06-4-4-MUST-027), whose malformed control message L1d makes a Message Length mismatch: a well-formed ANNOUNCE_REQUEST whose Message Length covers the prefix string plus trailing bytes. 027 judges only the code space of the close (and also takes session-close evidence from the MUST-level probes of 092, 112, 126 and 131, so it does not depend on this SHOULD-level reaction); this evaluator judges a different property, attributed to this row only, that the session is closed with PROTOCOL_VIOLATION (session code 0x3). The draft says \"close the connection\", so a stream reset or STOP_SENDING alone, a close with another code, or a session still open at the end of a generous stated allowance (no deadline is given; seconds, recorded in the evidence) is a Fail of this SHOULD row, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION on a publisher message with an unexpected length (the L1b decoders report it as ProtocolViolation)."
     },
     {
       "id": "L06-7-2-MUST-108",
@@ -2099,7 +2103,7 @@
       "evaluators": [
         "l06-setup-parameters-unique"
       ],
-      "rationale": "Observable by decoding the publisher's SETUP on every session with the L1b codec (decode_setup reports a repeated id as ProtocolViolation). This is a different property from L06-3-1-MUST-014 (one SETUP on one Setup stream ending with FIN): L1d's 014 evaluator must treat a SETUP whose framing is intact but whose only defect is a repeated id as a decoded SETUP, so one defect debits only this row. A Parameter ID appearing twice is a Fail. A duplicate needs at least two parameters, so with fewer than two the row is NotRun rather than a vacuous Pass. The runner must itself never repeat a Parameter ID except in the named probe of L06-7-3-MUST-112."
+      "rationale": "Observable by decoding the publisher's SETUP on every session with the L1b codec (decode_setup reports a repeated id as ProtocolViolation). This is a different property from L06-3-1-MUST-014 (one SETUP on one Setup stream ending with FIN): L1d's 014 evaluator must treat a SETUP whose framing is intact but whose only defect is a repeated id as a decoded SETUP, so one defect debits only this row. A Parameter ID appearing twice is a Fail. A duplicate needs at least two parameters, so with fewer than two the row is NotRun rather than a vacuous Pass. The runner must itself never repeat a Parameter ID except in the named probe of L06-7-3-MUST-112, whose raw SETUP bytes L1d builds with write_framed_message and the field writers because encode_setup refuses duplicate ids."
     },
     {
       "id": "L06-7-3-MUST-112",
@@ -2121,7 +2125,7 @@
       "evaluators": [
         "l06-setup-duplicate-parameter-close"
       ],
-      "rationale": "A named deliberate violation probe: the runner's SETUP carries the Cost parameter (0x4, which the runner may legally send once) twice with the same value, so the repetition is the only defect, and the runner sends nothing else that could provoke a close. The draft says \"close the session\", so the evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone (reset or STOP_SENDING of the runner's Setup stream), a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION when the publisher's SETUP repeats an id."
+      "rationale": "A named deliberate violation probe: the runner's SETUP carries the Cost parameter (0x4, which the runner may legally send once) twice with the same value, so the repetition is the only defect, and the runner sends nothing else that could provoke a close. The draft says \"close the session\", so the evaluator requires a session close with PROTOCOL_VIOLATION (session code 0x3); a stream-level reaction alone (reset or STOP_SENDING of the runner's Setup stream), a close with another code, or a session still open at the end of a generous stated allowance (seconds, recorded) is a Fail, the last flagged as time-bounded. The runner must itself close the session with PROTOCOL_VIOLATION when the publisher's SETUP repeats an id. encode_setup refuses duplicate ids, so L1d builds this probe's raw SETUP bytes with write_framed_message and the field writers."
     },
     {
       "id": "L06-7-3-1-MUST-113",
@@ -2305,7 +2309,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply: an invalid Path from the publisher (for example not a path-abempty with an optional query) closes the session with PROTOCOL_VIOLATION (session 0x3) and is recorded as evidence."
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply, but the interpretation of Path is application-defined and opaque to moq-lite (draft 1634-1635), so the runner treats only a value that is not a path-abempty with an optional ? and query as invalid, and records it. A publisher Path defect stays attributable to L06-7-3-2-MUST-120 in l06-setup-client-path and is not turned into a session close in every scenario: in other scenarios the runner records the value and continues."
     },
     {
       "id": "L06-7-3-2-MUST-123",
@@ -2323,7 +2327,7 @@
       "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. The runner must itself comply: it recognizes the path it gave the publisher (and the empty/absent default) and closes the session on any other path, recording the received value."
+      "rationale": "In L1 the publisher under test (the moq CLI) dials the runner, so the publisher is the CLIENT and the runner is the SERVER and the subscriber. This binds the server, which is the runner. Path interpretation is application-defined (draft 1634-1635) and the runner serves a single test endpoint, so it recognizes any path (absent and empty included) and records the received value; it never closes on an unrecognized path, which keeps a publisher Path defect attributable to L06-7-3-2-MUST-120 rather than ending every scenario."
     },
     {
       "id": "L06-7-3-2-SHOULD-124",
@@ -2631,7 +2635,7 @@
       "evaluators": [
         "l06-announce-ok-then-starts"
       ],
-      "rationale": "In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). Per stream the evaluator requires the first message to decode as ANNOUNCE_OK within a generous stated allowance (the draft gives no deadline; a missing ANNOUNCE_OK is a Fail flagged as time-bounded) and every later message to decode as ANNOUNCE_START, ANNOUNCE_END or ANNOUNCE_UPDATE. The Active Count of ANNOUNCE_OK announces the initial set, so the next Active Count messages must be ANNOUNCE_STARTs arriving within the allowance; fewer is a Fail, flagged as time-bounded. For the empty prefix and the broadcast's prefix an ANNOUNCE_START whose reconstructed route covers the configured broadcast path must arrive within the allowance, otherwise Fail (time-bounded). For the disjoint prefix only ANNOUNCE_OK is required; any routes there are recorded, since the runner cannot prove the publisher serves nothing under it. A session close or a reset instead of the answer is a Fail. The overlapping pair covers the publisher side of L06-5-1-1-MAY-039 (each stream answered on its own). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
+      "rationale": "In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). Per stream the evaluator requires the first message to decode as ANNOUNCE_OK within a generous stated allowance (the draft gives no deadline; a missing ANNOUNCE_OK is a Fail flagged as time-bounded) and every later message to decode as ANNOUNCE_START, ANNOUNCE_END or ANNOUNCE_UPDATE. The Active Count of ANNOUNCE_OK announces the initial set, so the next Active Count messages must be ANNOUNCE_STARTs arriving within the allowance; fewer is a Fail, flagged as time-bounded, except that an ANNOUNCE_END for an id of the initial set (a route ending while the initial set is still arriving) makes the Active Count check inconclusive rather than a Fail. For the empty prefix and the broadcast's prefix an ANNOUNCE_START whose reconstructed route covers the configured broadcast path must arrive within the allowance, otherwise Fail (time-bounded). For the disjoint prefix only ANNOUNCE_OK is required; any routes there are recorded, since the runner cannot prove the publisher serves nothing under it. A session close or a reset instead of the answer is a Fail. A START or UPDATE that fails to decode, including a Hop Count mismatch or a duplicate non-zero Hop ID (the L1b decoder reports both as ProtocolViolation), is a Fail of this row with the decode error recorded; no other row is debited for it (L06-7-6-MUST-146 and L06-7-6-MUST-149 are the runner's receiver duties). The overlapping pair covers the publisher side of L06-5-1-1-MAY-039 (each stream answered on its own). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail (an unknown Type stays inconclusive, not a decode failure)."
     },
     {
       "id": "L06-7-4-SHOULD-140",
@@ -2759,17 +2763,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher (sender of the announcement; the close binds the runner)",
-      "summary": "A receiver closes the stream with PROTOCOL_VIOLATION when an announcement's Hop Count does not match its Hop ID entries, so a sender's Hop Count always equals the number of entries it writes.",
-      "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "l06-announce-prefix"
-      ],
-      "evaluators": [
-        "l06-announce-hop-count-consistent"
-      ],
-      "rationale": "The close duty binds the receiver of announcements, which is the runner: it must itself close the stream (the publisher's Announce Stream) on a mismatch and record it. The draft states no separate keyword rule for the sender, so this row is the only one guarding the wire property, and the property is observable by decoding what the publisher sends; it is judged on the publisher as sender (unlike the draft 22 receiver-close rows, which had a separate sender rule). In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). For every decoded ANNOUNCE_START and ANNOUNCE_UPDATE the body after the suffix (or Announce ID) must decode as exactly Hop Count entries followed by the two Route Costs, ending at the Message Length; a shortfall or trailing bytes there is a Fail (the evaluator cannot tell a wrong Hop Count from another miscount in that region and records the raw body). A Hop Count above the L1b defensive cap is recorded, not failed (the draft states no limit). No ANNOUNCE_START or ANNOUNCE_UPDATE decoded makes the row NotRun. An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
+      "actor": "announcement receiver",
+      "summary": "A receiver closes the stream with PROTOCOL_VIOLATION when an ANNOUNCE_START or ANNOUNCE_UPDATE carries a Hop Count that does not match the number of Hop ID entries that follow.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The close duty binds the receiver of announcements, which is the subscriber side of the Announce Stream; the runner plays it, so it does not apply to the publisher under test (the publisher receives no announcements in L1). The runner must itself comply: on a Hop Count mismatch in a publisher announcement it closes that Announce Stream with PROTOCOL_VIOLATION and records the raw message as evidence. Following the receiver-close convention of draft 22 (D22-4-2-MUST-109) and L06-5-1-1-MUST-037, this close rule is not turned into a publisher rule; a publisher announcement that fails to decode, a Hop Count mismatch included, is judged once, by L06-7-4-MUST-139."
     },
     {
       "id": "L06-7-6-MUST-147",
@@ -2817,17 +2817,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher (sender of the announcement; the close binds the runner)",
-      "summary": "A receiver closes the session with PROTOCOL_VIOLATION when a non-zero Hop ID appears twice in an announcement's Hop ID list, so a sender never lists a non-zero Hop ID twice.",
-      "applicability": "Applicable",
-      "testability": "Testable",
-      "scenarios": [
-        "l06-announce-prefix"
-      ],
-      "evaluators": [
-        "l06-announce-hop-ids-unique"
-      ],
-      "rationale": "As for L06-7-6-MUST-146, the close duty binds the runner (it must itself close the session with PROTOCOL_VIOLATION and record it) and the row is judged on the publisher as sender, since no separate sender rule exists. In l06-announce-prefix the runner opens Announce Streams with an ANNOUNCE_REQUEST for the empty prefix, for a prefix of the publisher's configured broadcast path (both open at once, so two overlapping requests are exercised) and for a prefix disjoint from it, and decodes every message on the response side with the L1b codecs for a stated window (seconds, recorded in the evidence). A decoded ANNOUNCE_START or ANNOUNCE_UPDATE whose Hop ID list holds the same non-zero value twice is a Fail (the L1b decoder reports it as ProtocolViolation; the evaluator attributes that error to this row only). Repeated 0 entries are legal. A duplicate needs at least two non-zero entries in one list, so Pass requires at least one such list; otherwise the row is NotRun. An origin such as the moq CLI sends Hop Count 0, so against it the row is NotRun; it becomes judgeable against a relay publisher. An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
+      "actor": "announcement receiver",
+      "summary": "A receiver closes the session with PROTOCOL_VIOLATION when a non-zero Hop ID appears twice in one announcement's Hop ID list; repeated 0 entries are legal.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
+      "scenarios": [],
+      "evaluators": [],
+      "rationale": "The close duty binds the receiver of announcements, which is the subscriber side of the Announce Stream; the runner plays it, so it does not apply to the publisher under test. The runner must itself comply: on a repeated non-zero Hop ID in a publisher announcement it closes the session with PROTOCOL_VIOLATION (session 0x3) and records the message; repeated 0 entries are accepted. Following the receiver-close convention of draft 22 (D22-4-2-MUST-109) and L06-5-1-1-MUST-037, this close rule is not turned into a publisher rule; a publisher announcement with a duplicate non-zero Hop ID fails to decode and is judged once, by L06-7-4-MUST-139."
     },
     {
       "id": "L06-7-6-MUST-150",
@@ -2885,7 +2881,7 @@
       "evaluators": [
         "l06-announce-retired-id-unused"
       ],
-      "rationale": "Observable by decoding the publisher's Announce Stream, but only once a route is retracted. In l06-announce-lifecycle the runner holds an ANNOUNCE_REQUEST for the broadcast's prefix open while the adapter or driver ends the publisher's broadcast and starts it again (if the target supports that within one session), for a stated window. The evaluator tracks assigned and retired ids (each ANNOUNCE_START assigns the next id): an ANNOUNCE_END or ANNOUNCE_UPDATE naming a retired id is a Fail. With no ANNOUNCE_END in the window (for example the moq CLI ending its session with the broadcast) the row is NotRun, never a Pass. References to never-assigned ids and a fresh id on re-announcement are recorded as information (not keyword rules). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
+      "rationale": "Observable by decoding the publisher's Announce Stream, but only once a route is retracted. In l06-announce-lifecycle the runner holds an ANNOUNCE_REQUEST for the broadcast's prefix open while the adapter or driver ends the publisher's broadcast and starts it again (if the target supports that within one session), for a stated window. The evaluator tracks assigned and retired ids (each ANNOUNCE_START assigns the next id): an ANNOUNCE_END or ANNOUNCE_UPDATE naming a retired id is a Fail. With no ANNOUNCE_END in the window (for example the moq CLI ending its session with the broadcast) the row is NotRun, never a Pass. The scenario needs the adapter or driver to end and restart a broadcast within one session, which the adapter contract does not offer yet (an L1d/L1e item); until it does the row is NotRun, never a Pass. References to never-assigned ids and a fresh id on re-announcement are recorded as information (not keyword rules). An ANNOUNCE message with an unknown Type is not judged here: moq.dev skips it by Message Length while the L1b decoder returns InvalidValue, and that decision is open for the L1d session layer (handoff.from_L1b DEFERRED (b)); until it is made such a message is recorded and the stream is inconclusive for this row from that point on, never a Fail."
     },
     {
       "id": "L06-7-8-MAY-153",
@@ -3015,7 +3011,7 @@
       "evaluators": [
         "l06-subscribe-no-group-below-floor"
       ],
-      "rationale": "In l06-subscribe-group-floor the runner first learns the latest Group Sequence L from a default subscription in the same session, then opens two floored subscriptions with new Subscribe IDs: Group Start F = L and F = L + 2 (a floor above the latest group, which simply waits), Frame Start 0, Group End 0, and a large Subscriber Max Age; the values are recorded. For each, any Group stream whose GROUP names that Subscribe ID with a Group Sequence below the floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. A subscription with no decoded Group stream in the stated window (seconds, long enough for two groups at the target's cadence) is NotRun, never a Pass. The runner must itself send only conforming floors (Frame Start 0, Frame End 0)."
+      "rationale": "In l06-subscribe-group-floor the runner first learns the latest Group Sequence L from a default subscription in the same session, then opens two floored subscriptions with new Subscribe IDs: Group Start F = L and F = L + 2 (a floor above the latest group, which simply waits), Frame Start 0, Group End 0, and a large Subscriber Max Age; the values are recorded. A floor of 0 is no floor, so the F = L case needs L >= 1; when the latest group is 0 that subscription is NotRun (the F = L + 2 case still runs). For each, any Group stream whose GROUP names that Subscribe ID with a Group Sequence below the floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. A subscription with no decoded Group stream in the stated window (seconds, long enough for two groups at the target's cadence) is NotRun, never a Pass. The runner must itself send only conforming floors (Frame Start 0, Frame End 0)."
     },
     {
       "id": "L06-7-9-MUST-160",
@@ -3262,7 +3258,7 @@
       "evaluators": [
         "l06-subscribe-ok-group-at-floor"
       ],
-      "rationale": "Judged on the same floored subscriptions as L06-7-9-MUST-NOT-159 but from a different message: the SUBSCRIBE_OK decoded with the L1b codec (Type 0x0, one Group varint). A Group below the requested floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. A default subscription (no floor) cannot violate the rule and is not judged. A floored subscription with no SUBSCRIBE_OK in the stated window is NotRun (the publisher may withhold SUBSCRIBE_OK until a group resolves the start, or refuse with a reset). Whether the first Group stream matches the SUBSCRIBE_OK Group is recorded as information."
+      "rationale": "Judged on the same floored subscriptions as L06-7-9-MUST-NOT-159 but from a different message: the SUBSCRIBE_OK decoded with the L1b codec (Type 0x0, one Group varint). A Group below the requested floor is a Fail. The draft is inconsistent on the Group Start encoding: Section 3.6 (draft 414-416) and moq.dev (lite/subscribe.rs decode_start_group) carry the raw floor, while draft 2056-2058 says Group Start is offset by 1. The evaluator uses the raw floor F; a value of exactly F-1 (compliant only under the offset reading) is recorded as the reading conflict and makes the row inconclusive (NotRun) rather than a Fail, and only a value below F-1, wrong under both readings, is a Fail. When the latest group L is 0 the F = L subscription has no floor (F = 0) and is NotRun for this row; F must be at least 1. A default subscription (no floor) cannot violate the rule and is not judged. A floored subscription with no SUBSCRIBE_OK in the stated window is NotRun (the publisher may withhold SUBSCRIBE_OK until a group resolves the start, or refuse with a reset). Whether the first Group stream matches the SUBSCRIBE_OK Group is recorded as information."
     },
     {
       "id": "L06-7-14-MUST-NOT-173",
@@ -3604,7 +3600,7 @@
       "evaluators": [
         "l06-group-sequence-increments"
       ],
-      "rationale": "Judged on the default subscription of l06-subscribe-latest, over the window stated for L06-6-3-2-MUST-093. The evaluator orders the decoded GROUP sequences of the subscription and requires them to form a consecutive run; a gap is accounted for when a SUBSCRIBE_DROP range covers it, and makes the row inconclusive when a Group stream of the subscription was reset before its GROUP decoded. An unaccounted gap is a Fail of this SHOULD row (on a loopback path congestion is unlikely; the evidence keeps the gap). Fewer than two decoded groups is NotRun."
+      "rationale": "Judged on the default subscription of l06-subscribe-latest, which states a large Subscriber Max Age (as in L06-7-9-MUST-NOT-159, recorded in the evidence) so staleness resets cannot explain a gap; with a small Max Age an unaccounted gap is inconclusive, not a Fail. It is judged over the window stated for L06-6-3-2-MUST-093. The evaluator orders the decoded GROUP sequences of the subscription and requires them to form a consecutive run; a gap is accounted for when a SUBSCRIBE_DROP range covers it, and makes the row inconclusive when a Group stream of the subscription was reset before its GROUP decoded. An unaccounted gap is a Fail of this SHOULD row, flagged as inferred from delivery (a group skipped in delivery without a SUBSCRIBE_DROP looks like a numbering gap; on a loopback path congestion is unlikely; the evidence keeps the gap). Fewer than two decoded groups is NotRun."
     },
     {
       "id": "L06-7-19-MUST-191",

@@ -213,9 +213,9 @@ TEST(LiteCatalog, ReviewedRowCountPerSectionGroupIsPinned) {
         scenarios.insert(row.scenarios.begin(), row.scenarios.end());
         evaluators.insert(row.evaluators.begin(), row.evaluators.end());
     }
-    EXPECT_EQ(testable, 32u);
+    EXPECT_EQ(testable, 30u);
     EXPECT_EQ(scenarios.size(), 19u);
-    EXPECT_EQ(evaluators.size(), 32u);
+    EXPECT_EQ(evaluators.size(), 30u);
     const std::map<std::string, std::size_t> expected{{"1", 11}, {"3", 12}, {"4", 13},
                                                       {"5", 29}, {"6", 9},  {"7", 63}};
     EXPECT_EQ(reviewed, expected);
@@ -248,8 +248,6 @@ const std::vector<std::string> kPlannedScenarios{
 };
 
 const std::vector<std::string> kPlannedEvaluators{
-    "l06-announce-hop-count-consistent",
-    "l06-announce-hop-ids-unique",
     "l06-announce-hop-list-excludes-own",
     "l06-announce-ok-hop-assigned",
     "l06-announce-ok-then-starts",
@@ -298,7 +296,7 @@ TEST(LiteCatalog, EveryTestableRequiredL1RowNamesAPlannedScenario) {
             EXPECT_TRUE(work_list.contains(scenario)) << row.id << ": " << scenario << " is not on the work list";
         }
     }
-    EXPECT_EQ(required_testable, 28u);
+    EXPECT_EQ(required_testable, 26u);
 }
 
 // The sorted distinct planned ids derived from the catalog equal the pinned L1d contract.
