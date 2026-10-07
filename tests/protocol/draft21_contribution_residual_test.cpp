@@ -2,6 +2,7 @@
 
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
+#include "moq/interop/scenarios/wire_draft.h"
 
 #include <gtest/gtest.h>
 
@@ -916,6 +917,159 @@ TEST(ContributionResidual, AnUncommittedSubgroupMustBeResetWhenItsTimerExpires) 
     refused.reply(refused.stream_of(0), request_error(0x10), true);
     EXPECT_TRUE(probe.definition.response_ready(refused.partial()));
     EXPECT_EQ(judge(probe, refused.finish()), std::nullopt);
+}
+
+// ---- Subgroup timer: wire draft 21 pins and the draft 22 judgement ---------------------------------
+// The shapes the draft 22 evaluator tells apart (see the next tests), pinned on wire draft 21 first:
+// draft 21 is frozen, so there every stream still open at the end of the window stays a FAIL.
+
+// PUBLISH_DONE (0xB): Status Code 2, Stream Count 1, empty Reason Phrase (moqxr's bytes).
+Bytes subgroup_publish_done() { return cframe(0xb, cbytes({2, 1, 0})); }
+
+enum class Subgroup { Truncated, MoqPubLike };
+
+// SUBSCRIBE_OK, optionally PUBLISH_DONE, then Group 0's Subgroup stream: either one Object
+// truncated at the held credit (moqxr: a complete Group whose first Object is 1174 bytes) or
+// eight 2-byte Objects, one per event, the stream still open (imquic's moq-pub: a Group per
+// minute, an Object per second, so the Group is still being published when the window ends).
+ContributionRun withheld_run(const Draft21ContributionProbe& probe, Subgroup shape, bool done, bool reset) {
+    ContributionRun run(probe);
+    run.deliver(0);
+    run.reply(run.stream_of(0), subscribe_ok(5));
+    if (done) run.reply(run.stream_of(0), subgroup_publish_done());
+    if (shape == Subgroup::Truncated) {
+        run.reply(kData1, subgroup(5, 0, object_data(0, Bytes(100, std::byte{'o'}))));
+    } else {
+        run.reply(kData1, subgroup(5, 0, object_data(1, cbytes({'3', '5'}))));
+        for (int object = 2; object <= 8; ++object) run.reply(kData1, object_data(0, cbytes({'3', '6'})));
+    }
+    if (reset) run.event(transport::PeerResetEvent{kData1, 0x2});
+    return run;
+}
+
+TEST(ContributionResidual, SubgroupTimerVerdictsOnWireDraft21AreUnchanged) {
+    ASSERT_EQ(current_wire_draft(), 21u);
+    const auto& probe = find_probe(probes(), "d21-subgroup-completion-withheld-acknowledgments");
+    for (const auto shape : {Subgroup::Truncated, Subgroup::MoqPubLike}) {
+        for (const bool done : {false, true}) {
+            // A reset of the open stream passes, with or without PUBLISH_DONE.
+            EXPECT_EQ(judge(probe, withheld_run(probe, shape, done, true).finish()), true);
+            // A stream still open when the window ends fails: complete Group or not.
+            EXPECT_EQ(judge(probe, windowed(withheld_run(probe, shape, done, false))), false);
+            // Before the window ends there is no verdict.
+            EXPECT_EQ(judge(probe, withheld_run(probe, shape, done, false).finish()), std::nullopt);
+        }
+    }
+    // Arrival times do not matter on wire draft 21.
+    auto late = windowed(withheld_run(probe, Subgroup::Truncated, true, false));
+    const auto start = RawProbeClock::time_point{} + std::chrono::seconds(1);
+    late.event_times.assign(late.events.size(), start);
+    late.last_poll_at = start + std::chrono::milliseconds(10);
+    EXPECT_EQ(judge(probe, late), false);
+}
+
+// ---- Draft 22 Section 5.2 lines 2301-2312 (D22-5-2-MUST-144) -------------------------------------------
+// "... MUST start a timer of SUBGROUP_DELIVERY_TIMEOUT duration once it becomes aware that all of
+// the objects on the subgroup have been published ... If the timer expires before the underlying
+// transport stream reaches 'all data committed' state ..., the implementation MUST reset the
+// stream." A publisher still publishing the Subgroup owes no reset yet. The runner learns that the
+// publisher knows the Subgroup is complete from PUBLISH_DONE, which (Section 9.9 lines 4613-4615)
+// "MUST NOT [be sent] until it has closed all streams it will ever open" for the subscription.
+std::vector<Draft21ContributionProbe> wire22_probes() {
+    const ScopedWireDraft wire(22);
+    return draft21_contribution_probes();
+}
+
+std::optional<bool> judge22(const Draft21ContributionProbe& probe, const RawProbeTranscript& transcript) {
+    const ScopedWireDraft wire(22);
+    return evaluate_draft21_contribution_probe(transcript, probe);
+}
+
+// Every event arrives at `start`; the window ends `after` later.
+RawProbeTranscript timed(RawProbeTranscript transcript, std::chrono::milliseconds after) {
+    const auto start = RawProbeClock::time_point{} + std::chrono::seconds(1);
+    transcript.event_times.assign(transcript.events.size(), start);
+    transcript.last_poll_at = start + after;
+    return transcript;
+}
+
+TEST(ContributionResidual, Draft22SubgroupStillBeingPublishedIsNotJudged) {
+    const auto probes22 = wire22_probes();
+    const auto& probe = find_probe(probes22, "d21-subgroup-completion-withheld-acknowledgments");
+    // imquic's moq-pub: Objects keep arriving and no PUBLISH_DONE says the Subgroup is complete,
+    // so the timer need not have started. No verdict instead of a FAIL.
+    EXPECT_EQ(judge22(probe, windowed(withheld_run(probe, Subgroup::MoqPubLike, false, false))), std::nullopt);
+    EXPECT_EQ(judge22(probe, timed(windowed(withheld_run(probe, Subgroup::MoqPubLike, false, false)),
+                                   std::chrono::seconds(4))), std::nullopt);
+    // The same for a truncated Object without PUBLISH_DONE: completion is not observable.
+    EXPECT_EQ(judge22(probe, windowed(withheld_run(probe, Subgroup::Truncated, false, false))), std::nullopt);
+}
+
+TEST(ContributionResidual, Draft22CompletedSubgroupLeftOpenFails) {
+    const auto probes22 = wire22_probes();
+    const auto& probe = find_probe(probes22, "d21-subgroup-completion-withheld-acknowledgments");
+    for (const auto shape : {Subgroup::Truncated, Subgroup::MoqPubLike}) {
+        // PUBLISH_DONE, then nothing until the window ends: never reset. A transcript without
+        // arrival times (hand-built) is judged by order alone.
+        EXPECT_EQ(judge22(probe, windowed(withheld_run(probe, shape, true, false))), false);
+        // Window ended well after the 200 ms timer (plus the allowance for the reset to arrive).
+        EXPECT_EQ(judge22(probe, timed(windowed(withheld_run(probe, shape, true, false)),
+                                       std::chrono::seconds(2))), false);
+        // PUBLISH_DONE arrived too close to the end of the window for the timer to have run out.
+        EXPECT_EQ(judge22(probe, timed(windowed(withheld_run(probe, shape, true, false)),
+                                       std::chrono::milliseconds(100))), std::nullopt);
+        // Before the window ends there is no verdict.
+        EXPECT_EQ(judge22(probe, withheld_run(probe, shape, true, false).finish()), std::nullopt);
+    }
+    // A window ended by the publisher's close is measured to the close.
+    const auto closed = [&](std::chrono::milliseconds after) {
+        auto run = withheld_run(probe, Subgroup::Truncated, true, false);
+        run.event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0, {}});
+        auto transcript = run.finish();
+        const auto start = RawProbeClock::time_point{} + std::chrono::seconds(1);
+        transcript.event_times.assign(transcript.events.size(), start);
+        transcript.event_times.back() = start + after;
+        transcript.last_poll_at = start + std::chrono::seconds(30);
+        return transcript;
+    };
+    EXPECT_EQ(judge22(probe, closed(std::chrono::seconds(3))), false);
+    EXPECT_EQ(judge22(probe, closed(std::chrono::milliseconds(50))), std::nullopt);
+}
+
+TEST(ContributionResidual, Draft22ResetSubgroupPasses) {
+    const auto probes22 = wire22_probes();
+    const auto& probe = find_probe(probes22, "d21-subgroup-completion-withheld-acknowledgments");
+    for (const auto shape : {Subgroup::Truncated, Subgroup::MoqPubLike}) {
+        for (const bool done : {false, true}) {
+            EXPECT_EQ(judge22(probe, withheld_run(probe, shape, done, true).finish()), true);
+            EXPECT_TRUE(probe.definition.response_ready(withheld_run(probe, shape, done, true).partial()));
+        }
+    }
+    // A finished stream was committed: nothing to time out, PUBLISH_DONE or not.
+    ContributionRun finished(probe);
+    finished.deliver(0);
+    finished.reply(finished.stream_of(0), subscribe_ok(5));
+    finished.reply(finished.stream_of(0), subgroup_publish_done());
+    finished.reply(kData1, subgroup(5, 0, objects_with_ids({0})), true);
+    EXPECT_EQ(judge22(probe, windowed(finished)), std::nullopt);
+}
+
+TEST(ContributionResidual, Draft22SubgroupFinishedBeforePublishDoneIsNotJudged) {
+    const auto probes22 = wire22_probes();
+    const auto& probe = find_probe(probes22, "d21-subgroup-completion-withheld-acknowledgments");
+    // imquic's moq-pub when its one-minute Group 0 ends early in the window: six 2-byte Objects
+    // and the End of Group marker fit in the 64-byte credit, the stream ends with a FIN, and
+    // PUBLISH_DONE ("Reached the end group") follows a second later. The stream was committed.
+    ContributionRun run(probe);
+    run.deliver(0);
+    run.reply(run.stream_of(0), subscribe_ok(5));
+    run.reply(kData1, subgroup(5, 0, object_data(1, cbytes({'5', '4'}))));
+    for (int object = 2; object <= 6; ++object) run.reply(kData1, object_data(0, cbytes({'5', '5'})));
+    run.reply(kData1, cbytes({0, 0, 0, 3}), true);  // Object Status 0x3, End of Group
+    run.reply(run.stream_of(0), subgroup_publish_done(), true);
+    EXPECT_EQ(judge22(probe, windowed(run)), std::nullopt);
+    // An old PUBLISH_DONE does not make a finished stream a failure either.
+    EXPECT_EQ(judge22(probe, timed(windowed(run), std::chrono::seconds(5))), std::nullopt);
 }
 
 // ---- Section 8.9: operator-configured credentials ----------------------------------------------------------

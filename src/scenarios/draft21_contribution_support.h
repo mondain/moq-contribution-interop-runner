@@ -159,6 +159,18 @@ public:
     // can arrive. Always false for scenarios that must finish on evidence.
     bool window_ended() const noexcept { return window_ended_; }
     void set_window_ended(bool value) noexcept { window_ended_ = value; }
+    // Arrival time of each transport event and when the window ended, when the run recorded them.
+    void set_times(std::span<const RawProbeClock::time_point> event_times,
+                   std::optional<RawProbeClock::time_point> window_end) noexcept {
+        event_times_ = event_times;
+        window_end_ = window_end;
+    }
+    // How long the window went on after event `index` arrived; absent when the transcript does not
+    // record both times (a hand-built transcript is judged by order alone).
+    std::optional<RawProbeClock::duration> window_after(std::size_t index) const {
+        if (!window_end_ || index >= event_times_.size()) return std::nullopt;
+        return *window_end_ - event_times_[index];
+    }
     std::vector<Frame> frames(const StreamRecord& record) const;
     std::vector<Frame> write_frames(std::size_t index) const;
 
@@ -166,6 +178,8 @@ private:
     std::span<const RawProbeAcceptedWrite> writes_;
     bool valid_{true};
     bool window_ended_{false};
+    std::span<const RawProbeClock::time_point> event_times_;
+    std::optional<RawProbeClock::time_point> window_end_;
     std::optional<std::uint64_t> unknown_alias_code_;
     std::vector<RawProbeCourtesyWrite> courtesy_;
     std::vector<RawProbeAutoReply> auto_replies_;

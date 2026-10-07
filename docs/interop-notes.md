@@ -394,6 +394,7 @@ Runs (refused: HTTP refusal, nothing started):
 | first, native QUIC, sweep-only shutdown wrapper | 223 | 6 | 29 | 188 | 168 | 17 | 3 | 43 (39 / 4 / 0) |
 | first, WebTransport | 223 | 6 | 29 | 188 | 169 | 0 | 19 | 49 (13 / 0 / 30; 6 refused 422) |
 | final, native QUIC | 223 | 6 | 29 | 188 | 163 | 22 | 3 | 43 (37 / 6 / 0) |
+| final, native QUIC, A4 scenario re-run after `92d3c58` | 223 | 6 | 29 | 188 | 164 | 21 | 3 | 43 (37 / 6 / 0) |
 | final, WebTransport | 223 | 6 | 29 | 188 | 188 | 0 | 0 | 49 (43 / 0 / 0; 6 refused 422) |
 
 Requirement rows touched by the sweep:
@@ -403,10 +404,26 @@ Requirement rows touched by the sweep:
 | imquic, first, native QUIC (adapter as committed then) | 146 | 25 | 10 | 111 |
 | imquic, first, native QUIC (shutdown wrapper; first triage) | 146 | 47 | 16 | 83 |
 | imquic, final, native QUIC | 146 | 45 | 20 | 81 |
+| imquic, final, native QUIC, A4 scenario re-run after `92d3c58` | 146 | 45 | 19 | 82 |
 | imquic, final, WebTransport | 144 | 0 | 0 | 144 |
 | moqxr `4b615f4`, final, native QUIC (same runner) | 147 | 69 | 6 | 72 |
 | moqxr `4b615f4`, final, WebTransport (same runner) | 144 | 69 | 6 | 69 |
 
+- The 45 / 20 / 81 counts, the triage below as first written and the baseline comparison were
+  taken before the subgroup-completion evaluator fix (`92d3c58`, triage line A4). With the
+  fixed runner, `d22-subgroup-completion-withheld-acknowledgments` was re-run against the same
+  imquic scratch build. That run started mid-minute and got `not_run` for `D22-5-2-MUST-144`
+  instead of `fail` (no PUBLISH_DONE, so the publisher was never shown to know that the
+  Subgroup was complete). Substituting it into the final native sweep and re-aggregating with
+  the sweep's own script gives 45 pass, 19 fail and 82 not_run: the numbers of this sweep, not a
+  fixed result, since the other 222 runs were not repeated and this row depends on the phase
+  of moq-pub's one-minute Group 0 relative to the run start. Further re-runs started at chosen
+  seconds of the minute gave `not_run` when Group 0 ended after 6 or 7 Objects (its End of
+  Group marker and FIN fit in the 64-byte credit) and a genuine `fail` when it ended after 8
+  or more (the stream stalled, PUBLISH_DONE arrived 9 to 10 s in, and no reset followed):
+  imquic parses SUBGROUP_DELIVERY_TIMEOUT but never enforces it (imquic punch list, I-23).
+  The same re-run against moqxr `1883b9f` still passes the row (PUBLISH_DONE, then the stream
+  reset about 200 ms later).
 - Refusals: 6 scenarios need a reserved-namespace fixture (400), 23 FETCH scenarios are
   refused for the no-FETCH declaration and 6 transport-specific scenarios run only on their
   own transport (422). On WebTransport 6 group runs mix typed scenarios and are refused (422).
@@ -435,7 +452,9 @@ not touch `D22-9-1-2-MUST-315`, which only the refused query scenario scores): 3
 both; 19 pass on moqxr and fail on imquic; 13 pass on moqxr and are `not_run` on imquic; 8 are
 `not_run` on moqxr and pass on imquic; `D22-9-MUST-295` fails on moqxr and passes on imquic;
 4 fail on moqxr and are `not_run` on imquic; `D22-8-9-MUST-281` fails on both; 64 are
-`not_run` on both.
+`not_run` on both. With the re-run after the evaluator fix, `D22-5-2-MUST-144` moves from
+"pass on moqxr, fail on imquic" to "pass on moqxr, `not_run` on imquic" (18 and 14) in this
+sweep; a run in another phase of the minute can give a genuine fail instead.
 
 ### What the first imquic sweep found in the runner
 
@@ -490,15 +509,20 @@ reported but labeled as such). Totals: (a) 1 row (fail), (b) 34 rows (19 fail, 1
 (c) 3 rows, (d) 63 rows. A review of this triage moved `D22-5-2-MUST-144` from (b) to (a)
 (A4): the draft starts the SUBGROUP_DELIVERY_TIMEOUT timer only once all objects of the
 subgroup have been published (lines 2301-2307), and moq-pub's one-minute group was still being
-published when the window ended. The second outcome in brackets is moqxr's in its final
-sweep. Line numbers are in `docs/draft-ietf-moq-transport-22.txt`; imquic source
-lines are from the scratch copy of `6836173` that the sweep ran (the read-only checkout may
+published when the window ended. That (a) line was a runner defect and is now fixed
+(`92d3c58`). The re-run of its scenario in this sweep gave `not_run`, so this sweep's totals
+become 19 fail and 82 not_run, (a) 0 rows, (b) 34, (c) 3 and (d) 64 (A4 counted with the
+clock-payload limits). The row's outcome depends on the phase of moq-pub's one-minute group:
+in some phases it is a genuine fail, a (b) library finding (A4 line below). The other counts
+and outcomes below are those of the sweep before the fix. The second outcome in brackets is
+moqxr's in its final sweep. Line numbers are in `docs/draft-ietf-moq-transport-22.txt`;
+imquic source lines are from the scratch copy of `6836173` that the sweep ran (the read-only checkout may
 move, so its line numbers can differ). The items are detailed in
 [the imquic punch list](imquic-punch-list.md).
 
 | T | Cat | Draft 22 rows (imquic outcome; moqxr 4b615f4 outcome) | Scenarios | Evidence | Draft 22 lines | Action |
 |---|---|---|---|---|---|---|
-| A4 | a | `D22-5-2-MUST-144` (fail; pass) | `d22-subgroup-completion-withheld-acknowledgments` | SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`), FORWARD 1, Group 0; the runner holds stream credit at 64 bytes. moq-pub's Group 0 is a one-minute clock group: after a date-prefix Object 0 it sent one Object per second (Objects 1 to 8, payloads the clock seconds "35" to "42", a few bytes each) until the 64-byte credit stalled the stream, its log shows Objects 9 to 11 produced after that, and the group was still being published when the 12 s window ended, so the timer of lines 2301-2307, which starts only once all objects of the subgroup have been published, never started and no reset was owed. The evaluator (src/scenarios/draft21_contribution_residual_token.cpp, uncommitted_subgroup_spec) assumes "the fixture's Group 0 is complete and its first Object is larger than 64 bytes" (true for moqxr's fixture) and FAILs any subgroup stream still open at the end of the window: a false FAIL for this peer | 2301-2312 | Open runner item: the evaluator needs an observed subgroup end (FIN, or all Objects published) before it can FAIL; former punch list I-12 withdrawn |
+| A4 | a, fixed; now d or b by phase | `D22-5-2-MUST-144` (fail; after the fix `not_run` or fail by phase; pass) | `d22-subgroup-completion-withheld-acknowledgments` | SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`), FORWARD 1, Group 0; the runner holds stream credit at 64 bytes. moq-pub's Group 0 is a one-minute clock group: after a date-prefix Object 0 it sent one Object per second (Objects 1 to 8, payloads the clock seconds "35" to "42", a few bytes each) until the 64-byte credit stalled the stream, its log shows Objects 9 to 11 produced after that, and the group was still being published when the 12 s window ended, so the timer of lines 2301-2307, which starts only once all objects of the subgroup have been published, never started and no reset was owed. The evaluator (src/scenarios/draft21_contribution_residual_token.cpp, uncommitted_subgroup_spec) assumes "the fixture's Group 0 is complete and its first Object is larger than 64 bytes" (true for moqxr's fixture) and FAILs any subgroup stream still open at the end of the window: a false FAIL for this peer | 2301-2312, 4613-4615 | Fixed in `92d3c58`: on the draft 22 wire a stream left open is a FAIL only after the publisher's PUBLISH_DONE (sent only once it has closed every stream of the subscription) arrived at least the 200 ms timer plus 1 s before the window ended; otherwise no verdict. Re-runs on imquic depend on the phase of the minute: `not_run` when the group is still being published or its FIN fits in the credit, a genuine fail when the group ends after 8 or more Objects (stream stalled, PUBLISH_DONE at 9 to 10 s, no reset; the library parses SUBGROUP_DELIVERY_TIMEOUT but never enforces it). Still pass on moqxr. Former punch list I-12 withdrawn; the library finding is punch list I-23 |
 | I-02 | b (library) | `D22-9-2-MUST-338` (fail; pass), `D22-9-2-MUST-340` (not_run; not_run) | `d22-duplicate-control-goaway`, `d22-publisher-goaway-alternate-uri` | The first control-stream GOAWAY (`10 0003 00 a710`; with a URI `10 0021 1f moqt://...`) closes the session 0x4 INVALID_REQUEST_ID: "imquic_moq_parse_goaway:5031 Invalid Request ID". moq.c:5029 applies the draft 18 Request ID parity check for every version >= 18 although the field is parsed only for version 18 (request_id stays 0) | 4113-4115, 4116-4122 (format, no Request ID), 4129-4130 | Punch list I-02 |
 | I-04 | b (library + example) | `D22-8-7-MUST-272` (not_run; pass) | `d22-subscribe-oversized-full-track-name` (error run) | SUBSCRIBE with a 4096-byte namespace field plus track name: "imquic_moq_namespace_str:285 Insufficient buffer to render namespace(s)", then a segmentation fault (publisher exit 139, "the monitored command dumped core"; signal 11 in the first sweep A); no close, run `error`. The NULL rendering is then passed to strcasecmp in the example (moq-pub.c:188-197); the missing 4,096-byte check is the library's | 3576-3580 | Punch list I-04 (crash) |
 | I-05 | b (example) | `D22-3-1-2-MUST-047` (not_run; not_run) | `d22-cancel-subscribe-with-open-streams` | SUBSCRIBE without FORWARD (`03 0010 01 01 05 media 06 vide_1 00`) gets SUBSCRIBE_OK and no Objects (moq-pub.c:295 `forward_set && forward`), so no data stream is open when the runner cancels; the row cannot be judged | 5618-5621 (absent = 1) | Punch list I-05 |
@@ -528,16 +552,27 @@ move, so its line numbers can differ). The items are detailed in
 WebTransport: every one of the 144 rows touched is `not_run` because no session is ever
 established (I-01, category b); the native triage above says what each would need.
 
-Open runner items (one changes a verdict today, the first):
+Fixed runner item:
 
 - The subgroup-completion evaluator (`d22-subgroup-completion-withheld-acknowledgments`,
   `uncommitted_subgroup_spec` in `src/scenarios/draft21_contribution_residual_token.cpp`)
-  FAILs on a subgroup stream still open at the end of the window. It needs an observed subgroup
-  end (FIN, or all Objects published) first: the timer starts only then (lines 2301-2307).
-  Today this is correct for moqxr (its fixture's Group 0 is complete) but gives a false FAIL
-  for a publisher whose group outlasts the window, as for imquic's clock (A4). The other
-  evaluators in that file (pending alias delete, invalid token, expired token alias) do not
-  depend on a complete Group 0, and no other (b) row of this triage rests on group completion.
+  failed any subgroup stream still open at the end of the window, although the timer starts
+  only once the publisher is aware that all objects of the subgroup have been published (lines
+  2301-2307): a false FAIL for a publisher whose group outlasts the window, as for imquic's
+  clock (A4). Fixed in `92d3c58`, on the draft 22 wire only (draft 21 is frozen and keeps its
+  judgement). The held stream credit hides the stream's FIN, so the evaluator takes the
+  publisher's PUBLISH_DONE as the evidence that it knew: a sender "MUST NOT send PUBLISH_DONE
+  until it has closed all streams it will ever open" for the subscription (lines 4613-4615),
+  and this subscription ends with Group 0. A stream still open at the end of the window is a
+  FAIL only after a PUBLISH_DONE that arrived at least the 200 ms timer plus 1 s before the end;
+  a reset still passes; anything else has no verdict. A publisher that completes the group but
+  sends no PUBLISH_DONE is therefore no longer failed: its awareness is not observable. For
+  imquic the outcome now depends on when in the minute the run starts; the fail it gives in
+  some phases is a genuine library finding (A4 line, imquic punch list I-23). The other
+  evaluators in that file do not depend on a complete Group 0, and no other (b) row of
+  this triage rests on group completion.
+
+Open runner items:
 
 - The `unresolved_error_mapping` event of `d22-request-unknown-token-alias` says
   `result=NOT_RUN` (`src/app/native_run_manager.cpp` lines 1305-1308) next to the FAIL of
@@ -554,9 +589,11 @@ Open runner items (one changes a verdict today, the first):
   D-pad rows need a payload or emission change (the F2 motivation).
 
 Caveats: one peer at one revision on one date. The clock payload and the unpassed emission
-options limit the verdicts (14 rows in D-clock and D-pad). The WebTransport column is empty
-because of I-01, so this sweep says nothing about imquic's WebTransport MoQ behavior. The
-publisher is a demo with one subscriber and two fixed modes; rows in D-sub1, D-pub, D-disc and
+options limit the verdicts (14 rows in D-clock and D-pad, 15 with A4 after the evaluator
+fix), and Group 0 ends whenever the wall-clock minute rolls over, so a row that needs a
+complete group can depend on when in the minute its run starts (as A4 does). The WebTransport
+column is empty because of I-01, so this sweep says nothing about imquic's WebTransport MoQ
+behavior. The publisher is a demo with one subscriber and two fixed modes; rows in D-sub1, D-pub, D-disc and
 D-tok would need a different application on the same library. One intermittent moq-pub
 startup crash (GLib-CRITICAL `g_source_destroy`, then a core dump) was seen once in about 840
 processes of the first sweep and not in the final one.

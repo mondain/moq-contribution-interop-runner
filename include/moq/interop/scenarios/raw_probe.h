@@ -270,6 +270,9 @@ struct RawProbeTranscript {
     // Arrival time of each entry of `events`, on the polling clock. A transcript that lacks
     // times (hand-built in tests) cannot prove a reaction window and is judged by order alone.
     std::vector<RawProbeClock::time_point> event_times;
+    // The controller's latest poll: once the context has ended, when its window ended (absent in
+    // hand-built transcripts, which are then judged by order alone).
+    std::optional<RawProbeClock::time_point> last_poll_at;
     std::optional<std::uint64_t> unknown_auth_token_alias_compatibility_code{};
     // The moqt:// URI the runner named for the publisher's connection.
     std::optional<std::string> connection_uri{};
