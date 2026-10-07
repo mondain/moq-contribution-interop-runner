@@ -3,6 +3,8 @@
 #include "moq/interop/scenarios/lite06_setup.h"
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <variant>
 
 #include "moq/interop/wire/cursor.h"
@@ -61,6 +63,33 @@ bool is_session_code(std::uint64_t code) {
 
 bool is_stream_code(std::uint64_t code) {
     return std::find(std::begin(kStreamErrorCodes), std::end(kStreamErrorCodes), code) != std::end(kStreamErrorCodes);
+}
+
+LiteProbeDefinition allowance_probe(std::string_view id, std::chrono::milliseconds deadline,
+                                    std::chrono::milliseconds allowance) {
+    if (allowance.count() <= 0 || deadline <= allowance)
+        throw std::invalid_argument("a moq-lite-06 probe needs a deadline beyond its allowance");
+    LiteProbeDefinition definition;
+    definition.id = std::string(id);
+    definition.deadline = deadline;
+    // The probe ends as soon as its allowance step executed.
+    definition.observation_window = std::chrono::milliseconds{0};
+    return definition;
+}
+
+LiteStep allowance_step(std::chrono::milliseconds allowance) {
+    return lite_wait(allowance, std::string(kAllowanceLabel));
+}
+
+const LiteStepRecord* step_labelled(const LiteTranscript& transcript, std::string_view label) {
+    for (const auto& step : transcript.steps)
+        if (step.label == label) return &step;
+    return nullptr;
+}
+
+bool allowance_elapsed(const LiteTranscript& transcript) {
+    const auto* allowance = step_labelled(transcript, kAllowanceLabel);
+    return allowance && allowance->executed();
 }
 
 const LiteStepRecord* proved_stimulus(const LiteTranscript& transcript, std::string_view label) {

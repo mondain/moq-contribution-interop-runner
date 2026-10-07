@@ -22,23 +22,10 @@ std::vector<std::byte> text(std::string_view value) {
     return out;
 }
 
-void check(std::chrono::milliseconds deadline, std::chrono::milliseconds allowance) {
-    if (allowance.count() <= 0 || deadline <= allowance)
-        throw std::invalid_argument("a moq-lite-06 setup probe needs a deadline beyond its allowance");
-}
-
-LiteStep allowance_step(std::chrono::milliseconds allowance) {
-    return lite_wait(allowance, std::string(kL06AllowanceLabel));
-}
+using lite06::allowance_step;
 
 LiteProbeDefinition base(std::string_view id, std::chrono::milliseconds deadline, std::chrono::milliseconds allowance) {
-    check(deadline, allowance);
-    LiteProbeDefinition definition;
-    definition.id = std::string(id);
-    definition.deadline = deadline;
-    // The probe ends as soon as its allowance step executed.
-    definition.observation_window = std::chrono::milliseconds{0};
-    return definition;
+    return lite06::allowance_probe(id, deadline, allowance);
 }
 
 }  // namespace
@@ -113,11 +100,7 @@ LiteProbeDefinition l06_setup_server_role_probe(std::chrono::milliseconds deadli
 
 namespace {
 
-const LiteStepRecord* step_labelled(const LiteTranscript& transcript, std::string_view label) {
-    for (const auto& step : transcript.steps)
-        if (step.label == label) return &step;
-    return nullptr;
-}
+using lite06::step_labelled;
 
 // The common gate of rows 014 and 111: the l06-setup-stream transcript, judgeable, and the runner's ordinary Setup
 // stream delivered. judgeable() rather than judgeable_with_stimulus(): a peer close before the allowance step ran

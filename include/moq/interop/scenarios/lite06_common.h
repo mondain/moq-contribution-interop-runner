@@ -8,6 +8,7 @@
 // lite06::peer_streams() below, the peer's stream terminations (reset_code/stop_sending_code, which are the
 // peer's direction by definition) and the peer's StreamDataEvents (transport events carry only received bytes).
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -52,6 +53,18 @@ bool is_stream_code(std::uint64_t code);
 inline constexpr std::string_view kRunnerSetupLabel = "runner-setup";
 // The label of a probe's allowance step (a Wait that executes only once the allowance elapsed).
 inline constexpr std::string_view kAllowanceLabel = "allowance";
+
+// The probe skeleton every lite06 scenario shares: id, deadline and a zero observation window (the probe ends as
+// soon as its trailing allowance step executed). Throws std::invalid_argument when `allowance` is not positive or
+// `deadline` does not exceed it (the allowance must always end the probe, never the deadline).
+LiteProbeDefinition allowance_probe(std::string_view id, std::chrono::milliseconds deadline,
+                                    std::chrono::milliseconds allowance);
+// The trailing allowance step: an UNGATED Wait of `allowance`, labelled kAllowanceLabel.
+LiteStep allowance_step(std::chrono::milliseconds allowance);
+// The first step labelled `label`; nullptr when absent.
+const LiteStepRecord* step_labelled(const LiteTranscript& transcript, std::string_view label);
+// True when the allowance step executed (the whole allowance elapsed with the session open).
+bool allowance_elapsed(const LiteTranscript& transcript);
 
 // The step labelled `label` ("runner-setup" names the runner's Setup stream) when it executed and the transport
 // accepted all its bytes (and its FIN when it had one): the stimulus reached the peer. nullptr otherwise.

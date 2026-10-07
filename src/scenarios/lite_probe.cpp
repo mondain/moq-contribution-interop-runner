@@ -185,6 +185,8 @@ LiteProbeController::LiteProbeController(LiteProbeDefinition definition, transpo
     transcript_.scenario_id = definition_.id;
     transcript_.session_url_has_path = definition_.session_url_has_path;
     transcript_.binding = definition_.binding;
+    transcript_.broadcast_path = definition_.broadcast_path;
+    transcript_.track_name = definition_.track_name;
     LiteStep setup;
     setup.kind = LiteStep::Kind::SendUni;
     setup.bytes = definition_.runner_setup;
