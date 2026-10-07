@@ -10,6 +10,7 @@
 #include <array>
 #include <filesystem>
 #include <set>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -197,6 +198,28 @@ TEST(CompletenessTest, UnknownEvidenceKindCannotClaimCoverage) {
         [](const auto& finding) {
             return finding.code == "missing_evidence_schema";
         }));
+}
+
+// The three moq-lite-06 session evidence kinds (src/session/lite_session.h) are registered; a near miss is not.
+TEST(CompletenessTest, LiteSessionEvidenceKindsAreRegistered) {
+    RequirementCatalog catalog{18, "source", true, {row("required", Strength::Must)}};
+    for (const std::string kind : {"lite_stream_opened", "lite_message", "lite_decode_error"}) {
+        auto lite = binding("required");
+        lite.evidence_kinds = {kind};
+        const std::vector bindings{lite};
+        const auto report = audit_completeness(catalog, bindings, kSyntheticScenarios);
+        EXPECT_TRUE(report.complete()) << kind;
+        EXPECT_EQ(report.required_covered, 1u) << kind;
+    }
+    for (const std::string kind : {"lite_messages", "lite_stream", "lite_decode_issue"}) {
+        auto unknown = binding("required");
+        unknown.evidence_kinds = {kind};
+        const std::vector bindings{unknown};
+        const auto report = audit_completeness(catalog, bindings, kSyntheticScenarios);
+        EXPECT_FALSE(report.complete()) << kind;
+        EXPECT_TRUE(std::any_of(report.findings.begin(), report.findings.end(),
+            [](const auto& finding) { return finding.code == "missing_evidence_schema"; })) << kind;
+    }
 }
 
 // ---- audit_completeness_staged --------------------------------------------------------------

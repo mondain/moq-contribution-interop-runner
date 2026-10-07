@@ -204,6 +204,8 @@ add_library(moq-interop-session
     src/session/draft21_control_state.cpp
     src/session/draft21_publish_open.cpp
     src/session/wire_draft.cpp
+    src/session/lite_stream_reader.cpp
+    src/session/lite_session.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -1393,6 +1395,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-session GTest::gtest_main)
     add_test(NAME draft21-publish-open
              COMMAND moq-interop-draft21-publish-open-tests)
+
+    add_executable(moq-interop-moqlite-session-tests
+                   tests/protocol/lite_session_test.cpp)
+    target_link_libraries(moq-interop-moqlite-session-tests PRIVATE
+                          moq-interop-session GTest::gtest_main)
+    add_test(NAME moqlite-session
+             COMMAND moq-interop-moqlite-session-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
