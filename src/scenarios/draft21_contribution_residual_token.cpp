@@ -8,7 +8,10 @@
 #include "draft21_contribution_support.h"
 #include "draft21_contribution_residual_internal.h"
 
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/token.h"
+
+#include <chrono>
 
 namespace moq::interop::scenarios::d21c {
 namespace {
@@ -160,9 +163,40 @@ Spec pending_alias_delete_spec() {
 // withholding acknowledgements would leave a fully received stream, where a later
 // RESET_STREAM is not delivered to the application.) The fixture's Group 0 is complete
 // and its first Object is larger than 64 bytes.
+//
+// Wire draft 22 (Section 5.2 lines 2301-2312, D22-5-2-MUST-144; draft 21 is frozen and keeps
+// the judgement above): the timer starts only "once it becomes aware that all of the objects
+// on the subgroup have been published", so a publisher whose Group outlasts the window (a live
+// source) owes no reset. The held credit hides the stream's FIN, but PUBLISH_DONE shows the
+// awareness: "A sender MUST NOT send PUBLISH_DONE until it has closed all streams it will ever
+// open ... for a subscription" (Section 9.9 lines 4613-4615), and this subscription ends with
+// Group 0. A stream still open at the end of the window is a FAIL only after PUBLISH_DONE that
+// arrived long enough before the end for the timer to run out and the reset to arrive; without
+// it there is no verdict.
 constexpr std::uint64_t kSubgroupDeliveryTimeout = 0x06;
 constexpr std::uint64_t kSubgroupTimeoutMs = 200;
 constexpr std::uint64_t kHeldStreamCredit = 64;
+// Time allowed, after the timer, for the reset to reach the runner.
+constexpr std::chrono::milliseconds kResetAllowance{1000};
+
+// The event that completed the publisher's PUBLISH_DONE on the request stream of write
+// `index`, if it sent one.
+std::optional<std::size_t> publish_done_event(const View& view, std::size_t index) {
+    const auto* record = view.write_stream(index);
+    if (!record) return std::nullopt;
+    for (const auto& frame : view.frames(*record))
+        if (frame.type == kPublishDone) return frame.event;
+    return std::nullopt;
+}
+
+// Draft 22: whether the timer of a Subgroup still open at the end of the window is known to
+// have started, and to have expired with time left for the reset to arrive.
+bool timer_known_expired(const View& view) {
+    const auto done = publish_done_event(view, 0);
+    if (!done) return false;
+    const auto left = view.window_after(*done);
+    return !left || *left >= std::chrono::milliseconds(kSubgroupTimeoutMs) + kResetAllowance;
+}
 
 // The whole of Group 0: start (0,0), End Group delta 0.
 Param whole_group_filter() {
@@ -193,6 +227,7 @@ Spec uncommitted_subgroup_spec() {
                 unfinished = true;
             }
             if (!view.window_ended()) return {false, std::nullopt};
+            if (unfinished && current_wire_draft() == 22 && !timer_known_expired(view)) return {true, std::nullopt};
             // A stream still open at the end of the window, long after the timer, was never reset.
             return {true, unfinished ? std::optional<bool>{false} : std::nullopt};
         },

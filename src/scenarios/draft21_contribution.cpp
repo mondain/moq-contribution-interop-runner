@@ -136,10 +136,18 @@ std::optional<bool> evaluate_draft21_contribution_probe(
     // the deadline passed or the peer closed. Everything else must complete.
     RawProbeTranscript prefix = transcript;
     bool window_ended = false;
+    std::optional<RawProbeClock::time_point> window_end;
     if (spec->window && !transcript.harness_failed && transcript.stimulus_delivered) {
         const auto end = std::find_if(transcript.events.begin(), transcript.events.end(), terminal_event);
         const bool closed = end != transcript.events.end();
         window_ended = transcript.timed_out || closed;
+        // The window ends at the close, or at the last poll of a context that timed out.
+        if (closed) {
+            const auto index = static_cast<std::size_t>(end - transcript.events.begin());
+            if (index < transcript.event_times.size()) window_end = transcript.event_times[index];
+        } else if (window_ended) {
+            window_end = transcript.last_poll_at;
+        }
         if (window_ended) {
             prefix.events.assign(transcript.events.begin(), end);
             prefix.complete = true;
@@ -150,6 +158,7 @@ std::optional<bool> evaluate_draft21_contribution_probe(
     View view(prefix);
     if (!view.valid()) return std::nullopt;
     view.set_window_ended(window_ended);
+    if (transcript.event_times.size() >= transcript.events.size()) view.set_times(transcript.event_times, window_end);
     for (const auto& candidate : specs) {
         if (candidate.scenario != probe.definition.id) continue;
         for (const auto& row : candidate.rows) {

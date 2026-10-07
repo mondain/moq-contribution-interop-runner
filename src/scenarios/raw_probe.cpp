@@ -483,6 +483,7 @@ const RawProbeTranscript& RawProbeController::poll(RawProbeClock::time_point now
     if (transcript_.complete || transcript_.harness_failed || transcript_.timed_out ||
         transcript_.event_limit_reached) return transcript_;
     if (!started_at_) started_at_ = now;
+    transcript_.last_poll_at = now;
     const auto send = [&] {
         if (!transcript_.transport_established || transcript_.harness_failed ||
             !flush(transcript_.setup)) return;
