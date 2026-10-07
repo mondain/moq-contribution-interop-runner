@@ -126,6 +126,7 @@ add_library(moq-interop-wire
     src/wire/moqlite06/setup.cpp
     src/wire/moqlite06/announce.cpp
     src/wire/moqlite06/subscribe.cpp
+    src/wire/moqlite06/group.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -1298,6 +1299,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME moqlite06-subscribe
              COMMAND moq-interop-moqlite06-subscribe-tests)
+
+    add_executable(moq-interop-moqlite06-group-tests
+                   tests/golden/moqlite06_group_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-group-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-group
+             COMMAND moq-interop-moqlite06-group-tests)
 
     add_executable(moq-interop-draft22-shared-tests
                    tests/golden/draft22_shared_test.cpp)
