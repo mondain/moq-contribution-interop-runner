@@ -50,13 +50,12 @@ TEST(WebTransportListener, RejectsInvalidProtocolAndMissingOriginPolicy) {
     EXPECT_EQ(no_origin.error, NativeQuicListenerError::InvalidConfiguration);
 }
 
-// moq-lite-06 is a known identifier, but no session handler opts in to it in this sub-project.
-TEST(WebTransportListener, RefusesMoqLiteWithoutASessionHandler) {
+TEST(WebTransportListener, AcceptsMoqLiteProtocol) {
     auto settings = config();
     settings.application_protocol = "moq-lite-06";
     const auto result = WebTransportListener::create(std::move(settings));
-    EXPECT_EQ(result.listener, nullptr);
-    EXPECT_EQ(result.error, NativeQuicListenerError::InvalidConfiguration);
+    EXPECT_NE(result.listener, nullptr);
+    EXPECT_EQ(result.error, std::nullopt);
 }
 
 TEST(WebTransportListener, AcceptsDraft22ProtocolAndRejectsMoqt23) {
@@ -412,6 +411,23 @@ TEST(WebTransportListener, AdmitsExactDraft21ConnectOverHttp3) {
 TEST(WebTransportListener, AdmitsExactDraft18ConnectOverHttp3) {
     exercise_connect("webtransport-h3", "\"moqt-18\"",
                      "https://publisher.test", true, "moqt-18");
+}
+
+TEST(WebTransportListener, AdmitsMoqLiteConnectOverHttp3) {
+    exercise_connect("webtransport-h3", "\"moq-lite-06\"",
+                     "https://publisher.test", true, "moq-lite-06");
+}
+
+TEST(WebTransportListener, MixedOffersResolveToTheConfiguredProtocol) {
+    exercise_connect("webtransport-h3", "\"moqt-22\", \"moq-lite-06\"",
+                     "https://publisher.test", true, "moq-lite-06");
+    exercise_connect("webtransport-h3", "\"moq-lite-06\", \"moqt-22\"",
+                     "https://publisher.test", true, "moqt-22");
+}
+
+TEST(WebTransportListener, MoqLiteListenerRefusesAMoqTransportOnlyOffer) {
+    exercise_connect("webtransport-h3", "\"moqt-22\"",
+                     "https://publisher.test", false, "moq-lite-06");
 }
 
 TEST(WebTransportListener, RejectsLegacyTokenBeforeMoqt) {

@@ -80,7 +80,8 @@ int PicoquicConnectionState::on_event(picoquic_cnx_t* connection,
             config_.expected_alpn.size()};
         const auto* remote = picoquic_get_transport_parameters(connection, 0);
         if (negotiated == nullptr || std::string_view{negotiated} != expected ||
-            remote == nullptr || remote->max_datagram_frame_size == 0) {
+            remote == nullptr ||
+            (config_.require_datagram && remote->max_datagram_frame_size == 0)) {
             static constexpr std::string_view reason =
                 "QUIC DATAGRAM not negotiated";
             const auto result = picoquic_close_ex(

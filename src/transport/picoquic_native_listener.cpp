@@ -31,8 +31,7 @@ namespace {
 bool valid_alpn(std::span<const std::byte> offered) {
     const std::string_view value{reinterpret_cast<const char*>(offered.data()),
                                  offered.size()};
-    // moq-lite-06 is known but has no native session handler yet, so it is never negotiated.
-    return app::known_alpn(value) && value != app::alpn(app::DraftVersion::MoqLite06);
+    return app::known_alpn(value);
 }
 
 bool regular_file(const std::filesystem::path& path) {

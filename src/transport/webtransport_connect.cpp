@@ -160,8 +160,12 @@ ConnectDecision validate_connect(const H3Request& request,
     const std::string_view required_protocol = required_protocol_for(profile);
     if (endpoint.moqt_protocol != required_protocol)
         return reject(500, "run endpoint draft mismatch");
+    // moq-lite runs on native WebTransport streams (draft section 4.2); datagrams are
+    // optional there, so the lite profile needs only SETTINGS_WT_ENABLED.
+    const bool needs_datagrams = profile != WebTransportProfile::MoqLite06;
     if (!caps.settings_received || caps.wt_enabled_value != 1 ||
-        !caps.h3_datagram || !caps.quic_datagram || !caps.reset_stream_at)
+        (needs_datagrams &&
+         (!caps.h3_datagram || !caps.quic_datagram || !caps.reset_stream_at)))
         return reject(400, "required WebTransport capability missing");
     if (request.method != "CONNECT" || request.protocol != "webtransport-h3" ||
         request.scheme != "https")
