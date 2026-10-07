@@ -12,7 +12,10 @@
 #include <variant>
 #include <vector>
 
+#include "moq/interop/wire/moqlite06/announce.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/setup.h"
+#include "moq/interop/wire/moqlite06/subscribe.h"
 #include "moq/interop/wire/moqlite06/varint.h"
 
 namespace moq::interop::wire::moqlite06 {
@@ -425,6 +428,44 @@ TEST(Moqlite06GroupFrame, RandomBytesNeverCrash) {
         const auto frame_result = decode_frame(frame);
         EXPECT_EQ(std::holds_alternative<Frame>(frame_result), frame.remaining() < before);
     }
+}
+
+// ---- cursors whose absolute offset is near SIZE_MAX ----
+
+// read_varint can pass through OffsetOverflow; every decoder must return it (never throw) and leave the cursor.
+template <class Decode>
+void expect_overflow_is_an_error(Decode decode) {
+    const Bytes data = bytes({0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+    {
+        Cursor cursor(data, std::numeric_limits<std::size_t>::max());
+        const auto result = decode(cursor);
+        const auto* error = std::get_if<DecodeError>(&result);
+        ASSERT_NE(error, nullptr);
+        EXPECT_EQ(error->code, DecodeErrorCode::OffsetOverflow);
+        EXPECT_EQ(cursor.remaining(), data.size());
+    }
+    {
+        Cursor cursor(data, std::numeric_limits<std::size_t>::max() - 1);
+        const auto result = decode(cursor);
+        if (!std::holds_alternative<DecodeError>(result) && !std::holds_alternative<NeedMore>(result)) return;
+        EXPECT_EQ(cursor.remaining(), data.size());
+    }
+}
+
+TEST(Moqlite06Overflow, EveryDecoderReturnsAnErrorNearSizeMax) {
+    expect_overflow_is_an_error([](Cursor& c) { return decode_setup(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_announce_request(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_announce_ok(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_announce_message(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_subscribe(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_subscribe_update(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_subscribe_response(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_group_header(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return decode_frame(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return read_stream_type(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return read_varint(c); });
+    expect_overflow_is_an_error([](Cursor& c) { return read_string(c, 16); });
+    expect_overflow_is_an_error([](Cursor& c) { return read_framed_body(c); });
 }
 
 }  // namespace

@@ -13,7 +13,8 @@ namespace moq::interop::wire::moqlite06 {
 // byte select a 1/2/4/8 byte big-endian form carrying 6/14/30/62 value bits.
 inline constexpr std::uint64_t kMaxVarint = (std::uint64_t{1} << 62) - 1;
 
-// NeedMore on short input; never returns a DecodeError. Non-minimal forms are accepted (RFC 9000 allows
+// NeedMore on short input. A DecodeError (OffsetOverflow) is possible only when the Cursor's absolute offset is
+// near SIZE_MAX; callers must check for it before taking the value. Non-minimal forms are accepted (RFC 9000 allows
 // them) and the cursor advances by the wire width. The cursor moves only on success.
 DecodeResult<std::uint64_t> read_varint(Cursor& input);
 

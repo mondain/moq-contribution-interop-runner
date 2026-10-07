@@ -1,7 +1,6 @@
 #include "moq/interop/wire/moqlite06/varint.h"
 
 #include <array>
-#include <limits>
 #include <span>
 #include <variant>
 

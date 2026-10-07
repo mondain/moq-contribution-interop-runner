@@ -1,7 +1,6 @@
 #include "moq/interop/wire/moqlite06/announce.h"
 
 #include <span>
-#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -103,6 +102,7 @@ DecodeResult<AnnounceMessage> decode_announce_message(Cursor& input, const Decod
     Cursor working = input;
     const auto type_result = read_varint(working);
     if (const auto* need = std::get_if<NeedMore>(&type_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&type_result)) return *error;
     const auto type = std::get<std::uint64_t>(type_result);
     if (type > kAnnounceTypeUpdate) {
         return DecodeError{DecodeErrorCode::InvalidValue, input.offset(), "unknown announce message type"};

@@ -139,8 +139,6 @@ TEST(Moqlite06Announce, OkViolations) {
     EXPECT_EQ(error_code(decode_announce_ok(c)), DecodeErrorCode::ProtocolViolation);
 }
 
-// ANNOUNCE_START: Type 00; body = suffix "b" (01 62) + Hop Count 02 + hops 07 09 + warm 00 + cold 01
-// = 2 + 1 + 2 + 1 + 1 = 7 bytes, so Message Length 07.
 // A failed decode leaves the input cursor exactly where it was, for every error class.
 TEST(Moqlite06Announce, ErrorsLeaveTheCursorUnmoved) {
     const std::vector<Bytes> request_cases = {

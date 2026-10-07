@@ -101,6 +101,7 @@ DecodeResult<SubscribeResponse> decode_subscribe_response(Cursor& input, const D
     Cursor working = input;
     const auto type_result = read_varint(working);
     if (const auto* need = std::get_if<NeedMore>(&type_result)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&type_result)) return *error;
     const auto type = std::get<std::uint64_t>(type_result);
     if (type > kSubscribeTypeDrop) {
         return DecodeError{DecodeErrorCode::InvalidValue, input.offset(), "unknown subscribe response type"};
