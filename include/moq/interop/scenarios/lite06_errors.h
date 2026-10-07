@@ -92,7 +92,9 @@ LiteProbeDefinition l06_errors_unknown_stream_type_probe(std::chrono::millisecon
 // `answer_allowance`); a STOP_SENDING with kL06UnknownErrorCode on an open Group stream of A (gated on one existing,
 // at most `answer_allowance`; the row 098 note's non-fatal check, credited to no row); RESET_STREAM and STOP_SENDING
 // of A with kL06UnknownErrorCode; a later SUBSCRIBE C (id 2) for the fixture; the `allowance`.
-// Needs deadline > 2 * answer_allowance + allowance.
+// Needs deadline > 2 * answer_allowance + allowance. The Group stream STOP_SENDING targets only a stream still open
+// (no FIN, no reset); should a live transport still refuse it with InvalidState, the engine sets harness_failed and
+// every evaluator is NotRun: Task 9 maps that to NotRun / a stored harness error, never a verdict.
 LiteProbeDefinition l06_errors_unknown_reset_code_probe(
     std::chrono::milliseconds deadline, std::string_view broadcast_path, std::string_view track_name,
     std::chrono::milliseconds allowance = kLiteResponseAllowance,
@@ -108,7 +110,9 @@ LiteProbeDefinition l06_errors_reserved_reset_code_probe(
 // l06-errors-code-space (rows 027, 107): the stream half first, a SUBSCRIBE for kL06UnservedBroadcast (a broadcast
 // the publisher does not serve) and a Wait gated on its refusal (the publisher resets, stops or ends that stream; at
 // most `answer_allowance`); then the session half, the l06_message_length_extra_bytes ANNOUNCE_REQUEST; then the
-// close `allowance`. The stream half comes first so the session close cannot discard its code.
+// close `allowance`. The stream half comes first so the session close cannot discard its code. When the `refused`
+// gate expired (no refusal within `answer_allowance`) a later close might still answer the SUBSCRIBE; the step
+// record's gate_expired says so (Task 8: record it in the evidence of row 107).
 // Needs deadline > answer_allowance + allowance.
 LiteProbeDefinition l06_errors_code_space_probe(std::chrono::milliseconds deadline,
                                                 std::chrono::milliseconds allowance = kLiteCloseAllowance,
@@ -117,7 +121,10 @@ LiteProbeDefinition l06_errors_code_space_probe(std::chrono::milliseconds deadli
 // l06-setup-client-path (rows 120, 124, 125): the default runner Setup stream and the `allowance`, observing the
 // publisher's SETUP. `url_path` (path-abempty) and `url_query` (without '?') are what the adapter gave the publisher
 // in its session URL; recorded in the definition (session_url_path / session_url_query; session_url_has_path set
-// when the path is non-empty). Task 9 sets the binding. Needs deadline > allowance.
+// when the path is non-empty). Needs deadline > allowance. Task 9 must set session_url_has_path, session_url_path,
+// session_url_query and binding CONSISTENTLY (the flag is redundant with a non-empty path and is not derived: a
+// definition with the flag unset is NotRun whatever the strings say). Row 120 is an exact byte match of
+// path + "?" + query: Task 9 passes unreserved characters only.
 LiteProbeDefinition l06_setup_client_path_probe(std::chrono::milliseconds deadline, std::string_view url_path,
                                                 std::string_view url_query,
                                                 std::chrono::milliseconds allowance = kLiteSetupAllowance);

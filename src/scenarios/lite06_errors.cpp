@@ -317,11 +317,15 @@ std::optional<CancelView> cancel_view(const LiteTranscript& transcript, std::str
     return view;
 }
 
-// A and B were both still live when the code arrived (neither ended nor refused before it).
+// A and B were both still live when the code arrived (neither ended nor refused before it). The engine handles
+// every event of a poll before it runs that poll's steps and stamps both with the same time, so a peer event AT
+// code_ns arrived before the code was sent: `<=`, never `<` (otherwise a FIN of A in that poll would be credited as
+// the cancel's end, and a reset of B in that poll counted as a refusal after the code). Every later use of A's end
+// and B's refusal relies on this precondition, so whatever passes it happened strictly after the code.
 bool live_at_code(const LiteTranscript& transcript, const CancelView& view) {
     for (const auto* record : {view.cancelled, view.kept}) {
-        if (const auto at = peer_end_ns(transcript, record->stream_id); at && *at < view.code_ns) return false;
-        if (const auto at = peer_refusal_ns(transcript, record->stream_id); at && *at < view.code_ns) return false;
+        if (const auto at = peer_end_ns(transcript, record->stream_id); at && *at <= view.code_ns) return false;
+        if (const auto at = peer_refusal_ns(transcript, record->stream_id); at && *at <= view.code_ns) return false;
     }
     return true;
 }
@@ -369,6 +373,9 @@ bool unauthorized_close(const LiteTranscript& transcript) {
 std::optional<std::vector<std::vector<std::byte>>> client_paths(const LiteTranscript& transcript) {
     if (transcript.scenario_id != kL06SetupClientPath || !judgeable_with_stimulus(transcript)) return std::nullopt;
     if (!runner_setup_proved(transcript)) return std::nullopt;
+    // A non-empty query is required for all three rows (the task brief: the scenario only has meaning with a URL
+    // carrying a path AND a query). For 124 and 125 this is stricter than the rationales, which put no condition on
+    // the URL: it can only lose verdicts (NotRun), never turn one.
     if (!transcript.session_url_has_path || transcript.session_url_path.empty() ||
         transcript.session_url_query.empty())
         return std::nullopt;
@@ -384,13 +391,16 @@ std::optional<std::vector<std::vector<std::byte>>> client_paths(const LiteTransc
 }  // namespace
 
 std::optional<bool> evaluate_l06_errors_unknown_stream_type_reset(const LiteTranscript& transcript) {
-    // The default gate: a session close (peer_closed_early) makes the reset unobservable, so this row is NotRun
-    // and the close is judged by row 109 only. stimulus_delivered includes the executed allowance step.
-    if (transcript.scenario_id != kL06ErrorsUnknownStreamType || !judgeable_with_stimulus(transcript))
+    // judgeable() plus this row's own proofs rather than judgeable_with_stimulus(): a refused follow-up ANNOUNCE
+    // write (row 109's stimulus) must not lose this verdict. Any session close makes the reset unobservable, so this
+    // row is NotRun and the close is judged by row 109 only; the observation is over only once the allowance step
+    // executed with the session open.
+    if (transcript.scenario_id != kL06ErrorsUnknownStreamType || !judgeable(transcript) || transcript.peer_close ||
+        transcript.runner_closed)
         return std::nullopt;
     if (!runner_setup_proved(transcript)) return std::nullopt;
     const auto* stream = stimulus_stream(transcript, kL06UnknownStreamLabel, l06_unknown_stream_type_bytes());
-    if (!stream) return std::nullopt;
+    if (!stream || !lite06::allowance_elapsed(transcript)) return std::nullopt;
     // A RESET_STREAM of the publisher's send half or a STOP_SENDING of the runner's: the stream is reset. A FIN
     // without either, or nothing within the whole allowance, is a Fail (time-bounded).
     return stream->reset_seen || stream->stop_sending_seen;
@@ -455,6 +465,10 @@ std::optional<bool> evaluate_l06_errors_reserved_code_tolerated(const LiteTransc
 }
 
 std::optional<bool> evaluate_l06_errors_message_length_close(const LiteTranscript& transcript) {
+    // The close judged is the first one after the Message Length request was sent. When the `refused` step's gate
+    // expired (step record gate_expired: the unserved SUBSCRIBE got no refusal within its allowance), a close may
+    // still be the publisher's late reaction to that SUBSCRIBE; the step record is in the transcript (Task 8 records
+    // it in the evidence) so a reader can discount such a close.
     // The close probe verdict (PROTOCOL_VIOLATION Pass; another close, a stream reaction alone or a session still
     // open when the allowance elapsed Fail), on the Message Length stimulus proven with its exact bytes.
     if (!runner_setup_proved(transcript)) return std::nullopt;
@@ -475,6 +489,8 @@ std::optional<bool> evaluate_l06_setup_path_query_appended(const LiteTranscript&
     if (transcript.binding != LiteBinding::NativeQuic) return std::nullopt;
     const auto paths = client_paths(transcript);
     if (!paths || paths->empty()) return std::nullopt;
+    // An exact byte match: Task 9 passes the publisher a path and a query of unreserved characters only, so no
+    // percent-encoding or normalization can make a conforming value differ.
     const auto expected = l06_expected_client_path(transcript.session_url_path, transcript.session_url_query);
     for (const auto& value : *paths) {
         if (!std::equal(value.begin(), value.end(), expected.begin(), expected.end(),

@@ -152,7 +152,8 @@ struct LiteProbeDefinition {
     bool session_url_has_path{false};
     // That URL's path-abempty component and its query component (without the '?'), as given to the publisher; the
     // client-path evaluators (rows 120, 124, 125) rebuild the expected SETUP Path value from them. Empty when the run
-    // gave the publisher no such URL. Copied to the transcript.
+    // gave the publisher no such URL. Copied to the transcript. Task 9 sets session_url_has_path, these two and
+    // binding consistently: the flag is redundant with a non-empty path but is not derived from it.
     std::string session_url_path;
     std::string session_url_query;
     // The track fixture (plan decision (d)): RunConfig::track namespace fields joined with '/' are the publisher's

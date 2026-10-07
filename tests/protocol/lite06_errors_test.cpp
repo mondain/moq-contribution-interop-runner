@@ -592,10 +592,20 @@ TEST(Lite06ErrorsUnknownStreamType, RefusingTheFollowUpRequestFailsOnlyNotFatal)
 }
 
 TEST(Lite06ErrorsUnknownStreamType, AFollowUpWriteRefusedByThePeer) {
-    // Runner bidi ids: unknown stream 1, announce 5. The publisher stopped the announce before the write.
+    // Runner bidi ids: unknown stream 1, announce 5. The publisher stopped the announce before the write: 109
+    // fails, and 108 is still judged on its own stimulus (the unknown stream was reset).
     const auto t = run(unknown_stream_probe(), make_config({}),
                        [](ScriptedLitePeer& peer) { peer.forced_status[5] = transport::TransportStatus::PeerStopped; });
-    EXPECT_EQ(judge_unknown(t), Pair(kNotRun, kFail));
+    EXPECT_FALSE(t.stimulus_delivered);
+    EXPECT_EQ(judge_unknown(t), Pair(kPass, kFail));
+    // The same with an ignored unknown stream: 108 still fails on its own evidence.
+    auto ignoring = make_config({});
+    ignoring.hooks.on_request = nullptr;
+    ignoring.defect = LiteDefect::IgnoreUnknownStreams;
+    const auto ignored = run(unknown_stream_probe(), ignoring, [](ScriptedLitePeer& peer) {
+        peer.forced_status[5] = transport::TransportStatus::PeerStopped;
+    });
+    EXPECT_EQ(evaluate_l06_errors_unknown_stream_type_reset(ignored), kFail);
 }
 
 TEST(Lite06ErrorsUnknownStreamType, AnUnansweredFollowUpIsNotRunForNotFatal) {
@@ -746,6 +756,103 @@ TEST(Lite06ErrorsUnknownResetCode, WithoutAGroupStreamTheCancelIsStillJudged) {
     EXPECT_TRUE(step(t, "stop-group").gate_expired);
     EXPECT_FALSE(t.timed_out);
     EXPECT_EQ(judge_code(t), Pair(kPass, kPass));
+}
+
+// Ties: the engine handles a poll's events before that poll's steps, with the same time stamp, so a peer event at the
+// code's own time arrived BEFORE the code was sent.
+
+// Subscription A answered at once, its Group stream opened `group_delay` polls later (the stop-group step runs in
+// that poll); in the poll `group_delay - 1 + fin_offset` A is FINed (fin_offset 1: the same poll as the code) or B
+// reset (reset_b), and the cancel itself is ignored.
+Script tie(std::size_t fin_offset, bool reset_b) {
+    constexpr std::size_t group_delay = 50;
+    Script script;
+    script.on_subscribe = [fin_offset, reset_b](ConformingLitePublisher&, ScriptedLitePeer& peer, State& state,
+                                                transport::StreamId stream, const l06::Subscribe& sub) {
+        if (sub.subscribe_id != scen::kL06CancelledSubscribeId) return false;
+        peer.data(stream, subscribe_response(l06::SubscribeOk{kLatest}));
+        state.at(group_delay, [](auto&, ScriptedLitePeer& p, State& s) {
+            const auto id = p.open_peer_uni();
+            l06::Frame value;
+            value.timestamp_delta = 1000;
+            value.payload = bytes_of("g");
+            p.data(id, join({stream_type(0x0), group_header({0, kLatest, 0}), frame(value)}));
+            s.groups[0] = id;
+        });
+        state.at(group_delay - 1 + fin_offset, [stream, reset_b](auto&, ScriptedLitePeer& p, State& s) {
+            if (reset_b) {
+                p.peer_reset(s.subs.at(scen::kL06KeptSubscribeId), kCancelled);
+            } else {
+                p.fin(stream);
+            }
+        });
+        return true;
+    };
+    script.on_cancel = [](auto&, auto&, auto&, std::uint64_t) {};  // ignores the cancel
+    return script;
+}
+
+TEST(Lite06ErrorsUnknownResetCode, AFinOfAInTheSamePollAsTheCodeIsNotTheCancelsEnd) {
+    // The reviewer's repro: a publisher that ignores the cancel, whose FIN of A arrived in the poll the code was sent
+    // (offset 1) or the poll before (offset 0), cannot pass.
+    for (const std::size_t offset : {0u, 1u}) {
+        const auto t = run(unknown_code_probe(), tie(offset, false));
+        ASSERT_TRUE(step(t, "stop-group").executed()) << offset;
+        EXPECT_EQ(judge_code(t), Pair(kNotRun, kNotRun)) << offset;
+    }
+}
+
+TEST(Lite06ErrorsUnknownResetCode, AResetOfBInTheSamePollAsTheCodeIsNotARefusalAfterIt) {
+    // Same poll as the code: before it (precondition broken, NotRun); one poll later: a refusal after it (030 Fail).
+    const auto same = run(unknown_code_probe(), tie(1, true));
+    ASSERT_TRUE(step(same, "stop-group").executed());
+    EXPECT_EQ(evaluate_l06_errors_unknown_code_tolerated(same), kNotRun);
+    EXPECT_EQ(evaluate_l06_errors_no_assumed_unauthorized(same), kNotRun);
+    Script after = tie(2, true);
+    after.on_cancel = nullptr;  // the cancel ends A properly
+    EXPECT_EQ(evaluate_l06_errors_unknown_code_tolerated(run(unknown_code_probe(), after)), kFail);
+}
+
+// Hand-edited ties on a conforming transcript (030/032 and 033): A's end, or a reset of B, stamped exactly at the
+// first code step's time.
+void expect_ties(const LiteTranscript& base, Evaluator evaluator, std::string_view first_code_step) {
+    ASSERT_EQ(evaluator(base), kPass);
+    const auto code_ns = *step(base, first_code_step).executed_at_ns;
+    const auto a = *step(base, "subscribe-cancelled").stream_id;
+    const auto b = *step(base, "subscribe-kept").stream_id;
+    auto a_tie = base;
+    bool moved = false;
+    for (std::size_t i = 0; i < a_tie.events.size(); ++i) {
+        const auto* reset = std::get_if<transport::PeerResetEvent>(&a_tie.events[i]);
+        if (reset && reset->stream_id == a) {
+            a_tie.event_times[i] = code_ns;
+            moved = true;
+        }
+    }
+    ASSERT_TRUE(moved);
+    EXPECT_EQ(evaluator(a_tie), kNotRun);
+    for (const auto& [at, expected] : {std::pair{code_ns, kNotRun}, std::pair{code_ns + 1, kFail}}) {
+        auto b_reset = base;
+        b_reset.events.push_back(transport::PeerResetEvent{b, kCancelled});
+        b_reset.event_times.push_back(at);
+        EXPECT_EQ(evaluator(b_reset), expected) << at - code_ns;
+    }
+}
+
+TEST(Lite06ErrorsTies, PeerEventsAtTheCodesTimeCameBeforeIt) {
+    expect_ties(run(unknown_code_probe(), Script{}), evaluate_l06_errors_unknown_code_tolerated, "stop-group");
+    expect_ties(run(reserved_probe(), Script{}), evaluate_l06_errors_reserved_code_tolerated, "cancel-reset");
+    // 032: A's end at the code's time is not the cancel's end.
+    const auto base = run(unknown_code_probe(), Script{});
+    ASSERT_EQ(evaluate_l06_errors_no_assumed_unauthorized(base), kPass);
+    const auto code_ns = *step(base, "stop-group").executed_at_ns;
+    const auto a = *step(base, "subscribe-cancelled").stream_id;
+    auto a_tie = base;
+    for (std::size_t i = 0; i < a_tie.events.size(); ++i) {
+        const auto* reset = std::get_if<transport::PeerResetEvent>(&a_tie.events[i]);
+        if (reset && reset->stream_id == a) a_tie.event_times[i] = code_ns;
+    }
+    EXPECT_EQ(evaluate_l06_errors_no_assumed_unauthorized(a_tie), kNotRun);
 }
 
 // === l06-errors-reserved-reset-code (033) ===========================================================================
