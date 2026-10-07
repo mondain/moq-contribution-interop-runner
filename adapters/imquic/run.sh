@@ -268,6 +268,12 @@ d22_moqxr_paced_overrides=(
 #   request-update-independent-streams             two SUBSCRIBEs, then REQUEST_UPDATEs (session)
 #   publish-namespace-redirect-nonempty-track-name answers the publisher's PUBLISH_NAMESPACE (peer_close)
 #   publisher-namespace-routing-announcement       needs an explicit PUBLISH_NAMESPACE (announcement)
+#   setup-key-value-type-overflow                  SETUP probes whose SUBSCRIBE for media/vide_1 (the
+#   setup-key-value-declared-length-overflow       liveness check of draft21_close / raw_probe_liveness,
+#   setup-register-default-zero-cache              the register probe of draft21_contribution_session)
+#                                                  must be accepted to score the row; with -X moq-pub
+#                                                  refuses it (REQUEST_ERROR 0x19) and the rows stayed
+#                                                  unscored in the first imquic sweep
 #
 # Every other moqxr --forward 1 id stays publish-first: the runner answers or refuses the publisher's
 # PUBLISH (accepting_publishes, rejected_publish, peer_close publish probes, the typed announcement
@@ -285,6 +291,9 @@ d22_announce_overrides=(
     d22-request-update-independent-streams
     d22-publish-namespace-redirect-nonempty-track-name
     d22-publisher-namespace-routing-announcement
+    d22-setup-key-value-type-overflow
+    d22-setup-key-value-declared-length-overflow
+    d22-setup-register-default-zero-cache
 )
 #   d22- id (moqxr --forward 0 -> here -X)          why: the stimulus waits for the publisher's PUBLISH
 #   publish-update-ok-with-track-properties        its first write answers the publisher's PUBLISH

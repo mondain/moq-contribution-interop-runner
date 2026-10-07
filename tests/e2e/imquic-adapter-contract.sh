@@ -103,6 +103,13 @@ run_adapter
 make_request 22 webtransport "" d22-subscribe-single-subgroup
 run_adapter
 [[ "$status" -eq 0 && "$log" != *"<-X>"* ]] || fail "subscribe-single-subgroup must announce and wait: $(args_line)"
+for id in d22-setup-key-value-type-overflow d22-setup-key-value-declared-length-overflow \
+          d22-setup-register-default-zero-cache; do
+    make_request 22 native_quic "" "$id"
+    run_adapter
+    [[ "$status" -eq 0 && "$log" != *"<-X>"* ]] ||
+        fail "$id must announce and wait (its probe SUBSCRIBE needs an accepting publisher): $(args_line)"
+done
 make_request 22 native_quic "" d22-publish-ok-with-track-properties
 run_adapter
 [[ "$status" -eq 0 && "$log" == *"<-X>"* ]] || fail "publish-ok-with-track-properties must publish first: $(args_line)"

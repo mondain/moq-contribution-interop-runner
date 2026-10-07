@@ -147,6 +147,9 @@ announce_overrides=(
     d22-request-update-independent-streams
     d22-publish-namespace-redirect-nonempty-track-name
     d22-publisher-namespace-routing-announcement
+    d22-setup-key-value-type-overflow
+    d22-setup-key-value-declared-length-overflow
+    d22-setup-register-default-zero-cache
 )
 # imquic's reverse override: moqxr runs it --forward 0, imquic must publish first (run.sh).
 publish_overrides=(

@@ -263,6 +263,7 @@ modes differ from moqxr's, these shared scenarios deviate from the derivation:
 | `subscribe-accepted` | no `-X` | `--forward 1` | scores the SUBSCRIBE_OK branch (`subscribe-rejected` keeps `-X`) |
 | `request-update-overrun`, `request-update-independent-streams` | no `-X` | `--forward 1` | REQUEST_UPDATEs on the runner's own subscriptions |
 | `publish-namespace-redirect-nonempty-track-name`, `publisher-namespace-routing-announcement` | no `-X` | `--forward 1` | need the publisher's PUBLISH_NAMESPACE |
+| `setup-key-value-type-overflow`, `setup-key-value-declared-length-overflow`, `setup-register-default-zero-cache` | no `-X` | `--forward 1` | the probe's SUBSCRIBE (liveness or register check) must be accepted; with `-X` moq-pub refuses it (REQUEST_ERROR 0x19) and the row stays unscored |
 | `publish-update-ok-with-track-properties` | `-X` | `--forward 0 --paced` | its first write answers the publisher's PUBLISH |
 | `publish-established-subscriber-sends-publish-state-notify` | `-X` | `--forward 0 --paced` | answers the publisher's PUBLISH, then sends PUBLISH_STATE_NOTIFY on it |
 | `subscribe-tracks-publish-skipped-then-capacity-recovers` | `-X` | `--forward 0` | sends its SUBSCRIBE_TRACKS only after the publisher's PUBLISH |
