@@ -246,5 +246,152 @@ elapsed=$((SECONDS - started))
 [[ "$status" -eq 0 ]] || fail "timed-out publisher exit status $status (expected its own 0)"
 [[ "$log" == *"stub: started"*"stub: SIGTERM"* ]] || fail "publisher was not sent SIGTERM: $log"
 ((elapsed >= 3 && elapsed <= 8)) || fail "publisher ended after ${elapsed}s (expected about 4s)"
+# --preserve-status: a publisher that exits 5 on the deadline's SIGTERM makes the adapter exit 5.
+sed 's/exit 0. TERM/exit 5'"'"' TERM/' "$sleeper" >"$test_dir/exit5 publisher"
+chmod +x "$test_dir/exit5 publisher"
+grep -q "exit 5' TERM" "$test_dir/exit5 publisher" || fail 'could not derive the exit-5 stub'
+run_adapter "$test_dir/exit5 publisher"
+[[ "$status" -eq 5 && "$log" == *"stub: SIGTERM"* ]] || fail "timed-out publisher exit 5 became $status: $log"
+
+# Normal completion: the adapter waits for the publisher and returns its exit status.
+early="$test_dir/early publisher"
+printf '#!/usr/bin/env bash\nprintf "stub: done\\n"\nexit %s\n' 0 >"$early"
+chmod +x "$early"
+make_request 22 native_quic
+run_adapter "$early"
+[[ "$status" -eq 0 && "$log" == "stub: done" ]] || fail "publisher exiting 0 by itself gave $status: $log"
+printf '#!/usr/bin/env bash\nsleep 0.2\nprintf "stub: done\\n"\nexit %s\n' 7 >"$early"
+run_adapter "$early"
+[[ "$status" -eq 7 && "$log" == "stub: done" ]] || fail "publisher exiting 7 by itself gave $status: $log"
+
+# Shutdown by the runner. The runner starts the adapter as a process group leader, sends SIGTERM to
+# the whole group and SIGKILLs the group 100 ms later, recording a SIGKILL as a driver failure
+# (src/app/publisher_driver.cpp, native_run_manager.cpp driver_failed). moq-pub needs up to ~160 ms
+# to finish after SIGTERM, so the adapter itself must exit 0 within the grace while the publisher,
+# which received the group's SIGTERM, finishes on its own (bounded by `timeout -k 2`).
+#
+# group_term.py mirrors the runner: it spawns the adapter in a new session, waits for the stub's
+# "started" line, sends SIGTERM to the group, polls the adapter's exit every millisecond, then waits
+# until no process of the group is left. It prints `adapter_ms status group_ms`.
+cat >"$test_dir/group_term.py" <<'PY'
+import os, signal, subprocess, sys, time
+adapter, log, out, err = sys.argv[1:5]
+limit = float(sys.argv[5])
+def group_alive(pgid):
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f'/proc/{entry}/stat') as f:
+                fields = f.read().rsplit(')', 1)[1].split()
+        except OSError:
+            continue
+        if fields[0] != 'Z' and int(fields[2]) == pgid:
+            return True
+    return False
+with open(out, 'wb') as o, open(err, 'wb') as e:
+    p = subprocess.Popen([adapter], stdin=subprocess.DEVNULL, stdout=o, stderr=e,
+                         start_new_session=True)
+pgid = p.pid
+deadline = time.monotonic() + 10
+while True:
+    try:
+        with open(log) as f:
+            if 'stub: started' in f.read():
+                break
+    except OSError:
+        pass
+    if time.monotonic() > deadline or p.poll() is not None:
+        os.killpg(pgid, signal.SIGKILL)
+        print('-1 not-started -1')
+        sys.exit(0)
+    time.sleep(0.005)
+time.sleep(0.05)
+t0 = time.monotonic()
+os.killpg(pgid, signal.SIGTERM)
+adapter_ms, status = -1, 'running'
+while time.monotonic() - t0 < limit:
+    code = p.poll()
+    if code is not None:
+        adapter_ms, status = int((time.monotonic() - t0) * 1000), code
+        break
+    time.sleep(0.001)
+group_ms = -1
+while time.monotonic() - t0 < limit:
+    if not group_alive(pgid):
+        group_ms = int((time.monotonic() - t0) * 1000)
+        break
+    time.sleep(0.005)
+if group_ms < 0:
+    os.killpg(pgid, signal.SIGKILL)
+if p.poll() is None:
+    p.kill()
+p.wait()
+print(adapter_ms, status, group_ms)
+PY
+
+# group_term BIN LIMIT_S: runs group_term.py on request.json; sets adapter_ms, status, group_ms, log.
+group_term() {
+    rm -f -- "$log_dir/publisher.log"
+    read -r adapter_ms status group_ms < <(IMQUIC_PUB_BIN="$1" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" \
+        python3 "$test_dir/group_term.py" "$adapter" "$log_dir/publisher.log" "$test_dir/out" \
+        "$test_dir/err" "$2") || fail 'group_term.py gave no result'
+    log=
+    [[ -f "$log_dir/publisher.log" ]] && log=$(cat "$log_dir/publisher.log")
+    return 0
+}
+
+# A publisher like moq-pub: SIGTERM starts a 300 ms cleanup, then it exits 0. It counts the SIGTERMs
+# it receives: the group's and the one `timeout` forwards, never a third (moq-pub would exit(1)).
+slow="$test_dir/slow publisher"
+cat >"$slow" <<'STUB'
+#!/usr/bin/env bash
+terms=0
+trap 'terms=$((terms + 1))' TERM
+printf 'stub: started\n'
+sleep 30 &
+wait "$!"
+sleep 0.3
+printf 'stub: cleanup done after %s SIGTERM(s)\n' "$terms"
+exit 0
+STUB
+chmod +x "$slow"
+make_request 22 native_quic "" d22-successful-subscribe-response '["6d65646961"]' 766964655f31 10000
+# The adapter's own exit is usually a few ms after the signal; the 100 ms grace is checked with up to
+# three attempts so that one scheduling stall on a loaded machine cannot fail the test (an adapter
+# that waits for the publisher takes the stub's 300 ms every time). Everything else is checked on
+# every attempt with generous bounds.
+fast=0
+for attempt in 1 2 3; do
+    group_term "$slow" 6
+    [[ "$status" == 0 ]] || fail "adapter status after the group SIGTERM: $status (attempt $attempt, ${adapter_ms} ms)"
+    ((group_ms >= 0 && group_ms <= 1500)) ||
+        fail "the publisher's process group outlived the SIGTERM by ${group_ms} ms (attempt $attempt)"
+    [[ "$log" =~ stub:\ cleanup\ done\ after\ [12]\ SIGTERM ]] ||
+        fail "the publisher did not finish its cleanup after one or two SIGTERMs: $log"
+    ((group_ms >= 300)) || fail "the publisher's cleanup was cut short (${group_ms} ms)"
+    if ((adapter_ms >= 0 && adapter_ms < 100)); then
+        fast=1
+        break
+    fi
+    printf 'imquic adapter contract: attempt %s: adapter exited %s ms after SIGTERM\n' "$attempt" "$adapter_ms" >&2
+done
+((fast)) || fail "the adapter did not exit within the runner's 100 ms grace (last: ${adapter_ms} ms)"
+printf 'group SIGTERM: adapter exited after %s ms, the slow publisher finished after %s ms\n' \
+    "$adapter_ms" "$group_ms"
+
+# A publisher that ignores SIGTERM is killed by `timeout -k 2` about 2 s after the signal; the adapter
+# still exits 0 at once.
+deaf="$test_dir/deaf publisher"
+printf '#!/usr/bin/env bash\ntrap "" TERM\nprintf "stub: started\\n"\nexec sleep 30\n' >"$deaf"
+chmod +x "$deaf"
+group_term "$deaf" 8
+[[ "$status" == 0 && "$adapter_ms" -ge 0 && "$adapter_ms" -lt 1000 ]] ||
+    fail "adapter with a publisher ignoring SIGTERM: status $status after ${adapter_ms} ms"
+((group_ms >= 1500 && group_ms <= 4500)) ||
+    fail "a publisher ignoring SIGTERM ended ${group_ms} ms after it (expected timeout -k 2: about 2000)"
+printf 'group SIGTERM: adapter exited after %s ms, a publisher ignoring SIGTERM was killed after %s ms\n' \
+    "$adapter_ms" "$group_ms"
 
 printf 'imquic adapter contract passed\n'

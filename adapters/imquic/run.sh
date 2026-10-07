@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Driver adapter for imquic's example publisher (examples/moq-pub.c, built as imquic-moq-pub) at MoQ
-# draft 22. It validates the runner's request, translates it into moq-pub options and execs the
-# publisher under `timeout`, with its output in <log_dir>/publisher.log. It describes imquic's command
-# line only; it never decides what the runner expects.
+# draft 22. It validates the runner's request, translates it into moq-pub options and runs the
+# publisher under `timeout`, with its output in <log_dir>/publisher.log, as a small supervisor (see the
+# end of this file). It describes imquic's command line only; it never decides what the runner expects.
 #
 # moq-pub's command line (GLib options, examples/moq-pub-options.c):
 #   -M 22        negotiate MoQT draft 22 only (moqt-22 ALPN / WebTransport protocol)
@@ -123,9 +123,10 @@ fi
 
 # moq-pub has no deadline of its own: `timeout` stops it at the scenario timeout (rounded up to whole
 # seconds) plus 3 seconds, so the runner, not the publisher, ends the context, as with moqxr's paced
-# runs. --foreground keeps `timeout` from signalling the whole process group as well: the runner
-# already does, and a third SIGTERM would make moq-pub exit(1) without cleanup. --preserve-status
-# reports moq-pub's own status (0 after SIGTERM) instead of 124; -k 2 kills it if it hangs.
+# runs. --foreground keeps `timeout` in the runner's process group and keeps it from signalling the
+# whole group as well: the runner already does, and a third SIGTERM would make moq-pub exit(1)
+# without cleanup. --preserve-status reports moq-pub's own status (0 after SIGTERM) instead of 124;
+# -k 2 kills it if it hangs, also after the runner's SIGTERM (timeout arms -k on any signal it relays).
 timeout_seconds=$(((timeout_ms + 999) / 1000))
 ((timeout_seconds > 0)) || fail 'invalid scenario timeout'
 publisher_timeout=$((timeout_seconds + 3))
@@ -381,5 +382,23 @@ case "$impl_id" in
 esac
 args+=(-d 4)
 
-exec timeout --foreground --preserve-status -k 2 -s TERM "$publisher_timeout" \
-    "$publisher_bin" "${args[@]}" >"$log_dir/publisher.log" 2>&1
+# Supervisor. The runner stops the adapter with SIGTERM to its process group and SIGKILLs the group
+# 100 ms later, recording the SIGKILL as a driver failure (run error). moq-pub needs about 40-160 ms
+# after SIGTERM (PUBLISH_DONE, PUBLISH_NAMESPACE_DONE, QUIC close), so this script does not exec the
+# publisher: it starts `timeout` and moq-pub in the background, in the same process group, and
+#   - on SIGTERM, SIGINT or SIGHUP exits 0 at once: the group signal has already reached moq-pub (and
+#     `timeout`, which relays it once, so moq-pub sees two, never a third), which finishes its cleanup
+#     on its own; nothing is forwarded from here;
+#   - otherwise waits and exits with the status `timeout --preserve-status` reports (moq-pub's own,
+#     also when the deadline fired), as the former `exec timeout ...` did.
+# Trade-off: after a stop, moq-pub and `timeout` briefly outlive the adapter without the runner's
+# SIGKILL backstop; they stay bounded by `timeout -k 2` (SIGKILL 2 s after the signal at the latest).
+# The trap is set before the publisher starts; standard input is kept (`<&0`, a background command
+# would otherwise read /dev/null) and the output redirection is the same as before.
+trap 'exit 0' TERM INT HUP
+timeout --foreground --preserve-status -k 2 -s TERM "$publisher_timeout" \
+    "$publisher_bin" "${args[@]}" <&0 >"$log_dir/publisher.log" 2>&1 &
+publisher_pid=$!
+publisher_status=0
+wait "$publisher_pid" || publisher_status=$?
+exit "$publisher_status"

@@ -247,6 +247,18 @@ a missing or out-of-range port, user information, a fragment and an IPv6 zone. m
 reads no fixture (it publishes a clock: one Object per second, one Group per minute) and
 verifies no certificate, so `fixture` and `tls_ca` are not used.
 
+The adapter does not `exec` the publisher; it stays alive as a small supervisor. The runner
+stops a driver with SIGTERM to its process group and SIGKILLs the group 100 ms later, which
+it records as a driver failure (run `error`, `term_signal` 9), and moq-pub needs about
+40-160 ms after SIGTERM to send PUBLISH_DONE and PUBLISH_NAMESPACE_DONE and close. So the
+adapter starts `timeout` and moq-pub in the background (same process group), and on SIGTERM,
+SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub already received the
+group's SIGTERM (plus the one `timeout` relays; never a third, which would make it exit(1))
+and finishes on its own. Without a signal it waits and exits with the publisher's status as
+`--preserve-status` reports it, also when the deadline fired. The trade-off: after a stop,
+moq-pub briefly outlives the adapter without the runner's SIGKILL backstop; it stays bounded
+by `timeout -k 2` (SIGKILL at most 2 s after the signal).
+
 The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
 is refused with DUPLICATE_SUBSCRIPTION) or announce-and-wait (no `-X`: PUBLISH_NAMESPACE,
 then a SUBSCRIBE is accepted and Objects flow if it carries FORWARD=1; once delivery has
@@ -270,8 +282,9 @@ modes differ from moqxr's, these shared scenarios deviate from the derivation:
 
 `tests/e2e/imquic-adapter-cmdlines.sh` pins every command line in
 `tests/golden/imquic-cmdlines-d22.txt` and checks the derivation and these exceptions;
-`tests/e2e/imquic-adapter-contract.sh` checks validation, endpoint translation and the
-`timeout` wrapper.
+`tests/e2e/imquic-adapter-contract.sh` checks validation, endpoint translation, the
+`timeout` wrapper and the supervisor's shutdown (adapter exit within the 100 ms grace, the
+publisher's cleanup and the `-k 2` bound).
 
 A real request file from a run:
 

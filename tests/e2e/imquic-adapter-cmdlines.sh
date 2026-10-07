@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pin the command line adapters/imquic/run.sh execs: `timeout ... IMQUIC_PUB_BIN <moq-pub options>`.
+# Pin the command line adapters/imquic/run.sh runs: `timeout ... IMQUIC_PUB_BIN <moq-pub options>`.
 #
 # Usage: imquic-adapter-cmdlines.sh [--update]
 #   --update  rewrite tests/golden/imquic-cmdlines-d22.txt from the live adapter instead of
