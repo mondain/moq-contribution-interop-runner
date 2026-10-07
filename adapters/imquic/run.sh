@@ -24,7 +24,8 @@
 #   -d 4         log level (0-7, 4 = info), to standard output.
 # It has no timeout or input option (the payload is a clock: one Object per second, one Group per
 # minute) and stops on SIGTERM (PUBLISH_DONE, PUBLISH_NAMESPACE_DONE, exit 0), on connection loss or
-# GOAWAY. A third signal makes it exit(1) at once.
+# GOAWAY. Each of these (and a refused PUBLISH or PUBLISH_NAMESPACE) bumps one stop counter; a signal
+# that takes it past two makes it exit(1) at once, without cleanup.
 set -euo pipefail
 
 fail() {
@@ -123,9 +124,13 @@ fi
 
 # moq-pub has no deadline of its own: `timeout` stops it at the scenario timeout (rounded up to whole
 # seconds) plus 3 seconds, so the runner, not the publisher, ends the context, as with moqxr's paced
-# runs. --foreground keeps `timeout` in the runner's process group and keeps it from signalling the
-# whole group as well: the runner already does, and a third SIGTERM would make moq-pub exit(1)
-# without cleanup. --preserve-status reports moq-pub's own status (0 after SIGTERM) instead of 124;
+# runs. --foreground keeps `timeout` in the runner's process group and makes it signal only moq-pub,
+# not the whole group (the runner already signals the group). On a runner stop moq-pub still gets two
+# SIGTERMs, the group's and the one `timeout` relays; when its stop counter was already bumped
+# (connection loss, GOAWAY, a refused request) the second takes it past two and moq-pub exits(1)
+# without cleanup, in about 5 percent of runs. That is not new (the former `exec timeout` adapter did
+# the same in 43 of 186 runs of the first sweep) and changed no verdict.
+# --preserve-status reports moq-pub's own status (0 after SIGTERM) instead of 124;
 # -k 2 kills it if it hangs, also after the runner's SIGTERM (timeout arms -k on any signal it relays).
 timeout_seconds=$(((timeout_ms + 999) / 1000))
 ((timeout_seconds > 0)) || fail 'invalid scenario timeout'
@@ -269,12 +274,16 @@ d22_moqxr_paced_overrides=(
 #   request-update-independent-streams             two SUBSCRIBEs, then REQUEST_UPDATEs (session)
 #   publish-namespace-redirect-nonempty-track-name answers the publisher's PUBLISH_NAMESPACE (peer_close)
 #   publisher-namespace-routing-announcement       needs an explicit PUBLISH_NAMESPACE (announcement)
-#   setup-key-value-type-overflow                  SETUP probes whose SUBSCRIBE for media/vide_1 (the
-#   setup-key-value-declared-length-overflow       liveness check of draft21_close / raw_probe_liveness,
-#   setup-register-default-zero-cache              the register probe of draft21_contribution_session)
-#                                                  must be accepted to score the row; with -X moq-pub
-#                                                  refuses it (REQUEST_ERROR 0x19) and the rows stayed
-#                                                  unscored in the first imquic sweep
+#   setup-key-value-type-overflow                  SETUP probes whose liveness SUBSCRIBE for media/vide_1
+#   setup-key-value-declared-length-overflow       (draft21_close / raw_probe_liveness) must be accepted
+#                                                  to score the row; with -X moq-pub refuses it
+#                                                  (REQUEST_ERROR 0x19) and the rows stayed unscored in
+#                                                  the first imquic sweep
+#   setup-register-default-zero-cache              keeps its liveness SUBSCRIBE from being refused by -X
+#                                                  (harmless either way). Its row D22-9-1-4-MUST-NOT-318
+#                                                  stays unscored: it is bound to two scenarios, and the
+#                                                  sibling (setup-register-exceeds-token-cache) needs a
+#                                                  MAX_AUTH_TOKEN_CACHE_SIZE >= 1 imquic does not announce
 #
 # Every other moqxr --forward 1 id stays publish-first: the runner answers or refuses the publisher's
 # PUBLISH (accepting_publishes, rejected_publish, peer_close publish probes, the typed announcement
@@ -387,8 +396,8 @@ args+=(-d 4)
 # after SIGTERM (PUBLISH_DONE, PUBLISH_NAMESPACE_DONE, QUIC close), so this script does not exec the
 # publisher: it starts `timeout` and moq-pub in the background, in the same process group, and
 #   - on SIGTERM, SIGINT or SIGHUP exits 0 at once: the group signal has already reached moq-pub (and
-#     `timeout`, which relays it once, so moq-pub sees two, never a third), which finishes its cleanup
-#     on its own; nothing is forwarded from here;
+#     `timeout`, which relays it once, so moq-pub gets two SIGTERMs; see the stop counter above), which
+#     finishes its cleanup on its own; nothing is forwarded from here;
 #   - otherwise waits and exits with the status `timeout --preserve-status` reports (moq-pub's own,
 #     also when the deadline fired), as the former `exec timeout ...` did.
 # Trade-off: after a stop, moq-pub and `timeout` briefly outlive the adapter without the runner's

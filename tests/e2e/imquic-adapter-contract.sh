@@ -343,7 +343,9 @@ group_term() {
 }
 
 # A publisher like moq-pub: SIGTERM starts a 300 ms cleanup, then it exits 0. It counts the SIGTERMs
-# it receives: the group's and the one `timeout` forwards, never a third (moq-pub would exit(1)).
+# it receives: the group's and the one `timeout` relays, one or two in all (the adapter adds none).
+# moq-pub itself exits(1) when a signal takes its stop counter past two, which connection loss or
+# GOAWAY can bump first; this stub has no such counter.
 slow="$test_dir/slow publisher"
 cat >"$slow" <<'STUB'
 #!/usr/bin/env bash

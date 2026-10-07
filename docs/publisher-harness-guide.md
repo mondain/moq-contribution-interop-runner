@@ -253,8 +253,11 @@ it records as a driver failure (run `error`, `term_signal` 9), and moq-pub needs
 40-160 ms after SIGTERM to send PUBLISH_DONE and PUBLISH_NAMESPACE_DONE and close. So the
 adapter starts `timeout` and moq-pub in the background (same process group), and on SIGTERM,
 SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub already received the
-group's SIGTERM (plus the one `timeout` relays; never a third, which would make it exit(1))
-and finishes on its own. Without a signal it waits and exits with the publisher's status as
+group's SIGTERM (plus the one `timeout` relays, so two in all) and finishes on its own.
+moq-pub also bumps its stop counter on connection loss, GOAWAY and a refused request, and a
+signal that takes the counter past two makes it exit(1) without cleanup: that happens in
+about 5 percent of runs. It is not a regression (the former `exec timeout` adapter did the
+same in 43 of 186 runs of the first imquic sweep) and changed no verdict. Without a signal it waits and exits with the publisher's status as
 `--preserve-status` reports it, also when the deadline fired. The trade-off: after a stop,
 moq-pub briefly outlives the adapter without the runner's SIGKILL backstop; it stays bounded
 by `timeout -k 2` (SIGKILL at most 2 s after the signal).
@@ -275,7 +278,8 @@ modes differ from moqxr's, these shared scenarios deviate from the derivation:
 | `subscribe-accepted` | no `-X` | `--forward 1` | scores the SUBSCRIBE_OK branch (`subscribe-rejected` keeps `-X`) |
 | `request-update-overrun`, `request-update-independent-streams` | no `-X` | `--forward 1` | REQUEST_UPDATEs on the runner's own subscriptions |
 | `publish-namespace-redirect-nonempty-track-name`, `publisher-namespace-routing-announcement` | no `-X` | `--forward 1` | need the publisher's PUBLISH_NAMESPACE |
-| `setup-key-value-type-overflow`, `setup-key-value-declared-length-overflow`, `setup-register-default-zero-cache` | no `-X` | `--forward 1` | the probe's SUBSCRIBE (liveness or register check) must be accepted; with `-X` moq-pub refuses it (REQUEST_ERROR 0x19) and the row stays unscored |
+| `setup-key-value-type-overflow`, `setup-key-value-declared-length-overflow` | no `-X` | `--forward 1` | the probe's liveness SUBSCRIBE must be accepted; with `-X` moq-pub refuses it (REQUEST_ERROR 0x19) and the row stays unscored |
+| `setup-register-default-zero-cache` | no `-X` | `--forward 1` | keeps its liveness SUBSCRIBE from being refused by `-X` (harmless either way); its row `D22-9-1-4-MUST-NOT-318` stays unscored because it is bound to two scenarios and the sibling `setup-register-exceeds-token-cache` needs a MAX_AUTH_TOKEN_CACHE_SIZE of at least 1, which imquic does not announce |
 | `publish-update-ok-with-track-properties` | `-X` | `--forward 0 --paced` | its first write answers the publisher's PUBLISH |
 | `publish-established-subscriber-sends-publish-state-notify` | `-X` | `--forward 0 --paced` | answers the publisher's PUBLISH, then sends PUBLISH_STATE_NOTIFY on it |
 | `subscribe-tracks-publish-skipped-then-capacity-recovers` | `-X` | `--forward 0` | sends its SUBSCRIBE_TRACKS only after the publisher's PUBLISH |
