@@ -273,6 +273,9 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_contribution_residual_publisher.cpp
     src/scenarios/draft21_contribution_residual_token.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
+# moq-lite-06 probe engine (L1d).
+target_sources(moq-interop-scenarios PRIVATE
+    src/scenarios/lite_probe.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution.cpp
@@ -1402,6 +1405,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-session GTest::gtest_main)
     add_test(NAME moqlite-session
              COMMAND moq-interop-moqlite-session-tests)
+
+    add_executable(moq-interop-moqlite-probe-tests
+                   tests/protocol/lite_probe_test.cpp)
+    target_include_directories(moq-interop-moqlite-probe-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-probe-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-probe-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-probe
+             COMMAND moq-interop-moqlite-probe-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)
