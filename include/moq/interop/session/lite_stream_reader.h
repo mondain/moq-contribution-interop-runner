@@ -132,7 +132,14 @@ std::vector<const LiteDecoded*> runner_messages(const LiteStreamRecord& record);
 std::vector<const LiteDecodeIssue*> peer_issues(const LiteStreamRecord& record);
 // The only issues an evaluator may turn into a Fail of the peer: from the peer and classified PeerProtocol.
 std::vector<const LiteDecodeIssue*> peer_protocol_issues(const LiteStreamRecord& record);
-// Issues that make the observation incomplete (class Harness, either direction): judge NotRun, never Fail.
+// Runner-side Harness-class codes that are anomalies of the runner or the transport, never part of a deliberate
+// probe: trailing_after_fin, offset_overflow, undeclared_runner_stream, local_bidi_mismatch,
+// message_limit_reached, buffer_limit_reached.
+bool is_runner_anomaly(std::string_view code);
+// Issues that make the observation incomplete (judge NotRun, never Fail): every Harness-class issue raised by the
+// PEER's bytes, plus runner-origin Harness-class issues that is_runner_anomaly() names. Harness-class issues the
+// runner's own deliberately malformed probe bytes raise (length_exceeds_limit, length_not_representable from the
+// runner) are the stimulus and are NOT returned.
 std::vector<const LiteDecodeIssue*> harness_issues(const LiteStreamRecord& record);
 
 namespace detail {

@@ -286,10 +286,16 @@ std::vector<const LiteDecodeIssue*> peer_protocol_issues(const LiteStreamRecord&
     return out;
 }
 
+bool is_runner_anomaly(std::string_view code) {
+    return code == kIssueTrailingAfterFin || code == kIssueOffsetOverflow || code == kIssueUndeclaredRunnerStream ||
+           code == kIssueLocalBidiMismatch || code == kIssueMessageLimitReached || code == kIssueBufferLimitReached;
+}
+
 std::vector<const LiteDecodeIssue*> harness_issues(const LiteStreamRecord& record) {
     std::vector<const LiteDecodeIssue*> out;
     for (const auto& issue : record.issues) {
-        if (classify_issue(issue.code) == LiteIssueClass::Harness) out.push_back(&issue);
+        if (classify_issue(issue.code) != LiteIssueClass::Harness) continue;
+        if (issue.from == LiteOrigin::Peer || is_runner_anomaly(issue.code)) out.push_back(&issue);
     }
     return out;
 }

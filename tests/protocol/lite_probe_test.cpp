@@ -816,11 +816,35 @@ TEST(ConformingLitePublisher, DefectIgnoreUnknownStreams) {
     EXPECT_TRUE(unknown_seen);
 }
 
-TEST(ConformingLitePublisher, HooksReplaceTheDefaultBehavior) {
+
+const LiteStreamRecord* find_stream(const LiteTranscript& t, transport::StreamId id) {
+    for (const auto& r : t.streams)
+        if (r.stream_id == id) return &r;
+    return nullptr;
+}
+
+TEST(ConformingLitePublisher, OnRequestHookReplacesTheAnnounceAnswer) {
+    // Without the hook: ANNOUNCE_OK then ANNOUNCE_START.
+    {
+        ConformingLitePublisher publisher;
+        ScriptedLitePeer peer(publisher.reaction());
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 50ms;
+        definition.steps.push_back(scen::lite_open_bidi(announce_bytes(), false, "announce"));
+        const auto t = run_lite_probe(peer, definition, clock);
+        const auto* record = find_stream(t, 1);
+        ASSERT_NE(record, nullptr);
+        const auto messages = sess::peer_messages(*record);
+        ASSERT_EQ(messages.size(), 2u);
+        EXPECT_TRUE(std::holds_alternative<l06::AnnounceStart>(messages[1]->message));
+    }
+    // With the hook: exactly the two ANNOUNCE_OKs it wrote, and no ANNOUNCE_START.
     ConformingLitePublisherConfig config;
-    config.hooks.on_request = [](ConformingLitePublisher& self, ScriptedLitePeer& p, const LiteRunnerRequest& request) {
+    std::size_t hook_calls = 0;
+    config.hooks.on_request = [&](ConformingLitePublisher& self, ScriptedLitePeer& p, const LiteRunnerRequest& request) {
         if (!std::holds_alternative<l06::AnnounceRequest>(request.message)) return false;
-        // A scenario-local defect: ANNOUNCE_OK sent twice.
+        ++hook_calls;
         p.data(request.stream, join({announce_ok({self.config().hop_id, 0}), announce_ok({self.config().hop_id, 0})}));
         return true;
     };
@@ -831,14 +855,344 @@ TEST(ConformingLitePublisher, HooksReplaceTheDefaultBehavior) {
     definition.deadline = 50ms;
     definition.steps.push_back(scen::lite_open_bidi(announce_bytes(), false, "announce"));
     const auto t = run_lite_probe(peer, definition, clock);
-    bool seen = false;
-    for (const auto& record : t.streams)
-        if (record.kind == LiteStreamKind::Announce) {
-            seen = true;
-            EXPECT_FALSE(sess::peer_messages(record).empty());
-        }
-    EXPECT_TRUE(seen);
+    EXPECT_EQ(hook_calls, 1u);
+    Bytes received;
+    for (const auto& event : t.events)
+        if (const auto* data = std::get_if<transport::StreamDataEvent>(&event); data && data->stream_id == 1)
+            received.insert(received.end(), data->data.begin(), data->data.end());
+    EXPECT_EQ(received, join({announce_ok({7, 0}), announce_ok({7, 0})}));
+    const auto* record = find_stream(t, 1);
+    ASSERT_NE(record, nullptr);
+    for (const auto* decoded : sess::peer_messages(*record))
+        EXPECT_FALSE(std::holds_alternative<l06::AnnounceStart>(decoded->message));
     ASSERT_EQ(publisher.requests().size(), 2u);  // the runner SETUP and the ANNOUNCE_REQUEST
+}
+
+TEST(ConformingLitePublisher, OnStartHookSuppressesTheSetupAndOnPollRunsEveryReaction) {
+    ConformingLitePublisherConfig config;
+    std::size_t starts = 0, polls = 0;
+    config.hooks.on_start = [&](ConformingLitePublisher&, ScriptedLitePeer&) {
+        ++starts;
+        return true;  // handled: no Setup stream
+    };
+    config.hooks.on_poll = [&](ConformingLitePublisher&, ScriptedLitePeer&) { ++polls; };
+    ConformingLitePublisher publisher(config);
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 20ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_EQ(starts, 1u);
+    EXPECT_EQ(polls, peer.polls());
+    EXPECT_GE(polls, 20u);
+    for (const auto& record : t.streams) EXPECT_NE(record.origin, sess::LiteOrigin::Peer);
+}
+
+// --- review fixes: the continuation (I1, M4) ---
+
+TEST(LiteProbe, ContinuationNeverFinishedTimesOutAtTheDeadline) {
+    ScriptedLitePeer peer;
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 100ms;
+    definition.steps.push_back(scen::lite_open_bidi(subscribe_bytes(), false, "sub"));
+    definition.next_steps = [](const LiteSession&, LiteProbeContext&) { return std::vector<LiteStep>{}; };
+    definition.observation_window = 10ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.complete);
+    EXPECT_TRUE(t.timed_out);
+    EXPECT_FALSE(t.stimulus_delivered);
+    EXPECT_FALSE(judgeable(t));
+    EXPECT_EQ(t.ended_ns - t.established_ns, 100 * kMs);
+}
+
+TEST(LiteProbe, OpenContinuationMeansTheStimulusWasNotDelivered) {
+    for (const bool finish : {false, true}) {
+        ScriptedLitePeer peer;
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 100ms;
+        definition.steps.push_back(scen::lite_mark("m"));
+        definition.next_steps = [finish](const LiteSession&, LiteProbeContext& context) {
+            context.finished = finish;
+            return std::vector<LiteStep>{};
+        };
+        definition.done = [](const LiteSession&) { return true; };
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_TRUE(t.complete);
+        EXPECT_FALSE(t.timed_out);
+        EXPECT_EQ(t.stimulus_delivered, finish) << "finish=" << finish;
+        EXPECT_EQ(scen::judgeable_with_stimulus(t), finish) << "finish=" << finish;
+    }
+}
+
+TEST(LiteProbe, PeerCloseWithAnOpenContinuationIsEarly) {
+    for (const bool finish_on_close : {false, true}) {
+        ScriptedLitePeer peer([](ScriptedLitePeer& p) {
+            if (p.polls() == 5) p.close_session(0x0);
+        });
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 1000ms;
+        definition.steps.push_back(scen::lite_mark("m"));
+        definition.next_steps = [finish_on_close](const LiteSession& s, LiteProbeContext& context) {
+            if (finish_on_close && s.peer_close()) context.finished = true;
+            return std::vector<LiteStep>{};
+        };
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_TRUE(t.peer_close.has_value());
+        EXPECT_TRUE(t.steps[0].executed());
+        EXPECT_EQ(t.peer_closed_early, !finish_on_close) << "finish_on_close=" << finish_on_close;
+    }
+}
+
+TEST(LiteProbe, ASubscribeRefusedByAResetWakesTheContinuation) {
+    ConformingLitePublisherConfig config;
+    config.track = "other";  // the SUBSCRIBE for "video" is refused by RESET_STREAM + STOP_SENDING, no message
+    ConformingLitePublisher publisher(config);
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 100ms;
+    definition.steps.push_back(scen::lite_open_bidi(subscribe_bytes(), false, "sub"));
+    std::size_t calls_after_reset = 0;
+    definition.next_steps = [&](const LiteSession& s, LiteProbeContext& context) {
+        for (const auto* record : sess::runner_streams(s))
+            if (record->kind == LiteStreamKind::Subscribe && record->reset_seen) {
+                ++calls_after_reset;
+                context.finished = true;
+            }
+        return std::vector<LiteStep>{};
+    };
+    definition.observation_window = 5ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_GE(calls_after_reset, 1u);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+}
+
+TEST(LiteProbe, AContinuationAppendingForeverHitsTheStepLimit) {
+    ConformingLitePublisher publisher;
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 1500ms;  // one new stream per poll: the recorder's 1024-stream cap comes first
+    definition.next_steps = [](const LiteSession&, LiteProbeContext&) {
+        std::vector<LiteStep> more;
+        more.push_back(scen::lite_send_uni(stream_type(0x9), false, "u"));  // each is stopped: a new wake
+        return more;
+    };
+    const auto t = run_lite_probe(peer, definition, clock);
+    // Each step opens a stream, so the recorder's max_streams (1024) stops the wakes first; either bound ends it
+    // unjudgeable.
+    EXPECT_TRUE(t.harness_failed || t.event_limit_reached);
+    EXPECT_LE(t.steps.size(), scen::kLiteMaximumSteps);
+    EXPECT_FALSE(judgeable(t));
+    // The step cap itself: one wake appending more than the cap.
+    ScriptedLitePeer quiet;
+    ManualLiteClock quiet_clock;
+    LiteProbeDefinition burst;
+    burst.deadline = 50ms;
+    burst.next_steps = [](const LiteSession&, LiteProbeContext&) {
+        return std::vector<LiteStep>(scen::kLiteMaximumSteps + 1, scen::lite_mark("m"));
+    };
+    const auto capped = run_lite_probe(quiet, burst, quiet_clock);
+    EXPECT_TRUE(capped.harness_failed);
+    EXPECT_LE(capped.steps.size(), scen::kLiteMaximumSteps);
+}
+
+// --- review fixes: connect deadline (M1) ---
+
+TEST(LiteProbe, ConnectDeadlineBoundsOnlyTheConnectionWait) {
+    ScriptedLitePeer peer;
+    peer.establish_on_poll = std::nullopt;
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 1000ms;
+    definition.connect_deadline = 30ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_FALSE(t.established);
+    EXPECT_TRUE(t.timed_out);
+    EXPECT_EQ(t.ended_ns, 30 * kMs);
+}
+
+TEST(LiteProbe, AShortScenarioDeadlineNoLongerShortensTheConnectWait) {
+    for (const bool with_connect_deadline : {false, true}) {
+        ScriptedLitePeer peer;
+        peer.establish_on_poll = 99;
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 20ms;
+        if (with_connect_deadline) definition.connect_deadline = 200ms;
+        definition.steps.push_back(scen::lite_mark("m"));
+        const auto t = run_lite_probe(peer, definition, clock);
+        if (!with_connect_deadline) {
+            EXPECT_FALSE(t.established);
+            EXPECT_EQ(t.ended_ns, 20 * kMs);
+            continue;
+        }
+        EXPECT_TRUE(t.established);
+        EXPECT_EQ(t.established_ns, 99 * kMs);
+        EXPECT_EQ(t.ended_ns, t.established_ns + 20 * kMs) << "the scenario deadline restarts at establishment";
+        EXPECT_FALSE(t.timed_out);
+    }
+}
+
+// --- review fixes: judgeable_with_stimulus (M2) and the Harness-issue rule (M3) ---
+
+TEST(LiteProbe, JudgeableWithStimulusIsTheDefaultGate) {
+    {
+        ConformingLitePublisher publisher;
+        ScriptedLitePeer peer(publisher.reaction());
+        ManualLiteClock clock;
+        EXPECT_TRUE(scen::judgeable_with_stimulus(run_lite_probe(peer, announce_then_subscribe(), clock)));
+    }
+    {  // the peer closes before the steps: judgeable (a close probe may judge it), but not with stimulus
+        ScriptedLitePeer peer([](ScriptedLitePeer& p) {
+            if (p.polls() == 2) p.close_session(0x3);
+        });
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.steps.push_back(scen::lite_wait(100ms, "wait"));
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_TRUE(judgeable(t));
+        EXPECT_FALSE(scen::judgeable_with_stimulus(t));
+    }
+    {  // a write the peer refused
+        ScriptedLitePeer peer;
+        peer.forced_status[1] = TransportStatus::PeerReset;
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 20ms;
+        definition.steps.push_back(scen::lite_open_bidi(subscribe_bytes(), false, "subscribe"));
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_TRUE(judgeable(t));
+        EXPECT_FALSE(scen::judgeable_with_stimulus(t));
+    }
+}
+
+TEST(LiteProbe, TheRunnersDeliberatelyMalformedProbeBytesStayJudgeable) {
+    const Bytes malformed_subscribe{std::byte{0x02}, std::byte{0x00}, std::byte{0xBF},
+                                    std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+    const Bytes oversize_subscribe{std::byte{0x02}, std::byte{0x80}, std::byte{0x20}, std::byte{0x00}, std::byte{0x00}};
+    for (const auto& probe : {malformed_subscribe, oversize_subscribe}) {
+        ScriptedLitePeer peer;
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 20ms;
+        definition.steps.push_back(scen::lite_open_bidi(probe, true, "bad"));
+        const auto t = run_lite_probe(peer, definition, clock);
+        const auto* record = find_stream(t, 1);
+        ASSERT_NE(record, nullptr);
+        ASSERT_FALSE(record->issues.empty()) << "the runner's bytes raise an issue";
+        for (const auto& issue : record->issues) EXPECT_EQ(issue.from, sess::LiteOrigin::Runner);
+        EXPECT_TRUE(sess::harness_issues(*record).empty());
+        EXPECT_TRUE(judgeable(t));
+        EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+    }
+}
+
+// --- review fixes: transport realism (M5) ---
+
+TEST(LiteProbe, WritingAPublisherUniStreamIsAHarnessFailure) {
+    ConformingLitePublisher publisher;
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 100ms;
+    LiteStep write;
+    write.kind = LiteStep::Kind::SendOnStream;
+    write.bytes = bytes_of("x");
+    write.label = "write-peer-setup-stream";
+    write.target = [](const LiteSession& s) -> std::optional<transport::StreamId> {
+        for (const auto* record : sess::peer_streams(s))
+            if (record->kind == LiteStreamKind::Setup) return record->stream_id;
+        return std::nullopt;
+    };
+    definition.steps.push_back(write);
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.harness_failed);
+    ScriptedLitePeer fresh;
+    EXPECT_EQ(fresh.write(2, bytes_of("x"), false).status, TransportStatus::InvalidState);
+    EXPECT_EQ(fresh.reset(2, 0).status, TransportStatus::InvalidState);
+}
+
+TEST(LiteProbe, StopSendingOnARunnerUniStreamIsAHarnessFailure) {
+    ScriptedLitePeer peer;
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 100ms;
+    definition.steps.push_back(scen::lite_send_uni(stream_type(0x9), false, "uni"));
+    definition.steps.push_back(scen::lite_stop_sending(0, 0x1, "stop-own-uni"));
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.harness_failed);
+    ScriptedLitePeer fresh;
+    EXPECT_EQ(fresh.stop_sending(3, 0).status, TransportStatus::InvalidState);
+}
+
+// --- review fixes: remaining engine paths (M7) ---
+
+TEST(LiteProbe, MoreThanTheMaximumStepsIsAHarnessFailure) {
+    ScriptedLitePeer peer;
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    for (std::size_t i = 0; i <= scen::kLiteMaximumSteps; ++i) definition.steps.push_back(scen::lite_mark("m"));
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.harness_failed);
+    EXPECT_FALSE(t.harness_failure_reason.empty());
+    EXPECT_TRUE(peer.calls().empty());
+}
+
+TEST(LiteProbe, TransportEndingsAreClassified) {
+    struct Case {
+        const char* name;
+        transport::TransportEvent event;
+        bool harness_failed;
+        bool timed_out;
+    };
+    transport::ConnectionEstablishedEvent second;
+    second.alpn = bytes_of("moq-lite-06");
+    const std::vector<Case> cases{
+        {"second-connection", second, true, false},
+        {"transport-error", transport::TransportErrorEvent{}, true, false},
+        {"idle-timeout", transport::IdleTimeoutEvent{}, false, true},
+        {"local-close-without-step", transport::LocalCloseEvent{}, true, false},
+    };
+    for (const auto& c : cases) {
+        ScriptedLitePeer peer([&c](ScriptedLitePeer& p) {
+            if (p.polls() == 3) p.raw_event(c.event);
+        });
+        ManualLiteClock clock;
+        LiteProbeDefinition definition;
+        definition.deadline = 100ms;
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_EQ(t.harness_failed, c.harness_failed) << c.name;
+        EXPECT_EQ(t.timed_out, c.timed_out) << c.name;
+        EXPECT_EQ(t.complete, !c.harness_failed) << c.name;
+        EXPECT_LT(t.ended_ns, 10 * kMs) << c.name;
+        EXPECT_FALSE(judgeable(t)) << c.name;
+    }
+}
+
+TEST(LiteProbe, APeerThatDoesNotReactIsJudgeableThroughTheObservationWindow) {
+    ConformingLitePublisherConfig config;
+    config.defect = LiteDefect::IgnoreUnknownStreams;
+    ConformingLitePublisher publisher(config);
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 1000ms;
+    definition.steps.push_back(scen::lite_open_bidi(stream_type(0x7), false, "unknown-bidi"));
+    definition.observation_window = 50ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.complete);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_TRUE(judgeable(t));
+    EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+    const auto* record = find_stream(t, 1);
+    ASSERT_NE(record, nullptr);
+    EXPECT_FALSE(record->reset_seen) << "the absence of the reset is the observation";
+    EXPECT_LT(t.ended_ns, 100 * kMs);
 }
 
 }  // namespace

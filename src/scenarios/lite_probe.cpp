@@ -170,15 +170,13 @@ bool judgeable(const LiteTranscript& transcript) {
     if (!transcript.established || !transcript.complete || transcript.harness_failed ||
         transcript.event_limit_reached || transcript.timed_out)
         return false;
-    for (const auto& record : transcript.streams) {
-        for (const auto& issue : record.issues) {
-            if (session::classify_issue(issue.code) != session::LiteIssueClass::Harness) continue;
-            if (issue.from == session::LiteOrigin::Peer) return false;
-            if (issue.code == session::kIssueUndeclaredRunnerStream || issue.code == session::kIssueLocalBidiMismatch)
-                return false;
-        }
-    }
+    for (const auto& record : transcript.streams)
+        if (!session::harness_issues(record).empty()) return false;
     return true;
+}
+
+bool judgeable_with_stimulus(const LiteTranscript& transcript) {
+    return judgeable(transcript) && transcript.stimulus_delivered && !transcript.peer_closed_early;
 }
 
 LiteProbeController::LiteProbeController(LiteProbeDefinition definition, transport::SessionTransport& transport,
@@ -222,7 +220,7 @@ void LiteProbeController::finish(std::uint64_t now) {
         const bool no_action = record.kind == LiteStep::Kind::Wait || record.kind == LiteStep::Kind::Mark;
         if (!(no_action ? record.executed() : record.delivered())) delivered = false;
     }
-    transcript_.stimulus_delivered = transcript_.established && delivered;
+    transcript_.stimulus_delivered = transcript_.established && delivered && !continuation_open();
     stale_ = true;
 }
 
@@ -299,6 +297,10 @@ bool LiteProbeController::handle(const transport::TransportEvent& event, std::ui
 }
 
 bool LiteProbeController::steps_finished() const noexcept { return next_step_ >= steps_.size(); }
+
+bool LiteProbeController::continuation_open() const noexcept {
+    return static_cast<bool>(definition_.next_steps) && !context_.finished;
+}
 
 std::optional<transport::StreamId> LiteProbeController::resolve_stream(const LiteStep& step, LiteStepRecord& record,
                                                                        bool& skip) {
@@ -429,7 +431,12 @@ LiteProbeController::Progress LiteProbeController::execute(const LiteStep& step,
 
 void LiteProbeController::continue_steps(std::uint64_t now) {
     if (!definition_.next_steps || context_.finished) return;
-    const std::pair<std::size_t, std::size_t> seen{session_.message_count(), session_.streams().size()};
+    std::size_t stream_signals = 0;
+    for (const auto& record : session_.streams())
+        stream_signals +=
+            static_cast<std::size_t>(record.reset_seen) + static_cast<std::size_t>(record.stop_sending_seen);
+    const std::array<std::size_t, 4> seen{session_.message_count(), session_.streams().size(), stream_signals,
+                                          static_cast<std::size_t>(session_.peer_close().has_value())};
     if (continuation_seen_ && *continuation_seen_ == seen) return;
     continuation_seen_ = seen;
     context_.now_ns = now;
@@ -495,6 +502,7 @@ void LiteProbeController::on_deadline(std::uint64_t now) {
             record.skipped_reason = "deadline";
         }
     }
+    if (continuation_open()) pending = true;
     const bool done_missing = definition_.done && !definition_.done(session_);
     transcript_.timed_out = !transcript_.established || pending || done_missing;
     transcript_.complete = transcript_.established;
@@ -523,9 +531,12 @@ bool LiteProbeController::poll() {
     }
     if (session_.limit_reached()) limit("the lite session recorder reached a limit");
     if (peer_closed_) {
+        // The continuation sees the close (it may finish on it); steps it appends now can no longer run.
+        if (transcript_.established && (definition_.runner_setup.empty() || transcript_.runner_setup.executed()))
+            continue_steps(now);
         const bool setup_pending = !definition_.runner_setup.empty() && !transcript_.runner_setup.executed();
-        transcript_.peer_closed_early = setup_pending || !steps_finished();
-        transcript_.complete = true;
+        transcript_.peer_closed_early = setup_pending || !steps_finished() || continuation_open();
+        transcript_.complete = !transcript_.harness_failed;
         finish(now);
         return false;
     }
@@ -574,8 +585,7 @@ bool LiteProbeController::poll() {
                 finish(now);
                 return false;
             }
-            const bool continuation_open = definition_.next_steps && !context_.finished;
-            if (definition_.observation_window && steps_finished() && !continuation_open) {
+            if (definition_.observation_window && steps_finished() && !continuation_open()) {
                 const auto since = last_step_ns_.value_or(transcript_.established_ns);
                 if (now - since >= to_ns(*definition_.observation_window)) {
                     transcript_.complete = true;
@@ -586,7 +596,9 @@ bool LiteProbeController::poll() {
         }
     }
     const auto base = transcript_.established ? transcript_.established_ns : transcript_.started_ns;
-    if (now - base >= to_ns(definition_.deadline)) {
+    const auto limit_ms = transcript_.established ? definition_.deadline
+                                                  : definition_.connect_deadline.value_or(definition_.deadline);
+    if (now - base >= to_ns(limit_ms)) {
         on_deadline(now);
         return false;
     }

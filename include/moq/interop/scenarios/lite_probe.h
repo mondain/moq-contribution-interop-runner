@@ -8,6 +8,7 @@
 // Time comes from an injectable LiteClock (nanoseconds), so tests run on a manual clock and never sleep; the same
 // script on the same clock always yields the same transcript.
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -147,12 +148,16 @@ struct LiteProbeDefinition {
     std::vector<std::byte> runner_setup = lite_default_runner_setup();
     // Draft 6.3.1: the opener sends one SETUP and immediately FINs. False only for deliberate probes.
     bool runner_setup_fin{true};
-    // Optional dynamic continuation, called after establishment whenever the recorder decoded new messages or saw
-    // new streams; the steps it returns are appended in order.
+    // Optional dynamic continuation, called once after establishment and then whenever the recorder changed: new
+    // decoded messages, new streams, a new peer RESET_STREAM or STOP_SENDING, or the peer's close. The steps it
+    // returns are appended in order. Until it sets LiteProbeContext::finished the continuation counts as pending:
+    // the deadline then sets timed_out, stimulus_delivered stays false and a peer close is peer_closed_early.
     std::function<std::vector<LiteStep>(const session::LiteSession&, LiteProbeContext&)> next_steps;
     std::vector<LiteStep> steps;
-    // From the first poll until the connection is established, then from establishment.
+    // Bounds the probe from establishment (the clock restarts when the connection is established).
     std::chrono::milliseconds deadline{5000};
+    // Bounds ONLY the wait for the connection, from the first poll; nullopt: `deadline`.
+    std::optional<std::chrono::milliseconds> connect_deadline;
     // Early completion. Put here only a condition WITHOUT which the transcript cannot be judged: the deadline
     // passing before it holds sets timed_out (judgeable() false). When the ABSENCE of a reaction is the verdict,
     // leave it out and use observation_window or the deadline.
@@ -172,6 +177,9 @@ struct LiteTranscript {
     // The runner's Setup stream (label "runner-setup", kind SendUni; never executed when none was sent).
     LiteStepRecord runner_setup;
     std::vector<LiteStepRecord> steps;
+    // Every transport event, bounded by kLiteMaximumEvents; stream data bytes count against
+    // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: lite uses no datagrams and the
+    // transport bounds each one to the path MTU, so they are bounded by the event count).
     std::vector<transport::TransportEvent> events;
     std::vector<std::uint64_t> event_times;
     bool established{false};
@@ -184,11 +192,13 @@ struct LiteTranscript {
     bool timed_out{false};
     bool event_limit_reached{false};
     std::string event_limit_reason;
-    // The peer closed the session before the runner Setup and every step had executed.
+    // The peer closed the session before the runner Setup and every step had executed (or while the next_steps
+    // continuation was still open).
     bool peer_closed_early{false};
     // The runner closed the session (a CloseSession step).
     bool runner_closed{false};
-    // The runner Setup (if any) and every step executed and were delivered in full.
+    // The runner Setup (if any) and every step executed and were delivered in full, and the next_steps
+    // continuation (if any) finished.
     bool stimulus_delivered{false};
     std::uint64_t started_ns{0};
     std::uint64_t established_ns{0};
@@ -196,9 +206,22 @@ struct LiteTranscript {
 };
 
 // False when no verdict may be drawn from the transcript: never established, not complete, harness_failed,
-// event_limit_reached, timed_out, a Harness-class issue raised by the peer's bytes on any stream, or a runner-side
-// harness bug (undeclared_runner_stream, local_bidi_mismatch). Evaluators return nullopt when this is false.
+// event_limit_reached, timed_out, or any stream with a session::harness_issues() entry.
+//
+// The single rule for Harness-class issues (Tasks 4-7 rely on it; session::harness_issues implements it): every
+// Harness-class issue raised by the PEER's bytes makes the transcript unjudgeable, and so do the runner-side
+// anomalies session::is_runner_anomaly() names (trailing_after_fin, offset_overflow, undeclared_runner_stream,
+// local_bidi_mismatch, message_limit_reached, buffer_limit_reached). The only Harness-class issues ignored are
+// those the runner's own deliberately malformed probe bytes raise (length_exceeds_limit,
+// length_not_representable from the runner): they are the stimulus, not a harness fault. Runner-origin
+// PeerProtocol issues (e.g. a malformed SUBSCRIBE probe) are likewise the stimulus and never block.
+//
+// Use judgeable() alone only in evaluators where the peer's close IS the observation (a close probe may end the
+// session before every step ran). Every other evaluator gates on judgeable_with_stimulus().
 bool judgeable(const LiteTranscript& transcript);
+
+// The DEFAULT evaluator gate: judgeable() and stimulus_delivered and not peer_closed_early.
+bool judgeable_with_stimulus(const LiteTranscript& transcript);
 
 // Runner stream bytes: STREAM_TYPE then the request.
 std::vector<std::byte> lite_announce_stream_bytes(const wire::moqlite06::AnnounceRequest& request);
@@ -225,7 +248,8 @@ public:
 
     // True while running; drives events, steps and deadlines. Never blocks, never throws on peer input.
     bool poll();
-    // The transcript; the stream records are refreshed from the recorder on access.
+    // The transcript; the stream records are refreshed from the recorder on access. NOT thread-safe: although
+    // const, it writes the cached copy, so call it only from the thread that polls (or after polling stopped).
     [[nodiscard]] const LiteTranscript& transcript() const;
     [[nodiscard]] const session::LiteSession& session() const noexcept { return session_; }
     [[nodiscard]] bool running() const noexcept { return !ended_; }
@@ -244,6 +268,7 @@ private:
     Progress write_all(LiteStepRecord& record, std::uint64_t now);
     std::optional<transport::StreamId> resolve_stream(const LiteStep& step, LiteStepRecord& record, bool& skip);
     [[nodiscard]] bool steps_finished() const noexcept;
+    [[nodiscard]] bool continuation_open() const noexcept;
     void on_deadline(std::uint64_t now);
 
     LiteProbeDefinition definition_;
@@ -262,8 +287,8 @@ private:
     bool local_closed_{false};
     bool idle_timeout_{false};
     std::optional<std::uint64_t> last_step_ns_;
-    // (decoded messages, streams) when next_steps was last called.
-    std::optional<std::pair<std::size_t, std::size_t>> continuation_seen_;
+    // (decoded messages, streams, peer resets + stop-sendings, peer close) when next_steps was last called.
+    std::optional<std::array<std::size_t, 4>> continuation_seen_;
 };
 
 }  // namespace moq::interop::scenarios

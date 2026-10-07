@@ -1171,6 +1171,28 @@ TEST(LiteSession, LocalWriteDirectionComesFromTheStreamId) {
     EXPECT_TRUE(session.streams()[1].issues.empty());
 }
 
+TEST(LiteAccessors, HarnessIssuesExemptOnlyTheRunnersDeliberateProbeBytes) {
+    // A deliberate oversize runner SUBSCRIBE (Message Length 2 MiB): length_exceeds_limit from the runner is the
+    // stimulus, not a harness fault.
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x02, 0x80, 0x20, 0x00, 0x00}), false, 1);
+    ASSERT_EQ(count_issues(reader.record(), kIssueLengthExceedsLimit), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(reader.record().issues[0].from, LiteOrigin::Runner);
+    EXPECT_TRUE(harness_issues(reader.record()).empty());
+    // A runner-side anomaly is returned whatever its origin.
+    LiteSession session;
+    session.note_local_write(kRunnerUni, true, bytes({0x01, 0x01, 0x00}), true, 1);
+    ASSERT_EQ(session.streams().size(), 1u);
+    const auto anomalies = harness_issues(session.streams()[0]);
+    ASSERT_EQ(anomalies.size(), 1u);
+    EXPECT_EQ(anomalies[0]->code, kIssueLocalBidiMismatch);
+    for (const auto code : {kIssueTrailingAfterFin, kIssueOffsetOverflow, kIssueUndeclaredRunnerStream,
+                            kIssueLocalBidiMismatch, kIssueMessageLimitReached, kIssueBufferLimitReached})
+        EXPECT_TRUE(is_runner_anomaly(code)) << code;
+    for (const auto code : {kIssueLengthExceedsLimit, kIssueLengthNotRepresentable, kIssueProtocolViolation})
+        EXPECT_FALSE(is_runner_anomaly(code)) << code;
+}
+
 TEST(LiteStreamReader, PeerOpenedGoawayTypeIsUnknownWithItsRawType) {
     LiteStreamReader reader(kPeerBidi, LiteOrigin::Peer, true);
     reader.feed(bytes({0x05, 0x00}), false, 1);

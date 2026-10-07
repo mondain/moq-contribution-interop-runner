@@ -141,6 +141,7 @@ public:
     }
     transport::OperationResult write(transport::StreamId id, std::span<const std::byte> bytes, bool fin) override {
         if (closed()) return {transport::TransportStatus::ConnectionClosed, 0, {}};
+        if (publisher_uni(id)) return {transport::TransportStatus::InvalidState, 0, {}};  // receive-only for us
         if (const auto forced = forced_status.find(id); forced != forced_status.end())
             return {forced->second, 0, {}};
         if (would_block_writes > 0) {
@@ -158,6 +159,7 @@ public:
     }
     transport::OperationResult reset(transport::StreamId id, std::uint64_t code) override {
         if (closed()) return {transport::TransportStatus::ConnectionClosed, 0, {}};
+        if (publisher_uni(id)) return {transport::TransportStatus::InvalidState, 0, {}};  // no send side to reset
         if (const auto forced = forced_status.find(id); forced != forced_status.end())
             return {forced->second, 0, {}};
         runner_[id].reset_code = code;
@@ -166,6 +168,7 @@ public:
     }
     transport::OperationResult stop_sending(transport::StreamId id, std::uint64_t code) override {
         if (closed()) return {transport::TransportStatus::ConnectionClosed, 0, {}};
+        if (runner_uni(id)) return {transport::TransportStatus::InvalidState, 0, {}};  // no receive side to stop
         if (const auto forced = forced_status.find(id); forced != forced_status.end())
             return {forced->second, 0, {}};
         runner_[id].stop_sending_code = code;
@@ -242,6 +245,10 @@ public:
 
 private:
     [[nodiscard]] bool closed() const { return peer_closed_ || runner_close_.has_value(); }
+    // Like a real transport: the runner cannot write or reset a stream the publisher opened unidirectionally, nor
+    // STOP_SENDING one it opened unidirectionally itself (InvalidState).
+    static bool publisher_uni(transport::StreamId id) { return (id & 3u) == 2u; }
+    static bool runner_uni(transport::StreamId id) { return (id & 3u) == 3u; }
 
     Reaction reaction_;
     std::string alpn_;
@@ -311,6 +318,14 @@ struct ConformingLitePublisherConfig {
 // each GROUP plus frames and FIN, for the configured broadcast/track; NOT_FOUND reset for other tracks; resets (bidi)
 // or stops (uni) runner streams of unknown or unserved types; a second runner Setup stream or a malformed SETUP
 // closes the session with PROTOCOL_VIOLATION. Deterministic. The publisher must outlive the peer it reacts for.
+//
+// Defaults that are the implementer's choices, NOT draft rules (Tasks 4-7 set what their rows need):
+//   - unknown_stream_code 0x0 for resetting/stopping unknown or unserved streams (the draft names no code);
+//   - the ANNOUNCE_START hop list is empty and both route costs are 0 (the publisher is the origin);
+//   - prefix coverage is plain std::string::starts_with on the configured broadcast path (no segment rules);
+//   - one Group stream per poll, so the group rate follows the test tick, not media time;
+//   - Fetch, Probe, Goaway and Track streams (L2 kinds) are refused like unknown types;
+//   - a SUBSCRIBE floor (group_start > 0) starts at max(latest_group, group_start - 1); bounds are not checked.
 class ConformingLitePublisher {
 public:
     explicit ConformingLitePublisher(ConformingLitePublisherConfig config = {}) : config_(std::move(config)) {}
