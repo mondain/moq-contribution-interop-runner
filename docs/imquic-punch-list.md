@@ -23,7 +23,7 @@ Where the fault lies: the peer under test is moq-pub built on imquic. Each item 
 the fault is in the imquic **library** (it applies to every imquic application) or in the
 moq-pub **example** (a demo limit, reported but labeled as such, not a library defect). One
 former item, I-12, turned out to be a runner evaluator assumption and is withdrawn; its id is
-kept so the numbering stays stable.
+kept so the numbering stays stable. The runner defect behind it is fixed (`92d3c58`).
 
 ## Status in the final sweep
 
@@ -41,7 +41,7 @@ kept so the numbering stays stable.
 | I-09 server AUTHORITY closed with INVALID_PATH | Confirmed | D22-9-1-1-MUST-304 fail |
 | I-10 namespace REDIRECT with a Track Name ends with NO_ERROR | Confirmed | D22-9-4-1-MUST-352 fail |
 | I-11 INVALID_FILTER never sent | Confirmed | D22-3-3-2-MUST-077, D22-9-1-6-MUST-326 not_run |
-| I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT | Not an imquic defect: runner evaluator assumption (triage A4) | D22-5-2-MUST-144 fail is a false FAIL for this peer |
+| I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT | Not an imquic defect: runner evaluator assumption (triage A4), fixed in the runner (`92d3c58`) | D22-5-2-MUST-144 not_run since the fix (was a false FAIL in the final sweep) |
 | I-13 duplicate Request ID not detected | Confirmed | D22-6-4-2-1-MUST-169 not_run |
 | I-14 `.session` namespace request gets NOT_SUPPORTED | Confirmed | D22-6-5-MUST-186 fail |
 | I-15 requests answered before SETUP completes | Observed (MAY row, low) | D22-6-3-MAY-159 not_run |
@@ -61,7 +61,10 @@ wire instead of namespace () and track "x"; R3, three SETUP probes run announce-
 Rows per triage category (final native sweep, 101 non-pass rows): (a) 1 (D22-5-2-MUST-144,
 the evaluator assumption that withdrew I-12), (b) 34 (19 fail, 15 not_run; the items above
 except I-01, which covers WebTransport), (c) 3 (I-C1), (d) 63 (not applicable to this demo;
-see interop-notes.md). Items not labeled example or withdrawn are library items.
+see interop-notes.md). Items not labeled example or withdrawn are library items. Those counts
+were taken before the evaluator fix `92d3c58`; with it, D22-5-2-MUST-144 is not_run on
+imquic (re-run of its scenario), so the native totals are 45 pass, 19 fail, 82 not_run and
+the categories (a) 0, (b) 34, (c) 3, (d) 64.
 
 R2 is what turned the token and parameter probes (I-19 to I-22) from confounded results into
 evidence about imquic.
@@ -259,7 +262,8 @@ contradict each other.
 
 ### I-12 (withdrawn) SUBGROUP_DELIVERY_TIMEOUT: not an imquic defect
 
-- **Row:** D22-5-2-MUST-144 (fail; a false FAIL for this peer, triage line A4, category a).
+- **Row:** D22-5-2-MUST-144 (fail in the final sweep, a false FAIL for this peer, triage line
+  A4, category a; not_run since the runner fix `92d3c58`).
 - **Scenario:** `d22-subgroup-completion-withheld-acknowledgments`.
 - **Draft:** lines 2301-2307: the timer starts "once it becomes aware that all of the objects
   on the subgroup have been published"; only then must an uncommitted stream be reset
@@ -273,7 +277,12 @@ contradict each other.
 - **Why it was listed:** the evaluator (`uncommitted_subgroup_spec` in
   `src/scenarios/draft21_contribution_residual_token.cpp`) assumes the fixture's Group 0 is
   complete (true for moqxr's fixture) and FAILs any subgroup stream still open at the end of
-  the window. That is a runner item (interop-notes.md, open runner items), not imquic work.
+  the window. That was a runner item (interop-notes.md), not imquic work.
+- **Resolved in the runner (`92d3c58`):** on the draft 22 wire the evaluator FAILs an open
+  stream only after the publisher's PUBLISH_DONE (lines 4613-4615: sent only once every stream
+  of the subscription is closed) arrived at least the timer plus 1 s before the window ended;
+  otherwise it gives no verdict. moq-pub sent no PUBLISH_DONE in the window, so a re-run of the
+  scenario against the same build gives not_run; moqxr `1883b9f` still passes.
 
 ### I-13 A duplicate Request ID is not detected (confirmed)
 
