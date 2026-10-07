@@ -177,7 +177,8 @@ set(MOQ_INTEROP_HTTP_SOURCES
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
-                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators)
+                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators
+                      moq-interop-lite-evaluators)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 target_compile_options(moq-interop-http PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
@@ -327,6 +328,16 @@ target_compile_options(moq-interop-draft22-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+# moq-lite-06 evaluators, bindings and evaluate_lite (they consume the lite scenarios, so they cannot live in
+# moq-interop-requirements without a dependency cycle).
+add_library(moq-interop-lite-evaluators
+    src/requirements/lite_evaluators.cpp)
+target_link_libraries(moq-interop-lite-evaluators PUBLIC
+    moq-interop-requirements moq-interop-scenarios)
+target_compile_options(moq-interop-lite-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
@@ -349,7 +360,7 @@ target_compile_definitions(moq-interop-audit PRIVATE
 target_link_libraries(moq-interop-audit PRIVATE
     moq-interop-requirements moq-interop-draft18-evaluators
     moq-interop-draft21-evaluators moq-interop-draft22-evaluators
-    moq-interop-execution-audit nlohmann_json::nlohmann_json)
+    moq-interop-lite-evaluators moq-interop-execution-audit nlohmann_json::nlohmann_json)
 install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
 add_executable(moq-interop-catalog-carry src/app/catalog_carry_main.cpp)
 target_compile_definitions(moq-interop-catalog-carry PRIVATE
@@ -1007,6 +1018,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-lite-catalog-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lite-catalog COMMAND moq-interop-lite-catalog-tests)
+    add_executable(moq-interop-lite-evaluators-tests tests/unit/lite_evaluators_test.cpp)
+    target_compile_definitions(moq-interop-lite-evaluators-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_include_directories(moq-interop-lite-evaluators-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-evaluators-tests PRIVATE
+        moq-interop-lite-evaluators moq-interop-execution-audit GTest::gtest_main)
+    add_test(NAME lite-evaluators COMMAND moq-interop-lite-evaluators-tests)
     add_test(NAME lite-catalog-schema
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-catalog-schema.sh")
     set_tests_properties(lite-catalog-schema PROPERTIES SKIP_RETURN_CODE 77)

@@ -31,6 +31,7 @@
 #include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
+#include "moq/interop/requirements/lite_evaluators.h"
 
 #include "detail.h"
 
@@ -339,14 +340,13 @@ bool has_declared_evidence(const storage::RunRecord& run,
 }
 
 // The executable bindings of a configured catalog's draft (draft 22's are draft 21's translated through the
-// lineage plus its own).
+// lineage plus its own; moq-lite-06's are the L1d lite evaluators').
 std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersion draft) {
     switch (draft) {
         case app::DraftVersion::Draft18: return requirements::draft18_executable_bindings();
         case app::DraftVersion::Draft21: return requirements::draft21_executable_bindings();
         case app::DraftVersion::Draft22: return requirements::draft22_executable_bindings();
-        case app::DraftVersion::MoqLite06:
-            throw std::logic_error("moq-lite has no MoQ Transport executable bindings");
+        case app::DraftVersion::MoqLite06: return requirements::lite_executable_bindings();
     }
     throw std::logic_error("unknown draft");
 }
@@ -461,11 +461,11 @@ namespace detail {
 
 CatalogAudit audit_catalog(const requirements::RequirementCatalog& catalog) {
     const auto draft = app::parse_draft(catalog.draft);
-    // A catalog of a draft this server has no bindings for (moq-lite) reports no coverage and is
-    // audited as staged; MoQ Transport catalogs keep their bindings and the non-staged audit.
+    // An incomplete catalog (moq-lite-06's, with its lite bindings) is audited as staged; MoQ Transport
+    // catalogs keep their bindings and the non-staged audit.
     const bool moqt = draft && app::is_moqt(*draft);
     CatalogAudit result;
-    if (moqt) result.bindings = executable_bindings(*draft);
+    if (draft) result.bindings = executable_bindings(*draft);
     const auto scenarios = app::executable_scenarios(catalog.draft);
     result.report = catalog.complete || moqt
         ? requirements::audit_completeness(catalog, result.bindings, scenarios)

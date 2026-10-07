@@ -1,6 +1,7 @@
 #include "detail.h"
 #include "json.h"
 #include "moq/interop/http/result_schema.h"
+#include "moq/interop/requirements/lite_evaluators.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -312,12 +313,15 @@ TEST(ResultExport, LiteCatalogRowsReviewedFalseSerializeWithoutThrowing) {
     });
 }
 
-TEST(ResultExport, LiteCatalogAuditIsStagedWithoutBindings) {
+TEST(ResultExport, LiteCatalogAuditIsStagedWithTheLiteBindings) {
     const auto selection = detail::audit_catalog(lite_catalog());
-    EXPECT_TRUE(selection.bindings.empty());
+    EXPECT_EQ(selection.bindings.size(), requirements::lite_executable_bindings().size());
+    EXPECT_FALSE(selection.bindings.empty());
     EXPECT_EQ(selection.report.unreviewed_total, 1u);
     EXPECT_EQ(selection.report.unreviewed_required, 1u);
-    for (const auto& finding : selection.report.findings) EXPECT_FALSE(finding.blocking) << finding.code;
+    // The synthetic catalog holds none of the bound rows: those bindings are orphans, nothing else blocks.
+    for (const auto& finding : selection.report.findings)
+        EXPECT_TRUE(!finding.blocking || finding.code == "orphan_binding") << finding.code;
     EXPECT_FALSE(selection.report.complete());
 }
 

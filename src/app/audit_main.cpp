@@ -8,6 +8,7 @@
 #include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/draft22_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
+#include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/storage/run_store.h"
 
 #include <nlohmann/json.hpp>
@@ -85,9 +86,10 @@ bool is_lite(unsigned draft) {
     return parsed && !moq::interop::app::is_moqt(*parsed);
 }
 
-// The staged audit of the moq-lite-06 catalog: incomplete by design, never a pass. No executable
-// bindings exist yet (a later sub-project supplies them), so every reviewed Applicable+Testable row is a
-// non-blocking "missing evaluator" finding and the exit status reflects only real catalog errors.
+// The staged audit of the moq-lite-06 catalog: incomplete by design, never a pass. The L1d executable
+// bindings (lite_executable_bindings) cover the reviewed Applicable+Testable rows over the executable lite
+// scenarios; an uncovered reviewed row would be a non-blocking "missing evaluator" finding, and the exit status
+// reflects only real catalog errors and blocking binding findings.
 int audit_lite(const Options& options) {
     using namespace moq::interop;
     if (options.database)
@@ -99,9 +101,9 @@ int audit_lite(const Options& options) {
         source, options.requirements / (name + ".json"),
         requirements::CatalogLoadMode::AllowIncomplete);
     const auto source_audit = requirements::audit_normative_occurrences_staged(source, catalog);
-    const std::vector<requirements::ExecutableBinding> no_bindings;
+    const auto bindings = requirements::lite_executable_bindings();
     const auto report = requirements::audit_completeness_staged(
-        catalog, no_bindings, app::executable_scenarios(options.draft));
+        catalog, bindings, app::executable_scenarios(options.draft));
     const auto counts = requirements::staged_counts(catalog);
     std::set<std::string> planned;
     for (const auto& row : catalog.requirements)
@@ -118,6 +120,10 @@ int audit_lite(const Options& options) {
                   << "Unreviewed required (MUST/MUST NOT): " << counts.unreviewed_required << '\n'
                   << "Required applicable testable (reviewed rows): " << report.required_total << '\n'
                   << "Planned scenarios: " << planned.size() << '\n'
+                  << "Required coverage (reviewed rows): " << report.required_covered << " of "
+                  << report.required_total << '\n'
+                  << "Optional coverage (reviewed rows): " << report.optional_covered << " of "
+                  << report.optional_total << '\n'
                   << "Source-keyword audit: " << (source_audit.ok() ? "complete" : "failed") << '\n'
                   << "Findings: " << report.findings.size() << '\n';
         for (const auto& finding : report.findings) {
@@ -146,6 +152,9 @@ int audit_lite(const Options& options) {
             {"unreviewed", counts.unreviewed},
             {"unreviewed_required", counts.unreviewed_required},
             {"required_applicable_testable", report.required_total},
+            {"required_covered", report.required_covered},
+            {"optional_applicable_testable", report.optional_total},
+            {"optional_covered", report.optional_covered},
             {"planned_scenarios", planned.size()},
             {"staged", true}, {"complete", false}, {"verdict", verdict},
             {"findings", std::move(findings)}};

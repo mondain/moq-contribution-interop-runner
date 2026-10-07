@@ -2,6 +2,7 @@
 
 #include "moq/interop/app/draft18_gap_a_scenarios.h"
 #include "moq/interop/app/lineage.h"
+#include "moq/interop/app/lite_scenarios.h"
 #include "moq/interop/app/own_scenarios_22.h"
 #include "moq/interop/app/scenario_registry_d21a.h"
 
@@ -403,6 +404,8 @@ inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
         }();
         return OwnScenarioRegistry22::instance().with_own(runnable);
     }
+    // moq-lite-06 (draft 106): the L1d scenarios (lite_scenarios.h).
+    if (draft == 106) return kLiteExecutableScenarioIds;
     return {};
 }
 
@@ -530,6 +533,10 @@ inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::st
 static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 106) {
+        const auto lite = lite_executable_scenario(scenario);
+        return lite && lite->requires_track;
+    }
     if (draft == 22) {
         if (const auto own = own_scenario_22(scenario)) return own->requires_track;
         const auto implementation = implementation_scenario_id(scenario);
@@ -584,6 +591,8 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario) {
 }
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
+    // moq-lite scenarios run on the lite probe engine, never as MoQ Transport raw probes.
+    if (draft == 106) return false;
     if (draft == 22) {
         // Own draft 22 scenarios are always raw probes (src/app/own_scenario_dispatch_22.cpp).
         if (own_scenario_22(scenario)) return true;
