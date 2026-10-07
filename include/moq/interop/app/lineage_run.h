@@ -27,6 +27,7 @@ struct LineageRun {
 // shared scenario's draft 21 implementation; nothing if any selected id is not a shared draft 22
 // scenario whose implementation is executable.
 inline std::optional<LineageRun> lineage_run(const RunConfig& config) {
+    if (!is_moqt(config.draft)) throw std::logic_error("lineage does not apply to moq-lite");
     if (config.draft != DraftVersion::Draft22) return LineageRun{config, config.draft};
     LineageRun run{config, DraftVersion::Draft22};
     run.execution.draft = family_draft(config.draft);

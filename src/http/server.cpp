@@ -179,7 +179,8 @@ app::RunConfig parse_run_config(const httplib::Request& request,
         const auto timeout = body.at("timeout_ms").get<std::int64_t>();
         const std::optional<app::DraftVersion> parsed_draft =
             draft < 0 ? std::nullopt : app::parse_draft(static_cast<unsigned>(draft));
-        if (!parsed_draft) {
+        // The integer form is MoQ Transport only; moq-lite (106) is never accepted as a number.
+        if (!parsed_draft || !app::is_moqt(*parsed_draft)) {
             throw ApiError{400, "invalid_run_config", "draft must be 18, 21 or 22."};
         }
         if (transport != "native-quic" && transport != "webtransport") {
@@ -344,6 +345,8 @@ std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersi
         case app::DraftVersion::Draft18: return requirements::draft18_executable_bindings();
         case app::DraftVersion::Draft21: return requirements::draft21_executable_bindings();
         case app::DraftVersion::Draft22: return requirements::draft22_executable_bindings();
+        case app::DraftVersion::MoqLite06:
+            throw std::logic_error("moq-lite has no MoQ Transport executable bindings");
     }
     throw std::logic_error("unknown draft");
 }
@@ -1015,6 +1018,7 @@ public:
             case app::DraftVersion::Draft18: return true;
             case app::DraftVersion::Draft21: return true;
             case app::DraftVersion::Draft22: return config.draft22_catalog != nullptr;
+            case app::DraftVersion::MoqLite06: return false;  // not runnable yet; refused as draft_not_runnable
         }
         return false;
     }
@@ -1035,6 +1039,7 @@ public:
             case app::DraftVersion::Draft22:
                 if (config.draft22_catalog) return *config.draft22_catalog;
                 break;
+            case app::DraftVersion::MoqLite06: break;  // no moq-lite catalog is configured yet
         }
         const auto number = std::to_string(app::draft_number(draft));
         throw ApiError{409, "draft_catalog_not_configured",
