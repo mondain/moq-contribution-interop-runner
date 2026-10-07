@@ -96,7 +96,8 @@ have the runner launch your publisher for you, follow the
 | [docs/http-api.md](docs/http-api.md) | Routes, run request and response JSON, run lifecycle, events, JSON/TAP/HTML exports, completeness endpoint, error codes |
 | [docs/scoring-and-audit.md](docs/scoring-and-audit.md) | Outcome states, weights, verdicts, scores, `moq-interop-audit`, release audit, sanitizer and fuzz scripts |
 | [docs/scenario-reference.md](docs/scenario-reference.md) | Per-family fixture contracts, operator credentials, port and transport requirements, what `NOT_RUN` means |
-| [docs/interop-notes.md](docs/interop-notes.md) | Publisher compatibility notes: the bundled moqxr adapter, observed results, the standing rule on expected behavior |
+| [docs/interop-notes.md](docs/interop-notes.md) | Publisher compatibility notes: the bundled moqxr and imquic adapters, observed results (including the draft 22 sweeps against moqxr and imquic), the standing rule on expected behavior |
+| [docs/moqxr-punch-list.md](docs/moqxr-punch-list.md), [docs/imquic-punch-list.md](docs/imquic-punch-list.md) | Work lists of the findings against moqxr and imquic, with evidence and draft citations |
 | [docs/moq-contribution-interop-runner-design.md](docs/moq-contribution-interop-runner-design.md) | Design: goals, architecture, requirement catalog, scoring model, verification strategy |
 | [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt), [-22.txt](docs/draft-ietf-moq-transport-22.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
 | [docs/plans/](docs/plans/) | Historical implementation plans |
@@ -107,7 +108,7 @@ have the runner launch your publisher for you, follow the
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
 | `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json` and `draft22.json`), the draft 21 to 22 delta audit, schema and draft digests |
-| `adapters/` | Driver contract schema and the bundled `moqxr` adapter |
+| `adapters/` | Driver contract schema and the bundled `moqxr` (drafts 18, 21, 22), `imquic` (draft 22) and `moq5` (drafts 18, 21) adapters |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
 | `docs/` | Documentation and the draft texts |
 | `tests/` | Unit, golden, protocol, integration, end-to-end and fuzz tests |

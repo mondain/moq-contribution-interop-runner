@@ -230,6 +230,7 @@ add_library(moq-interop-scenarios
     src/scenarios/discovery_overlap.cpp
     src/scenarios/draft18_peer_close.cpp
     src/scenarios/draft21_request.cpp
+    src/scenarios/draft22_run_names.cpp
     src/scenarios/draft21_response.cpp
     src/scenarios/draft21_peer_close.cpp
     src/scenarios/draft21_close.cpp
@@ -710,6 +711,10 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-d22-fixture-probes-tests tests/protocol/draft22_fixture_probes_test.cpp)
     target_link_libraries(moq-interop-d22-fixture-probes-tests PRIVATE moq-interop-scenarios GTest::gtest_main)
     add_test(NAME d22-fixture-probes COMMAND moq-interop-d22-fixture-probes-tests)
+    add_executable(moq-interop-d22-fixture-requests-tests tests/protocol/draft22_fixture_requests_test.cpp)
+    target_link_libraries(moq-interop-d22-fixture-requests-tests PRIVATE
+        moq-interop-scenarios moq-interop-requirements moq-interop-draft21-evaluators GTest::gtest_main)
+    add_test(NAME d22-fixture-requests COMMAND moq-interop-d22-fixture-requests-tests)
 
     add_executable(moq-interop-draft18-session-tests
                    tests/protocol/draft18_session_test.cpp)
@@ -1106,6 +1111,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
                  COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-cmdlines.sh"
                          ${moqxr_cmdline_draft})
     endforeach()
+    add_test(NAME imquic-adapter-contract
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-adapter-contract.sh")
+    add_test(NAME imquic-adapter-cmdlines-d22
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-adapter-cmdlines.sh")
+    add_test(NAME imquic-matrix-plan
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-matrix-plan.sh")
     add_executable(moq-interop-executable-ids-golden-tests tests/unit/executable_ids_golden_test.cpp)
     target_compile_definitions(moq-interop-executable-ids-golden-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

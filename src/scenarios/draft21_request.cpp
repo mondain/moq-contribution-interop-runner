@@ -1,8 +1,14 @@
 #include "moq/interop/scenarios/draft21_request.h"
+#include "moq/interop/scenarios/draft22_run_names.h"
+#include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/wire/draft21/setup.h"
 
+#include <algorithm>
 #include <limits>
+#include <set>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 namespace moq::interop::scenarios {
 namespace {
@@ -28,10 +34,25 @@ Bytes frame(unsigned type, const Bytes& body) {
     return result;
 }
 
-Bytes subscribe(const Bytes& parameters, unsigned count = 1) {
-    auto body = bytes({1, 0, 1, 'x', count});
+Bytes named_subscribe(const Bytes& names, const Bytes& parameters, unsigned count) {
+    // Request ID 1, the track's names (zero namespace fields and name x on wire 21), parameter count.
+    auto body = bytes({1});
+    body.insert(body.end(), names.begin(), names.end());
+    body.push_back(static_cast<std::byte>(count));
     body.insert(body.end(), parameters.begin(), parameters.end());
+    if (body.size() > 65535) throw std::invalid_argument("track names do not fit a probe request");
     return frame(3, body);
+}
+
+// The profiles whose SUBSCRIBE names a track only because the message needs one: (), "x" on wire 21, the
+// run's track on wire 22 (draft21_request_profiles' request names).
+bool run_names_profile(std::string_view id) {
+    static const std::set<std::string_view> ids{
+        "d21-range-filter-start-delta-overflow", "d21-range-filter-end-delta-overflow",
+        "d21-duplicate-range-filter-key-in-request", "d21-priority-filter-start-above-255",
+        "d21-priority-filter-end-above-255", "d21-object-property-filter-odd-property-type",
+        "d21-request-unknown-token-alias"};
+    return ids.contains(id);
 }
 
 bool setup_ready(std::span<const std::byte> input, unsigned minimum_ranges) {
@@ -51,7 +72,15 @@ bool setup_ready(std::span<const std::byte> input, unsigned minimum_ranges) {
 }  // namespace
 
 std::vector<RequestProbeProfile> draft21_request_profiles(
-    std::chrono::milliseconds deadline) {
+    std::chrono::milliseconds deadline, std::vector<Bytes> request_namespace, Bytes request_name) {
+    // Draft 22 runs share these profiles. A publisher may refuse an empty namespace before it reads the filter
+    // or token a profile is about, so on the draft 22 wire their SUBSCRIBE names the run's track (draft 21 is
+    // frozen: its bytes stay). Names too large to send throw std::invalid_argument.
+    const auto names = encode_probe_track_names(
+        probe_track_names(std::move(request_namespace), std::move(request_name)));
+    const auto subscribe = [&names](const Bytes& parameters, unsigned count = 1) {
+        return named_subscribe(names, parameters, count);
+    };
     std::vector<RequestProbeProfile> result;
     const auto add = [&](const char* requirement, const char* scenario,
                          const char* evaluator, std::uint64_t error,
@@ -122,6 +151,31 @@ std::vector<RequestProbeProfile> draft21_request_profiles(
             entry.compatibility_error = true;
     }
     return result;
+}
+
+std::optional<bool> evaluate_draft21_request_profile(
+    const RawProbeTranscript& transcript, const RequestProbeProfile& profile) {
+    if (current_wire_draft() != 22 || !run_names_profile(profile.definition.id))
+        return evaluate_raw_probe_request_error(transcript, profile);
+    // On the draft 22 wire the SUBSCRIBE named the run's track: rebuild the definition for the names the
+    // delivered request carries (only an exact rebuild is accepted) and prove the stimulus against it.
+    if (transcript.writes.empty()) return std::nullopt;
+    const auto& first = transcript.writes.front().write.bytes;
+    const auto names = recover_probe_track_names(first);
+    if (!names) return std::nullopt;
+    std::vector<RequestProbeProfile> rebuilt;
+    try {
+        rebuilt = draft21_request_profiles(profile.definition.deadline, names->track_namespace, names->track_name);
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    }
+    const auto found = std::find_if(rebuilt.begin(), rebuilt.end(), [&](const auto& candidate) {
+        return candidate.definition.id == profile.definition.id &&
+            candidate.requirement_id == profile.requirement_id && candidate.evaluator_id == profile.evaluator_id;
+    });
+    if (found == rebuilt.end() || found->definition.writes.empty() ||
+        found->definition.writes.front().bytes != first) return std::nullopt;
+    return evaluate_raw_probe_request_error(transcript, *found);
 }
 
 }  // namespace moq::interop::scenarios

@@ -138,7 +138,8 @@ std::optional<RawResult> raw_result(
             transcript.scenario_id == profile.definition.id &&
             includes(row.scenarios, profile.definition.id.c_str()) &&
             includes(row.evaluators, profile.evaluator_id.c_str())) {
-            const auto result = scenarios::evaluate_raw_probe_request_error(transcript, profile);
+            // evaluate_raw_probe_request_error on wire 21; on wire 22 it first rebuilds the run's names.
+            const auto result = scenarios::evaluate_draft21_request_profile(transcript, profile);
             if (result) return RawResult{*result, profile.evaluator_id};
             return std::nullopt;
         }

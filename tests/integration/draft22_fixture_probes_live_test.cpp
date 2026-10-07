@@ -193,5 +193,113 @@ TEST(Draft22FixtureProbesLive, SubscribeTracksUpdateCloseAnswersThePublishAndRea
     EXPECT_EQ(state_of(run, "D22-9-5-1-MUST-360"), requirements::OutcomeState::Pass);
 }
 
+// --- SUBSCRIBE / TRACK_STATUS probes that named (), "x" --------------------------------------------------
+
+// A request's Track Namespace field count, read after its type, length and one-byte Request ID.
+std::optional<std::uint64_t> namespace_fields(const Bytes& request) {
+    if (request.size() < 5) return std::nullopt;
+    return std::to_integer<std::uint64_t>(request[4]);
+}
+
+// Plays a publisher that, like imquic, closes 0x3 (PROTOCOL_VIOLATION) on a SUBSCRIBE or TRACK_STATUS with
+// no namespace field before it reads the rest. Returns the first request the runner sent, once it named
+// the run's track (n)/t; the caller then plays the probe's real condition.
+std::optional<Bytes> named_request(Client& client) {
+    const auto request = first_message(client, request_stream(0));
+    EXPECT_TRUE(request.has_value());
+    if (!request) return std::nullopt;
+    if (namespace_fields(*request) == 0u) {
+        EXPECT_TRUE(client.close(3, {})) << "Invalid number of namespaces";
+        ADD_FAILURE() << "the runner sent an empty namespace";
+        return std::nullopt;
+    }
+    return request;
+}
+
+// SUBSCRIBE Request ID 1 for (n)/t with one parameter: an undecodable AUTHORIZATION_TOKEN (Alias Type 3 with
+// no Token Type), and the unknown parameter 0x7e.
+Bytes undecodable_token_subscribe() { return b({3, 0, 10, 1, 1, 1, 'n', 1, 't', 1, 3, 1, 3}); }
+Bytes unknown_parameter_subscribe() { return b({3, 0, 9, 1, 1, 1, 'n', 1, 't', 1, 0x7e, 0}); }
+// The runner's liveness follow-up: SUBSCRIBE Request ID 7 for (n)/t, no parameters.
+Bytes liveness_subscribe() { return b({3, 0, 7, 7, 1, 1, 'n', 1, 't', 0}); }
+
+TEST(Draft22FixtureProbesLive, UndecodableTokenProbeNamesTheRunsTrackAndReachesTheToken) {
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-request-undecodable-authorization-token"}, 1500ms,
+        app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = connect(store, started, 1);
+    ASSERT_NE(client, nullptr);
+    if (const auto request = named_request(*client)) {
+        EXPECT_EQ(*request, undecodable_token_subscribe());
+        // Section 8.9: an undecodable token is a KEY_VALUE_FORMATTING_ERROR.
+        EXPECT_TRUE(client->close(6, {}));
+    }
+    pump_until_context_ends(*client, store, started.id);
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-8-9-MUST-279"), requirements::OutcomeState::Pass);
+}
+
+TEST(Draft22FixtureProbesLive, UnknownParameterProbeIsJudgedOnThePublishersAnswerNotOnTheName) {
+    // The publisher accepts the unknown parameter (as if it ignored it) and stays live: that is a genuine
+    // failure of Section 9.20. Before, the empty namespace drew the 0x3 close the row expects: a false pass.
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-unknown-message-parameter"}, 3000ms, app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto client = connect(store, started, 1);
+    ASSERT_NE(client, nullptr);
+    if (const auto request = named_request(*client)) {
+        EXPECT_EQ(*request, unknown_parameter_subscribe());
+        EXPECT_TRUE(client->send_stream(request_stream(0), subscribe_ok(), false));
+        EXPECT_TRUE(answer(*client, request_stream(1), liveness_subscribe(), subscribe_ok()))
+            << "the liveness follow-up asks for the run's track";
+    }
+    pump_until_context_ends(*client, store, started.id);
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-9-20-MUST-390"), requirements::OutcomeState::Fail);
+}
+
+// SUBSCRIBE Request ID 1 for (n)/t with a PRIORITY_FILTER whose Start (256) or End (255 + 1) exceeds 255.
+Bytes priority_start_subscribe() { return b({3, 0, 12, 1, 1, 1, 'n', 1, 't', 1, 0x27, 3, 0, 0x81, 0}); }
+Bytes priority_end_subscribe() { return b({3, 0, 13, 1, 1, 1, 'n', 1, 't', 1, 0x27, 4, 0, 0x80, 0xff, 1}); }
+// REQUEST_ERROR INVALID_FILTER (0x36).
+Bytes invalid_filter() { return b({5, 0, 3, 0x36, 0, 0}); }
+
+TEST(Draft22FixtureProbesLive, PriorityFilterProbesNameTheRunsTrackAndReachTheFilter) {
+    auto store = std::make_shared<storage::SqliteRunStore>(":memory:", app::BuildInfo{"test", "test", {}});
+    auto manager = manager_for(store);
+    const auto started = manager.start({app::DraftVersion::Draft22, app::TransportKind::NativeQuic,
+        app::RunMode::Observed, {"d22-priority-filter-start-above-255", "d22-priority-filter-end-above-255"},
+        1500ms, app::TrackFixture{{"n"}, "t"}});
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const std::vector<Bytes> expected{priority_start_subscribe(), priority_end_subscribe()};
+    for (unsigned ordinal = 1; ordinal <= 2; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        ASSERT_TRUE(context_ready(store, started.id, ordinal));
+        auto client = Client::create({.port = started.endpoint.port, .alpn = alpn_of("moqt-22")});
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(pump_until(*client, [&] {
+            const auto control = client->stream(3);
+            return control && control->data == setup();
+        }));
+        // The probes wait for a SETUP offering MAX_FILTER_RANGES (here 2).
+        EXPECT_TRUE(client->send_stream(2, b({0xaf, 0, 0, 2, 6, 2}), false));
+        if (const auto request = named_request(*client)) {
+            EXPECT_EQ(*request, expected[ordinal - 1]);
+            EXPECT_TRUE(client->send_stream(request_stream(0), invalid_filter(), true));
+        }
+        pump_until_context_ends(*client, store, started.id, ordinal);
+    }
+    const auto run = finish(manager, store, started.id);
+    EXPECT_FALSE(harness_error(run));
+    EXPECT_EQ(state_of(run, "D22-9-20-12-MUST-425"), requirements::OutcomeState::Pass);
+}
+
 }  // namespace
 }  // namespace moq::interop

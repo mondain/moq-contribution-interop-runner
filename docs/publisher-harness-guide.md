@@ -173,7 +173,7 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter") |
+| `draft` | `18`, `21` or `22` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21) |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -232,6 +232,81 @@ its twin-equality check:
 | `unknown-unidirectional-stream-type` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 | `unknown-control-message` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
 | `successful-subscribe-object-delivery` | `--forward 0 --paced`, timeout+3 | `--forward 1` |
+
+#### The imquic adapter (draft 22)
+
+`adapters/imquic/run.sh` drives imquic's example publisher (`examples/moq-pub.c`, built as
+`imquic-moq-pub`), named by `IMQUIC_PUB_BIN`, at draft 22 only. It passes `-M 22 -n media
+-N vide_1 -d 4`, translates the endpoint into `-r HOST -R PORT` plus `-q` (native QUIC) or
+`-w -H PATH` (WebTransport; the path and any query become the HTTP/3 `:path` unchanged, `/` if
+empty; IPv6 literals lose their brackets), and runs the publisher as
+`timeout --foreground --preserve-status -k 2 -s TERM <timeout+3>` with its output in
+`<log_dir>/publisher.log`. imquic's raw QUIC client sends no PATH or AUTHORITY SETUP
+option, so the `moqt://` path is dropped and a `moqt://` query is refused (exit 64), as are
+an empty host, a missing or out-of-range port, user information, a fragment and an IPv6
+zone. moq-pub reads no fixture (it publishes a clock: one Object per second, one Group per
+minute) and verifies no certificate, so `fixture` and `tls_ca` are not used.
+
+The adapter does not `exec` the publisher; it stays alive as a small supervisor. The runner
+stops a driver with SIGTERM to its process group and SIGKILLs the group 100 ms later, which
+it records as a driver failure (run `error`, `term_signal` 9), and moq-pub needs about
+40-160 ms after SIGTERM to send PUBLISH_DONE and PUBLISH_NAMESPACE_DONE and close. So the
+adapter starts `timeout` and moq-pub in the background (same process group), and on SIGTERM,
+SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub was already sent the
+group's SIGTERM (and the one `timeout` relays, so two in all, of which it observes one or two,
+because pending standard signals coalesce) and finishes on its own.
+moq-pub also bumps its stop counter on connection loss, GOAWAY and a refused PUBLISH or
+PUBLISH_NAMESPACE, and a signal that takes the counter past two makes it exit(1) without
+cleanup: that happens in about 5 percent of runs. It is not a regression (the former
+`exec timeout` adapter did the same in 43 of 186 runs of the first imquic sweep) and changed
+no verdict. Without a signal it waits and exits with the publisher's status as
+`--preserve-status` reports it, also when the deadline fired. The trade-off: after a stop,
+moq-pub briefly outlives the adapter without the runner's SIGKILL backstop; it stays bounded
+by `timeout -k 2` (SIGKILL at most 2 s after the signal). When you run the adapter by hand, note
+that a background child of a shell without job control starts with SIGINT and SIGQUIT ignored:
+Ctrl-C ends only the adapter, and moq-pub runs on to its `timeout` deadline. The runner uses
+SIGTERM, so this affects interactive use only.
+
+The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
+is refused with DUPLICATE_SUBSCRIPTION, code 0x19, which draft 22 does not define) or
+announce-and-wait (no `-X`: PUBLISH_NAMESPACE, then a SUBSCRIBE is accepted and Objects flow
+if it carries FORWARD=1; once delivery has started, a further SUBSCRIBE is refused with
+DUPLICATE_SUBSCRIPTION, while SUBSCRIBEs without FORWARD=1 start nothing and later ones are
+still accepted). In either mode a refused PUBLISH or PUBLISH_NAMESPACE ends the session. It is
+derived from the moqxr adapter: moqxr `--forward 1` gives `-X`, `--forward 0` (paced or not)
+gives none, and the own scenarios and probes follow the moqxr table above. Where imquic's
+modes differ from moqxr's, these shared scenarios deviate from the derivation:
+
+| `d22-` scenario | imquic | moqxr | Why |
+|---|---|---|---|
+| `complete-subgroup-fin`, `subgroup-start-location-fin` | no `-X` | `--forward 1` | the runner subscribes and judges Subgroup FINs |
+| `object-datagram-flags` | no `-X`, `-D datagram` | `--forward 1` | the runner subscribes and judges Object datagrams |
+| `original-publisher-opens-new-subgroup`, `publish-track-with-mandatory-property`, `subscribe-single-subgroup` | no `-X` | `--forward 1` | the runner subscribes and judges the Objects |
+| `subscribe-accepted` | no `-X` | `--forward 1` | scores the SUBSCRIBE_OK branch (`subscribe-rejected` keeps `-X`) |
+| `request-update-overrun`, `request-update-independent-streams` | no `-X` | `--forward 1` | REQUEST_UPDATEs on the runner's own subscriptions |
+| `publish-namespace-redirect-nonempty-track-name`, `publisher-namespace-routing-announcement` | no `-X` | `--forward 1` | need the publisher's PUBLISH_NAMESPACE |
+| `setup-key-value-type-overflow`, `setup-key-value-declared-length-overflow` | no `-X` | `--forward 1` | the probe's liveness SUBSCRIBE must be accepted; with `-X` moq-pub refuses it (REQUEST_ERROR 0x19) and the row stays unscored |
+| `setup-register-default-zero-cache` | no `-X` | `--forward 1` | keeps its liveness SUBSCRIBE from being refused by `-X` (harmless either way); its row `D22-9-1-4-MUST-NOT-318` stays unscored because it is bound to two scenarios and the sibling `setup-register-exceeds-token-cache` needs a MAX_AUTH_TOKEN_CACHE_SIZE of at least 1, which imquic does not announce |
+| `publish-update-ok-with-track-properties` | `-X` | `--forward 0 --paced` | its first write answers the publisher's PUBLISH |
+| `publish-established-subscriber-sends-publish-state-notify` | `-X` | `--forward 0 --paced` | answers the publisher's PUBLISH, then sends PUBLISH_STATE_NOTIFY on it |
+| `subscribe-tracks-publish-skipped-then-capacity-recovers` | `-X` | `--forward 0` | sends its SUBSCRIBE_TRACKS only after the publisher's PUBLISH |
+
+`tests/e2e/imquic-adapter-cmdlines.sh` pins every command line in
+`tests/golden/imquic-cmdlines-d22.txt` and checks the derivation and these exceptions;
+`tests/e2e/imquic-adapter-contract.sh` checks validation, endpoint translation, the
+`timeout` wrapper and the supervisor's shutdown (adapter exit within the 100 ms grace, the
+publisher's cleanup and the `-k 2` bound).
+
+Limits of this adapter and publisher: namespace fields and the track name must be printable
+ASCII without spaces (the adapter accepts only the reference `media` / `vide_1`); moq-pub
+registers no FETCH handler, so start the runner with `--publisher-no-fetch` (or declare
+`"publisher_capabilities": {"fetch": false}`); it has no SUBSCRIBE_NAMESPACE or
+SUBSCRIBE_TRACKS handler of its own (the library answers NOT_SUPPORTED); and the adapter
+passes no emission option other than `-D datagram` (no `-P` padding, no `-f` / `-F` prior
+group or object gap, no `-x` Object properties), so the rows that need them stay unscored. The draft 22 sweep
+against imquic and its triage are in
+[interop-notes.md](interop-notes.md#draft-22-sweep-against-imquic-6836173); the imquic findings
+are in [imquic-punch-list.md](imquic-punch-list.md).
 
 A real request file from a run:
 

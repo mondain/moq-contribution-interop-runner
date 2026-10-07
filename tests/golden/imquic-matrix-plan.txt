@@ -1,0 +1,8 @@
+contract: bash @ROOT@/tests/e2e/imquic-adapter-contract.sh
+matrix draft=22 transport=native_quic
+runner: IMQUIC_PUB_BIN=</opt/imquic/imquic-moq-pub> </opt/moq/bin/moq-interop> <--bind> <127.0.0.1> <--port> <19221> <--database> <@TMP@/runs.sqlite3> <--docs> <@ROOT@/docs> <--requirements> <@ROOT@/requirements> <--publisher-bind> <127.0.0.1> <--publisher-advertise> <127.0.0.1> <--publisher-port-start> <19222> <--publisher-port-end> <19222> <--tls-cert> <@TMP@/cert.pem> <--tls-key> <@TMP@/key.pem> <--driver-executable> <@ROOT@/adapters/imquic/run.sh> <--driver-fixture> </opt/moq/fixture.mp4> <--driver-log-root> <@TMP@/logs>
+request: POST http://127.0.0.1:19221/api/v1/runs {"draft":22,"transport":"native-quic","mode":"driven","scenarios":["d22-publisher-request-stream-placement"],"timeout_ms":12000,"track":{"namespace_hex":["6d65646961"],"name_hex":"766964655f31"}}
+matrix draft=22 transport=webtransport
+runner: IMQUIC_PUB_BIN=</opt/imquic/imquic-moq-pub> </opt/moq/bin/moq-interop> <--bind> <127.0.0.1> <--port> <19223> <--database> <@TMP@/runs.sqlite3> <--docs> <@ROOT@/docs> <--requirements> <@ROOT@/requirements> <--publisher-bind> <127.0.0.1> <--publisher-advertise> <127.0.0.1> <--publisher-port-start> <19224> <--publisher-port-end> <19224> <--tls-cert> <@TMP@/cert.pem> <--tls-key> <@TMP@/key.pem> <--driver-executable> <@ROOT@/adapters/imquic/run.sh> <--driver-fixture> </opt/moq/fixture.mp4> <--driver-log-root> <@TMP@/logs>
+request: POST http://127.0.0.1:19223/api/v1/runs {"draft":22,"transport":"webtransport","mode":"driven","scenarios":["d22-publisher-request-stream-placement"],"timeout_ms":12000,"track":{"namespace_hex":["6d65646961"],"name_hex":"766964655f31"}}
+matrix dry run completed; nothing was started

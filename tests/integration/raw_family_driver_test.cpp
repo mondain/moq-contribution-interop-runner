@@ -1677,5 +1677,44 @@ TEST(NativeRunManagerDraft22Fixtures, SharedScenariosAnswerDegenerateFixturesLik
     EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
     for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
 }
+
+// The shared SUBSCRIBE / TRACK_STATUS probes that name the run's track on the draft 22 wire (they named (),
+// "x" before). Every degenerate fixture valid_fixture accepts builds (an empty namespace or track name
+// included) and every one it refuses is InvalidConfig, as on draft 21 (a whole fixture of 32 fields of 4096
+// bytes, which could not fit one probe frame, is among the refused). Nothing is bound or stored either way.
+TEST(NativeRunManagerDraft22Fixtures, RunNamedRequestProbesBuildDegenerateFixturesWithoutCrashing) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=lineage_manager(store,catalog22());
+    const auto blockers=fill_run_slots(manager);
+    const std::vector<std::string_view> ids{
+        "d22-group-order-zero","d22-group-order-above-two","d22-fill-invalid-group-order","d22-forward-value-two",
+        "d22-forward-value-255","d22-include-properties-value-two","d22-include-properties-value-255",
+        "d22-fill-timeout-outside-fill-or-fetch","d22-fill-recursive-parameter",
+        "d22-fill-forbidden-track-property-filter","d22-fill-forbidden-nested-authorization",
+        "d22-parameter-invalid-message-scope","d22-parameter-type-delta-overflow","d22-unknown-message-parameter",
+        "d22-unexpected-duplicate-message-parameter","d22-request-undecodable-authorization-token",
+        "d22-request-token-cache-overflow","d22-request-alias-registration-with-default-zero-cache",
+        "d22-token-duplicate-registration","d22-request-message-truncated-at-fin","d22-update-on-track-status",
+        "d22-unknown-request-stream-message","d22-duplicate-range-filter-key-in-request",
+        "d22-range-filter-start-delta-overflow","d22-range-filter-end-delta-overflow",
+        "d22-priority-filter-start-above-255","d22-priority-filter-end-above-255",
+        "d22-object-property-filter-odd-property-type","d22-request-unknown-token-alias"};
+    auto fixtures=degenerate_fixtures();
+    fixtures.push_back({"too large for one probe frame",
+        app::TrackFixture{std::vector<std::string>(32,std::string(4096,'n')),"t"}});
+    for (const auto id : ids) {
+        for (const auto& [name,fixture] : fixtures) {
+            SCOPED_TRACE(std::string(id)+" / "+name);
+            const auto started=manager.start({app::DraftVersion::Draft22,app::TransportKind::NativeQuic,
+                app::RunMode::Observed,{std::string(id)},1000ms,fixture});
+            // The bounds valid_fixture refuses are InvalidConfig before any probe is built (as on draft 21).
+            const bool out_of_bounds=name=="empty field" || name=="33 fields" || name.find("over 4096")!=std::string::npos;
+            EXPECT_EQ(started.status,out_of_bounds || name=="too large for one probe frame"
+                ? app::RunStartStatus::InvalidConfig : app::RunStartStatus::PortExhausted);
+        }
+    }
+    EXPECT_EQ(store->list({100,0}).total,blockers.size()) << "no run is created";
+    for (const auto& id : blockers) EXPECT_TRUE(manager.stop(id));
+}
 }
 }

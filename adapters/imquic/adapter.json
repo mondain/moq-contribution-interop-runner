@@ -1,0 +1,11 @@
+{
+  "adapter_id": "imquic",
+  "driver_contract_version": 1,
+  "entrypoint": "run.sh",
+  "publisher_binary_environment": "IMQUIC_PUB_BIN",
+  "supported_drafts": [22],
+  "supported_transports": ["native_quic", "webtransport"],
+  "supported_namespace_hex": ["6d65646961"],
+  "supported_track_name_hex": "766964655f31",
+  "protocol_expectations": "none; logs and exit status are diagnostic only"
+}

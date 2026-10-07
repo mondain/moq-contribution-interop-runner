@@ -1,4 +1,5 @@
 #include "moq/interop/scenarios/draft21_close.h"
+#include "moq/interop/scenarios/draft22_run_names.h"
 #include "moq/interop/scenarios/location_filter_param.h"
 #include "moq/interop/scenarios/wire_draft.h"
 #include "moq/interop/scenarios/fetch_first_object.h"
@@ -11,7 +12,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <stdexcept>
+#include <string_view>
 
 namespace moq::interop::scenarios {
 namespace {
@@ -45,13 +48,33 @@ bool setup_ready(std::span<const std::byte> input) {
         wire::draft21::decode_setup(cursor));
 }
 
-Bytes subscribe(const Bytes& parameters, unsigned parameter_count = 1,
-                unsigned request_id = 1) {
-    // Section 9.6 Figure 10: Request ID, zero namespace fields, name x,
+Bytes named_subscribe(const Bytes& names, const Bytes& parameters, unsigned parameter_count,
+                      unsigned request_id) {
+    // Section 9.6 Figure 10: Request ID, the track's names (zero namespace fields and name x on wire 21),
     // parameter count. The raw parameters deliberately bypass valid encoders.
-    auto body = bytes({request_id, 0, 1, 'x', parameter_count});
+    auto body = bytes({request_id});
+    body.insert(body.end(), names.begin(), names.end());
+    body.push_back(static_cast<std::byte>(parameter_count));
     body.insert(body.end(), parameters.begin(), parameters.end());
+    if (body.size() > 65535) throw std::invalid_argument("track names do not fit a probe request");
     return frame(3, body);
+}
+
+// The probes whose SUBSCRIBE or TRACK_STATUS names a track only because the message needs one: (), "x" on
+// wire 21, the run's track on wire 22 (draft21_close_probes' request names).
+bool run_names_probe(std::string_view id) {
+    static const std::set<std::string_view> ids{
+        "d21-parameter-type-delta-overflow", "d21-request-undecodable-authorization-token",
+        "d21-unknown-message-parameter", "d21-unexpected-duplicate-message-parameter",
+        "d21-parameter-invalid-message-scope", "d21-group-order-zero", "d21-location-filter-end-group-overflow",
+        "d21-forward-value-two", "d21-include-properties-value-two", "d21-fill-forbidden-nested-authorization",
+        "d21-fill-forbidden-track-property-filter", "d21-fill-recursive-parameter", "d21-update-on-track-status",
+        "d21-token-duplicate-registration", "d21-request-token-cache-overflow",
+        "d21-unknown-request-stream-message", "d21-request-message-truncated-at-fin", "d21-group-order-above-two",
+        "d21-fill-invalid-group-order", "d21-fill-location-filter-end-group-overflow", "d21-forward-value-255",
+        "d21-include-properties-value-255", "d21-request-alias-registration-with-default-zero-cache",
+        "d21-fill-timeout-outside-fill-or-fetch"};
+    return ids.contains(id);
 }
 
 bool successful_response_ready(std::span<const std::byte> input,
@@ -189,10 +212,19 @@ std::optional<std::uint64_t> peer_token_cache_capacity(
 
 std::vector<Draft21CloseProbe> draft21_close_probes(
     std::chrono::milliseconds deadline, std::vector<Bytes> track_namespace,
-    Bytes track_name) {
+    Bytes track_name, std::vector<Bytes> request_namespace, Bytes request_name) {
     const FetchTrack track{std::move(track_namespace), std::move(track_name)};
     if (deadline.count() <= 0 || !valid_track(track))
         throw std::invalid_argument("invalid draft21 close probe configuration");
+    // Draft 22 runs share these probes. A publisher may refuse an empty namespace before it reads the
+    // parameter a probe is about, so on the draft 22 wire the SUBSCRIBE / TRACK_STATUS probes name the run's
+    // track (draft 21 is frozen: its bytes stay). Names too large to send throw std::invalid_argument.
+    const auto names = encode_probe_track_names(
+        probe_track_names(std::move(request_namespace), std::move(request_name)));
+    const auto subscribe = [&names](const Bytes& parameters, unsigned parameter_count = 1,
+                                    unsigned request_id = 1) {
+        return named_subscribe(names, parameters, parameter_count, request_id);
+    };
     std::vector<Draft21CloseProbe> result;
     const auto add = [&](const char* requirement, const char* scenario,
                          const char* evaluator, RawProbeChannel channel,
@@ -370,7 +402,10 @@ std::vector<Draft21CloseProbe> draft21_close_probes(
         subscribe(bytes({0x23, 2, 0x23, 0})));
     // Sections 9.5 and 9.13: TRACK_STATUS cannot receive REQUEST_UPDATE,
     // even from its original sender with a fresh, correctly odd Request ID.
-    auto status_update = frame(0x0d, bytes({1, 0, 1, 'x', 0}));
+    auto status_body = bytes({1});
+    status_body.insert(status_body.end(), names.begin(), names.end());
+    status_body.push_back(std::byte{0});
+    auto status_update = frame(0x0d, status_body);
     const auto update = frame(2, bytes({3, 0}));
     status_update.insert(status_update.end(), update.begin(), update.end());
     add("D21-9-5-MUST-344", "d21-update-on-track-status",
@@ -549,6 +584,28 @@ std::optional<bool> evaluate_draft21_close_probe(
         probe.definition.id == "d21-duplicate-request-update-id";
     const bool publish_context = probe.definition.id ==
         "d21-publish-established-subscriber-sends-publish-state-notify";
+    if (current_wire_draft() == 22 && run_names_probe(probe.definition.id)) {
+        // On the draft 22 wire the request named the run's track: rebuild the definition for the names the
+        // delivered request carries (only an exact rebuild is accepted) and prove the stimulus against it.
+        if (transcript.writes.empty()) return std::nullopt;
+        const auto& first = transcript.writes.front().write.bytes;
+        const auto names = recover_probe_track_names(first);
+        if (!names) return std::nullopt;
+        std::vector<Draft21CloseProbe> rebuilt;
+        try {
+            rebuilt = draft21_close_probes(probe.definition.deadline, {}, {std::byte{'x'}},
+                                           names->track_namespace, names->track_name);
+        } catch (const std::invalid_argument&) {
+            return std::nullopt;
+        }
+        const auto found = std::find_if(rebuilt.begin(), rebuilt.end(), [&](const auto& candidate) {
+            return candidate.definition.id == probe.definition.id &&
+                candidate.requirement_id == probe.requirement_id && candidate.evaluator_id == probe.evaluator_id;
+        });
+        if (found == rebuilt.end() || found->definition.writes.empty() ||
+            found->definition.writes.front().bytes != first) return std::nullopt;
+        return evaluate_raw_probe_close(transcript, found->definition, found->expected_close);
+    }
     if (!fetch_context && !subscribe_context && !publish_context)
         return evaluate_raw_probe_close(transcript, probe.definition, probe.expected_close);
     if (transcript.writes.empty()) return std::nullopt;
