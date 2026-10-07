@@ -1307,6 +1307,24 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME moqlite06-group
              COMMAND moq-interop-moqlite06-group-tests)
 
+    add_executable(moq-interop-moqlite06-wire-audit-tests
+                   tests/golden/moqlite06_wire_audit_test.cpp)
+    target_compile_definitions(moq-interop-moqlite06-wire-audit-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-moqlite06-wire-audit-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-wire-audit
+             COMMAND moq-interop-moqlite06-wire-audit-tests)
+
+    add_executable(moq-interop-moqlite06-crosscheck-tests
+                   tests/golden/moqlite06_crosscheck_test.cpp)
+    target_compile_definitions(moq-interop-moqlite06-crosscheck-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-moqlite06-crosscheck-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-crosscheck
+             COMMAND moq-interop-moqlite06-crosscheck-tests)
+
     add_executable(moq-interop-draft22-shared-tests
                    tests/golden/draft22_shared_test.cpp)
     target_link_libraries(moq-interop-draft22-shared-tests PRIVATE

@@ -1,0 +1,32 @@
+# moq-lite-06 wire vectors extracted from the moq.dev Rust implementation, for read-only cross-checking.
+#
+# Provenance
+#   Repository:  /media/mondain/terrorbyte/workspace/github-moq/moq   (moq.dev, "moq" monorepo, branch main)
+#   Commit:      b8b0d235a99bddb9043f453c46c958362d6c9247   (read from .git/HEAD -> refs/heads/main)
+#   Licence:     MIT OR Apache-2.0   (rs/moq-net/Cargo.toml "license"; repository files LICENSE-MIT and
+#                LICENSE-APACHE; the MIT file is "MIT License, Copyright (c) 2023 Luke Curley")
+#   Extracted:   2026-10-07, MANUALLY (byte-array literals copied by hand from Rust test sources, no tool)
+#   Read by:     tests/golden/moqlite06_crosscheck_test.cpp. The checkout is never edited.
+#
+# Format, one vector per line:  name | message | hex bytes | source file:line | expected fields
+#   source is relative to the moq.dev checkout root. expected fields are key=value pairs separated by ';'.
+#   message is SETUP, VARINT or ANNOUNCE_END.
+#
+# Coverage. moq.dev's Rust tests hold very few literal Lite06 wire bytes: nearly every other test builds a
+# message in memory and round-trips it. The usable literals are the SETUP cost vector and the three Lite06
+# varint cases below. There are NO usable Lite06 byte literals for ANNOUNCE_REQUEST, ANNOUNCE_OK,
+# ANNOUNCE_START, ANNOUNCE_UPDATE, SUBSCRIBE, SUBSCRIBE_UPDATE, SUBSCRIBE_OK, SUBSCRIBE_END, SUBSCRIBE_DROP,
+# GROUP or FRAME in announce.rs, subscribe.rs, group.rs, message.rs or datagram.rs, so the cross-check for
+# those messages is limited to the structural facts the crosscheck test cites from the Rust tests.
+# The only TRACK_INFO literal (track.rs:215) is a Lite05 vector for a message that is out of scope for L1b
+# and is deliberately not extracted.
+#
+# One vector is DERIVED, not a literal: moq.dev announce.rs:829 asserts only that an ANNOUNCE_END for id 42
+# on Lite06 encodes to 3 bytes ("type byte, size prefix, id varint"). The bytes below are built from draft
+# 7.7 (Type 0x1, Message Length 1, Announce ID 0x2A) and agree with that length.
+#
+setup_cost_100_lite06 | SETUP | 05 01 04 02 40 64 | rs/moq-net/src/lite/setup.rs:398 | parameter_count=1;parameter.4=4064;cost=100
+varint_63_lite06 | VARINT | 3F | rs/moq-net/src/coding/varint.rs:487 | value=63
+varint_64_lite06 | VARINT | 40 40 | rs/moq-net/src/coding/varint.rs:488 | value=64
+varint_16384_lite06 | VARINT | 80 00 40 00 | rs/moq-net/src/coding/varint.rs:489 | value=16384
+announce_end_id_42_lite06_derived | ANNOUNCE_END | 01 01 2A | rs/moq-net/src/lite/announce.rs:829 | announce_id=42;derived=true
