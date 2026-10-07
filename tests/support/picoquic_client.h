@@ -71,6 +71,8 @@ public:
     bool retire_destination_id(std::uint64_t sequence);
     std::optional<ClientStreamObservation> stream(
         std::uint64_t stream_id) const;
+    // The application error of a STOP_SENDING the peer sent for `stream_id`, if any.
+    std::optional<std::uint64_t> stop_sending_error(std::uint64_t stream_id) const;
     std::vector<std::vector<std::byte>> take_datagrams();
     std::optional<ClientCloseObservation> peer_close() const;
     bool close(std::uint64_t application_error,

@@ -338,11 +338,12 @@ target_compile_options(moq-interop-lite-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
+add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp
+    src/app/lite_run.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-    moq-interop-storage moq-interop-lineage-run)
+    moq-interop-storage moq-interop-lineage-run moq-interop-lite-evaluators)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
@@ -482,6 +483,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-moqlite-start-guard-tests PRIVATE
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME moqlite-start-guard COMMAND moq-interop-moqlite-start-guard-tests)
+    # Live moq-lite-06 runs through the production run manager (L1d Task 9).
+    add_executable(moq-interop-lite-run-live-tests tests/integration/lite_run_live_test.cpp)
+    target_include_directories(moq-interop-lite-run-live-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-run-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+    target_compile_definitions(moq-interop-lite-run-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME lite-run-live COMMAND moq-interop-lite-run-live-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)

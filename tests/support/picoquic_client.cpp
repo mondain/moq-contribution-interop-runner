@@ -428,6 +428,11 @@ std::optional<ClientStreamObservation> PicoquicTestClient::stream(std::uint64_t 
     const auto found = impl_->streams.find(stream_id);
     return found == impl_->streams.end() ? std::nullopt : std::optional{found->second};
 }
+std::optional<std::uint64_t> PicoquicTestClient::stop_sending_error(std::uint64_t stream_id) const {
+    if (!impl_) return std::nullopt;
+    const auto found = impl_->stopped.find(stream_id);
+    return found == impl_->stopped.end() ? std::nullopt : std::optional{found->second};
+}
 std::vector<std::vector<std::byte>> PicoquicTestClient::take_datagrams() {
     if (!impl_) return {};
     auto result = std::move(impl_->datagrams);
