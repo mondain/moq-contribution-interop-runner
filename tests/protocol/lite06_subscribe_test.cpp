@@ -814,10 +814,11 @@ TEST(Lite06SubscribeInvalidBounds, NoReactionFailsOnceTheAllowanceElapsed) {
 }
 
 TEST(Lite06SubscribeInvalidBounds, ASessionCloseInsteadOfTheResetFails) {
-    // The shared publisher's own reaction to an undecodable SUBSCRIBE: close with PROTOCOL_VIOLATION.
+    // The shared publisher with its named defect: close with PROTOCOL_VIOLATION on the undecodable SUBSCRIBE.
     ConformingLitePublisherConfig config;
     config.broadcast = kBroadcast;
     config.track = kTrack;
+    config.defect = LiteDefect::CloseOnInvalidSubscribe;
     const auto t = run(invalid_probe(), config);
     ASSERT_TRUE(t.peer_close.has_value());
     EXPECT_EQ(t.peer_close->code, 0x3u);

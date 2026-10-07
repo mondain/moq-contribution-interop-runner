@@ -274,6 +274,8 @@ enum class LiteDefect {
     NoSetupStream,         // never opens its own Setup stream
     SilentOnAnnounce,      // never answers an ANNOUNCE_REQUEST
     IgnoreUnknownStreams,  // neither resets nor stops a runner stream of an unknown type (draft 7.2)
+    CloseOnInvalidSubscribe,  // closes the session (PROTOCOL_VIOLATION) on an undecodable SUBSCRIBE (draft 3.6)
+    OffsetGroupStart,         // reads a SUBSCRIBE Group Start offset by one: starts at max(latest, Group Start - 1)
 };
 
 // A request the runner opened, decoded far enough to answer.
@@ -309,25 +311,62 @@ struct ConformingLitePublisherConfig {
     std::uint64_t not_found_code{0x33};
     // Session error code for a violation of the session rules (PROTOCOL_VIOLATION).
     std::uint64_t protocol_violation_code{0x3};
+    // Stream error code for resetting a SUBSCRIBE that fails decoding (INTERNAL_ERROR: the stream table has no
+    // protocol-violation code).
+    std::uint64_t invalid_subscribe_code{0x0};
+    // Stream error code for ending a subscription, or a Group stream, the runner cancelled (CANCELLED).
+    std::uint64_t cancelled_code{0x1};
+    // After the `groups_per_subscription` whole groups of an unbounded subscription, one more Group stream is opened
+    // and left open (GROUP + frames, no FIN): the group still being produced.
+    bool keep_live_group_open{true};
+    // Draft 4.3: close the send direction of a stream this publisher answered once the runner closed (FIN) its own.
+    // nullopt: on, unless hooks.on_poll is set (the scenario scripts of Tasks 5-7 own their stream endings there).
+    std::optional<bool> echo_runner_fin{};
+    // The session URL the adapter gave this publisher, and the binding (draft 7.3.2): on native QUIC the SETUP
+    // carries Path = path + "?" + query (no '?' when the query is empty); on WebTransport (or Unknown) no Path.
+    std::string session_url_path{};
+    std::string session_url_query{};
+    scenarios::LiteBinding binding{scenarios::LiteBinding::Unknown};
     LiteDefect defect{LiteDefect::None};
     LitePublisherHooks hooks{};
 };
 
-// Replies per the draft: its own Setup stream first; ANNOUNCE_OK (Hop ID, Active Count) then one ANNOUNCE_START for
-// the configured broadcast when the prefix covers it; SUBSCRIBE_OK (latest group) then one Group stream per poll,
-// each GROUP plus frames and FIN, for the configured broadcast/track; NOT_FOUND reset for other tracks; resets (bidi)
-// or stops (uni) runner streams of unknown or unserved types; a second runner Setup stream, a malformed SETUP
-// (a repeated Parameter ID included) or a runner SETUP carrying Path or Role (client-only, draft 7.3.2/7.3.3)
-// closes the session with PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3). Deterministic. The
-// publisher must outlive the peer it reacts for.
+// Replies per the draft, so that every moq-lite-06 scenario judges it conforming (the end-to-end conformance table,
+// tests/protocol/lite_conformance_test.cpp):
+//   - its own Setup stream first (config `setup_parameters`, plus Path on native QUIC from the session URL);
+//   - ANNOUNCE_OK (Hop ID, Active Count) then one ANNOUNCE_START for the configured broadcast when the prefix
+//     covers it;
+//   - SUBSCRIBE_OK then Group streams for the configured broadcast/track, one per poll: Group Start read raw
+//     (start = max(latest_group, Group Start), draft 3.6), Frame Start applied only when the start resolves at the
+//     Group Start group (else the GROUP's Frame Start is 0), Group End / Frame End honored (the last group stops at
+//     Frame End); an unbounded subscription gets `groups_per_subscription` whole groups (FIN) and then, with
+//     `keep_live_group_open`, one more Group stream left open;
+//   - a later SUBSCRIBE is answered the same way (SUBSCRIBE_OK), whatever was cancelled before it;
+//   - NOT_FOUND reset (+ STOP_SENDING) for other broadcasts or tracks; a SUBSCRIBE that fails decoding (Frame End
+//     without Group End, draft 3.6) is reset with `invalid_subscribe_code`, the session stays open;
+//   - the runner resetting or stopping a Subscribe stream this publisher serves ends that subscription: RESET_STREAM
+//     CANCELLED on the Subscribe stream and on its open Group streams, no further groups; a STOP_SENDING on an open
+//     Group stream resets only that stream (CANCELLED); the runner resetting or stopping an announce stream this
+//     publisher answered is answered by resetting its send direction (draft 4.3);
+//   - the runner closing (FIN) the send direction of a stream this publisher answered is answered by closing its own
+//     (FIN; a served subscription's open Group streams are reset first), see `echo_runner_fin` (draft 4.3);
+//   - resets (bidi) or stops (uni) runner streams of unknown or unserved types;
+//   - a second runner Setup stream, a malformed SETUP (a repeated Parameter ID included), a runner SETUP carrying
+//     Path or Role (client-only, draft 7.3.2/7.3.3) or another malformed request closes the session with
+//     PROTOCOL_VIOLATION; unknown Parameter IDs are ignored (draft 7.3).
+// Deterministic. The publisher must outlive the peer it reacts for.
 //
 // Defaults that are the implementer's choices, NOT draft rules (Tasks 4-7 set what their rows need):
 //   - unknown_stream_code 0x0 for resetting/stopping unknown or unserved streams (the draft names no code);
+//   - invalid_subscribe_code 0x0 (INTERNAL_ERROR) for the undecodable SUBSCRIBE (the stream table has no
+//     protocol-violation code);
 //   - the ANNOUNCE_START hop list is empty and both route costs are 0 (the publisher is the origin);
 //   - prefix coverage is plain std::string::starts_with on the configured broadcast path (no segment rules);
 //   - one Group stream per poll, so the group rate follows the test tick, not media time;
 //   - Fetch, Probe, Goaway and Track streams (L2 kinds) are refused like unknown types;
-//   - a SUBSCRIBE floor (group_start > 0) starts at max(latest_group, group_start - 1); bounds are not checked.
+//   - the Subscriber Max Age is not consulted: no history is held, every unfloored subscription starts at
+//     latest_group;
+//   - a bounded subscription ends with its last group (no SUBSCRIBE_END, the Subscribe stream stays open).
 class ConformingLitePublisher {
 public:
     explicit ConformingLitePublisher(ConformingLitePublisherConfig config = {}) : config_(std::move(config)) {}
@@ -347,15 +386,26 @@ public:
         }
         for (const auto& [id, stream] : peer.runner_streams()) {
             if (peer.peer_closed()) break;
+            if (publisher_uni(id)) continue;  // a Group stream the runner stopped: handled below
             read_runner_stream(peer, id, stream);
         }
-        emit_one_group(peer);
+        if (!peer.peer_closed()) react_to_runner_endings(peer);
+        if (!peer.peer_closed()) emit_one_group(peer);
         if (config_.hooks.on_poll) config_.hooks.on_poll(*this, peer);
     }
 
     // Default behaviors, public so hooks can reuse them.
     void send_setup(ScriptedLitePeer& peer) {
-        peer.data(peer.open_peer_uni(), setup_stream({config_.setup_parameters}), true);
+        l06::SetupMessage message{config_.setup_parameters};
+        const bool has_path = std::any_of(message.parameters.begin(), message.parameters.end(),
+                                          [](const l06::SetupParameter& p) { return p.id == l06::kParamPath; });
+        if (config_.binding == scenarios::LiteBinding::NativeQuic && !config_.session_url_path.empty() && !has_path) {
+            std::string value = config_.session_url_path;
+            if (!config_.session_url_query.empty()) value += "?" + config_.session_url_query;
+            message.parameters.insert(message.parameters.begin(),
+                                      l06::SetupParameter{l06::kParamPath, bytes_of(value)});
+        }
+        peer.data(peer.open_peer_uni(), setup_stream(message), true);
     }
     void answer_announce(ScriptedLitePeer& peer, transport::StreamId stream, const l06::AnnounceRequest& request) {
         const bool covered = config_.broadcast.starts_with(request.prefix);
@@ -367,22 +417,50 @@ public:
             reply.insert(reply.end(), more.begin(), more.end());
         }
         peer.data(stream, std::move(reply));
+        answered_.insert(stream);
     }
     void answer_subscribe(ScriptedLitePeer& peer, transport::StreamId stream, const l06::Subscribe& subscribe) {
         if (subscribe.broadcast_path != config_.broadcast || subscribe.track_name != config_.track) {
             refuse(peer, stream, config_.not_found_code);
             return;
         }
-        std::uint64_t first = config_.latest_group;
-        if (subscribe.range.group_start > 0) first = std::max(first, subscribe.range.group_start - 1);
-        peer.data(stream, subscribe_response(l06::SubscribeOk{first}));
+        const auto& range = subscribe.range;
+        std::uint64_t start = config_.latest_group;
+        if (range.group_start > 0) {
+            start = config_.defect == LiteDefect::OffsetGroupStart ? std::max(start, range.group_start - 1)
+                                                                    : std::max(start, range.group_start);
+        }
+        // Draft 3.6: Frame Start qualifies only the Group Start group.
+        const std::uint64_t first_frame = start == range.group_start ? range.frame_start : 0;
+        peer.data(stream, subscribe_response(l06::SubscribeOk{start}));
+        answered_.insert(stream);
+        auto& served = subscriptions_[stream];
+        served.subscribe_id = subscribe.subscribe_id;
+        const auto plan = [&](std::uint64_t sequence, std::uint64_t total, bool fin) {
+            const std::uint64_t from = sequence == start ? first_frame : 0;
+            pending_groups_.push_back({stream, subscribe.subscribe_id, sequence, from, total > from ? total - from : 0,
+                                       fin});
+        };
+        if (range.group_end != 0) {
+            // Bounded: groups start .. Group End - 1, the last one cut at Frame End (when non-zero).
+            for (std::uint64_t sequence = start; sequence + 1 <= range.group_end; ++sequence) {
+                std::uint64_t total = config_.frames_per_group;
+                if (sequence + 1 == range.group_end && range.frame_end != 0)
+                    total = std::min<std::uint64_t>(total, range.frame_end);
+                plan(sequence, total, true);
+            }
+            return;
+        }
         for (std::size_t i = 0; i < config_.groups_per_subscription; ++i)
-            pending_groups_.push_back({stream, subscribe.subscribe_id, first + i});
+            plan(start + i, config_.frames_per_group, true);
+        if (config_.keep_live_group_open)
+            plan(start + config_.groups_per_subscription, config_.frames_per_group, false);
     }
     void refuse(ScriptedLitePeer& peer, transport::StreamId stream, std::uint64_t code) {
         if ((stream & 2u) == 0u) peer.peer_reset(stream, code);
         peer.peer_stop_sending(stream, code);
         cancelled_.insert(stream);
+        send_ended_.insert(stream);
     }
     void close(ScriptedLitePeer& peer, std::uint64_t code, std::string reason = {}) {
         peer.close_session(code, std::move(reason));
@@ -402,7 +480,17 @@ private:
         transport::StreamId subscribe_stream;
         std::uint64_t subscribe_id;
         std::uint64_t sequence;
+        std::uint64_t frame_start;
+        std::uint64_t frames;
+        bool fin;
     };
+    // A subscription this publisher serves (answered by answer_subscribe).
+    struct Served {
+        std::uint64_t subscribe_id{0};
+        std::set<transport::StreamId> open_groups;
+    };
+
+    static bool publisher_uni(transport::StreamId id) { return (id & 3u) == 2u; }
 
     void read_runner_stream(ScriptedLitePeer& peer, transport::StreamId id, const RunnerStream& stream) {
         if (stream.reset_code || stream.stop_sending_code) cancelled_.insert(id);
@@ -460,6 +548,12 @@ private:
                 close(peer, config_.protocol_violation_code);
             return;
         }
+        if (malformed && request.bidirectional && request.stream_type == 0x2 &&
+            config_.defect != LiteDefect::CloseOnInvalidSubscribe) {
+            // Draft 3.6: a SUBSCRIBE with Frame End but no Group End is refused by resetting its stream.
+            refuse(peer, request.stream, config_.invalid_subscribe_code);
+            return;
+        }
         if (malformed) {
             close(peer, config_.protocol_violation_code);
             return;
@@ -486,20 +580,58 @@ private:
         return false;
     }
 
+    // Ends a served subscription: its open Group streams reset (CANCELLED), no further groups.
+    void end_groups(ScriptedLitePeer& peer, transport::StreamId subscribe_stream) {
+        cancelled_.insert(subscribe_stream);
+        const auto served = subscriptions_.find(subscribe_stream);
+        if (served == subscriptions_.end()) return;
+        for (const auto group : served->second.open_groups) peer.peer_reset(group, config_.cancelled_code);
+        served->second.open_groups.clear();
+    }
+
+    // Draft 4.3: the runner ending a stream this publisher answered (or one of its open Group streams).
+    void react_to_runner_endings(ScriptedLitePeer& peer) {
+        const bool echo_fin = config_.echo_runner_fin.value_or(!config_.hooks.on_poll);
+        for (const auto& [id, stream] : peer.runner_streams()) {
+            if (publisher_uni(id)) {
+                // A STOP_SENDING on an open Group stream: reset only that stream.
+                if (!stream.stop_sending_code) continue;
+                for (auto& [subscribe_stream, served] : subscriptions_) {
+                    if (served.open_groups.erase(id) > 0) peer.peer_reset(id, config_.cancelled_code);
+                }
+                continue;
+            }
+            if ((id & 2u) != 0u || !answered_.contains(id) || send_ended_.contains(id)) continue;
+            if (stream.reset_code || stream.stop_sending_code) {
+                send_ended_.insert(id);
+                end_groups(peer, id);
+                peer.peer_reset(id, config_.cancelled_code);
+            } else if (stream.fin && echo_fin) {
+                send_ended_.insert(id);
+                end_groups(peer, id);
+                peer.fin(id);
+            }
+        }
+    }
+
     void emit_one_group(ScriptedLitePeer& peer) {
         while (!pending_groups_.empty()) {
             const auto group = pending_groups_.front();
             pending_groups_.pop_front();
             if (cancelled_.contains(group.subscribe_stream)) continue;
-            Bytes bytes = join({stream_type(0x0), group_header({group.subscribe_id, group.sequence, 0})});
-            for (std::size_t f = 0; f < config_.frames_per_group; ++f) {
+            Bytes bytes =
+                join({stream_type(0x0), group_header({group.subscribe_id, group.sequence, group.frame_start})});
+            for (std::uint64_t f = 0; f < group.frames; ++f) {
                 l06::Frame value;
                 value.timestamp_delta = f == 0 ? static_cast<std::int64_t>(group.sequence * 1000) : 33;
-                value.payload = bytes_of("frame-" + std::to_string(group.sequence) + "-" + std::to_string(f));
+                value.payload = bytes_of("frame-" + std::to_string(group.sequence) + "-" +
+                                         std::to_string(group.frame_start + f));
                 const auto encoded = frame(value);
                 bytes.insert(bytes.end(), encoded.begin(), encoded.end());
             }
-            peer.data(peer.open_peer_uni(), std::move(bytes), true);
+            const auto id = peer.open_peer_uni();
+            peer.data(id, std::move(bytes), group.fin);
+            if (!group.fin) subscriptions_[group.subscribe_stream].open_groups.insert(id);
             ++groups_sent_;
             return;
         }
@@ -509,6 +641,9 @@ private:
     bool started_{false};
     std::map<transport::StreamId, Parse> parse_;
     std::set<transport::StreamId> cancelled_;
+    std::set<transport::StreamId> answered_;    // runner bidi streams this publisher answered itself
+    std::set<transport::StreamId> send_ended_;  // runner bidi streams whose send direction this publisher ended
+    std::map<transport::StreamId, Served> subscriptions_;
     std::deque<PendingGroup> pending_groups_;
     std::vector<LiteRunnerRequest> requests_;
     std::size_t runner_setups_{0};
