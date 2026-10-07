@@ -146,6 +146,16 @@ std::vector<std::byte> l06_subscribe_bytes(const l06::Subscribe& subscribe) {
     return lite_subscribe_stream_bytes(subscribe);
 }
 
+l06::Subscribe l06_learning_subscribe(std::string_view broadcast_path, std::string_view track_name) {
+    auto subscribe = l06_subscribe(kL06LearnSubscribeId, broadcast_path, track_name);
+    subscribe.range.subscriber_max_age_ms = kL06LearnMaxAgeMs;
+    return subscribe;
+}
+
+std::vector<std::byte> l06_learning_subscribe_bytes(std::string_view broadcast_path, std::string_view track_name) {
+    return l06_subscribe_bytes(l06_learning_subscribe(broadcast_path, track_name));
+}
+
 std::vector<std::byte> l06_invalid_bounds_subscribe_bytes(std::string_view broadcast_path,
                                                           std::string_view track_name) {
     const auto subscribe = l06_subscribe(kL06InvalidSubscribeId, broadcast_path, track_name);
@@ -227,7 +237,7 @@ LiteProbeDefinition l06_subscribe_group_floor_probe(std::chrono::milliseconds de
     auto definition = fixture_probe(kL06SubscribeGroupFloor, deadline, window, learn_allowance + window,
                                     broadcast_path, track_name);
     definition.steps.push_back(
-        lite_open_bidi(l06_subscribe_bytes(l06_subscribe(kL06LearnSubscribeId, broadcast_path, track_name)), false,
+        lite_open_bidi(l06_learning_subscribe_bytes(broadcast_path, track_name), false,
                        std::string(kL06SubscribeLearnLabel)));
     definition.next_steps = [path = std::string(broadcast_path), track = std::string(track_name), window,
                              learn_allowance](const session::LiteSession& session,
@@ -264,7 +274,7 @@ LiteProbeDefinition l06_subscribe_abutting_frame_start_probe(std::chrono::millis
     auto definition = fixture_probe(kL06SubscribeAbuttingFrameStart, deadline, window, step_allowance * 2 + window,
                                     broadcast_path, track_name);
     definition.steps.push_back(
-        lite_open_bidi(l06_subscribe_bytes(l06_subscribe(kL06LearnSubscribeId, broadcast_path, track_name)), false,
+        lite_open_bidi(l06_learning_subscribe_bytes(broadcast_path, track_name), false,
                        std::string(kL06SubscribeLearnLabel)));
     definition.next_steps = [path = std::string(broadcast_path), track = std::string(track_name), window,
                              step_allowance](const session::LiteSession& session,
@@ -466,13 +476,21 @@ Judged judge_refusal(const LiteTranscript& transcript, const std::vector<GroupVi
     // Served instead of refused: for (a) a Fail; for (b) the track may exist after all (not a refusal case).
     if (first_subscribe_ok(*record) || !headers_for(views, subscribe_id).empty())
         return pending_fails ? Judged::Fail : Judged::Open;
-    if (has_subscribe_end(*record)) return Judged::Fail;  // SUBSCRIBE_END instead of the reset
     if (!session::peer_protocol_issues(*record).empty()) return Judged::Open;  // the answer is unreadable
-    if (record->reset_seen) return Judged::Pass;  // any code (the code space is row 027)
-    if (record->fin_seen) return Judged::Fail;    // FIN instead of the reset
+    // The reset is the refusal (any code; the code space is row 027). A SUBSCRIBE_END before it is information
+    // only: it is not "instead of" the reset, and a RESET_STREAM may discard END bytes still in flight, so
+    // judging it would make the verdict depend on timing (draft 1043-1045).
+    if (record->reset_seen) return Judged::Pass;
+    if (record->fin_seen) return Judged::Fail;       // FIN (after a SUBSCRIBE_END or not) instead of the reset
     if (transcript.peer_close) return Judged::Fail;  // a session close instead of the stream reset
-    // Still pending: (a) is not reset within the allowance (time-bounded); (b) may still be resolving.
-    if (lite06::allowance_elapsed(transcript)) return pending_fails ? Judged::Fail : Judged::Open;
+    if (lite06::allowance_elapsed(transcript)) {
+        // A SUBSCRIBE_END with no reset by the end of the allowance is an answer instead of the refusal, in both
+        // cases. For (b) this holds although draft 5.1.2 allows END without SUBSCRIBE_OK: that covers a track
+        // that existed and ended with no matching group, not "no such track", which must be refused by a reset.
+        if (has_subscribe_end(*record)) return Judged::Fail;
+        // Still pending: (a) is not reset within the allowance (time-bounded); (b) may still be resolving.
+        return pending_fails ? Judged::Fail : Judged::Open;
+    }
     return Judged::Open;
 }
 
@@ -493,7 +511,7 @@ std::optional<std::vector<FloorSubscription>> floor_subscriptions(const LiteTran
     const auto& path = transcript.broadcast_path;
     const auto& track = transcript.track_name;
     if (!stimulus_stream(transcript, kL06SubscribeLearnLabel,
-                         l06_subscribe_bytes(l06_subscribe(kL06LearnSubscribeId, path, track))))
+                         l06_learning_subscribe_bytes(path, track)))
         return std::nullopt;
     std::vector<FloorSubscription> out;
     for (const auto& [label, id] : {std::pair{kL06FloorAtLatestLabel, kL06FloorAtLatestSubscribeId},
@@ -629,10 +647,11 @@ std::optional<bool> evaluate_l06_subscribe_invalid_frame_bounds_reset(const Lite
     // Accepted: a SUBSCRIBE_OK or a Group stream for it, at any time in the allowance (also after a reset).
     if (first_subscribe_ok(*record) || !headers_for(group_views(transcript), kL06InvalidSubscribeId).empty())
         return false;
-    if (has_subscribe_end(*record)) return false;  // answered instead of reset
     if (!session::peer_protocol_issues(*record).empty()) return std::nullopt;  // the answer is unreadable
+    // The row's disqualifiers are SUBSCRIBE_OK and Group streams only: a SUBSCRIBE_END before the reset is
+    // information (a RESET_STREAM may discard it in flight). Without a reset it is no substitute (below).
     if (record->reset_seen) return true;           // any stream code
-    if (record->fin_seen) return false;            // FIN instead of the reset
+    if (record->fin_seen) return false;            // FIN (after a SUBSCRIBE_END or not) instead of the reset
     if (transcript.peer_close) return false;       // a session close instead of the stream reset
     if (lite06::allowance_elapsed(transcript)) return false;  // no reaction within the allowance (time-bounded)
     return std::nullopt;
@@ -675,7 +694,7 @@ std::optional<bool> evaluate_l06_subscribe_resolved_start(const LiteTranscript& 
     const auto& path = transcript.broadcast_path;
     const auto& track = transcript.track_name;
     if (!stimulus_stream(transcript, kL06SubscribeLearnLabel,
-                         l06_subscribe_bytes(l06_subscribe(kL06LearnSubscribeId, path, track))))
+                         l06_learning_subscribe_bytes(path, track)))
         return std::nullopt;
     // The first subscription, when sent: its G and N, its exact bytes checked against the fixture.
     std::optional<std::pair<std::uint64_t, std::uint64_t>> first;  // (G, N)
@@ -692,7 +711,11 @@ std::optional<bool> evaluate_l06_subscribe_resolved_start(const LiteTranscript& 
     }
     const auto views = group_views(transcript);
     // The default and the first subscriptions asked for Frame Start 0: a partial group there is a Position they
-    // did not choose (draft 3.6), whenever it arrives in the window.
+    // did not choose (draft 3.6), whenever it arrives in the window. The default subscription is the rationale's
+    // "a separate default subscription must never receive a non-zero Frame Start"; the first subscription
+    // (Group Start G, Frame Start 0) is an extension of the same rule beyond the rationale's wording, recorded as
+    // such for the evidence: it cannot false-Fail, since a request for frame 0 resolves to frame 0 of G or of a
+    // later group, never to a non-zero Frame Start.
     bool fail = false;
     for (const auto& view : views) {
         if (!view.header || view.header->frame_start == 0) continue;
@@ -705,6 +728,8 @@ std::optional<bool> evaluate_l06_subscribe_resolved_start(const LiteTranscript& 
     };
     const auto* second_step = step_labelled(transcript, kL06AbuttingSecondLabel);
     if (!second_step || !first) return inconclusive();  // the pattern could not be set up
+    // G = 0 edge: Group Start 0 also means "no floor", but draft 3.6 lets Frame Start qualify group 0 ("group 0
+    // included"), so (0, N) is still the requested Position; the reading conflict (G-1, N) needs G >= 1.
     const auto [g, n] = *first;
     if (!stimulus_stream(transcript, kL06AbuttingSecondLabel,
                          l06_subscribe_bytes(l06_subscribe(kL06AbuttingSecondSubscribeId, path, track, g, 0, n, 0))))

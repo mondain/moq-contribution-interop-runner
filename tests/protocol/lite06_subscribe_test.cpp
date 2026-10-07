@@ -119,6 +119,10 @@ struct Script {
     std::uint64_t latest{5};
     std::size_t frames{3};
     std::size_t groups{3};  // per unbounded subscription
+    // Groups held below the latest (draft 7.9): with a non-zero Subscriber Max Age the publisher starts an unfloored
+    // subscription at its oldest held group, latest - history; with Max Age 0 at the latest group. A floor starts
+    // at max(oldest held, F).
+    std::uint64_t history{0};
     // Draft 2056-2058 reading of Group Start (offset by 1): start = max(latest, F - 1).
     bool offset_reading{false};
     // Replaces the answer to one SUBSCRIBE (true: answered).
@@ -139,10 +143,10 @@ void default_answer(const Script& script, ConformingLitePublisher& publisher, Sc
         return;
     }
     const auto& range = subscribe.range;
-    std::uint64_t start = script.latest;
+    const std::uint64_t oldest = script.latest - std::min(script.history, script.latest);
+    std::uint64_t start = range.subscriber_max_age_ms == 0 ? script.latest : oldest;
     if (range.group_start > 0)
-        start = script.offset_reading ? std::max(script.latest, range.group_start - 1)
-                                      : std::max(script.latest, range.group_start);
+        start = script.offset_reading ? std::max(oldest, range.group_start - 1) : std::max(oldest, range.group_start);
     const std::uint64_t first_frame = start == range.group_start ? range.frame_start : 0;
     const std::uint64_t last = range.group_end != 0 ? range.group_end - 1 : start + script.groups - 1;
     std::vector<Planned> groups;
@@ -337,7 +341,8 @@ TEST(Lite06SubscribeCommon, BuildersRejectAShortDeadlineAndAMissingFixture) {
     EXPECT_THROW(scen::l06_subscribe_latest_probe(kDeadline, kBroadcast, kTrack, 6000ms, 0ms), std::invalid_argument);
     EXPECT_THROW(scen::l06_subscribe_group_floor_probe(kDeadline, kBroadcast, kTrack, 6000ms, 0ms),
                  std::invalid_argument);
-    for (const auto& [path, track] : {std::pair<std::string, std::string>{"", kTrack}, {"/", kTrack}, {kBroadcast, ""}}) {
+    for (const auto& [path, track] :
+         {std::pair<std::string, std::string>{"", kTrack}, {"/", kTrack}, {kBroadcast, ""}}) {
         EXPECT_THROW(scen::l06_subscribe_latest_probe(kDeadline, path, track), std::invalid_argument);
         EXPECT_THROW(scen::l06_subscribe_refused_probe(kDeadline, path, track), std::invalid_argument);
         EXPECT_THROW(scen::l06_subscribe_invalid_frame_bounds_probe(kDeadline, path, track), std::invalid_argument);
@@ -410,7 +415,7 @@ TEST(Lite06SubscribeCommon, ProbeStimuli) {
         ASSERT_EQ(definition.steps.size(), 1u);
         EXPECT_EQ(definition.steps[0].label, scen::kL06SubscribeLearnLabel);
         EXPECT_EQ(definition.steps[0].bytes,
-                  scen::l06_subscribe_bytes(scen::l06_subscribe(scen::kL06LearnSubscribeId, kBroadcast, kTrack)));
+                  scen::l06_learning_subscribe_bytes(kBroadcast, kTrack));
         EXPECT_TRUE(static_cast<bool>(definition.next_steps));
     }
 }
@@ -461,6 +466,44 @@ TEST(Lite06SubscribeLatest, AGroupStreamResetBeforeAnyByteIsSkipped) {
         if (record->kind == session::LiteStreamKind::Group && record->reset_seen) reset = true;
     EXPECT_TRUE(reset);
     EXPECT_EQ(judge_latest(t), Triple(kPass, kPass, kPass));
+}
+
+TEST(Lite06SubscribeLatest, AGroupStreamResetAfterPartOfItsGroupIsSkipped) {
+    // STREAM_TYPE Group and the first two bytes of a GROUP, then a RESET_STREAM: no GROUP decoded, no issue.
+    Script partial;
+    auto armed = std::make_shared<bool>(false);
+    partial.on_poll = [armed](ConformingLitePublisher&, ScriptedLitePeer& peer, State& state) {
+        if (state.subscribes.empty() || *armed) return;
+        *armed = true;
+        const auto id = peer.open_peer_uni();
+        const auto header = group_header({0, 9, 0});
+        peer.data(id, join({stream_type(0x0), Bytes(header.begin(), header.begin() + 2)}));
+        state.at(3, [id](ConformingLitePublisher&, ScriptedLitePeer& p, State&) { p.peer_reset(id, 0x0); });
+    };
+    const auto t = run(latest_probe(), partial);
+    bool skipped = false;
+    for (const auto* record : lite06::peer_streams(t))
+        if (record->kind == session::LiteStreamKind::Group && record->reset_seen &&
+            session::peer_messages(*record).empty() && session::peer_protocol_issues(*record).empty() &&
+            record->bytes > 1)
+            skipped = true;
+    EXPECT_TRUE(skipped);
+    // 190 sees an undecoded stream but no gap (5, 6, 7), so it still passes.
+    EXPECT_EQ(judge_latest(t), Triple(kPass, kPass, kPass));
+}
+
+TEST(Lite06SubscribeLatest, AnUnansweredAnnounceRequestLeavesTheGroupRowsNotRun) {
+    // The announce wait expires: the runner still subscribes and receives groups, but the stimulus (an announce
+    // exchange, then a SUBSCRIBE to an announced track) was not delivered in full.
+    auto config = make_config({});
+    config.defect = LiteDefect::SilentOnAnnounce;
+    const auto t = run(latest_probe(), config);
+    const auto* announced = lite06::step_labelled(t, scen::kL06SubAnnouncedLabel);
+    ASSERT_TRUE(announced);
+    EXPECT_TRUE(announced->gate_expired);
+    EXPECT_FALSE(t.stimulus_delivered);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_EQ(judge_latest(t), Triple(kNotRun, kNotRun, kNotRun));
 }
 
 TEST(Lite06SubscribeLatest, ADuplicateGroupSequenceFailsOnly097) {
@@ -618,6 +661,50 @@ TEST(Lite06SubscribeRefused, ServingTheUncoveredPathFailsAndServingTheUnknownTra
     EXPECT_EQ(evaluate_l06_subscribe_refused_reset(run(refused_probe(), answering(1, serve))), kNotRun);
 }
 
+TEST(Lite06SubscribeRefused, ASubscribeEndFollowedByTheResetPasses) {
+    // END then RESET_STREAM is a refusal by reset (the END is information; a reset may discard it in flight).
+    for (const auto id : {scen::kL06UncoveredSubscribeId, scen::kL06UnknownTrackSubscribeId}) {
+        const auto t = run(refused_probe(), answering(id, [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                                             auto&, transport::StreamId stream, const auto&) {
+                               peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                               publisher.refuse(peer, stream, kNotFound);
+                           }));
+        EXPECT_EQ(evaluate_l06_subscribe_refused_reset(t), kPass) << id;
+        // A reset arriving later in the allowance after the END passes too.
+        const auto late = run(refused_probe(), answering(id, [](auto&, ScriptedLitePeer& peer, State& state,
+                                                                transport::StreamId stream, const auto&) {
+                                  peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                                  state.at(polls(2000ms), [stream](ConformingLitePublisher& publisher,
+                                                                   ScriptedLitePeer& p, State&) {
+                                      publisher.refuse(p, stream, kNotFound);
+                                  });
+                              }));
+        EXPECT_EQ(evaluate_l06_subscribe_refused_reset(late), kPass) << id;
+    }
+}
+
+TEST(Lite06SubscribeRefused, ASubscribeEndLeftWithoutAResetFails) {
+    for (const auto id : {scen::kL06UncoveredSubscribeId, scen::kL06UnknownTrackSubscribeId}) {
+        // END, then nothing until the allowance elapsed (also for the unknown track: END is no refusal).
+        const auto pending_end = run(refused_probe(), answering(id, [](auto&, ScriptedLitePeer& peer, auto&,
+                                                                       transport::StreamId stream, const auto&) {
+                                         peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                                     }));
+        EXPECT_TRUE(lite06::allowance_elapsed(pending_end));
+        EXPECT_EQ(evaluate_l06_subscribe_refused_reset(pending_end), kFail) << id;
+        // END, then a session close.
+        const auto closed = run(refused_probe(), answering(id, [](auto&, ScriptedLitePeer& peer, State& state,
+                                                                  transport::StreamId stream, const auto&) {
+                                    peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                                    state.at(5, [](ConformingLitePublisher& pub, ScriptedLitePeer& p, State&) {
+                                        pub.close(p, 0x0);
+                                    });
+                                }));
+        ASSERT_TRUE(closed.peer_close.has_value());
+        EXPECT_EQ(evaluate_l06_subscribe_refused_reset(closed), kFail) << id;
+    }
+}
+
 TEST(Lite06SubscribeRefused, ASlowResetInsideTheAllowancePasses) {
     const auto t = run(refused_probe(), answering(0, [](auto&, ScriptedLitePeer&, State& state,
                                                        transport::StreamId stream, const auto&) {
@@ -750,6 +837,21 @@ TEST(Lite06SubscribeInvalidBounds, ASubscribeEndOrFinInsteadOfTheResetFails) {
               kFail);
 }
 
+TEST(Lite06SubscribeInvalidBounds, ASubscribeEndFollowedByTheResetPasses) {
+    const auto t = run(invalid_probe(), invalid_answer([](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                                          auto&, transport::StreamId stream) {
+                           peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                           publisher.refuse(peer, stream, 0x0);
+                       }));
+    EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(t), kPass);
+    // END alone, no reset within the allowance: no substitute.
+    const auto alone = run(invalid_probe(), invalid_answer([](auto&, ScriptedLitePeer& peer, auto&,
+                                                              transport::StreamId stream) {
+                               peer.data(stream, subscribe_response(l06::SubscribeEnd{0}));
+                           }));
+    EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(alone), kFail);
+}
+
 TEST(Lite06SubscribeInvalidBounds, AGroupAfterTheResetIsStillSeen) {
     const auto t = run(invalid_probe(), invalid_answer([](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
                                                           State& state, transport::StreamId stream) {
@@ -811,6 +913,39 @@ TEST(Lite06SubscribeGroupFloor, ALateGroupBelowTheFloorIsStillSeen) {
     EXPECT_EQ(judge_floor(run(floor_probe(), script)), Pair(kFail, kPass));
 }
 
+TEST(Lite06SubscribeGroupFloor, WithHistoryTheLearningSubscriptionStillLearnsTheLatest) {
+    // The publisher holds three groups below its latest (5): a large Max Age would start at 2, Max Age 0 at 5.
+    Script history;
+    history.history = 3;
+    const auto t = run(floor_probe(), history);
+    const auto* learn = lite06::step_labelled(t, scen::kL06SubscribeLearnLabel);
+    ASSERT_TRUE(learn);
+    const auto learning = scen::l06_decode_subscribe_stimulus(learn->bytes);
+    ASSERT_TRUE(learning.has_value());
+    EXPECT_EQ(learning->range.subscriber_max_age_ms, 0u);
+    EXPECT_EQ(floor_of(t, scen::kL06FloorAtLatestLabel), 5u);
+    EXPECT_EQ(floor_of(t, scen::kL06FloorAboveLabel), 7u);
+    // The floored subscriptions keep the large Max Age.
+    const auto floored = scen::l06_decode_subscribe_stimulus(
+        lite06::step_labelled(t, scen::kL06FloorAtLatestLabel)->bytes);
+    ASSERT_TRUE(floored.has_value());
+    EXPECT_EQ(floored->range.subscriber_max_age_ms, scen::kL06LargeMaxAgeMs);
+    EXPECT_EQ(judge_floor(t), Pair(kPass, kPass));
+}
+
+TEST(Lite06SubscribeGroupFloor, ALargeMaxAgeLearningSubscriptionWouldMisLearn) {
+    // The old behavior: the same probe with a large-Max-Age learning SUBSCRIBE learns the OLDEST held group.
+    Script history;
+    history.history = 3;
+    auto definition = floor_probe();
+    definition.steps[0].bytes =
+        scen::l06_subscribe_bytes(scen::l06_subscribe(scen::kL06LearnSubscribeId, kBroadcast, kTrack));
+    const auto t = run(std::move(definition), history);
+    EXPECT_EQ(floor_of(t, scen::kL06FloorAtLatestLabel), 2u);  // L = 2, not the latest 5
+    // Such a transcript is not the stimulus the evaluators expect: NotRun.
+    EXPECT_EQ(judge_floor(t), Pair(kNotRun, kNotRun));
+}
+
 TEST(Lite06SubscribeGroupFloor, ASubscribeOkBelowTheFloorFailsOnly172) {
     const auto t = run(floor_probe(), editing(scen::kL06FloorAboveSubscribeId,
                                               [](std::optional<std::uint64_t>& ok, auto&) { ok = 5; }));
@@ -847,7 +982,9 @@ TEST(Lite06SubscribeGroupFloor, FloorsWithoutGroupsOrOkAreNotRun) {
     // Both floored subscriptions pending (no SUBSCRIBE_OK, no Group stream) for the whole window.
     Script silent;
     silent.answer = [](ConformingLitePublisher&, ScriptedLitePeer&, State&, transport::StreamId,
-                       const l06::Subscribe& subscribe) { return subscribe.subscribe_id != scen::kL06LearnSubscribeId; };
+                       const l06::Subscribe& subscribe) {
+        return subscribe.subscribe_id != scen::kL06LearnSubscribeId;
+    };
     const auto t = run(floor_probe(), silent);
     EXPECT_TRUE(lite06::allowance_elapsed(t));
     EXPECT_FALSE(t.timed_out);
@@ -916,6 +1053,18 @@ TEST(Lite06SubscribeAbutting, ThePublisherHoldingGroupGResumesAtFrameN) {
     EXPECT_EQ(b->range.frame_end, 0u);
     EXPECT_TRUE(t.stimulus_delivered);
     EXPECT_TRUE(lite06::allowance_elapsed(t));
+    EXPECT_EQ(evaluate_l06_subscribe_resolved_start(t), kPass);
+}
+
+TEST(Lite06SubscribeAbutting, WithHistoryGIsTheLatestGroup) {
+    Script history;
+    history.history = 3;
+    const auto t = run(abutting_probe(), history);
+    const auto* second = lite06::step_labelled(t, scen::kL06AbuttingSecondLabel);
+    ASSERT_TRUE(second);
+    const auto b = scen::l06_decode_subscribe_stimulus(second->bytes);
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b->range.group_start, 5u);
     EXPECT_EQ(evaluate_l06_subscribe_resolved_start(t), kPass);
 }
 
@@ -1206,7 +1355,9 @@ TEST(Lite06SubscribeNotRun, ASubscribeWriteRefusedByThePeer) {
     // The publisher stops the runner's first bidirectional stream before the write: not delivered.
     for (const auto& probe : {invalid_probe, floor_probe, abutting_probe}) {
         const auto t = run(probe(), make_config({}),
-                           [](ScriptedLitePeer& peer) { peer.forced_status[1] = transport::TransportStatus::PeerStopped; });
+                           [](ScriptedLitePeer& peer) {
+                               peer.forced_status[1] = transport::TransportStatus::PeerStopped;
+                           });
         for (const auto evaluator : all_evaluators()) EXPECT_EQ(evaluator(t), kNotRun) << t.scenario_id;
     }
 }

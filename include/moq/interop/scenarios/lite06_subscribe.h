@@ -11,7 +11,10 @@
 // Every SUBSCRIBE the runner sends conforms (draft 3.6, 7.9: Frame Start 0 unless the abutting second subscription
 // names a group the runner received, Frame End 0 whenever Group End is 0), except the deliberate invalid-bounds
 // probe (row L06-3-6-MUST-023). Each states kL06LargeMaxAgeMs as Subscriber Max Age (rows 159 and 190: staleness
-// resets cannot explain a gap) and gets a new Subscribe ID within the session (row L06-7-9-MUST-NOT-154).
+// resets cannot explain a gap), except the LEARNING subscription of the floor and abutting probes, which states
+// Max Age 0: under draft 7.9 (2019-2023) a publisher holding history SHOULD start a large-Max-Age subscription at
+// its oldest unexpired group, and only Max Age 0 starts at the latest group, which is what those probes learn. Every
+// SUBSCRIBE gets a new Subscribe ID within the session (row L06-7-9-MUST-NOT-154).
 //
 // Deadline and windows: every probe observes its whole stated window through an UNGATED trailing Wait labelled
 // "allowance" (lite06::allowance_step) and never ends early on a condition, so a late violation is still seen. Each
@@ -21,7 +24,9 @@
 // l06-subscribe-group-floor and l06-subscribe-abutting-frame-start learn the latest group from a default
 // subscription first, through the engine's dynamic next_steps continuation. The continuation runs only when the
 // recorder changes: a learning step whose allowance passed is closed on the next change; a publisher that never
-// sends anything more leaves the continuation open until the deadline, which sets timed_out (NotRun).
+// sends anything more (a silent learning subscription) leaves the continuation open until the deadline, which sets
+// timed_out, so every evaluator of the probe is NotRun. Task 9 must treat timed_out on these two probes as NotRun,
+// NOT as a harness error, and give them deadlines of at least the stated sums plus a margin.
 
 #include <chrono>
 #include <cstddef>
@@ -45,8 +50,10 @@ inline constexpr std::string_view kL06SubscribeInvalidFrameBounds = "l06-subscri
 inline constexpr std::string_view kL06SubscribeGroupFloor = "l06-subscribe-group-floor";
 inline constexpr std::string_view kL06SubscribeAbuttingFrameStart = "l06-subscribe-abutting-frame-start";
 
-// The Subscriber Max Age every runner SUBSCRIBE states (one hour, in milliseconds).
+// The Subscriber Max Age every runner SUBSCRIBE states (one hour, in milliseconds), except the learning one.
 inline constexpr std::uint64_t kL06LargeMaxAgeMs = 3'600'000;
+// The Subscriber Max Age of the learning SUBSCRIBE (floor and abutting probes): 0 starts at the latest group.
+inline constexpr std::uint64_t kL06LearnMaxAgeMs = 0;
 
 // Step labels.
 inline constexpr std::string_view kL06SubAnnounceLabel = "announce-request";   // ANNOUNCE_REQUEST "" (latest, refused)
@@ -90,6 +97,10 @@ wire::moqlite06::Subscribe l06_subscribe(std::uint64_t subscribe_id, std::string
                                          std::uint64_t frame_end = 0);
 // STREAM_TYPE 0x2 then the SUBSCRIBE (encode_subscribe; empty when it refuses the message).
 std::vector<std::byte> l06_subscribe_bytes(const wire::moqlite06::Subscribe& subscribe);
+// The learning SUBSCRIBE of the floor and abutting probes: id kL06LearnSubscribeId, default range, Subscriber Max
+// Age kL06LearnMaxAgeMs (0), so the publisher starts it at its latest group.
+wire::moqlite06::Subscribe l06_learning_subscribe(std::string_view broadcast_path, std::string_view track_name);
+std::vector<std::byte> l06_learning_subscribe_bytes(std::string_view broadcast_path, std::string_view track_name);
 // The invalid-bounds stimulus built raw (encode_subscribe refuses it): Group End 0, Frame End kL06InvalidFrameEnd.
 std::vector<std::byte> l06_invalid_bounds_subscribe_bytes(std::string_view broadcast_path,
                                                           std::string_view track_name);
@@ -116,22 +127,24 @@ LiteProbeDefinition l06_subscribe_refused_probe(std::chrono::milliseconds deadli
 LiteProbeDefinition l06_subscribe_invalid_frame_bounds_probe(
     std::chrono::milliseconds deadline, std::string_view broadcast_path, std::string_view track_name,
     std::chrono::milliseconds allowance = kLiteResponseAllowance);
-// l06-subscribe-group-floor: the learning SUBSCRIBE (id 0, default); once a GROUP of it decodes, L is the highest
-// Group Sequence it delivered so far, and the continuation opens two floored SUBSCRIBEs at once (id 1 with Group
-// Start F = L, id 2 with F = L + 2; Frame Start 0, Group End 0, Frame End 0) followed by the `window`. No GROUP
-// within `learn_allowance` (seen on the next change), or the learning stream ended or reset: no floored
-// subscription is sent (NotRun). Needs deadline > learn_allowance + window.
+// l06-subscribe-group-floor: the learning SUBSCRIBE (id 0, default range, Max Age 0); once a GROUP of it decodes,
+// L is the highest Group Sequence it delivered so far, and the continuation opens two floored SUBSCRIBEs at once
+// (id 1 with Group Start F = L, id 2 with F = L + 2; Frame Start 0, Group End 0, Frame End 0, large Max Age)
+// followed by the `window`. No GROUP within `learn_allowance` (seen on the next change), or the learning stream
+// ended or reset: no floored subscription is sent (NotRun). Needs deadline > learn_allowance + window.
 LiteProbeDefinition l06_subscribe_group_floor_probe(std::chrono::milliseconds deadline,
                                                     std::string_view broadcast_path, std::string_view track_name,
                                                     std::chrono::milliseconds window = kLiteObservationWindow,
                                                     std::chrono::milliseconds learn_allowance = kLiteResponseAllowance);
-// l06-subscribe-abutting-frame-start (draft 3.6): the learning SUBSCRIBE (id 0, default) gives G (the first GROUP
-// decoded on it); the first subscription (id 1: Group Start G, Group End G+1 on the wire, Frame End N on the wire,
-// i.e. frames 0..N-1 of G with N = kL06AbuttingFrameSplit); once frames 0..N-1 of group G decoded on it, the second
-// (id 2: Group Start G, Frame Start N, unbounded) and the `window`. When a stage fails (no GROUP within
-// `step_allowance`, the first subscription answered with another group or a non-zero Frame Start, a stream ended
-// or reset first) the continuation sends no second subscription and still observes the `window` (the default
-// subscription stays judged). Needs deadline > 2 * step_allowance + window.
+// l06-subscribe-abutting-frame-start (draft 3.6): the learning SUBSCRIBE (id 0, default range, Max Age 0) gives G
+// (the highest Group Sequence decoded on it when its first GROUP decodes); the first subscription (id 1: Group Start
+// G, Group End G+1 on the wire, Frame End N on the wire, i.e. frames 0..N-1 of G with N = kL06AbuttingFrameSplit);
+// once frames 0..N-1 of group G decoded on it, the second (id 2: Group Start G, Frame Start N, unbounded) and the
+// `window`. G = 0 is a valid pattern: Group Start 0 then also reads as "no floor", but draft 3.6 lets a Frame Start
+// qualify group 0 ("group 0 included"), so the second subscription still names frame N of group 0. When a stage
+// fails (no GROUP within `step_allowance`, the first subscription answered with another group or a non-zero Frame
+// Start, a stream ended or reset first) the continuation sends no second subscription and still observes the
+// `window` (the default subscription stays judged). Needs deadline > 2 * step_allowance + window.
 LiteProbeDefinition l06_subscribe_abutting_frame_start_probe(
     std::chrono::milliseconds deadline, std::string_view broadcast_path, std::string_view track_name,
     std::chrono::milliseconds window = kLiteObservationWindow,
