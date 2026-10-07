@@ -121,6 +121,8 @@ add_library(moq-interop-wire
     src/wire/draft22/location_filter.cpp
     src/wire/draft22/publish.cpp
     src/wire/draft22/publisher_request.cpp
+    src/wire/moqlite06/varint.cpp
+    src/wire/moqlite06/framing.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -1265,6 +1267,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME draft22-location-filter
              COMMAND moq-interop-draft22-location-filter-tests)
+
+    add_executable(moq-interop-moqlite06-framing-tests
+                   tests/golden/moqlite06_framing_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-framing-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-framing
+             COMMAND moq-interop-moqlite06-framing-tests)
 
     add_executable(moq-interop-draft22-shared-tests
                    tests/golden/draft22_shared_test.cpp)
