@@ -211,7 +211,113 @@ std::string_view lite_message_name(const LiteMessage& message) {
     return message.index() < kNames.size() ? kNames[message.index()] : std::string_view{};
 }
 
+std::optional<LiteIssueClass> explicit_issue_class(std::string_view code) {
+    struct Entry {
+        std::string_view code;
+        LiteIssueClass kind;
+    };
+    static constexpr std::array<Entry, kAllIssueCodes.size()> kClasses{{
+        // The peer's bytes break the wire format (draft 7.1 framing, the codec's body rules, an unknown response
+        // Type, bytes after the only message of a Setup stream, a message cut by FIN).
+        {kIssueProtocolViolation, LiteIssueClass::PeerProtocol},
+        {kIssueInvalidValue, LiteIssueClass::PeerProtocol},
+        {kIssueKeyValueFormattingError, LiteIssueClass::PeerProtocol},
+        {kIssueTrailingAfterSetup, LiteIssueClass::PeerProtocol},
+        {kIssueTrailingAfterRequest, LiteIssueClass::PeerProtocol},
+        {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
+        // Decision (a): the draft is inconclusive on an unknown ANNOUNCE Type; rows 139, 141, 152 are NotRun.
+        {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
+        // Limits the draft does not state (DecodeLimits are defensive caps), the runner's own state, or transport
+        // anomalies QUIC rules out (data after FIN; per-stream offsets near SIZE_MAX): never a peer Fail.
+        {kIssueLengthExceedsLimit, LiteIssueClass::Harness},
+        {kIssueLengthNotRepresentable, LiteIssueClass::Harness},
+        {kIssueOffsetOverflow, LiteIssueClass::Harness},
+        {kIssueTrailingAfterFin, LiteIssueClass::Harness},
+        {kIssueUndeclaredRunnerStream, LiteIssueClass::Harness},
+        {kIssueMessageLimitReached, LiteIssueClass::Harness},
+        {kIssueBufferLimitReached, LiteIssueClass::Harness},
+        {kIssueLocalBidiMismatch, LiteIssueClass::Harness},
+        // Recorded for the transcript: a publisher-opened bidi stream is legal in moq-lite (either side may open
+        // Announce/Subscribe streams), just unused by L1; L2 streams are recorded raw by scope.
+        {kIssuePublisherOpenedBidi, LiteIssueClass::Informational},
+        {kIssueL2StreamNotDecoded, LiteIssueClass::Informational},
+    }};
+    for (const auto& entry : kClasses) {
+        if (entry.code == code) return entry.kind;
+    }
+    return std::nullopt;
+}
+
+LiteIssueClass classify_issue(std::string_view code) {
+    return explicit_issue_class(code).value_or(LiteIssueClass::Harness);
+}
+
+std::vector<const LiteDecoded*> peer_messages(const LiteStreamRecord& record) {
+    std::vector<const LiteDecoded*> out;
+    for (const auto& message : record.messages) {
+        if (message.from == LiteOrigin::Peer) out.push_back(&message);
+    }
+    return out;
+}
+
+std::vector<const LiteDecoded*> runner_messages(const LiteStreamRecord& record) {
+    std::vector<const LiteDecoded*> out;
+    for (const auto& message : record.messages) {
+        if (message.from == LiteOrigin::Runner) out.push_back(&message);
+    }
+    return out;
+}
+
+std::vector<const LiteDecodeIssue*> peer_issues(const LiteStreamRecord& record) {
+    std::vector<const LiteDecodeIssue*> out;
+    for (const auto& issue : record.issues) {
+        if (issue.from == LiteOrigin::Peer) out.push_back(&issue);
+    }
+    return out;
+}
+
+std::vector<const LiteDecodeIssue*> peer_protocol_issues(const LiteStreamRecord& record) {
+    std::vector<const LiteDecodeIssue*> out;
+    for (const auto& issue : record.issues) {
+        if (issue.from == LiteOrigin::Peer && classify_issue(issue.code) == LiteIssueClass::PeerProtocol) {
+            out.push_back(&issue);
+        }
+    }
+    return out;
+}
+
+std::vector<const LiteDecodeIssue*> harness_issues(const LiteStreamRecord& record) {
+    std::vector<const LiteDecodeIssue*> out;
+    for (const auto& issue : record.issues) {
+        if (classify_issue(issue.code) == LiteIssueClass::Harness) out.push_back(&issue);
+    }
+    return out;
+}
+
 namespace detail {
+
+std::size_t issue_charge(std::string_view code, std::string_view detail) {
+    return sizeof(LiteDecodeIssue) + code.size() + detail.size();
+}
+
+namespace {
+
+// Held peer chunks beyond this many coalesce into the last entry (which then carries the newest arrival).
+constexpr std::size_t kMaxHeldChunks = 1024;
+
+// Sets the budget for the duration of one public call.
+class BudgetScope {
+public:
+    BudgetScope(LiteBudget*& slot, LiteBudget* budget) : slot_(slot) { slot_ = budget; }
+    ~BudgetScope() { slot_ = nullptr; }
+    BudgetScope(const BudgetScope&) = delete;
+    BudgetScope& operator=(const BudgetScope&) = delete;
+
+private:
+    LiteBudget*& slot_;
+};
+
+}  // namespace
 
 LiteStreamDecoder::LiteStreamDecoder(LiteStreamRecord& record, const DecodeLimits& limits, std::size_t max_messages)
     : limits_(limits), max_messages_(max_messages) {
@@ -240,7 +346,8 @@ std::size_t LiteStreamDecoder::begin_event(LiteStreamRecord& record, std::uint64
 }
 
 void LiteStreamDecoder::feed(LiteStreamRecord& record, std::span<const std::byte> data, bool fin,
-                             std::uint64_t at_ns) {
+                             std::uint64_t at_ns, LiteBudget* budget) {
+    const BudgetScope scope(budget_, budget);
     const auto event = begin_event(record, at_ns);
     record.bytes += data.size();
     if (record.origin == LiteOrigin::Runner && !kind_final_ && record.local_bytes == 0 &&
@@ -256,7 +363,8 @@ void LiteStreamDecoder::feed(LiteStreamRecord& record, std::span<const std::byte
 }
 
 void LiteStreamDecoder::feed_local(LiteStreamRecord& record, std::span<const std::byte> data, bool fin,
-                                   std::uint64_t at_ns) {
+                                   std::uint64_t at_ns, LiteBudget* budget) {
+    const BudgetScope scope(budget_, budget);
     const auto event = begin_event(record, at_ns);
     record.local_bytes += data.size();
     if (fin) record.local_fin = true;
@@ -268,7 +376,9 @@ void LiteStreamDecoder::feed_local(LiteStreamRecord& record, std::span<const std
     }
 }
 
-void LiteStreamDecoder::reset(LiteStreamRecord& record, std::optional<std::uint64_t> code, std::uint64_t at_ns) {
+void LiteStreamDecoder::reset(LiteStreamRecord& record, std::optional<std::uint64_t> code, std::uint64_t at_ns,
+                              LiteBudget* budget) {
+    const BudgetScope scope(budget_, budget);
     begin_event(record, at_ns);
     record.reset_seen = true;
     if (code && !record.reset_code) record.reset_code = code;
@@ -277,10 +387,17 @@ void LiteStreamDecoder::reset(LiteStreamRecord& record, std::optional<std::uint6
 }
 
 void LiteStreamDecoder::stop_sending(LiteStreamRecord& record, std::optional<std::uint64_t> code,
-                                     std::uint64_t at_ns) {
+                                     std::uint64_t at_ns, LiteBudget* budget) {
+    const BudgetScope scope(budget_, budget);
     begin_event(record, at_ns);
     record.stop_sending_seen = true;
     if (code && !record.stop_sending_code) record.stop_sending_code = code;
+}
+
+void LiteStreamDecoder::note_runner_issue(LiteStreamRecord& record, std::string_view code, std::string detail,
+                                          std::uint64_t at_ns, LiteBudget* budget) {
+    const BudgetScope scope(budget_, budget);
+    issue(record, local_, begin_event(record, at_ns), code, std::move(detail));
 }
 
 void LiteStreamDecoder::ingest(LiteStreamRecord& record, Direction& direction, std::span<const std::byte> data,
@@ -295,6 +412,14 @@ void LiteStreamDecoder::ingest(LiteStreamRecord& record, Direction& direction, s
     }
     if (direction.phase != Phase::Raw && direction.phase != Phase::Stopped) {
         direction.buffer.insert(direction.buffer.end(), data.begin(), data.end());
+        if (direction.phase == Phase::AwaitKind && !data.empty()) {
+            const HeldChunk chunk{direction.base + direction.buffer.size(), event, at_ns};
+            if (direction.held.size() < kMaxHeldChunks) {
+                direction.held.push_back(chunk);
+            } else {
+                direction.held.back() = chunk;
+            }
+        }
         pump(record, direction, event, at_ns);
     }
     if (fin) {
@@ -314,15 +439,17 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
             std::span<const std::byte>(direction.buffer).subspan(direction.start);
         if (direction.phase == Phase::AwaitKind) {
             if (pending.size() > buffer_cap(limits_)) {
-                issue(record, direction, event, kIssueLengthExceedsLimit,
+                issue(record, direction, event, kIssueBufferLimitReached,
                       std::to_string(pending.size()) + " bytes buffered before the stream kind was known");
                 stop(direction);
             }
             return;
         }
         if (pending.empty()) {
+            direction.base += direction.buffer.size();
             direction.buffer.clear();
             direction.start = 0;
+            direction.held.clear();
             return;
         }
         if (direction.phase == Phase::Done) {
@@ -354,24 +481,38 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
             on_kind_known(record, event);
             continue;
         }
-        if (messages_and_skips_ >= max_messages_) {
+        if (direction.messages >= max_messages_) {
             message_limit_reached_ = true;
             issue(record, direction, event, kIssueMessageLimitReached,
-                  "more than " + std::to_string(max_messages_) + " messages on one stream");
-            stop(inbound_);
-            stop(local_);
+                  "more than " + std::to_string(max_messages_) + " messages in one direction of a stream");
+            stop(direction);
             return;
         }
         auto next = decode_next(record.kind, direction.opener, direction.phase, cursor, limits_);
+        // The arrival of the message's last byte: a held chunk's (peer bytes that waited for the runner's
+        // STREAM_TYPE) or this event's.
+        std::size_t when_event = event;
+        std::uint64_t when_ns = at_ns;
+        if (!direction.held.empty()) {
+            const auto last_byte = direction.base + direction.start + cursor.offset();
+            for (const auto& chunk : direction.held) {
+                if (chunk.end >= last_byte) {
+                    when_event = chunk.event;
+                    when_ns = chunk.at_ns;
+                    break;
+                }
+            }
+        }
         switch (next.what) {
             case Next::What::Wait:
                 if (pending.size() > buffer_cap(limits_)) {
-                    issue(record, direction, event, kIssueLengthExceedsLimit,
+                    issue(record, direction, event, kIssueBufferLimitReached,
                           std::to_string(pending.size()) + " bytes buffered without a complete message");
                     stop(direction);
                 } else if (direction.start > 4096 && direction.start * 2 > direction.buffer.size()) {
                     direction.buffer.erase(direction.buffer.begin(),
                                            direction.buffer.begin() + static_cast<std::ptrdiff_t>(direction.start));
+                    direction.base += direction.start;
                     direction.start = 0;
                 }
                 return;
@@ -384,12 +525,18 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
                 stop(direction);
                 return;
             case Next::What::Skip:
-                ++messages_and_skips_;
-                issue(record, direction, event, kIssueUnknownAnnounceType, std::move(next.detail));
+                ++direction.messages;
+                issue(record, direction, when_event, kIssueUnknownAnnounceType, std::move(next.detail));
                 break;
             case Next::What::Message:
-                ++messages_and_skips_;
-                record.messages.push_back(LiteDecoded{event, std::move(*next.message), at_ns, direction.from});
+                if (!charge(kMessageCharge, true)) {
+                    // The session budget is spent: stop storing; the session reports limit_reached().
+                    stop(inbound_);
+                    stop(local_);
+                    return;
+                }
+                ++direction.messages;
+                record.messages.push_back(LiteDecoded{when_event, std::move(*next.message), when_ns, direction.from});
                 break;
         }
         direction.start += cursor.offset();
@@ -405,8 +552,8 @@ void LiteStreamDecoder::on_kind_known(LiteStreamRecord& record, std::size_t even
               std::string(to_string(record.kind)) + " streams are L2 and recorded raw");
     }
     if (inbound_.phase == Phase::AwaitKind) {
-        // The peer's buffered bytes are decoded once the runner's write is (see feed_local), so the runner's
-        // request precedes the peer's response in the record.
+        // The peer's held bytes are decoded once the runner's write is (see feed_local), so the runner's request
+        // precedes the peer's response in the record; they keep their own arrival times (HeldChunk).
         inbound_.phase = initial_phase(record.kind, false);
         wake_inbound_ = true;
     }
@@ -441,7 +588,19 @@ void LiteStreamDecoder::finish(LiteStreamRecord& record, Direction& direction, s
 
 void LiteStreamDecoder::issue(LiteStreamRecord& record, const Direction& direction, std::size_t event,
                               std::string_view code, std::string detail) {
+    if (!charge(issue_charge(code, detail), false)) return;
     record.issues.push_back(LiteDecodeIssue{event, std::string(code), std::move(detail), direction.from});
+}
+
+bool LiteStreamDecoder::charge(std::size_t bytes, bool is_message) {
+    if (budget_ == nullptr) return true;
+    if (budget_->exhausted || budget_->bytes_left < bytes || (is_message && budget_->messages_left == 0)) {
+        budget_->exhausted = true;
+        return false;
+    }
+    budget_->bytes_left -= bytes;
+    if (is_message) --budget_->messages_left;
+    return true;
 }
 
 void LiteStreamDecoder::stop(Direction& direction) {
@@ -453,6 +612,8 @@ void LiteStreamDecoder::stop_buffering(Direction& direction) {
     direction.buffer.clear();
     direction.buffer.shrink_to_fit();
     direction.start = 0;
+    direction.held.clear();
+    direction.held.shrink_to_fit();
 }
 
 }  // namespace detail

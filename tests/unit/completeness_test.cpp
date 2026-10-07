@@ -200,7 +200,7 @@ TEST(CompletenessTest, UnknownEvidenceKindCannotClaimCoverage) {
         }));
 }
 
-// The three moq-lite-06 session evidence kinds (src/session/lite_session.h) are registered; a near miss is not.
+// The three moq-lite-06 session evidence kinds (include/moq/interop/session/lite_session.h) are registered; a near miss is not.
 TEST(CompletenessTest, LiteSessionEvidenceKindsAreRegistered) {
     RequirementCatalog catalog{18, "source", true, {row("required", Strength::Must)}};
     for (const std::string kind : {"lite_stream_opened", "lite_message", "lite_decode_error"}) {

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <random>
 #include <span>
 #include <string>
@@ -115,6 +116,10 @@ std::string describe_issues(const LiteStreamRecord& record) {
     std::string out;
     for (const auto& issue : record.issues) out += issue.code + "(" + issue.detail + ") ";
     return out;
+}
+
+bool is_known_issue_code(std::string_view code) {
+    return std::find(kAllIssueCodes.begin(), kAllIssueCodes.end(), code) != kAllIssueCodes.end();
 }
 
 StreamDataEvent data_event(std::uint64_t id, Bytes data, bool fin = false) {
@@ -620,7 +625,8 @@ TEST(LiteStreamReader, PeerBytesBufferedBeforeTheKindAreBounded) {
     reader.feed(repeat(0, 30), false, 2);
     EXPECT_TRUE(reader.record().issues.empty());
     reader.feed(repeat(0, 30), false, 3);  // 60 bytes > 8 + 32 of slack
-    EXPECT_EQ(count_issues(reader.record(), kIssueLengthExceedsLimit), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(count_issues(reader.record(), kIssueBufferLimitReached), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(classify_issue(kIssueBufferLimitReached), LiteIssueClass::Harness);
     reader.feed_local(concat({bytes({0x02}), kSubscribeMinimal}), false, 4);  // completes the type: Subscribe
     EXPECT_EQ(reader.record().kind, LiteStreamKind::Subscribe);
     // The peer direction stays stopped (the runner's SUBSCRIBE is itself over this tight limit).
@@ -936,9 +942,353 @@ TEST(LiteSession, RandomByteSoupNeverThrows) {
                 begin += take;
             }
         });
-        EXPECT_LE(reader.record().messages.size(), 64u);
+        EXPECT_LE(reader.record().messages.size(), 128u);  // 64 per direction
         EXPECT_EQ(reader.record().bytes, data.size());
+        for (const auto& issue : reader.record().issues) EXPECT_TRUE(is_known_issue_code(issue.code)) << issue.code;
     }
+    for (const auto& record : session.streams()) {
+        for (const auto& issue : record.issues) EXPECT_TRUE(is_known_issue_code(issue.code)) << issue.code;
+    }
+}
+
+// ---- review fixes: memory accounting (I1) ---------------------------------------------------------------------
+
+Bytes empty_frames_group(std::size_t frames) {
+    Bytes wire = kGroupPreamble;
+    wire.resize(wire.size() + 2 * frames, std::byte{0});  // FRAME{delta 0, empty payload} is 00 00
+    return wire;
+}
+
+TEST(LiteSessionBudget, MessagesAreChargedAgainstMaxBytes) {
+    LiteSession session;
+    const auto wire = empty_frames_group(3);
+    session.on_event(data_event(kPeerUni, wire, true), 1);
+    EXPECT_EQ(session.message_count(), 4u);
+    EXPECT_EQ(session.total_bytes(), wire.size());
+    EXPECT_EQ(session.charged_bytes(), wire.size() + 4 * detail::kMessageCharge);
+    EXPECT_GE(detail::kMessageCharge, sizeof(LiteDecoded));
+    // Issues are charged too.
+    session.on_event(data_event(kPeerBidi, bytes({0x01})), 2);  // publisher_opened_bidi at creation is free
+    session.on_event(data_event(kPeerUni + 4, bytes({0x01}), true), 3);  // truncated_at_fin
+    const auto* truncated = session.find(kPeerUni + 4);
+    ASSERT_NE(truncated, nullptr);
+    ASSERT_EQ(truncated->issues.size(), 1u);
+    EXPECT_EQ(session.charged_bytes(), wire.size() + 4 * detail::kMessageCharge + 2 +
+                                           detail::issue_charge(truncated->issues[0].code,
+                                                                truncated->issues[0].detail));
+}
+
+TEST(LiteSessionBudget, EmptyFrameFloodAcrossStreamsIsBoundedByDefaults) {
+    LiteSession session;  // defaults
+    const LiteSessionLimits defaults;
+    const auto wire = empty_frames_group(99000);
+    std::uint64_t id = kPeerUni;
+    std::size_t sent = 0;
+    while (!session.limit_reached() && sent < 400) {
+        session.on_event(data_event(id, wire, true), 1);
+        id += 4;
+        ++sent;
+    }
+    EXPECT_TRUE(session.limit_reached());
+    std::size_t messages = 0;
+    for (const auto& record : session.streams()) messages += record.messages.size();
+    EXPECT_EQ(messages, session.message_count());
+    EXPECT_LE(messages, defaults.max_messages_total);
+    EXPECT_LE(session.charged_bytes(), defaults.max_bytes);
+    // The resident estimate (stored messages plus the wire bytes behind them) stays within the byte budget, far
+    // below the ~4.8 GiB the unaccounted recorder reached.
+    EXPECT_LE(messages * sizeof(LiteDecoded) + session.total_bytes(), defaults.max_bytes);
+}
+
+TEST(LiteSessionBudget, ByteBudgetStopsAFloodBeforeTheMessageCap) {
+    LiteSessionLimits limits;
+    limits.max_bytes = std::size_t{1} << 20;
+    limits.max_messages_total = std::numeric_limits<std::size_t>::max();
+    LiteSession session(limits);
+    const auto wire = empty_frames_group(1000);
+    for (std::uint64_t id = kPeerUni; id < 4 * 200 && !session.limit_reached(); id += 4) {
+        session.on_event(data_event(id, wire), 1);
+    }
+    EXPECT_TRUE(session.limit_reached());
+    std::size_t messages = 0;
+    for (const auto& record : session.streams()) messages += record.messages.size();
+    EXPECT_LE(messages * sizeof(LiteDecoded) + session.total_bytes(), limits.max_bytes);
+    EXPECT_LE(session.charged_bytes(), limits.max_bytes);
+}
+
+TEST(LiteSessionBudget, TotalMessageCapSetsTheLimit) {
+    LiteSessionLimits limits;
+    limits.max_messages_total = 5;
+    LiteSession session(limits);
+    session.on_event(data_event(kPeerUni, empty_frames_group(3)), 1);  // 4 messages
+    EXPECT_FALSE(session.limit_reached());
+    session.on_event(data_event(kPeerUni + 4, empty_frames_group(3)), 2);  // the 6th message is refused
+    EXPECT_TRUE(session.limit_reached());
+    EXPECT_EQ(session.message_count(), 5u);
+    EXPECT_EQ(session.streams()[1].messages.size(), 1u);
+}
+
+// ---- review fixes: evaluator accessors and issue classes (I2) ---------------------------------------------------
+
+TEST(LiteAccessors, PeerMessagesNeverSeeTheRunnersOwnSetup) {
+    LiteSession session;
+    session.note_local_write(kRunnerUni, false, bytes({0x01, 0x01, 0x00}), true, 1);  // the runner's SETUP
+    // A naive scan of all streams' messages finds a SETUP although the peer sent none.
+    bool naive = false;
+    for (const auto& record : session.streams()) {
+        for (const auto& message : record.messages) naive |= std::holds_alternative<SetupMessage>(message.message);
+    }
+    EXPECT_TRUE(naive);
+    bool peer_setup = false;
+    for (const auto* record : peer_streams(session)) {
+        for (const auto* message : peer_messages(*record)) {
+            peer_setup |= std::holds_alternative<SetupMessage>(message->message);
+        }
+    }
+    EXPECT_FALSE(peer_setup);
+    EXPECT_TRUE(peer_streams(session).empty());
+    ASSERT_EQ(runner_streams(session).size(), 1u);
+    EXPECT_EQ(runner_messages(*runner_streams(session)[0]).size(), 1u);
+    EXPECT_TRUE(peer_messages(session.streams()[0]).empty());
+    // Once the peer sends its SETUP, the accessors see exactly that one.
+    session.on_event(data_event(kPeerUni, bytes({0x01, 0x01, 0x00}), true), 2);
+    ASSERT_EQ(peer_streams(session).size(), 1u);
+    ASSERT_EQ(peer_messages(*peer_streams(session)[0]).size(), 1u);
+}
+
+TEST(LiteAccessors, RunnerIssuesAreNotPeerIssues) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    // A deliberately malformed runner ANNOUNCE_REQUEST (trailing byte inside its length), then a peer error.
+    reader.feed_local(bytes({0x01, 0x03, 0x01, 0x61, 0x00}), false, 1);
+    reader.feed(concat({kAnnounceOkWire, bytes({0x04, 0x00}), bytes({0x01, 0x02, 0x05, 0x00})}), false, 2);
+    const auto& record = reader.record();
+    ASSERT_EQ(record.issues.size(), 3u) << describe_issues(record);
+    const auto peer = peer_issues(record);
+    ASSERT_EQ(peer.size(), 2u);
+    EXPECT_EQ(peer[0]->code, kIssueUnknownAnnounceType);
+    EXPECT_EQ(peer[1]->code, kIssueProtocolViolation);
+    const auto protocol = peer_protocol_issues(record);
+    ASSERT_EQ(protocol.size(), 1u);  // the runner's violation and the Inconclusive skip are excluded
+    EXPECT_EQ(protocol[0]->code, kIssueProtocolViolation);
+    EXPECT_EQ(protocol[0]->from, LiteOrigin::Peer);
+    EXPECT_EQ(peer_messages(record).size(), 1u);  // ANNOUNCE_OK
+}
+
+TEST(LiteAccessors, HarnessLimitsAreNeverPeerProtocol) {
+    LiteStreamReader reader(kPeerUni, LiteOrigin::Peer, false, wire::moqlite06::kDefaultLimits, 2);
+    reader.feed(empty_frames_group(5), false, 1);
+    EXPECT_EQ(count_issues(reader.record(), kIssueMessageLimitReached), 1u);
+    EXPECT_TRUE(peer_protocol_issues(reader.record()).empty());
+    EXPECT_EQ(harness_issues(reader.record()).size(), 1u);
+    // A SETUP over the (defensive, undrafted) default length limit is a harness limit, not a peer violation.
+    LiteStreamReader big(kPeerUni, LiteOrigin::Peer, false);
+    big.feed(bytes({0x01, 0x80, 0x10, 0x00, 0x01}), false, 1);
+    EXPECT_EQ(count_issues(big.record(), kIssueLengthExceedsLimit), 1u);
+    EXPECT_TRUE(peer_protocol_issues(big.record()).empty());
+}
+
+TEST(LiteIssueClasses, EveryIssueCodeHasAnExplicitClass) {
+    const std::vector<std::pair<std::string_view, LiteIssueClass>> expected = {
+        {kIssueProtocolViolation, LiteIssueClass::PeerProtocol},
+        {kIssueInvalidValue, LiteIssueClass::PeerProtocol},
+        {kIssueKeyValueFormattingError, LiteIssueClass::PeerProtocol},
+        {kIssueTrailingAfterSetup, LiteIssueClass::PeerProtocol},
+        {kIssueTrailingAfterRequest, LiteIssueClass::PeerProtocol},
+        {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
+        {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
+        {kIssueLengthExceedsLimit, LiteIssueClass::Harness},
+        {kIssueLengthNotRepresentable, LiteIssueClass::Harness},
+        {kIssueOffsetOverflow, LiteIssueClass::Harness},
+        {kIssueTrailingAfterFin, LiteIssueClass::Harness},
+        {kIssueUndeclaredRunnerStream, LiteIssueClass::Harness},
+        {kIssueMessageLimitReached, LiteIssueClass::Harness},
+        {kIssueBufferLimitReached, LiteIssueClass::Harness},
+        {kIssueLocalBidiMismatch, LiteIssueClass::Harness},
+        {kIssuePublisherOpenedBidi, LiteIssueClass::Informational},
+        {kIssueL2StreamNotDecoded, LiteIssueClass::Informational},
+    };
+    ASSERT_EQ(expected.size(), kAllIssueCodes.size());
+    for (const auto code : kAllIssueCodes) {
+        const auto found = std::find_if(expected.begin(), expected.end(),
+                                        [&](const auto& entry) { return entry.first == code; });
+        ASSERT_NE(found, expected.end()) << code;
+        ASSERT_TRUE(explicit_issue_class(code).has_value()) << code;
+        EXPECT_EQ(*explicit_issue_class(code), found->second) << code;
+        EXPECT_EQ(classify_issue(code), found->second) << code;
+    }
+    // No duplicates in the registry.
+    std::vector<std::string_view> sorted(kAllIssueCodes.begin(), kAllIssueCodes.end());
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(std::adjacent_find(sorted.begin(), sorted.end()), sorted.end());
+    // An unknown code is never a peer Fail.
+    EXPECT_FALSE(explicit_issue_class("not_a_code").has_value());
+    EXPECT_EQ(classify_issue("not_a_code"), LiteIssueClass::Harness);
+}
+
+// ---- review fixes: minors ---------------------------------------------------------------------------------------
+
+TEST(LiteStreamReader, HeldPeerBytesKeepTheirArrival) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x40}), false, 100);          // event 0
+    reader.feed(bytes({0x00, 0x01}), false, 200);          // event 1: SUBSCRIBE_OK, first two bytes
+    reader.feed(bytes({0x06, 0x01, 0x01}), false, 300);    // event 2: its last byte, then 2 of SUBSCRIBE_END
+    reader.feed_local(concat({bytes({0x02}), kSubscribeMinimal}), false, 900);  // event 3: the kind is known
+    reader.feed(bytes({0x07}), false, 1000);               // event 4: SUBSCRIBE_END's last byte
+    const auto& record = reader.record();
+    ASSERT_EQ(record.messages.size(), 3u) << describe_issues(record);
+    EXPECT_TRUE(same(record.messages[0].message, Subscribe{0, "b", "t", SubscribeRange{0x80, 0, 0, 0, 0, 0}}));
+    EXPECT_EQ(record.messages[0].at_ns, 900u);
+    EXPECT_TRUE(same(record.messages[1].message, SubscribeOk{6}));
+    EXPECT_EQ(record.messages[1].at_ns, 300u);
+    EXPECT_EQ(record.messages[1].stream_event_index, 2u);
+    EXPECT_TRUE(same(record.messages[2].message, SubscribeEnd{7}));
+    EXPECT_EQ(record.messages[2].at_ns, 1000u);
+    EXPECT_EQ(record.messages[2].stream_event_index, 4u);
+}
+
+TEST(LiteStreamReader, SubscribeOkHeldAt200Stays200) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x40}), false, 100);
+    reader.feed(bytes({0x00, 0x01, 0x06}), false, 200);
+    reader.feed_local(concat({bytes({0x02}), kSubscribeMinimal}), false, 900);
+    const auto peer = peer_messages(reader.record());
+    ASSERT_EQ(peer.size(), 1u);
+    EXPECT_EQ(peer[0]->at_ns, 200u);
+    EXPECT_EQ(peer[0]->stream_event_index, 1u);
+}
+
+TEST(LiteSession, LocalWriteDirectionComesFromTheStreamId) {
+    LiteSession session;
+    session.note_local_write(kRunnerUni, true, bytes({0x01, 0x01, 0x00}), true, 1);  // uni id, caller says bidi
+    ASSERT_EQ(session.streams().size(), 1u);
+    const auto& record = session.streams()[0];
+    EXPECT_FALSE(record.bidirectional);
+    EXPECT_EQ(record.kind, LiteStreamKind::Setup);
+    EXPECT_EQ(count_issues(record, kIssueLocalBidiMismatch), 1u) << describe_issues(record);
+    EXPECT_EQ(record.issues[0].from, LiteOrigin::Runner);
+    EXPECT_TRUE(peer_issues(record).empty());
+    session.note_local_write(kRunnerBidi, true, kAnnounceLocal, false, 2);  // agreeing flag: no issue
+    EXPECT_TRUE(session.streams()[1].issues.empty());
+}
+
+TEST(LiteStreamReader, PeerOpenedGoawayTypeIsUnknownWithItsRawType) {
+    LiteStreamReader reader(kPeerBidi, LiteOrigin::Peer, true);
+    reader.feed(bytes({0x05, 0x00}), false, 1);
+    EXPECT_EQ(reader.record().kind, LiteStreamKind::Unknown);
+    EXPECT_EQ(reader.record().stream_type.value_or(0), 0x5u);
+    EXPECT_EQ(count_issues(reader.record(), kIssuePublisherOpenedBidi), 1u);
+}
+
+TEST(LiteStreamReader, RunnerWritesDoNotUseUpThePeersMessageCap) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true, wire::moqlite06::kDefaultLimits, 2);
+    const auto update = bytes({0x06, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00});
+    reader.feed_local(concat({kSubscribeLocal, update, update}), false, 1);  // the runner's third message hits it
+    reader.feed(concat({bytes({0x00, 0x01, 0x06}), bytes({0x01, 0x01, 0x07})}), false, 2);
+    const auto& record = reader.record();
+    EXPECT_TRUE(reader.message_limit_reached());
+    EXPECT_EQ(runner_messages(record).size(), 2u);
+    EXPECT_EQ(peer_messages(record).size(), 2u);  // the peer's allowance is its own
+    ASSERT_EQ(count_issues(record, kIssueMessageLimitReached), 1u);
+    EXPECT_EQ(record.issues[0].from, LiteOrigin::Runner);
+    EXPECT_TRUE(peer_issues(record).empty());
+}
+
+TEST(LiteSession, PerStreamMessageCapEndsRecordingForTheSession) {
+    LiteSessionLimits limits;
+    limits.max_messages_per_stream = 2;
+    LiteSession session(limits);
+    session.on_event(data_event(kPeerUni, empty_frames_group(4)), 1);
+    EXPECT_TRUE(session.limit_reached());
+    session.on_event(data_event(kPeerUni + 4, bytes({0x01, 0x01, 0x00}), true), 2);  // another stream: ignored
+    EXPECT_EQ(session.streams().size(), 1u);
+}
+
+TEST(LiteStreamReaderProperty, UnknownAnnounceTypeSkipAtEveryOffsetAndPairOfOffsets) {
+    const auto peer = concat({kAnnounceOkWire, bytes({0x04, 0x02, 0xaa, 0xbb}), bytes({0x01, 0x01, 0x05}),
+                              bytes({0x05, 0x00}), bytes({0x02, 0x05, 0x05, 0x01, 0x07, 0x02, 0x03})});
+    auto check = [&](const std::vector<std::size_t>& cuts) {
+        LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+        reader.feed_local(kAnnounceLocal, false, 1);
+        std::size_t begin = 0;
+        std::uint64_t clock = 2;
+        for (const auto cut : cuts) {
+            reader.feed(std::span(peer).subspan(begin, cut - begin), false, clock++);
+            begin = cut;
+        }
+        reader.feed(std::span(peer).subspan(begin), false, clock);
+        const auto& record = reader.record();
+        ASSERT_EQ(record.messages.size(), 4u) << describe_issues(record);
+        EXPECT_TRUE(same(record.messages[1].message, AnnounceOk{0, 0}));
+        EXPECT_TRUE(same(record.messages[2].message, AnnounceEnd{5}));
+        EXPECT_TRUE(same(record.messages[3].message, AnnounceUpdate{5, RouteMetadata{{7}, 2, 3}}));
+        ASSERT_EQ(record.issues.size(), 2u) << describe_issues(record);
+        EXPECT_EQ(record.issues[0].code, kIssueUnknownAnnounceType);
+        EXPECT_EQ(record.issues[1].code, kIssueUnknownAnnounceType);
+    };
+    for (std::size_t cut = 0; cut <= peer.size(); ++cut) {
+        SCOPED_TRACE(cut);
+        check({cut});
+    }
+    for (std::size_t first = 0; first <= peer.size(); ++first) {
+        for (std::size_t second = first; second <= peer.size(); ++second) {
+            SCOPED_TRACE(std::to_string(first) + "," + std::to_string(second));
+            check({first, second});
+        }
+    }
+}
+
+TEST(LiteStreamReader, PeerFinWhileWaitingForTheRunnersStreamType) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x40}), false, 1);
+    reader.feed(bytes({0x00, 0x01, 0x06, 0x00}), true, 2);  // SUBSCRIBE_OK, then a partial message, FIN
+    EXPECT_TRUE(reader.record().issues.empty());              // judged once the kind is known
+    reader.feed_local(concat({bytes({0x02}), kSubscribeMinimal}), false, 3);
+    const auto& record = reader.record();
+    ASSERT_EQ(record.messages.size(), 2u) << describe_issues(record);
+    EXPECT_TRUE(same(record.messages[1].message, SubscribeOk{6}));
+    EXPECT_EQ(record.messages[1].at_ns, 2u);
+    EXPECT_TRUE(record.fin_seen);
+    EXPECT_EQ(count_issues(record, kIssueTruncatedAtFin), 1u) << describe_issues(record);
+}
+
+TEST(LiteStreamReader, ResetWhileWaitingForTheRunnersStreamType) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x40}), false, 1);
+    reader.feed(bytes({0x00, 0x01}), false, 2);
+    reader.reset(5);
+    reader.feed_local(concat({bytes({0x02}), kSubscribeMinimal}), false, 3);
+    EXPECT_EQ(reader.record().messages.size(), 1u);  // only the runner's SUBSCRIBE
+    EXPECT_TRUE(reader.record().issues.empty()) << describe_issues(reader.record());
+    EXPECT_EQ(reader.record().reset_code.value_or(0), 5u);
+}
+
+TEST(LiteSession, ResetAndStopSendingAreIgnoredAfterTheLimit) {
+    LiteSessionLimits limits;
+    limits.max_streams = 1;
+    LiteSession session(limits);
+    session.on_event(data_event(kPeerUni, kGroupPreamble), 1);
+    session.on_event(data_event(kPeerUni + 4, kGroupPreamble), 2);
+    ASSERT_TRUE(session.limit_reached());
+    session.on_event(PeerResetEvent{kPeerUni, 9}, 3);
+    session.on_event(PeerStopSendingEvent{kPeerUni, 9}, 4);
+    EXPECT_FALSE(session.streams()[0].reset_seen);
+    EXPECT_FALSE(session.streams()[0].stop_sending_seen);
+    EXPECT_EQ(session.streams().size(), 1u);
+}
+
+TEST(LiteStreamReader, LargeFrameInSmallChunks) {
+    LiteStreamReader reader(kPeerUni, LiteOrigin::Peer, false);
+    // FRAME payload 0xffff0 bytes (4-byte length 80 0f ff f0), then an empty frame.
+    Bytes wire = concat({kGroupPreamble, bytes({0x00, 0x80, 0x0f, 0xff, 0xf0})});
+    wire.resize(wire.size() + 0xffff0, std::byte{1});
+    wire.push_back(std::byte{0});
+    wire.push_back(std::byte{0});
+    for (std::size_t i = 0; i < wire.size(); i += 1000) {
+        reader.feed(std::span(wire).subspan(i, std::min<std::size_t>(1000, wire.size() - i)), false, i);
+    }
+    ASSERT_EQ(reader.record().messages.size(), 3u) << describe_issues(reader.record());
+    EXPECT_EQ(std::get<Frame>(reader.record().messages[1].message).payload.size(), 0xffff0u);
+    EXPECT_TRUE(reader.record().issues.empty());
 }
 
 TEST(LiteNames, KindAndMessageNames) {

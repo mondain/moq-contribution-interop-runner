@@ -1,5 +1,6 @@
 #include "moq/interop/session/lite_session.h"
 
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -16,7 +17,10 @@ bool bidirectional_of(std::uint64_t stream_id) { return (stream_id & 0x2) == 0; 
 
 }  // namespace
 
-LiteSession::LiteSession(LiteSessionLimits limits) : limits_(limits) {}
+LiteSession::LiteSession(LiteSessionLimits limits) : limits_(limits) {
+    budget_.bytes_left = limits_.max_bytes;
+    budget_.messages_left = limits_.max_messages_total;
+}
 
 void LiteSession::on_event(const transport::TransportEvent& event, std::uint64_t at_ns) {
     std::visit(
@@ -26,19 +30,22 @@ void LiteSession::on_event(const transport::TransportEvent& event, std::uint64_t
                 if (limit_reached_ || !admit_bytes(value.data.size())) return;
                 const auto index = slot(value.stream_id, bidirectional_of(value.stream_id));
                 if (!index) return;
+                budget_.bytes_left -= value.data.size();
                 total_bytes_ += value.data.size();
-                decoders_[*index].feed(records_[*index], value.data, value.fin, at_ns);
+                decoders_[*index].feed(records_[*index], value.data, value.fin, at_ns, &budget_);
                 after_update(*index);
             } else if constexpr (std::is_same_v<T, transport::PeerResetEvent>) {
                 if (limit_reached_) return;
                 const auto index = slot(value.stream_id, bidirectional_of(value.stream_id));
                 if (!index) return;
-                decoders_[*index].reset(records_[*index], value.application_error, at_ns);
+                decoders_[*index].reset(records_[*index], value.application_error, at_ns, &budget_);
+                after_update(*index);
             } else if constexpr (std::is_same_v<T, transport::PeerStopSendingEvent>) {
                 if (limit_reached_) return;
                 const auto index = slot(value.stream_id, bidirectional_of(value.stream_id));
                 if (!index) return;
-                decoders_[*index].stop_sending(records_[*index], value.application_error, at_ns);
+                decoders_[*index].stop_sending(records_[*index], value.application_error, at_ns, &budget_);
+                after_update(*index);
             } else if constexpr (std::is_same_v<T, transport::PeerCloseEvent>) {
                 if (peer_close_) return;  // the first close is the one that counts
                 PeerCloseInfo info;
@@ -60,10 +67,19 @@ void LiteSession::on_event(const transport::TransportEvent& event, std::uint64_t
 void LiteSession::note_local_write(std::uint64_t stream_id, bool bidirectional, std::span<const std::byte> bytes,
                                    bool fin, std::uint64_t at_ns) {
     if (limit_reached_ || !admit_bytes(bytes.size())) return;
-    const auto index = slot(stream_id, bidirectional);
+    const bool by_id = bidirectional_of(stream_id);
+    const auto index = slot(stream_id, by_id);
     if (!index) return;
+    budget_.bytes_left -= bytes.size();
     total_bytes_ += bytes.size();
-    decoders_[*index].feed_local(records_[*index], bytes, fin, at_ns);
+    if (bidirectional != by_id) {
+        decoders_[*index].note_runner_issue(
+            records_[*index], kIssueLocalBidiMismatch,
+            std::string("caller said ") + (bidirectional ? "bidirectional" : "unidirectional") + " for stream " +
+                std::to_string(stream_id) + "; the stream id says otherwise",
+            at_ns, &budget_);
+    }
+    decoders_[*index].feed_local(records_[*index], bytes, fin, at_ns, &budget_);
     after_update(*index);
 }
 
@@ -86,7 +102,7 @@ std::optional<std::size_t> LiteSession::slot(std::uint64_t stream_id, bool bidir
 }
 
 bool LiteSession::admit_bytes(std::size_t size) {
-    if (size > limits_.max_bytes - total_bytes_) {  // total_bytes_ never exceeds max_bytes
+    if (size > budget_.bytes_left) {
         limit_reached_ = true;
         return false;
     }
@@ -94,7 +110,23 @@ bool LiteSession::admit_bytes(std::size_t size) {
 }
 
 void LiteSession::after_update(std::size_t index) {
-    if (decoders_[index].message_limit_reached()) limit_reached_ = true;
+    if (decoders_[index].message_limit_reached() || budget_.exhausted) limit_reached_ = true;
+}
+
+std::vector<const LiteStreamRecord*> peer_streams(const LiteSession& session) {
+    std::vector<const LiteStreamRecord*> out;
+    for (const auto& record : session.streams()) {
+        if (record.origin == LiteOrigin::Peer) out.push_back(&record);
+    }
+    return out;
+}
+
+std::vector<const LiteStreamRecord*> runner_streams(const LiteSession& session) {
+    std::vector<const LiteStreamRecord*> out;
+    for (const auto& record : session.streams()) {
+        if (record.origin == LiteOrigin::Runner) out.push_back(&record);
+    }
+    return out;
 }
 
 }  // namespace moq::interop::session
