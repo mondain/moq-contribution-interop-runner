@@ -241,11 +241,11 @@ its twin-equality check:
 `-w -H PATH` (WebTransport; the path and any query become the HTTP/3 `:path` unchanged, `/` if
 empty; IPv6 literals lose their brackets), and runs the publisher as
 `timeout --foreground --preserve-status -k 2 -s TERM <timeout+3>` with its output in
-`<log_dir>/publisher.log`. imquic's raw QUIC client sends no PATH SETUP option, so the
-`moqt://` path is dropped and a `moqt://` query is refused (exit 64), as are an empty host,
-a missing or out-of-range port, user information, a fragment and an IPv6 zone. moq-pub
-reads no fixture (it publishes a clock: one Object per second, one Group per minute) and
-verifies no certificate, so `fixture` and `tls_ca` are not used.
+`<log_dir>/publisher.log`. imquic's raw QUIC client sends no PATH or AUTHORITY SETUP
+option, so the `moqt://` path is dropped and a `moqt://` query is refused (exit 64), as are
+an empty host, a missing or out-of-range port, user information, a fragment and an IPv6
+zone. moq-pub reads no fixture (it publishes a clock: one Object per second, one Group per
+minute) and verifies no certificate, so `fixture` and `tls_ca` are not used.
 
 The adapter does not `exec` the publisher; it stays alive as a small supervisor. The runner
 stops a driver with SIGTERM to its process group and SIGKILLs the group 100 ms later, which
@@ -254,18 +254,21 @@ it records as a driver failure (run `error`, `term_signal` 9), and moq-pub needs
 adapter starts `timeout` and moq-pub in the background (same process group), and on SIGTERM,
 SIGINT or SIGHUP exits 0 at once without forwarding anything: moq-pub already received the
 group's SIGTERM (plus the one `timeout` relays, so two in all) and finishes on its own.
-moq-pub also bumps its stop counter on connection loss, GOAWAY and a refused request, and a
-signal that takes the counter past two makes it exit(1) without cleanup: that happens in
-about 5 percent of runs. It is not a regression (the former `exec timeout` adapter did the
-same in 43 of 186 runs of the first imquic sweep) and changed no verdict. Without a signal it waits and exits with the publisher's status as
+moq-pub also bumps its stop counter on connection loss, GOAWAY and a refused PUBLISH or
+PUBLISH_NAMESPACE, and a signal that takes the counter past two makes it exit(1) without
+cleanup: that happens in about 5 percent of runs. It is not a regression (the former
+`exec timeout` adapter did the same in 43 of 186 runs of the first imquic sweep) and changed
+no verdict. Without a signal it waits and exits with the publisher's status as
 `--preserve-status` reports it, also when the deadline fired. The trade-off: after a stop,
 moq-pub briefly outlives the adapter without the runner's SIGKILL backstop; it stays bounded
 by `timeout -k 2` (SIGKILL at most 2 s after the signal).
 
 The per-scenario choice is publish-first (`-X`: PUBLISH right after SETUP; every SUBSCRIBE
-is refused with DUPLICATE_SUBSCRIPTION) or announce-and-wait (no `-X`: PUBLISH_NAMESPACE,
-then a SUBSCRIBE is accepted and Objects flow if it carries FORWARD=1; once delivery has
-started, a further SUBSCRIBE is refused with DUPLICATE_SUBSCRIPTION). It is
+is refused with DUPLICATE_SUBSCRIPTION, code 0x19, which draft 22 does not define) or
+announce-and-wait (no `-X`: PUBLISH_NAMESPACE, then a SUBSCRIBE is accepted and Objects flow
+if it carries FORWARD=1; once delivery has started, a further SUBSCRIBE is refused with
+DUPLICATE_SUBSCRIPTION, while SUBSCRIBEs without FORWARD=1 start nothing and later ones are
+still accepted). In either mode a refused PUBLISH or PUBLISH_NAMESPACE ends the session. It is
 derived from the moqxr adapter: moqxr `--forward 1` gives `-X`, `--forward 0` (paced or not)
 gives none, and the own scenarios and probes follow the moqxr table above. Where imquic's
 modes differ from moqxr's, these shared scenarios deviate from the derivation:
@@ -289,6 +292,17 @@ modes differ from moqxr's, these shared scenarios deviate from the derivation:
 `tests/e2e/imquic-adapter-contract.sh` checks validation, endpoint translation, the
 `timeout` wrapper and the supervisor's shutdown (adapter exit within the 100 ms grace, the
 publisher's cleanup and the `-k 2` bound).
+
+Limits of this adapter and publisher: namespace fields and the track name must be printable
+ASCII without spaces (the adapter accepts only the reference `media` / `vide_1`); moq-pub
+registers no FETCH handler, so start the runner with `--publisher-no-fetch` (or declare
+`"publisher_capabilities": {"fetch": false}`); it has no SUBSCRIBE_NAMESPACE or
+SUBSCRIBE_TRACKS handler of its own (the library answers NOT_SUPPORTED); and the adapter
+passes none of moq-pub's emission options (`-P` padding, `-f` / `-F` prior group or object
+gap, `-x` Object properties), so the rows that need them stay unscored. The draft 22 sweep
+against imquic and its triage are in
+[interop-notes.md](interop-notes.md#draft-22-sweep-against-imquic-6836173); the imquic findings
+are in [imquic-punch-list.md](imquic-punch-list.md).
 
 A real request file from a run:
 

@@ -127,8 +127,8 @@ fi
 # runs. --foreground keeps `timeout` in the runner's process group and makes it signal only moq-pub,
 # not the whole group (the runner already signals the group). On a runner stop moq-pub still gets two
 # SIGTERMs, the group's and the one `timeout` relays; when its stop counter was already bumped
-# (connection loss, GOAWAY, a refused request) the second takes it past two and moq-pub exits(1)
-# without cleanup, in about 5 percent of runs. That is not new (the former `exec timeout` adapter did
+# (connection loss, GOAWAY, a refused PUBLISH or PUBLISH_NAMESPACE) the second takes it past two
+# and moq-pub exits(1) without cleanup, in about 5 percent of runs. That is not new (the former `exec timeout` adapter did
 # the same in 43 of 186 runs of the first sweep) and changed no verdict.
 # --preserve-status reports moq-pub's own status (0 after SIGTERM) instead of 124;
 # -k 2 kills it if it hangs, also after the runner's SIGTERM (timeout arms -k on any signal it relays).

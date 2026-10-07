@@ -6,7 +6,7 @@ runner in this repository against `openmoq-publisher 0.4.1 (commit 9bda5c9)`, wi
 the evidence and draft citation recorded below. The item bodies keep that original
 evidence; the status tables that follow record what later sweeps against moqxr
 `0993cf7` and `4b615f4` showed. The D22- items come from the first draft 22 sweep,
-against `4b615f4`. Background and the full result set
+against `4b615f4`, and its re-sweep after the F1 runner fixes. Background and the full result set
 are in [interop-notes.md](interop-notes.md).
 
 ## Status against moqxr 0993cf7
@@ -76,6 +76,12 @@ pass, so those draft 21 FAILs are adapter artifacts, not moqxr defects.
 
 M-04, M-06, M-07, M-16, M-17 and M-21 were not re-checked (draft 18 rows, or FETCH,
 which the sweep declared away).
+
+After the F1 runner fixes (29 shared probes send the run's namespace and track on the draft
+22 wire; see [interop-notes.md](interop-notes.md#draft-22-sweep-against-moqxr-4b615f4)) the
+same build was swept again on both transports. One row changed: `D22-8-9-MUST-281` went from
+`not_run` to `fail`, because a SUBSCRIBE for the run's track that uses an unregistered token
+alias is served (D22-10). Every status above is unchanged.
 
 ## Draft 22 items
 
@@ -173,7 +179,11 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   runner's fixed request for track "x" (see the runner-side follow-ups): moqxr did not answer
   even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED as soon as it reads the
   request stream (`moqt_session.cpp` around lines 10379-10395), so it probably never read that
-  stream. In `d22-subscriber-update-on-publish` (a permitted case, lines 4298-4299) moqxr
+  stream. After the F1 runner fixes the probe asks for the run's track, and moqxr (in its
+  await-subscribe mode) still answered nothing, neither to the TRACK_STATUS nor to the
+  REQUEST_UPDATE: the names are no longer the confound, but this leg is still silence, which
+  fits the reading that moqxr does not read that request stream while it awaits a SUBSCRIBE.
+  In `d22-subscriber-update-on-publish` (a permitted case, lines 4298-4299) moqxr
   reset its PUBLISH streams before the update arrived and sent no REQUEST_UPDATE_OK, so
   nothing was observed there. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
 - **Question:** is the silence real for the remaining legs? Silence is not proof, so the
@@ -221,18 +231,35 @@ cited lines first. Items that carry an M- item over to draft 22 say so.
   (D22-4-2-MUST-111 passes).
 - **Required:** apply the overlap check to SUBSCRIBE_TRACKS, in its own overlap space.
 
-### D22-10 A REQUEST_UPDATE that references an unregistered token alias is not rejected
+### D22-10 A message that references an unregistered token alias is not rejected (SUBSCRIBE and REQUEST_UPDATE)
 
-- **Rows:** none scored. It keeps D22-9-5-1-MUST-357, -359 and -360 unscored: their
-  probes use such an update to make it fail.
-- **Scenarios:** `d22-failed-subscription-update-cleanup`,
+The first sweep saw this on REQUEST_UPDATE only (the item was titled "A REQUEST_UPDATE that
+references an unregistered token alias is not rejected"). The re-sweep after the F1 runner
+fixes shows the same missing check on SUBSCRIBE, where it is scored.
+
+- **Rows:** D22-8-9-MUST-281 (fail after the F1 fixes; `not_run` before, when the probe
+  asked for track "x", which moqxr refused as unknown before looking at the token). It also
+  keeps D22-9-5-1-MUST-357, -359 and -360 unscored: their probes use such an update to make
+  it fail.
+- **Scenarios:** `d22-request-unknown-token-alias` (with `d22-request-deleted-token-alias`,
+  which waits for a token cache and sends nothing); `d22-failed-subscription-update-cleanup`,
   `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close`.
 - **Draft:** lines 3708-3709: "The receiver of a message referencing an Alias that is not
   currently registered MUST reject the message with UNKNOWN_AUTH_TOKEN_ALIAS."
-- **Observed:** the update `02 0006 03 01 03 02 02 00` (AUTHORIZATION TOKEN, USE_ALIAS 0,
-  never registered) is answered REQUEST_OK (`07 0004 01 09 00 01`) on a SUBSCRIBE, and
-  gets no answer on SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS.
-- **Required:** reject a reference to an unregistered alias.
+- **Observed:** a SUBSCRIBE for `media`/`vide_1` with AUTHORIZATION TOKEN USE_ALIAS 0, never
+  registered (`03 0014 01 01 05 media 06 vide_1 01 03 02 02 00`), is answered SUBSCRIBE_OK
+  (`04 0002 01 00`) and Objects follow, on both transports. The update
+  `02 0006 03 01 03 02 02 00` (the same token) is answered REQUEST_OK
+  (`07 0004 01 09 00 01`) on a SUBSCRIBE, and gets no answer on SUBSCRIBE_NAMESPACE or
+  SUBSCRIBE_TRACKS. The run also stores an `unresolved_error_mapping` event reading
+  `result=NOT_RUN`; that text is about a REQUEST_ERROR answer (draft 22 assigns
+  UNKNOWN_AUTH_TOKEN_ALIAS no REQUEST_ERROR code) and does not contradict the FAIL.
+- **Where:** `valid_authorization_token` (`moqt_control_messages.cpp` lines 478-505) checks
+  only the structure (USE_ALIAS is an Alias Type followed by one Alias), and the REQUEST_UPDATE
+  decoder (around lines 1995-2017) likewise; moqxr keeps no alias registry, so a well-formed
+  reference to any alias is accepted. moqxr source lines are from the scratch copy of `4b615f4` that the sweep ran; the read-only checkout has since moved, so its line numbers differ in places.
+- **Required:** reject a reference to an unregistered alias. With no token cache
+  (ground rule 3) every alias is unregistered, so every USE_ALIAS reference is rejected.
 
 ### D22-C1 A refused PUBLISH ends the session, GREASE code included (expectation question)
 
@@ -800,15 +827,22 @@ These come out of the same results but belong to the runner repository:
 - **Peer-close and response probe families** (probes where the publisher opens the
   request stream) do not yet use the close-attribution rule.
 - **Remaining hard-coded baseline SUBSCRIBEs** in a few draft 21 probes (for example
-  `d21-unknown-request-stream-message`, `d21-duplicate-invalid-request-id`). At
-  draft 22, three probes now send the run's names (`d22-failed-subscription-update-cleanup`,
-  `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams`), but
-  `d22-unknown-request-stream-message` and `d22-update-on-track-status` still request
-  namespace () and track "x", and the first still runs moqxr `--forward 1`, so the
-  request-stream half of D22-9-MUST-295 is never exercised against moqxr, and the
-  TRACK_STATUS leg of D22-06 is no evidence (moqxr answered nothing, not even the
-  TRACK_STATUS). `d22-unknown-datagram-type` also still runs `--forward 1`, which
-  confounds its WebTransport run (D22-07).
+  `d21-unknown-request-stream-message`, `d21-duplicate-invalid-request-id`); draft 21 is
+  frozen. At draft 22 the F1 work made the last 29 such probes send the run's names (three
+  had done so since the first draft 22 sweep), `d22-unknown-request-stream-message` and
+  `d22-update-on-track-status` included. Against moqxr this changed only D22-8-9-MUST-281
+  (D22-10). `d22-unknown-request-stream-message` still runs moqxr `--forward 1`, so the
+  request-stream half of D22-9-MUST-295 is still never exercised against moqxr (moqxr sends
+  its own PUBLISH and ends the session); in `d22-update-on-track-status` moqxr now answers
+  nothing to a TRACK_STATUS for the run's track, which leaves that leg of D22-06 silence, not
+  proof. `d22-unknown-datagram-type` also still runs `--forward 1`, which confounds its
+  WebTransport run (D22-07).
+- **Two draft 22 ids that may need moqxr `--forward 1`.** The imquic adapter (F1) found that
+  `d22-publish-established-subscriber-sends-publish-state-notify` and
+  `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` wait for the publisher's own
+  PUBLISH; the moqxr adapter runs both `--forward 0`, which likely explains their `not_run`
+  against moqxr. Not changed (the moqxr command lines are pinned); a follow-up for the moqxr
+  adapter.
 - **Rows moqxr cannot be scored on by silence** (M-14) need a liveness follow-up for
   their probe family.
 

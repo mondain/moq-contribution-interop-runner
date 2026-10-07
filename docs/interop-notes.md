@@ -2,7 +2,8 @@
 
 This document records what is known about running specific publishers against the
 interop runner: how the bundled `moqxr` adapter maps scenarios to the publisher's
-command line, what was observed in recent runs, and the standing rule for
+command line, what was observed in recent runs (including the draft 22 sweeps against
+moqxr and imquic), and the standing rule for
 reading any such observation. It is a log of facts about publisher builds, not a
 statement of what MoQT requires. Observations here can go stale when either side
 changes; every entry names the build it was made against.
@@ -81,8 +82,8 @@ one run, not a conformance claim.
 |---|---|
 | Peer | `openmoq-publisher` (moqxr) at `4b615f4874d67653035642c80a3d454db759859e` ("Add moqt draft 22", 2026-10-06), `--version` `0.4.2-dev`; built in a scratch copy with picoquic `01e124e` and picotls `f06553b`, Release, target `openmoq-publisher` |
 | Fixture | moqxr's `tests/fixtures/locmaf-publisher.mp4` (Groups 0 and 1), namespace `media`, track `vide_1` |
-| Runner | this repository at `5ca525e` (runner binary built from `6b28cca`; later commits change only tests), bundled `adapters/moqxr/run.sh` |
-| Date | 2026-10-06 (final sweep 13:10 to 13:32 -07:00) |
+| Runner | this repository at `5ca525e` (runner binary built from `6b28cca`; later commits change only tests), bundled `adapters/moqxr/run.sh`; re-swept after the F1 runner fixes at `84dca11` (see below) |
+| Date | 2026-10-06 (final sweep 13:10 to 13:32 -07:00; re-sweep after the F1 fixes 18:58 to 19:09) |
 
 Method (the same as the draft 18 and 21 sweeps below): every executable scenario is run
 as its own driven run on both transports, with the bundled moqxr adapter as the driver
@@ -117,6 +118,8 @@ Runs (refused: HTTP refusal, nothing started; every single-scenario run is `inco
 | draft 21 WebTransport | 222 | 6 | 28 | 188 | 164 | 15 | 9 | 43 (33 / 6 / 4) |
 | draft 22 native QUIC | 223 | 6 | 29 | 188 | 175 | 6 | 7 | 41 (31 / 6 / 4) |
 | draft 22 WebTransport | 223 | 6 | 29 | 188 | 175 | 6 | 7 | 41 (31 / 6 / 4) |
+| draft 22 native QUIC, after the F1 fixes | 223 | 6 | 29 | 188 | 174 | 7 | 7 | 41 (30 / 7 / 4) |
+| draft 22 WebTransport, after the F1 fixes | 223 | 6 | 29 | 188 | 174 | 7 | 7 | 41 (30 / 7 / 4) |
 
 Requirement rows touched by the sweep:
 
@@ -126,6 +129,8 @@ Requirement rows touched by the sweep:
 | draft 21 WebTransport | 145 | 57 | 12 | 76 |
 | draft 22 native QUIC | 147 | 69 | 5 | 73 |
 | draft 22 WebTransport | 144 | 69 | 5 | 70 |
+| draft 22 native QUIC, after the F1 fixes | 147 | 69 | 6 | 72 |
+| draft 22 WebTransport, after the F1 fixes | 144 | 69 | 6 | 69 |
 
 - Refusals are the same on every sweep: 6 scenarios need a reserved-namespace fixture
   the adapter does not accept (400 `invalid_run_config`), 22 FETCH scenarios (23 at
@@ -175,6 +180,26 @@ pass. Two have no draft 22 twin: the draft 22 row for the overflowing filter tha
 two remaining draft 21 FAILs, `D21-3-3-2-MUST-065` and `D21-9-1-6-MUST-315`, are moqxr
 findings (M-11).
 
+After the F1 fixes. The imquic work (below) changed the runner for draft 22 once more: 29
+shared probes that still sent namespace () and track "x" now send the run's namespace and
+track on the draft 22 wire (fix R2; the other two F1 fixes touch only the imquic adapter).
+The same `4b615f4` build was swept again on both transports with the runner at `84dca11`.
+After the F1 fixes of the shared probes the rows moved from 69 pass, 5 fail, 73 not_run to
+69 pass, 6 fail, 72 not_run on native QUIC, and from 69 / 5 / 70 to 69 / 6 / 69 on
+WebTransport. One row changed, on both transports: `D22-8-9-MUST-281` went from `not_run` to
+`fail`. With the run's track, `d22-request-unknown-token-alias` sends a SUBSCRIBE for
+`media`/`vide_1` with AUTHORIZATION_TOKEN USE_ALIAS 0, an alias never registered
+(`03 0014 01 01 05 media 06 vide_1 01 03 02 02 00`); moqxr answers SUBSCRIBE_OK
+(`04 0002 01 00`) and serves Objects instead of rejecting the request with
+UNKNOWN_AUTH_TOKEN_ALIAS (lines 3708-3709). Before, the fixed track "x" was refused as an
+unknown track, which said nothing about the alias. The run also stores an
+`unresolved_error_mapping` event reading `result=NOT_RUN`; that text applies only to a
+REQUEST_ERROR answer (draft 22 assigns UNKNOWN_AUTH_TOKEN_ALIAS no REQUEST_ERROR code) and
+does not contradict the FAIL. This is the same missing check as punch list D22-10, now seen on
+SUBSCRIBE as well as on REQUEST_UPDATE. Every other row, the error runs and the refusals are
+as before; `D22-8-9-MUST-279` and `-289`, which already passed with the run's names, still
+pass.
+
 ### Triage of the draft 22 non-pass rows
 
 Every `fail` and `not_run` row of the draft 22 native QUIC sweep is in exactly one line
@@ -183,7 +208,9 @@ defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0
 (b) 15 rows (5 fail, 10 not_run), (c) 3 rows, (d) 60 rows. Line numbers are in
 `docs/draft-ietf-moq-transport-22.txt`. The 7 `error` runs are the update-overlap probes
 (T22), `d22-publisher-goaway-alternate-uri` (T9), the two REQUEST_UPDATE overrun probes
-(T13) and two SETUP token-registration probes (T12).
+(T13) and two SETUP token-registration probes (T12). After the F1 fixes `D22-8-9-MUST-281`
+is a FAIL and moves from T12 to T5: 6 fail and 72 not_run rows, (b) 16 rows (6 fail, 10
+not_run), (d) 59 rows; the table below shows it under T5.
 
 | T | Cat | Draft 22 rows (outcome) | Scenarios | Evidence | Draft 22 text | Draft 21 twin | Action |
 |---|---|---|---|---|---|---|---|
@@ -191,14 +218,14 @@ defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0
 | T2 | b | `D22-9-MUST-295` (fail) | `d22-unknown-control-message` (+ `d22-unknown-request-stream-message`) | The runner writes control message type 0x7e (`7e 00 00`); moqxr keeps the session and answers the liveness SUBSCRIBE with SUBSCRIBE_OK and Objects | 3877-3878 | `D21-9-MUST-284` not_run (its twin runs `--forward 1`) | Punch list D22-02 (M-09 partly open) |
 | T3 | b | `D22-9-2-MUST-339` (fail) | `d22-duplicate-request-goaway`, `d22-goaway-on-distinct-request-streams` | After moqxr accepts SUBSCRIBE_NAMESPACE for `media` (`07 0001 00`), two GOAWAYs (`10 0003 00 a7 10`) on that request stream draw no close and the liveness SUBSCRIBE is served: moqxr stops reading the request stream after accepting SUBSCRIBE_NAMESPACE. The distinct-streams negative control was answered (barrier REQUEST_ERROR 0x10) | 4113-4115 | `D21-9-2-MUST-328` not_run (fixed names) | Punch list D22-08 |
 | T4 | b | `D22-3-6-MUST-083` (fail) | `d22-subscribe-tracks-overlap`, `d22-discovery-independent-overlap-spaces` | A second SUBSCRIBE_TRACKS for prefix `media` while the first is established is accepted with REQUEST_OK (`07 0001 00`), as is one for the empty prefix | 1716-1719 | `D21-9-18-MUST-393` not_run (no PUBLISH answer at draft 21) | Punch list D22-09 |
-| T5 | b | `D22-9-5-1-MUST-357`, `-359`, `-360` (not_run) | `d22-failed-subscription-update-cleanup`, `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close` | The REQUEST_UPDATE meant to fail (`02 0006 03 01 03 02 02 00`: AUTHORIZATION TOKEN USE_ALIAS 0, never registered) is accepted on a SUBSCRIBE (REQUEST_OK `07 0004 01 09 00 01`) and ignored on SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS (no reply, no FIN). The update never fails, so the cleanup these rows require never comes due; the rows stay unscored | 3708-3709 (unknown alias), 4395-4401 | `D21-9-5-1-MUST-346`, `-348`, `-349` not_run (fixed names at draft 21) | Punch list D22-10 (unscored observation) |
+| T5 | b | `D22-9-5-1-MUST-357`, `-359`, `-360` (not_run); `D22-8-9-MUST-281` (fail after the F1 fixes; not_run and under T12 before) | `d22-failed-subscription-update-cleanup`, `d22-failed-subscribe-namespace-update-close`, `d22-failed-subscribe-tracks-update-close`; `d22-request-unknown-token-alias` | After the F1 fixes a SUBSCRIBE for the run's track with USE_ALIAS 0 (never registered) gets SUBSCRIBE_OK (`04 0002 01 00`) and Objects: row 281 FAILs. The REQUEST_UPDATE meant to fail (`02 0006 03 01 03 02 02 00`: AUTHORIZATION TOKEN USE_ALIAS 0, never registered) is accepted on a SUBSCRIBE (REQUEST_OK `07 0004 01 09 00 01`) and ignored on SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS (no reply, no FIN). The update never fails, so the cleanup these rows require never comes due; the rows stay unscored | 3708-3709 (unknown alias), 4395-4401 | `D21-9-5-1-MUST-346`, `-348`, `-349` not_run (fixed names at draft 21) | Punch list D22-10 |
 | T6 | b | `D22-11-5-1-MUST-541` (not_run) | `d22-inbound-padding-stream` | A padding stream (type 0x132B3E28) makes moqxr close with PROTOCOL_VIOLATION ("received unknown or malformed unidirectional stream type"); the row's evaluator scores only the liveness follow-up, so the close leaves it unscored | 2702, 6633-6647 | `D21-11-5-1-MUST-566` not_run (same close) | Punch list D22-03 |
 | T7 | b | `D22-9-5-MUST-356`, `D22-9-5-1-MUST-363` (not_run) | `d22-single-request-update-response`, `d22-coalesced-successful-update-responses`, `d22-coalesced-failed-update-response` | After an accepted SUBSCRIBE, a valid REQUEST_UPDATE (`02 0004 03 01 20 64`; three coalesced) followed by a TRACK_STATUS with FIN on a new request stream: moqxr closes 0x3 "request stream closed before a complete message" (its `read_request_stream_message`) and sends no REQUEST_OK. Which of the two requests triggers the close is not settled | 4304-4308, 4406-4408 | `D21-9-5-MUST-345`, `D21-9-5-1-MUST-352` not_run (same close) | Punch list D22-05 (medium confidence) |
 | T8 | b | `D22-4-2-MUST-110`, `D22-9-20-18-MUST-445`, `D22-9-5-MUST-355` (not_run) | `d22-discover-original-publisher-namespaces`; `d22-discovery-update-invalid-forward` (`d22-forward-value-two`, `-255` close 0x3 correctly); `d22-update-on-track-status`, `d22-responder-update-on-publish-namespace`, `d22-subscriber-update-on-publish` | Silence where the draft requires an answer or a close: no NAMESPACE for `media` after accepting SUBSCRIBE_NAMESPACE with the empty prefix; FORWARD 255 in a REQUEST_UPDATE on SUBSCRIBE_TRACKS ignored; a REQUEST_UPDATE on moqxr's own PUBLISH_NAMESPACE (after REQUEST_OK) ignored. Not evidence: `d22-update-on-track-status` is confounded by the open runner item below (fixed track "x"; moqxr did not answer even the TRACK_STATUS, which it otherwise answers with NOT_SUPPORTED, so it probably never read that stream), and in `d22-subscriber-update-on-publish` (a permitted case) moqxr reset its PUBLISH streams before the update, so nothing was observed. Silence is not proof, so the rows stay unscored | 1929-1931, 5613, 4302 | `D22-4-2-MUST-110` is a draft 22 row (no twin); `D21-9-20-19-MUST-460`, `D21-9-5-MUST-344` not_run | Punch list D22-06 (suspected) |
 | T9 | b | `D22-9-2-MUST-340` (not_run) | `d22-publisher-goaway-alternate-uri` (error run) | GOAWAY with a New Session URI on the control stream: moqxr logs "received unknown or unsupported control-stream message" and closes 0x3 instead of migrating | 4129-4130 | `D21-9-2-MUST-329` not_run (same error) | Punch list D22-04 (M-19) |
 | T10 | c | `D22-13-MUST-568`, `D22-13-MUST-NOT-569`, `D22-13-MUST-NOT-576` (not_run) | `d22-grease-request-error` (+ `-grease-setup-options`, `-auth-token-type`, `-stop-sending`) | The runner rejects moqxr's PUBLISH with GREASE code 0x9d (`05 0004 80 9d 00 00`); moqxr resets the stream and ends the session with code 0. It ends the session after any refused PUBLISH, so whether it closed because of the unknown code cannot be told; the NO_ERROR close is unscored. The other three GREASE scenarios show no close | 7025-7039 | `D21-13-MUST-593`, `-NOT-594`, `-NOT-601` not_run | Expectation question (punch list D22-C1) |
 | T11 | d | `D22-8-6-MUST-267`, `D22-3-3-2-MUST-076`, `D22-9-20-12-MUST-425`, `D22-9-20-13-MUST-427`, `D22-9-20-14-MUST-429` (not_run) | range-filter delta overflow, duplicate range-filter key, priority filter, property-filter odd type | moqxr advertises no MAX_FILTER_RANGES (its SETUP carries only PATH and AUTHORITY); these probes wait for it, so the stimulus is never sent | 3535-3536, 1493-1494, 5421-5466 | twins not_run | None (optional capability) |
-| T12 | d | `D22-8-9-MUST-276`, `-277`, `-280`, `-281`, `-282`, `-283`, `-285`, `D22-8-9-MUST-NOT-293`, `D22-9-1-4-MUST-319`, `D22-9-1-4-MUST-NOT-318` (not_run) | token registration and alias probes, `d22-setup-register-*` (2 error runs) | No token cache (no MAX_AUTH_TOKEN_CACHE_SIZE), no operator credential it understands, never registers tokens itself | 3664-3783, 4003-4004 | twins not_run | None (out of scope) |
+| T12 | d | `D22-8-9-MUST-276`, `-277`, `-280`, `-282`, `-283`, `-285`, `D22-8-9-MUST-NOT-293`, `D22-9-1-4-MUST-319`, `D22-9-1-4-MUST-NOT-318` (not_run) | token registration and alias probes, `d22-setup-register-*` (2 error runs) | No token cache (no MAX_AUTH_TOKEN_CACHE_SIZE), no operator credential it understands, never registers tokens itself | 3664-3783, 4003-4004 | twins not_run | None (out of scope) |
 | T13 | d | `D22-9-1-7-MUST-328`, `D22-9-1-7-MUST-NOT-327` (not_run) | `d22-request-update-overrun`, `-independent-streams` (2 error runs), `-unlimited`; `d22-publisher-update-credit-*` | No MAX_REQUEST_UPDATES advertised; moqxr never sends a REQUEST_UPDATE of its own | 4054-4055, 4068-4069 | twins not_run | None |
 | T14 | d | `D22-11-5-MAY-536`, `-537`, `D22-11-5-1-MAY-539`, `-MUST-540`, `D22-11-5-2-MAY-544`, `-MUST-545` (not_run) | `d22-padding-stream-emission`, `d22-padding-datagram-emission` | moqxr sends no padding | 6624-6656 | twins not_run | None |
 | T15 | d | `D22-9-10-MUST-380`, `-381`, `-383`, `D22-9-10-MUST-NOT-382` (not_run) | `d22-publish-state-notify-*` | No PUBLISH_STATE_NOTIFY | 4711-4726 | twins not_run | None |
@@ -229,18 +256,217 @@ draft 21 twin ended `error` once in this one (WebTransport) with moqxr closing 0
 "retained SUBSCRIBE stream closed with a truncated REQUEST_UPDATE" after it had answered
 the update; see D22-05.
 
-Open runner item (no row outcome depends on it): `d22-unknown-request-stream-message`
-and `d22-update-on-track-status` still send a fixed request for namespace () and track
-"x" (`03 0005 01 00 01 78 00`, `0d 0005 01 00 01 78 00`) on the draft 22 wire, and the
-first still runs moqxr `--forward 1`. Against moqxr the request-stream half of
-`D22-9-MUST-295` is therefore never exercised (moqxr refuses the unknown track or times
-out on its own PUBLISH); the row's FAIL comes from the control-message scenario. It also
-weakens the evidence for T8 / punch list D22-06: the TRACK_STATUS leg of
-`D22-9-5-MUST-355` comes from `d22-update-on-track-status`, where moqxr answered nothing,
-not even the TRACK_STATUS, so that leg says nothing about update handling. The draft 21
-twins have the same fixed names (punch list, runner-side follow-ups). Likewise
-`d22-unknown-datagram-type` still runs `--forward 1`, which confounds its WebTransport
-run (above); a later adapter change could pace it as the other 14.
+Open runner item (no row outcome depends on it). In the sweep above
+`d22-unknown-request-stream-message` and `d22-update-on-track-status` still sent a fixed
+request for namespace () and track "x" (`03 0005 01 00 01 78 00`, `0d 0005 01 00 01 78 00`) on
+the draft 22 wire. Fix R2 of the F1 work made them send the run's track
+(`03 0010 01 01 05 media 06 vide_1 00 7e 00 00`, `0d 0010 01 01 05 media 06 vide_1 00 ...`);
+against moqxr nothing changed. `d22-unknown-request-stream-message` still runs moqxr
+`--forward 1`: moqxr sends its own PUBLISH, ends the session with code 0 and exits, so the
+request-stream half of `D22-9-MUST-295` is still never exercised against moqxr; the row's FAIL
+comes from the control-message scenario. In `d22-update-on-track-status` moqxr, in its
+await-subscribe mode, now answers nothing to a TRACK_STATUS for `media`/`vide_1` and the
+REQUEST_UPDATE on it: the names are no longer the confound, but silence is not proof, so that
+leg of T8 / punch list D22-06 stays an observation. The draft 21 twins keep the fixed names
+(draft 21 is frozen). Likewise `d22-unknown-datagram-type` still runs `--forward 1`, which
+confounds its WebTransport run (above); a later adapter change could pace it as the other 14.
+
+## Draft 22 sweep against imquic 6836173
+
+This is one peer at one revision on one date. It says nothing about another imquic
+revision or another publisher, and a `pass` row is an observation of wire evidence in one
+run, not a conformance claim. The peer is imquic's example publisher `moq-pub`, a demo: it
+publishes one clock track, serves one subscriber at a time, and either announces and waits
+for a SUBSCRIBE or sends its own PUBLISH first. It is not a general MoQ publisher, and many
+rows below are out of its reach for that reason, not because the library is wrong.
+
+| Item | Value |
+|---|---|
+| Peer | `imquic-moq-pub` (`examples/moq-pub.c`) from imquic at `6836173947a5eb0a6edffe3709dab3340ce43871`, branch `fix/core-parser-and-stream-regressions` (clean), reporting `imquic 0.0.2/alpha` |
+| Build | a scratch copy of the read-only checkout (no `.git`), `make distclean`, `./configure --enable-moq-examples`, `make -j8`; the LOC demos were skipped (no libav); no network needed |
+| Payload | moq-pub's clock: one Object per second, one Group per minute, Group IDs from 0 at start; namespace `media`, track `vide_1` |
+| Runner | this repository at `84dca11` (runner and adapter of the final sweep; `2de6385` adds only a test), bundled `adapters/imquic/run.sh` |
+| Date | 2026-10-06: first sweep 15:48 to 16:10, final sweep 18:33 to 18:57 (-07:00) |
+
+The adapter (see [the harness guide](publisher-harness-guide.md#the-imquic-adapter-draft-22))
+passes `-M 22 -n media -N vide_1 -d 4`, `-q -r HOST -R PORT` for native QUIC or
+`-w -H PATH` for WebTransport, and chooses per scenario between publish-first (`-X`: PUBLISH
+right after SETUP, every SUBSCRIBE refused) and announce-and-wait (PUBLISH_NAMESPACE, then
+one SUBSCRIBE served). The choice is derived from the moqxr adapter (moqxr `--forward 1` gives
+`-X`, `--forward 0` gives none) with 17 enumerated exceptions and an explicit entry for each
+own draft 22 scenario and probe; 68 of the 223 ids run `-X`. It stays alive as a small
+supervisor around `timeout --foreground --preserve-status -k 2 -s TERM <timeout+3>` so that
+moq-pub's 40 to 160 ms shutdown fits the runner's 100 ms stop grace. It passes none of
+moq-pub's emission options: no padding (`-P`), no prior group or object gap (`-f`, `-F`), no
+Object properties (`-x`).
+
+Method: as for the moqxr sweep above, with `IMQUIC_PUB_BIN` and `adapters/imquic/run.sh` in
+place of `MOQXR_BIN` and the moqxr adapter, and `--publisher-no-fetch` (moq-pub registers no
+FETCH handler). Every one of the 221 executable draft 22 ids and the two unscored probes ran
+as its own driven run on each transport (four runners in parallel, `"timeout_ms": 12000`),
+then every row still `fail` or `not_run` whose scenarios were all runnable got one
+row-completion group run. `moq-interop-audit --draft 22` ran on every database. The final
+sweep also re-ran the moqxr `4b615f4` draft 22 sweep on both transports with the same driver,
+the same runner build and the bundled moqxr adapter (`MOQXR_BIN`), so that both peers are
+compared at the same runner revision (see the update in the moqxr section above).
+
+Runs (refused: HTTP refusal, nothing started):
+
+| Sweep | ids | refused 400 | refused 422 | runs | incomplete | fail | error | group runs (incomplete / fail / error) |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| first, native QUIC, adapter as committed then | 223 | 6 | 29 | 188 | 95 | 10 | 83 | 43 (10 / 1 / 32) |
+| first, native QUIC, sweep-only shutdown wrapper | 223 | 6 | 29 | 188 | 168 | 17 | 3 | 43 (39 / 4 / 0) |
+| first, WebTransport | 223 | 6 | 29 | 188 | 169 | 0 | 19 | 49 (13 / 0 / 30; 6 refused 422) |
+| final, native QUIC | 223 | 6 | 29 | 188 | 163 | 22 | 3 | 43 (37 / 6 / 0) |
+| final, WebTransport | 223 | 6 | 29 | 188 | 188 | 0 | 0 | 49 (43 / 0 / 0; 6 refused 422) |
+
+Requirement rows touched by the sweep:
+
+| Sweep | rows | pass | fail | not_run |
+|---|---:|---:|---:|---:|
+| imquic, first, native QUIC (adapter as committed then) | 146 | 25 | 10 | 111 |
+| imquic, first, native QUIC (shutdown wrapper; first triage) | 146 | 47 | 16 | 83 |
+| imquic, final, native QUIC | 146 | 45 | 20 | 81 |
+| imquic, final, WebTransport | 144 | 0 | 0 | 144 |
+| moqxr `4b615f4`, final, native QUIC (same runner) | 147 | 69 | 6 | 72 |
+| moqxr `4b615f4`, final, WebTransport (same runner) | 144 | 69 | 6 | 69 |
+
+- Refusals: 6 scenarios need a reserved-namespace fixture (400), 23 FETCH scenarios are
+  refused for the no-FETCH declaration and 6 transport-specific scenarios run only on their
+  own transport (422). On WebTransport 6 group runs mix typed scenarios and are refused (422).
+- The 3 `error` runs on native QUIC: `d22-native-publisher-uri-query` and
+  `d22-native-publisher-empty-query`, which the adapter refuses (exit 64: moq-pub's raw QUIC
+  client cannot carry a `moqt://` query), and `d22-subscribe-oversized-full-track-name`, where
+  moq-pub crashes (I-04). No run of the final sweep ended in a runner SIGKILL: the 282
+  adapter stops of the native sweep (single and group runs) and the 188 of the WebTransport
+  single runs all ended on SIGTERM within the grace.
+- WebTransport: every one of the 188 publisher logs shows "Connection established
+  (ALPN=h3)" after "Buffering incoming STREAM data on unknown context", and no WebTransport
+  session follows (I-01), so all 144 rows are `not_run`, exactly as in the first sweep; only
+  the 19 SIGKILL errors of the first sweep are gone.
+- Unscored probes: `d22-location-filter-unknown-type` passed on native QUIC (close 0x3 on
+  the undefined LOCATION_FILTER Type); `d22-location-filter-absolute-origin` stayed `not_run`
+  (SUBSCRIBE_OK, no Object: the probe's SUBSCRIBE has no FORWARD, I-05). Both are `not_run` on
+  WebTransport.
+- Audit: `Required executable coverage: 170/170` and `Static gate: PASS` on all 16 imquic
+  databases (and the 16 moqxr ones). The execution audit reports one `run_error` per `error`
+  run, a `stored_score_mismatch` for the crashed run, and `scored_without_binding` for
+  `D22-6-3-MUST-NOT-155`, `D22-9-MUST-294` and `D22-9-1-MUST-NOT-300` (the typed announcement
+  scenario), as for moqxr: pre-existing audit behavior.
+
+Baseline comparison with moqxr `4b615f4` (final sweeps, same runner, native QUIC; imquic does
+not touch `D22-9-1-2-MUST-315`, which only the refused query scenario scores): 36 rows pass on
+both; 19 pass on moqxr and fail on imquic; 13 pass on moqxr and are `not_run` on imquic; 8 are
+`not_run` on moqxr and pass on imquic; `D22-9-MUST-295` fails on moqxr and passes on imquic;
+4 fail on moqxr and are `not_run` on imquic; `D22-8-9-MUST-281` fails on both; 64 are
+`not_run` on both.
+
+### What the first imquic sweep found in the runner
+
+The first sweep found three runner and adapter defects; they were fixed before the final
+sweep, and none is in imquic:
+
+- **R1, adapter shutdown timing.** The runner stops a driver with SIGTERM to its process group
+  and SIGKILLs the group 100 ms later, recording that as a driver failure (run `error`). moq-pub
+  needs 41 to 157 ms after SIGTERM (median 102 ms) to send PUBLISH_DONE and
+  PUBLISH_NAMESPACE_DONE and close; with the adapter's `exec timeout ...`, 80 of 188 native
+  single runs and 19 of 188 WebTransport runs ended `error`. The adapter now supervises the
+  publisher and exits at once on SIGTERM (commit `9afa0da`); the runner is unchanged.
+- **R2, fixed names in shared probes.** 29 draft 21 probes shared by draft 22 sent their
+  SUBSCRIBE or TRACK_STATUS for namespace () and track "x". imquic closes a zero-field
+  namespace with 0x3 before it reads the rest (I-03), and the evaluators scored that close:
+  false FAILs (`D22-8-9-MUST-279`, `-281`, `-289`) and false passes (among them
+  `D22-9-20-8-MUST-421` and `D22-9-20-SHOULD-393`). On the draft 22 wire these probes now name
+  the run's track (commits `728ce69`, `584f130`); draft 21 is unchanged.
+- **R3, adapter mode table.** Three SETUP probes ran `-X` by derivation, so moq-pub refused
+  their liveness SUBSCRIBE (REQUEST_ERROR 0x19) and their rows stayed unscored; they now run
+  announce-and-wait (commit `3e7c0d5`).
+
+Row changes from the first sweep (wrapper, the first triage's basis) to the final sweep, all
+from R2 or R3: `D22-8-3-MUST-249` and `-250` not_run to fail (R3, imquic does not close on
+the malformed SETUP); `D22-9-20-1-MUST-396` not_run to fail and `D22-9-20-8-MUST-421` pass to
+fail (R2, imquic accepts EXPIRES or FILL_TIMEOUT in a SUBSCRIBE and GROUP_ORDER 0);
+`D22-9-20-SHOULD-393` pass to not_run (R2, the duplicate FORWARD is accepted; an advisory row
+records no fail). The token rows `D22-8-9-MUST-279`, `-281`, `-289` fail in both sweeps, but
+only the final FAILs are about tokens (I-19); likewise `D22-9-20-MUST-388`, `-390`,
+`D22-9-20-15-MUST-432`, `D22-9-20-21-MUST-460` and `D22-9-MUST-295` pass in both and are now
+backed by closes on the run's track (432 with the caveat of C1 below). Against the first
+sweep as committed (no wrapper), 33 rows changed: the 28 that the wrapper alone already
+changed (R1: 22 not_run to pass, 6 not_run to fail) and the 5 above.
+
+Prediction scorecard (made before the first sweep, from the adapter review): 60 s Groups
+leave the Subgroup FIN rows without a verdict, confirmed; a REQUEST_UPDATE overrun needs SETUP
+option 8, refuted (imquic sends MAX_REQUEST_UPDATES=1) but the rows stay unscored (I-06);
+`d22-grease-request-error` fails, refuted (it passes); the publisher LOCATION_FILTER row is
+inconclusive, confirmed; an absent FORWARD is treated as 0, confirmed (I-05); one subscriber
+at a time, confirmed (0x19, I-17); padding rows lack verdicts, confirmed (no `-P`); no
+discovery or FETCH handling of its own, confirmed; shutdown timing, confirmed and decisive
+(R1); the `-X` derivation wrong somewhere, confirmed for three ids (R3).
+
+### Triage of the imquic draft 22 non-pass rows
+
+Every `fail` and `not_run` row of the final native QUIC sweep is in exactly one line below:
+20 fail and 81 not_run rows, 101 in all. Categories: (a) runner or adapter defect, (b) imquic
+defect, (c) expectation question, (d) not applicable to this peer. Totals: (a) 0 rows, (b) 35
+rows (20 fail, 15 not_run), (c) 3 rows, (d) 63 rows. The second outcome in brackets is moqxr's
+in its final sweep. Line numbers are in `docs/draft-ietf-moq-transport-22.txt`; imquic source
+lines are from the scratch copy of `6836173` that the sweep ran (the read-only checkout may
+move, so its line numbers can differ). The items are detailed in
+[the imquic punch list](imquic-punch-list.md).
+
+| T | Cat | Draft 22 rows (imquic outcome; moqxr 4b615f4 outcome) | Scenarios | Evidence | Draft 22 lines | Action |
+|---|---|---|---|---|---|---|
+| I-02 | b | `D22-9-2-MUST-338` (fail; pass), `D22-9-2-MUST-340` (not_run; not_run) | `d22-duplicate-control-goaway`, `d22-publisher-goaway-alternate-uri` | The first control-stream GOAWAY (`10 0003 00 a710`; with a URI `10 0021 1f moqt://...`) closes the session 0x4 INVALID_REQUEST_ID: "imquic_moq_parse_goaway:5031 Invalid Request ID". moq.c:5029 applies the draft 18 Request ID parity check for every version >= 18 although the field is parsed only for version 18 (request_id stays 0) | 4113-4115, 4116-4122 (format, no Request ID), 4129-4130 | Punch list I-02 |
+| I-04 | b | `D22-8-7-MUST-272` (not_run; pass) | `d22-subscribe-oversized-full-track-name` (error run) | SUBSCRIBE with a 4096-byte namespace field plus track name: "imquic_moq_namespace_str:285 Insufficient buffer to render namespace(s)", then a segmentation fault (publisher exit 139, "the monitored command dumped core"; signal 11 in the first sweep A); no close, run `error` | 3576-3580 | Punch list I-04 (crash) |
+| I-05 | b | `D22-3-1-2-MUST-047` (not_run; not_run) | `d22-cancel-subscribe-with-open-streams` | SUBSCRIBE without FORWARD (`03 0010 01 01 05 media 06 vide_1 00`) gets SUBSCRIBE_OK and no Objects (moq-pub.c:295 `forward_set && forward`), so no data stream is open when the runner cancels; the row cannot be judged | 5618-5621 (absent = 1) | Punch list I-05 |
+| I-06 | b | `D22-9-5-MUST-356` (not_run; not_run), `D22-9-1-7-MUST-328` (not_run; not_run), `D22-9-5-1-MUST-357` (not_run; not_run), `D22-6-4-2-2-MUST-172` (not_run; not_run), `D22-9-9-MUST-376` (not_run; pass), `D22-9-5-MUST-355` (not_run; not_run) | `d22-single-request-update-response`, `d22-request-update-overrun`, `-independent-streams`, `d22-failed-subscription-update-cleanup`, `d22-established-subscription-publisher-fin`, `d22-publish-done-without-data-streams`, `d22-subscriber-update-on-publish` (with `d22-update-on-track-status`, `d22-responder-update-on-publish-namespace`) | REQUEST_UPDATE is never answered (no REQUEST_OK/REQUEST_ERROR on the SUBSCRIBE stream after `02 0004 03 01 20 64`); a REQUEST_UPDATE that must fail (AUTHORIZATION_TOKEN USE_ALIAS of an unregistered alias, `02 0006 03 01 03 02 02 00`) is accepted and, carrying no FORWARD, pauses delivery ("Pausing delivery of objects") instead of PUBLISH_DONE UPDATE_FAILED; the 2nd outstanding update against imquic's own MAX_REQUEST_UPDATES=1 closes 0x3 "Invalid use of REQUEST_UPDATE on bidirectional request" (moq.c:3440) instead of TOO_MANY_REQUEST_UPDATES. D22-9-5-MUST-355: the TRACK_STATUS and PUBLISH_NAMESPACE legs now name the run's track and correctly draw close 0x3 ("Invalid use of REQUEST_UPDATE on bidirectional request", moq.c:3440); the permitted leg, a REQUEST_UPDATE on the subscription, gets no answer and pauses delivery ("Pausing delivery of objects"), so the row stays unscored | 4304-4308, 4320-4321, 4395-4397, 3708-3709, 4068-4069, 2755-2756, 4298-4302 | Punch list I-06 |
+| I-07 | b | `D22-6-4-1-MUST-167` (fail; pass), `D22-6-3-MUST-156` (fail; pass), `D22-9-MUST-296` (fail; pass), `D22-8-3-MUST-251` (fail; pass), `D22-11-MUST-488` (not_run; pass), `D22-9-20-9-MUST-424` (fail; pass), `D22-8-3-MUST-249` (fail; pass), `D22-8-3-MUST-250` (fail; pass) | `d22-unknown-unidirectional-stream-type`, `d22-invalid-bidirectional-request-stream-opener`, `d22-message-body-length-mismatch`, `d22-request-message-truncated-at-fin`, `d22-setup-known-key-value-malformed-value`, `d22-unknown-datagram-type`, `d22-location-filter-end-group-overflow`, `d22-setup-key-value-type-overflow`, `d22-setup-key-value-declared-length-overflow` | Malformed or unknown input is logged and ignored, no close, and the liveness SUBSCRIBE is answered: unknown uni stream type `00` ("not allowed on media streams"), REQUEST_OK opening a bidi stream `07 0001 00`, GOAWAY with Length 1 `10 0001 00` ("Broken GOAWAY"), SUBSCRIBE truncated at FIN (treated as unsubscribe), SETUP AUTHORIZATION_TOKEN value `04` undecodable, datagram type 0x132B3E2A ("Broken MoQ Message", window timed out), LOCATION_FILTER type 3 with StartGroup 2^62-1 + delta overflow accepted with SUBSCRIBE_OK; SETUP with a Delta Type that overflows 2^64-1 (`af00 000c ffffffffffffffff ff 00 01 00`, "Unsupported parameter '18446744073709551615'") and SETUP with an odd option whose Length exceeds 2^16-1 (`af00 0004 09 c1 00 00`, "Broken SETUP", moq.c:2697) are not closed; the liveness SUBSCRIBE is answered SUBSCRIBE_OK (since R3 the adapter runs both announce-and-wait) | 2707-2708, 2540-2541, 3882, 3407-3408, 5955-5956, 5368-5369, 3377-3379, 3397-3400 | Punch list I-07 |
+| I-08 | b | `D22-6-3-2-MUST-164` (fail; pass), `D22-9-1-1-MUST-307` (fail; pass), `D22-9-1-2-MUST-314` (fail; pass) | `d22-native-quic-required-setup-options`, `d22-native-publisher-uri-options` | Native QUIC SETUP carries only MOQT_IMPLEMENTATION and MAX_REQUEST_UPDATES (`af00 0016 07 12 "imquic 0.0.2/alpha" 01 01`), no AUTHORITY or PATH (moq.c:280-281 "TODO For raw quic connections ... PATH") | 3943-3944, 3959-3961, 2648-2649 | Punch list I-08 |
+| I-09 | b | `D22-9-1-1-MUST-304` (fail; pass) | `d22-server-sends-authority` | Server SETUP with AUTHORITY is closed 0x8 INVALID_PATH ("AUTHORITY received from a server", moq.c:2716) instead of 0x19 INVALID_AUTHORITY. (PATH from a server correctly gets 0x8) | 3929-3934, 7917 | Punch list I-09 |
+| I-10 | b | `D22-9-4-1-MUST-352` (fail; pass) | `d22-publish-namespace-redirect-nonempty-track-name` | REQUEST_ERROR REDIRECT with a nonempty Track Name on its PUBLISH_NAMESPACE (`05 0009 34 00 00 00 01 01 6e 01 78`): "Got an error announcing namespace: error 52", session ended with code 0 (NO_ERROR) instead of PROTOCOL_VIOLATION | 4245-4246 | Punch list I-10 |
+| I-11 | b | `D22-3-3-2-MUST-077` (not_run; fail), `D22-9-1-6-MUST-326` (not_run; fail) | `d22-range-filter-with-zero-negotiated-limit`, `d22-range-filter-default-zero-limit` (other row scenarios wait for MAX_FILTER_RANGES) | SUBSCRIBE with a Range Filter while imquic advertises no MAX_FILTER_RANGES: "Received 1 range filters, where 0 were allowed", then "imquic_moq_reject_subscribe:7632 Invalid request/state (Error)": moq.c:3406 sets the request state to ERROR before calling reject, so the INVALID_FILTER REQUEST_ERROR is never sent (silence, window timed out) | 1501-1505, 4039-4044 | Punch list I-11 |
+| I-12 | b | `D22-5-2-MUST-144` (fail; pass) | `d22-subgroup-completion-withheld-acknowledgments` | SUBSCRIBE with SUBGROUP_DELIVERY_TIMEOUT 200 ms (`06 80c8`), FORWARD 1, group 0 only; the runner withholds acknowledgments; imquic keeps the subgroup stream open past the timer and never resets it | 2309-2310 | Punch list I-12 |
+| I-13 | b | `D22-6-4-2-1-MUST-169` (not_run; pass) | `d22-duplicate-request-id-across-streams`, `d22-duplicate-request-update-id` | Two SUBSCRIBE_NAMESPACE with Request ID 1 (`50 0003 01 00 00`, `50 0005 01 01 01 6d 00`): both answered REQUEST_ERROR NOT_SUPPORTED, no INVALID_REQUEST_ID close | 2733-2734 | Punch list I-13 |
+| I-14 | b | `D22-6-5-MUST-186` (fail; pass) | `d22-session-namespace-unknown-namespace-request` | SUBSCRIBE_NAMESPACE for (".session", "x") (`50 000e 01 02 08 .session 01 78 00`) is answered by the library default REQUEST_ERROR NOT_SUPPORTED "Not handled" (`05 000e 03 00 0b ...`), not DOES_NOT_EXIST | 2811-2812 | Punch list I-14 (library default handler) |
+| I-15 | b | `D22-6-3-MAY-159` (not_run; pass) | `d22-request-stream-before-peer-setup` | With only the first SETUP byte (`af`) delivered, imquic already answers the early SUBSCRIBE (SUBSCRIBE_OK before the rest `000000` of the runner SETUP): neither buffered nor reset, so the MAY row is inconclusive | 2549-2553 (SHOULD buffer) | Punch list I-15 (low) |
+| I-19 | b | `D22-8-9-MUST-279` (fail; pass), `D22-8-9-MUST-281` (fail; fail), `D22-8-9-MUST-289` (fail; pass) | `d22-request-undecodable-authorization-token`, `d22-request-unknown-token-alias` (+ `-deleted-token-alias`), `d22-request-token-cache-overflow`, `d22-request-alias-registration-with-default-zero-cache` | The AUTHORIZATION_TOKEN parameter of a SUBSCRIBE is stored as opaque bytes and never decoded (moq.c:6486-6500): an undecodable token (`03 01 03`), a USE_ALIAS of an alias never registered (`03 02 02 00`) and a REGISTER while imquic announced no token cache (`03 04 01 00 00 78`, `03 04 01 00 80 9d`) all get SUBSCRIBE_OK `04 0002 00 00`, and the liveness SUBSCRIBE is answered. Since R2 the probes name the run's track; before, the FAILs were the zero-field-namespace close (first sweep A2) | 3704-3705, 3708-3709, 3760-3765 | Punch list I-19 |
+| I-20 | b | `D22-9-20-8-MUST-421` (fail; pass) | `d22-group-order-zero` (with `d22-group-order-above-two`, `d22-fill-invalid-group-order`) | SUBSCRIBE with GROUP_ORDER 0 (`22 00`) is accepted with SUBSCRIBE_OK and the liveness SUBSCRIBE is answered: the check is `group_order > IMQUIC_MOQ_ORDERING_DESCENDING` only (moq.c:6557), so 0 passes. GROUP_ORDER 3 is closed 0x3 correctly; the fill leg closes for the C1 reason | 5256-5260 | Punch list I-20 |
+| I-21 | b | `D22-9-20-1-MUST-396` (fail; pass) | `d22-parameter-invalid-message-scope`, `d22-fill-timeout-outside-fill-or-fetch` (with `d22-group-order-in-subscription-update`) | A SUBSCRIBE carrying EXPIRES (`08 01`) or FILL_TIMEOUT (`0a 00`), parameters not allowed in SUBSCRIBE, is accepted with SUBSCRIBE_OK; the parameter parser has no per-message scope check (moq.c:6448-6800). GROUP_ORDER in a subscription REQUEST_UPDATE is also accepted silently | 5126-5129 | Punch list I-21 |
+| I-22 | b | `D22-9-20-SHOULD-393` (not_run; pass) | `d22-unexpected-duplicate-message-parameter` | SUBSCRIBE with FORWARD twice (`10 00 00 00`, the second as Delta Type 0) is accepted with SUBSCRIBE_OK; no close in the window. The parameter loop never checks for repeats (moq.c:6833-6843). A SHOULD, so the advisory row is `not_run`, not `fail` | 5104-5108 | Punch list I-22 (SHOULD, low) |
+| C1 | c | `D22-3-4-1-MUST-079` (not_run; not_run), `D22-3-4-1-MUST-080` (not_run; not_run), `D22-3-4-1-MUST-081` (not_run; not_run) | `d22-cancel-subscription-with-concurrent-fill-streams`, `d22-fill-fails-before-first-object` (+ `d22-fill-location-filter-end-group-overflow`); also every fill probe (`d22-fill-forbidden-*`, `d22-fill-recursive-parameter`, `d22-fill-invalid-group-order`) | SUBSCRIBE with FILL_PARAMETERS `23 02 21 00` (one nested LOCATION_FILTER type 0, no count): imquic expects a Number of Parameters first (moq.c:6761), reads 0x21 as a count and closes 0x3 "Broken MoQ request parameter". The same parse error closes every fill probe: D22-9-20-15-MUST-432 passes and the fill legs of D22-9-20-8-MUST-421 and D22-9-20-9-MUST-424 close 0x3 for this reason, not because imquic judged the nested parameter (confounded passes) | 5478-5482 ("a sequence of Parameters ... encoded as if they were Parameters for a separate message") | Expectation question C1: is FILL_PARAMETERS a bare parameter sequence (runner) or count + parameters (imquic)? |
+| D-clock | d | `D22-11-3-2-MUST-512` (not_run; not_run), `D22-2-2-MUST-022` (not_run; not_run), `D22-2-2-MUST-NOT-020` (not_run; not_run), `D22-3-7-MUST-088` (not_run; not_run), `D22-10-7-MUST-474` (not_run; not_run), `D22-10-7-MUST-475` (not_run; not_run), `D22-11-3-2-MUST-513` (not_run; not_run), `D22-11-3-2-MUST-519` (not_run; not_run) | subgroup FIN (`d22-complete-subgroup-fin`, `-start-location-fin`), group 7 probes (`d22-original-publisher-opens-new-subgroup`, `d22-subscribe-single-subgroup`, `d22-subgroup-restart-after-reset`, `d22-publish-track-with-mandatory-property`), property filters, premature close / early hand-off resets | Clock payload limit: one Object per second, one Group per minute, Group IDs counted from 0 at start. A 12 s window ends before a Group (and its Subgroup FIN) completes; Group 7 is 7 minutes away ("Starting delivery of objects: [7/0]", no Object); no Object properties (`-x` not passed); moq-pub never resets or prematurely closes a subgroup | 819-822, 796-798, 1779, 5815-5816, 6303, 6306, 6376 | None (F2 payload/emission options: -x, shorter groups) |
+| D-pad | d | `D22-11-5-MAY-536` (not_run; not_run), `D22-11-5-MAY-537` (not_run; not_run), `D22-11-5-1-MAY-539` (not_run; not_run), `D22-11-5-1-MUST-540` (not_run; not_run), `D22-11-5-2-MAY-544` (not_run; not_run), `D22-11-5-2-MUST-545` (not_run; not_run) | `d22-padding-stream-emission`, `d22-padding-datagram-emission` | The adapter does not pass `-P` (moq-pub padding); no padding stream or datagram is sent | 6624-6656 | None now (adapter emission option -P later) |
+| D-disc | d | `D22-3-6-MUST-083` (not_run; fail), `D22-3-6-MUST-084` (not_run; not_run), `D22-3-6-3-MUST-NOT-086` (not_run; not_run), `D22-4-2-MUST-108` (not_run; not_run), `D22-4-2-MUST-110` (not_run; not_run), `D22-4-2-MUST-111` (not_run; pass), `D22-4-2-MUST-NOT-112` (not_run; not_run), `D22-4-2-1-MUST-115` (not_run; not_run), `D22-9-2-MUST-339` (not_run; fail), `D22-9-4-1-MUST-351` (not_run; not_run), `D22-9-5-1-MUST-359` (not_run; not_run), `D22-9-5-1-MUST-360` (not_run; not_run), `D22-9-10-MUST-380` (not_run; not_run), `D22-9-20-2-MUST-NOT-399` (not_run; pass), `D22-9-20-20-MUST-455` (not_run; not_run), `D22-9-20-20-MUST-456` (not_run; not_run), `D22-9-20-18-MUST-445` (not_run; not_run) | SUBSCRIBE_NAMESPACE / SUBSCRIBE_TRACKS probes (discovery, overlap, authorization, GOAWAY on request streams, redirects, failed updates, PUBLISH_STATE_NOTIFY on namespace requests, prefix updates); `d22-discovery-update-invalid-forward` (row 445, with `d22-forward-value-two`, `-255`) | moq-pub registers no SUBSCRIBE_NAMESPACE / SUBSCRIBE_TRACKS handler: every such request gets the library default REQUEST_ERROR NOT_SUPPORTED "Not handled" + FIN (`05 000e 03 00 0b 4e6f742068616e646c6564`), so no request is established for the stimulus. (FETCH-only scenarios of these rows are refused 422 by the no-FETCH declaration). D22-9-20-18-MUST-445: the SUBSCRIBE legs with FORWARD 2 and 255 now name the run's track and correctly draw close 0x3 (moq.c:6684); the SUBSCRIBE_TRACKS leg is refused NOT_SUPPORTED, so the row stays unscored | 1716-1719, 1944-1945, 1929-1931, 4113-4115, 4244-4246, 4395-4401, 4711-4712, 5608-5613 | None (optional discovery) |
+| D-sub1 | d | `D22-3-1-MUST-043` (not_run; pass), `D22-9-20-MUST-NOT-394` (not_run; pass), `D22-9-20-17-MUST-441` (not_run; pass), `D22-3-3-1-MUST-NOT-069` (not_run; not_run) | `d22-overlapping-subscriptions-*`, `d22-subscribe-parameters-preserve-payload`, `d22-largest-object-required-after-publication`, `d22-subscribe-bounded-location-range` (+ refused `d22-fetch-bounded-location-range`) | One subscriber at a time: once delivery started, a further SUBSCRIBE is refused REQUEST_ERROR 0x19 "We already have a subscriber" (`05 001f 19 00 1c ...`, moq-pub.c:216). 069 also names a FETCH scenario (refused 422) | 1130-1132, 5113-5115, 5579, 1461 | None (demo limit); note 0x19 is not a draft 22 REQUEST_ERROR code |
+| D-tok | d | `D22-8-9-MUST-276` (not_run; not_run), `D22-8-9-MUST-277` (not_run; not_run), `D22-8-9-MUST-280` (not_run; not_run), `D22-8-9-MUST-282` (not_run; not_run), `D22-8-9-MUST-283` (not_run; not_run), `D22-8-9-MUST-285` (not_run; not_run), `D22-8-9-MUST-NOT-293` (not_run; not_run), `D22-8-6-MUST-267` (not_run; not_run), `D22-3-3-2-MUST-076` (not_run; not_run), `D22-9-20-12-MUST-425` (not_run; not_run), `D22-9-20-13-MUST-427` (not_run; not_run), `D22-9-20-14-MUST-429` (not_run; not_run), `D22-9-5-1-MUST-363` (not_run; not_run), `D22-9-1-4-MUST-NOT-318` (not_run; not_run) | token registration/alias probes, operator-credential probes, range/priority/property filter probes, coalesced updates; `d22-setup-register-default-zero-cache` with `d22-setup-register-exceeds-token-cache` | Gates never open: imquic advertises no MAX_AUTH_TOKEN_CACHE_SIZE and no MAX_FILTER_RANGES (SETUP options 7 and 8 only), no credentials are configured, the publisher never registers or deletes tokens, and MAX_REQUEST_UPDATES=1 is below the 3 the coalesced probes need; the runner sends nothing after SETUP. D22-9-1-4-MUST-NOT-318 is bound to two scenarios that are not alternatives; the sibling `d22-setup-register-exceeds-token-cache` needs a MAX_AUTH_TOKEN_CACHE_SIZE of at least 1 and imquic announces none (a legitimate default of 0) | 3664-3783, 1493-1494, 3535-3536, 5421-5466, 4048-4061, 4003-4004 | None (optional capabilities) |
+| D-pub | d | `D22-2-5-MUST-034` (not_run; pass), `D22-3-1-3-MUST-NOT-050` (not_run; pass), `D22-3-1-2-MUST-NOT-049` (not_run; not_run), `D22-3-1-MUST-035` (not_run; not_run), `D22-9-1-7-MUST-NOT-327` (not_run; not_run), `D22-9-10-MUST-383` (not_run; not_run), `D22-9-10-MUST-NOT-382` (not_run; not_run), `D22-9-2-MUST-329` (not_run; not_run), `D22-9-20-9-MAY-422` (not_run; not_run), `D22-9-3-MUST-348` (not_run; not_run) | distinct tracks, rejected-publish pairs, accepted/rejected SUBSCRIBE pair, publisher REQUEST_UPDATE credit, PUBLISH_STATE_NOTIFY, client GOAWAY, LOCATION_FILTER in PUBLISH, track properties in replies | The condition never arises with this single-track demo: one track only; no Object before PUBLISH_OK, and a refused PUBLISH ends the session (code 0) rather than a stream reaction; an accepted live SUBSCRIBE never completes in the window (imquic also treats the runner's FIN as UNSUBSCRIBE, "Getting rid of SUBSCRIBE"); moq-pub sends no REQUEST_UPDATE, no PUBLISH_STATE_NOTIFY, no GOAWAY; its PUBLISH carries FORWARD and GROUP_ORDER only (`1d 0017 ... 02 10 01 12 01`), no LOCATION_FILTER. (348: the PUBLISH_OK and PUBLISH_NAMESPACE_OK legs correctly close 0x3 "Track properties not empty") | 982-983, 1200-1201, 1182-1191, 1096-1097, 4054-4055, 4711-4726, 4076-4078, 5275-5277, 4211-4212 | None |
+| D-wt | d | `D22-9-1-1-MUST-305` (not_run; not_run), `D22-9-1-1-MUST-NOT-303` (not_run; not_run), `D22-9-1-2-MUST-312` (not_run; not_run), `D22-9-1-2-MUST-NOT-310` (not_run; not_run) | rows naming a `d22-webtransport-*` scenario | The WebTransport scenario is refused on native QUIC (422 unsupported_run_config); the native halves passed or are in I-09; on WebTransport nothing runs (I-01) | 3934-3955 | None |
+
+WebTransport: every one of the 144 rows touched is `not_run` because no session is ever
+established (I-01, category b); the native triage above says what each would need.
+
+Open runner items (no category (a) row; none changes a verdict today):
+
+- The `unresolved_error_mapping` event of `d22-request-unknown-token-alias` says
+  `result=NOT_RUN` (`src/app/native_run_manager.cpp` lines 1305-1308) next to the FAIL of
+  `D22-8-9-MUST-281` on both peers. The text applies only to a REQUEST_ERROR answer; both
+  peers answered SUBSCRIBE_OK, which the evaluator scores FAIL. The wording could say so.
+- C1 decides whether `D22-9-20-15-MUST-432` is a real pass for imquic and whether the fill
+  rows can be scored; if the runner's FILL_PARAMETERS encoding is the wrong reading, it is a
+  runner defect for every fill probe.
+- `D22-9-1-4-MUST-NOT-318` is bound to two scenarios that are not alternatives, so a peer
+  without a token cache can never score it (binding design question; draft 21 is frozen).
+- The adapter passes none of moq-pub's emission options (`-P`, `-f`, `-F`, `-x`), and the
+  clock payload cannot reach Group 7 or complete a Group within a run window: the D-clock and
+  D-pad rows need a payload or emission change (the F2 motivation).
+
+Caveats: one peer at one revision on one date. The clock payload and the unpassed emission
+options limit the verdicts (14 rows in D-clock and D-pad). The WebTransport column is empty
+because of I-01, so this sweep says nothing about imquic's WebTransport MoQ behavior. The
+publisher is a demo with one subscriber and two fixed modes; rows in D-sub1, D-pub, D-disc and
+D-tok would need a different application on the same library. One intermittent moq-pub
+startup crash (GLib-CRITICAL `g_source_destroy`, then a core dump) was seen once in about 840
+processes of the first sweep and not in the final one.
 
 ## Results observed with moqxr 0993cf7
 
@@ -487,4 +713,6 @@ A different publisher integrates through the same driver contract with no change
 to runner code; see [publisher-harness-guide.md](publisher-harness-guide.md). The
 sibling `moq-rs/moq-pub` project was recorded as supporting draft versions only
 through 14 with ALPN `moq-00`, so it was not used as a draft-18 or draft-21
-acceptance fixture.
+acceptance fixture. imquic's example publisher has a bundled draft 22 adapter
+(`adapters/imquic/run.sh`); its sweep is
+[above](#draft-22-sweep-against-imquic-6836173).
