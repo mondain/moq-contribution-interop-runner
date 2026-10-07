@@ -177,7 +177,8 @@ set(MOQ_INTEROP_HTTP_SOURCES
 )
 add_library(moq-interop-http ${MOQ_INTEROP_HTTP_SOURCES})
 target_link_libraries(moq-interop-http PUBLIC moq-interop-app moq-interop-requirements moq-interop-runs
-                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators)
+                      moq-interop-storage moq-interop-execution-audit moq-interop-draft22-evaluators
+                      moq-interop-lite-evaluators)
 target_link_libraries(moq-interop-http PRIVATE httplib::httplib nlohmann_json::nlohmann_json)
 target_compile_options(moq-interop-http PRIVATE $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
 
@@ -204,6 +205,8 @@ add_library(moq-interop-session
     src/session/draft21_control_state.cpp
     src/session/draft21_publish_open.cpp
     src/session/wire_draft.cpp
+    src/session/lite_stream_reader.cpp
+    src/session/lite_session.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -271,6 +274,14 @@ add_library(moq-interop-scenarios
     src/scenarios/draft21_contribution_residual_publisher.cpp
     src/scenarios/draft21_contribution_residual_token.cpp)
 target_link_libraries(moq-interop-scenarios PUBLIC moq-interop-session)
+# moq-lite-06 probe engine (L1d).
+target_sources(moq-interop-scenarios PRIVATE
+    src/scenarios/lite_probe.cpp
+    src/scenarios/lite06_common.cpp
+    src/scenarios/lite06_setup.cpp
+    src/scenarios/lite06_announce.cpp
+    src/scenarios/lite06_subscribe.cpp
+    src/scenarios/lite06_errors.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/draft18_contribution.cpp
@@ -317,11 +328,22 @@ target_compile_options(moq-interop-draft22-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp)
+# moq-lite-06 evaluators, bindings and evaluate_lite (they consume the lite scenarios, so they cannot live in
+# moq-interop-requirements without a dependency cycle).
+add_library(moq-interop-lite-evaluators
+    src/requirements/lite_evaluators.cpp)
+target_link_libraries(moq-interop-lite-evaluators PUBLIC
+    moq-interop-requirements moq-interop-scenarios)
+target_compile_options(moq-interop-lite-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp
+    src/app/lite_run.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
     moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-    moq-interop-storage moq-interop-lineage-run)
+    moq-interop-storage moq-interop-lineage-run moq-interop-lite-evaluators)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
@@ -339,7 +361,7 @@ target_compile_definitions(moq-interop-audit PRIVATE
 target_link_libraries(moq-interop-audit PRIVATE
     moq-interop-requirements moq-interop-draft18-evaluators
     moq-interop-draft21-evaluators moq-interop-draft22-evaluators
-    moq-interop-execution-audit nlohmann_json::nlohmann_json)
+    moq-interop-lite-evaluators moq-interop-execution-audit nlohmann_json::nlohmann_json)
 install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
 add_executable(moq-interop-catalog-carry src/app/catalog_carry_main.cpp)
 target_compile_definitions(moq-interop-catalog-carry PRIVATE
@@ -461,6 +483,15 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-moqlite-start-guard-tests PRIVATE
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME moqlite-start-guard COMMAND moq-interop-moqlite-start-guard-tests)
+    # Live moq-lite-06 runs through the production run manager (L1d Task 9).
+    add_executable(moq-interop-lite-run-live-tests tests/integration/lite_run_live_test.cpp)
+    target_include_directories(moq-interop-lite-run-live-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-run-live-tests PRIVATE
+        moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+    target_compile_definitions(moq-interop-lite-run-live-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME lite-run-live COMMAND moq-interop-lite-run-live-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -997,6 +1028,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-lite-catalog-tests PRIVATE moq-interop-requirements GTest::gtest_main)
     add_test(NAME lite-catalog COMMAND moq-interop-lite-catalog-tests)
+    add_executable(moq-interop-lite-evaluators-tests tests/unit/lite_evaluators_test.cpp)
+    target_compile_definitions(moq-interop-lite-evaluators-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_include_directories(moq-interop-lite-evaluators-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-evaluators-tests PRIVATE
+        moq-interop-lite-evaluators moq-interop-execution-audit GTest::gtest_main)
+    add_test(NAME lite-evaluators COMMAND moq-interop-lite-evaluators-tests)
     add_test(NAME lite-catalog-schema
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-catalog-schema.sh")
     set_tests_properties(lite-catalog-schema PROPERTIES SKIP_RETURN_CODE 77)
@@ -1393,6 +1431,81 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-session GTest::gtest_main)
     add_test(NAME draft21-publish-open
              COMMAND moq-interop-draft21-publish-open-tests)
+
+    add_executable(moq-interop-moqlite-session-tests
+                   tests/protocol/lite_session_test.cpp)
+    target_link_libraries(moq-interop-moqlite-session-tests PRIVATE
+                          moq-interop-session GTest::gtest_main)
+    add_test(NAME moqlite-session
+             COMMAND moq-interop-moqlite-session-tests)
+
+    add_executable(moq-interop-moqlite-probe-tests
+                   tests/protocol/lite_probe_test.cpp)
+    target_include_directories(moq-interop-moqlite-probe-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-probe-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-probe-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-probe
+             COMMAND moq-interop-moqlite-probe-tests)
+
+    add_executable(moq-interop-moqlite-setup-tests
+                   tests/protocol/lite06_setup_test.cpp)
+    target_include_directories(moq-interop-moqlite-setup-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-setup-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-setup-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-setup
+             COMMAND moq-interop-moqlite-setup-tests)
+
+    add_executable(moq-interop-moqlite-announce-tests
+                   tests/protocol/lite06_announce_test.cpp)
+    target_include_directories(moq-interop-moqlite-announce-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-announce-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-announce-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-announce
+             COMMAND moq-interop-moqlite-announce-tests)
+
+    add_executable(moq-interop-moqlite-subscribe-tests
+                   tests/protocol/lite06_subscribe_test.cpp)
+    target_include_directories(moq-interop-moqlite-subscribe-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-subscribe-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-subscribe-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-subscribe
+             COMMAND moq-interop-moqlite-subscribe-tests)
+
+    add_executable(moq-interop-moqlite-errors-tests
+                   tests/protocol/lite06_errors_test.cpp)
+    target_include_directories(moq-interop-moqlite-errors-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-errors-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-errors-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-errors
+             COMMAND moq-interop-moqlite-errors-tests)
+
+    add_executable(moq-interop-moqlite-conformance-tests
+                   tests/protocol/lite_conformance_test.cpp)
+    target_include_directories(moq-interop-moqlite-conformance-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_compile_definitions(moq-interop-moqlite-conformance-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-moqlite-conformance-tests PRIVATE
+                          moq-interop-lite-evaluators GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-conformance-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-conformance
+             COMMAND moq-interop-moqlite-conformance-tests)
 
     add_executable(moq-interop-draft18-objects-tests
                    tests/golden/draft18_objects_test.cpp)

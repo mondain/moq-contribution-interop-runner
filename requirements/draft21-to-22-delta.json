@@ -700,7 +700,134 @@
       "D21-4-1-MUST-082 is double-accounted: it has a removed entry (superseded) and is also the reworded counterpart of D22-4-2-MUST-108.",
       "LOCATION_FILTER: Next Object is Type 0x05 (Type 0x02 {0, 0} is an absolute start) and any Location Filter Type above 0x05 is a PROTOCOL_VIOLATION without a catalog row.",
       "merge (merge_partitions) keeps the complete flag of the draft<N>.json it replaces (false when there is none or it cannot be read); generate still writes complete: false. Do not run merge or generate in a working tree whose requirements/ you want to keep: the CLI ignores path arguments."
-    ]
+    ],
+    "from_L1d": {
+      "files_and_interfaces": [
+        "Transport opt-in (T1): NativeQuicListenerConfig::require_datagram (default true; false only for wire_draft MoqLite06) in include/moq/interop/transport/native_quic_listener.h; picoquic_native_listener.cpp accepts ALPN moq-lite-06 (moq-lite-07 still refused); picoquic_connection.cpp demands max_datagram_frame_size only when require_datagram; webtransport_listener.cpp no longer refuses lite; webtransport_connect.cpp skips the datagram and reset_stream_at checks for MoqLite06 (SETTINGS_WT_ENABLED still required for every profile).",
+        "Session recorder (T2): include/moq/interop/session/lite_stream_reader.h and lite_session.h with src/session/lite_stream_reader.cpp and lite_session.cpp: LiteStreamKind, LiteOrigin, LiteMessage, LiteDecoded, LiteDecodeIssue, LiteStreamRecord, LiteStreamReader, LiteSession, LiteSessionLimits (max_messages_total 250000, 64 MiB), PeerCloseInfo, kIssue* codes, evidence kinds lite_stream_opened / lite_message / lite_decode_error (known_evidence_kind in src/requirements/completeness.cpp). Accessors for evaluators: peer_messages, peer_issues, peer_protocol_issues, peer_streams.",
+        "Probe engine (T3): include/moq/interop/scenarios/lite_probe.h, lite06_timing.h, src/scenarios/lite_probe.cpp: LiteProbeDefinition {id, requires_track, runner_setup, steps, next_steps, deadline, connect_deadline, observation_window, done, session_url_has_path, session_url_path, session_url_query, binding, broadcast_path, track_name}, LiteStep (with target), LiteStepRecord, LiteProbeContext, LiteTranscript, LiteBinding {Unknown, NativeQuic, WebTransport}, LiteClock/SteadyLiteClock/ManualLiteClock, LiteProbeController, judgeable() and judgeable_with_stimulus().",
+        "Scenarios and evaluators (T4-T7): lite06_common (shared helpers and the l06-errors-code-space evaluator), lite06_setup (6 scenarios), lite06_announce (3), lite06_subscribe (5), lite06_errors (4 plus l06-setup-client-path), each header under include/moq/interop/scenarios/ with src/scenarios/lite06_*.cpp: 19 scenarios, 30 evaluators, builders that throw std::invalid_argument when the deadline cannot cover the windows.",
+        "Bindings and registry (T8): include/moq/interop/requirements/lite_evaluators.h and src/requirements/lite_evaluators.cpp (lite_evaluator_registry, lite_executable_bindings = 34 bindings, evaluate_lite); include/moq/interop/app/lite_scenarios.h (kLiteExecutableScenarios, requires_track for 10); lite entries in scenario_registry.h (executable_scenarios(106) lists the 19; golden tests/golden/executable-ids-d106.txt); server.cpp executable_bindings(MoqLite06) returns the lite bindings; execution_audit.cpp uses score_staged when the catalog is incomplete; audit_main.cpp prints lite coverage (Required 26 of 26, Optional 4 of 4) and the audit JSON gained required_covered, optional_applicable_testable, optional_covered.",
+        "Run hook (T9): include/moq/interop/app/lite_run.h and src/app/lite_run.cpp (lite_start_refusal, lite_probe_for, run_lite, provisional endpoint forms), routing only in native_run_manager.cpp (Impl::start_lite; NativeRunManager takes a trailing moqlite06 catalog pointer on the 5-argument constructor); supports(MoqLite06) = catalog present; src/app/main.cpp untouched.",
+        "Test support: tests/support/scripted_lite_peer.h (ScriptedLitePeer, ConformingLitePublisher, LiteDefect, LitePublisherHooks), tests/support/lite_conformance.h (conformance table over all 19 scenarios and 3 bindings), tests/support/lite_run_live.h (LiteQuicPublisher), PicoquicTestClient::stop_sending_error accessor; tests lite_session_test, lite_probe_test, lite06_{setup,announce,subscribe,errors}_test, lite_conformance_test, lite_evaluators_test, lite_run_live_test (ctest names include moqlite-session, moqlite-probe, moqlite-setup, lite-run-live).",
+        "Existing files changed beyond new files: CMakeLists.txt, the five transport files above, completeness.cpp (evidence kinds), execution_audit.cpp, audit_main.cpp, server.cpp, scenario_registry.h, native_run_manager.*, and the tests that pinned the old lite refusals or the audit output (picoquic_native_listener_test, webtransport_listener_test, webtransport_connect_test, native_quic_test, moqlite_start_guard_test, result_export_test, completeness_test, executable_ids_golden_test, audit-cli-moqlite.sh). Audit CLI output for drafts 18, 21 and 22, goldens, adapter command-line goldens and result pins are unchanged."
+      ],
+      "decisions": [
+        "Ruling (lite WebTransport capability set): SETTINGS_WT_ENABLED plus the moq-lite-06 protocol offer only (draft 4.2 lines 471-474, 516-519, 530-533: datagrams optional, nothing requires reset_stream_at); a native QUIC lite listener likewise accepts a peer without QUIC DATAGRAM. MoQ Transport profiles keep all requirements.",
+        "Ruling (issue classes): LiteDecodeIssue classes are PeerProtocol, Harness, Informational and Inconclusive (the fourth only for unknown_announce_type). Evaluators use only peer_messages/peer_issues/peer_protocol_issues/peer_streams; a Harness-class issue is never a Fail; Inconclusive gives nullopt (NotRun).",
+        "Ruling (gates): 12 evaluators gate on judgeable_with_stimulus(transcript) (judgeable && stimulus_delivered && !peer_closed_early): 141, 143, 152, 093, 097, 190, 159, 172, 020, 120, 124, 125. 18 evaluators use plain judgeable() because the publisher's close IS the observation (or a Fail), and each adds its own proof of the stimulus it judges (proved_stimulus with the exact bytes): 014 and 111 (lite06_setup.cpp setup_stream_gate), 110, the four close probes 112/092/126/131 (judge_close_probe in lite06_common.cpp), 107 (same helper), 027 (lite06_common.cpp), 025 (lite06_announce.cpp), 139, 062 and 023 (lite06_subscribe.cpp), 108 and 109 (lite06_errors.cpp, 108 is NotRun on any publisher close), 030, 032 and 033 (cancel_view in lite06_errors.cpp). Harness-class issues are never a Fail; Inconclusive gives NotRun.",
+        "Ruling (same-poll ties): a peer event stamped at a step's executed time arrived before the step because the engine handles a poll's events before its steps, so comparisons use <= (live_at_code; 025 likewise).",
+        "Ruling (binding): LiteBinding {Unknown, NativeQuic, WebTransport} is carried by definition and transcript and set from the transport; l06-setup-server-path-close (126) is NotRun on WebTransport; row 027 is judged on any binding; 120/124 are native QUIC only, 125 WebTransport only.",
+        "Ruling (URL fields): session_url_has_path, session_url_path, session_url_query and binding must be set consistently (unreserved characters only; 120 is an exact byte match of path + '?' + query); unknown binding or empty fields make 120/124/125 NotRun; 124 and 125 also need a non-empty query (stricter than the rationale, loses verdicts only).",
+        "Ruling (broadcast fields): LiteProbeDefinition/LiteTranscript carry broadcast_path (namespace fields joined with '/') and track_name from RunConfig::track; evaluators return NotRun if empty or mismatched; l06-session-stream-close has requires_track true.",
+        "Ruling (probe construction): probes end with an ungated allowance Wait and builders throw invalid_argument when deadline <= allowance; the run hook stores that as a harness error and continues. Floor and abutting probes learn through next_steps continuations and a silent learning publisher times out at the deadline, which is NotRun, not a harness error.",
+        "Ruling (subscribe probes): the learning SUBSCRIBE uses Max Age 0 (kL06LearnMaxAgeMs) so the publisher starts at its latest group; floored and default subscriptions keep a large Max Age; 062 and 023 check the reset before SUBSCRIBE_END (END then reset passes; END with FIN, close or no reset fails).",
+        "Ruling (fixture conformance): ConformingLitePublisher is a draft-conforming fixture (raw floor max(latest, group_start), frame bounds, cancel handling, Path per binding, FIN echo as an explicit echo_runner_fin bool default true; only the codec bounds violation resets a SUBSCRIBE, other undecodable SUBSCRIBE closes PROTOCOL_VIOLATION); the conformance table runs all 19 scenarios on all 3 bindings and all 30 evaluators are true on their own scenario except the documented NotRun cases (152 no retraction, 120/124 native only, 125 WebTransport only, 126 native only).",
+        "Ruling (bindings and evidence): lite_executable_bindings has 34 bindings (29 single-scenario rows plus row 027 on 5 scenarios); evidence kinds per binding are documented in lite_evaluators.h; rows 014, 111, 120, 124, 125 declare only {raw_probe_stimulus, lite_stream_opened} because the lenient SETUP re-read cannot guarantee lite_message; the run hook must record exactly the declared kinds for each Pass or the audit reports missing_evaluator_evidence.",
+        "Ruling (flagged transcripts): evaluate_lite drops the verdicts of a flagged transcript (harness_failed, event_limit_reached, timed_out) entirely though it counts as a run of its scenario.",
+        "Ruling (timeouts): RunConfig::timeout bounds the wait for the publisher and, separately, the probe from establishment (one context may take up to 2x timeout; driven process_timeout = 2x timeout + 1 s); there is no total-run bound (stop() exists). This differs from the plan's 'timeout bounds the whole context'; cost is a slow worst case.",
+        "Ruling (unknown id): an unknown scenario id for a lite run is InvalidConfig, while MoQ Transport drafts answer Unsupported; align in the API mapping when L1e makes lite reachable.",
+        "Ruling (endpoint forms): native QUIC lite has no session URL and RunConfig gained no field; 120/124/125 stay NotRun on live runs until L1e defines the endpoint forms and session URL. moql://host:port and https://host:port/moq live only in src/app/lite_run.cpp and are provisional.",
+        "Ruling (run outcomes): a publisher that never connects (including wrong ALPN) ends the run: remaining contexts context_skipped, verdict Error; other harness errors are stored, the run continues, verdict Error; timed_out alone is NotRun.",
+        "Ruling (setup parameters, from L1c, applied): client rows testable with the publisher as client, server rows NotApplicable; row 027 is bound once per scenario on five scenarios with l06-errors-code-space evidence; rows 014 and 111, 030 and 032 share carve-outs so one defect never fails two rows.",
+        "Draft ambiguity (T4): 4.4.1 describes 0x6 KEY_VALUE_FORMATTING_ERROR as 'repeated more than allowed' but 7.3 mandates PROTOCOL_VIOLATION for row 112; the evaluator follows the row. A transport-space peer close is a Fail of the close probes and NotRun for 027; revisit if a live stack reports lite session closes in the transport space.",
+        "Ruling (pending tail, final fix wave): LiteStreamRecord::peer_pending_bytes holds the bytes of an incomplete message buffered on the peer direction (inbound phase First or Rest); rows 139, 141 and 152 return NotRun while it is non-zero on a stream the publisher has not finished or reset (real Fails still count), so a second ANNOUNCE_OK at the end of a covered stream no longer gives 139 a Pass. The conformance table asserts a conforming publisher leaves 0 pending bytes on every stream.",
+        "Blind-spot analysis (final fix wave): Group-stream rows 093, 097, 190 can in principle hide a Fail inside a Group stream whose first message (GROUP header or FRAME) is still incomplete when the window ends: 093 could miss a FRAME-first stream and 097 a duplicate sequence in a header not yet decoded. Not changed: a stream opened just before the window end would otherwise make most live runs NotRun; 190 already returns NotRun when any Group stream lacks a decoded header. Rows 143, 062, 023, 159, 172, 020 judge decoded prefixes whose verdict a later byte cannot reverse in the same direction."
+      ],
+      "scenarios": {
+        "l06-setup-stream": "Stimulus: runner SETUP then 2 s allowance. Evidence: publisher Setup stream(s) and their parameters. 014, 111. NotRun: no publisher SETUP decoded, or an early close/reset.",
+        "l06-setup-unknown-parameter": "Stimulus: SETUP with undefined Parameter 0x7f then ANNOUNCE_REQUEST. 110. NotRun: no publisher SETUP or ANNOUNCE_OK (attribution), early close.",
+        "l06-setup-duplicate-parameter": "Stimulus: SETUP with Cost twice. 112 and 027 (close code and space). NotRun: no attributable close.",
+        "l06-setup-duplicate-stream": "Stimulus: second SETUP stream. 092 and 027.",
+        "l06-setup-server-path": "Stimulus: SETUP with Path '/'. 126 (native QUIC only) and 027.",
+        "l06-setup-server-role": "Stimulus: SETUP with Role 0. 131 and 027.",
+        "l06-setup-client-path": "Stimulus: ordinary SETUP; the publisher's SETUP Path is compared with the session URL fields. 120 and 124 native QUIC, 125 WebTransport. NotRun: unknown binding, missing path/query fields; live runs until L1e.",
+        "l06-announce-prefix": "Stimulus: ANNOUNCE_REQUESTs for the empty prefix, the broadcast's first segment and a disjoint prefix. 139, 141, 143 (Hop as information). Time-bounded flag on 139. NotRun: undecodable response prefix, missing response stream for 141/143.",
+        "l06-announce-lifecycle": "Stimulus: one ANNOUNCE_REQUEST held open while the adapter ends and restarts a broadcast. 152. NotRun until the adapter can do that.",
+        "l06-session-stream-close": "Stimulus: ANNOUNCE_REQUEST and SUBSCRIBE, wait for first answers, runner FINs both. 025 (scans transcript events for peer FIN or reset; time-bounded flag).",
+        "l06-subscribe-latest": "Stimulus: announce exchange then default SUBSCRIBE. 093, 097, 190.",
+        "l06-subscribe-refused": "Stimulus: SUBSCRIBE for an uncovered path and for an unknown track. 062.",
+        "l06-subscribe-invalid-frame-bounds": "Stimulus: raw SUBSCRIBE with Group End 0 and Frame End 1. 023.",
+        "l06-subscribe-group-floor": "Stimulus: learning SUBSCRIBE (Max Age 0) then floors L and L+2. 159, 172. NotRun: no GROUP on the learning subscription (timed_out).",
+        "l06-subscribe-abutting-frame-start": "Stimulus: learning SUBSCRIBE gives G; subscription for frames 0..N-1 then one from frame N. 020, recording the first subscription's Position as evidence.",
+        "l06-errors-unknown-stream-type": "Stimulus: bidirectional stream with STREAM_TYPE 0x3f then ANNOUNCE_REQUEST. 108 (records whether reset or STOP_SENDING came first) and 109.",
+        "l06-errors-unknown-reset-code": "Stimulus: two live SUBSCRIBEs, Group STOP_SENDING, RESET_STREAM and STOP_SENDING of A with code 0x4d1, later SUBSCRIBE C; about 9 s. 030, 032. Live InvalidState on the Group STOP_SENDING is harness_failed and NotRun.",
+        "l06-errors-reserved-reset-code": "As above with code 0x2a, about 6 s. 033.",
+        "l06-errors-code-space": "Stimulus: SUBSCRIBE for an unserved broadcast (stream half) then an ANNOUNCE_REQUEST with trailing bytes inside its Message Length (session half). 027 needs both halves (one half is NotRun, wrong space Fails), 107 (gate_expired of the refusal wait recorded)."
+      },
+      "l1e_must_do": [
+        "Flip runnable(MoqLite06) to true and accepts_runs, catalog_for, supported_drafts; add the lite catalog field to ServerConfig and load it in src/app/main.cpp; list moq-lite-06 in /api/v1/drafts and document it in docs/http-api.md.",
+        "completeness_json residual wording for unreviewed rows: rows with the 'Unreviewed:' rationale show as not_testable, so the report wording must say 'classification pending'.",
+        "Map the unknown-scenario-id status for lite (today InvalidConfig, MoQ Transport drafts use Unsupported) in the API.",
+        "Write adapters/moq-lite/ driving the moq CLI: MOQ_CLI_BIN, the final endpoint forms (provisional moql://host:port and https://host:port/moq, finalize against the moq CLI), session URL path and query pass-through for 120/124/125 (and a RunConfig/lite_run field so native QUIC gets a session URL), end and restart a broadcast within one session for 152, and a media source that keeps producing for at least ~9 s (unknown-code and reserved-code probes; a source that ends makes the publisher close NO_ERROR, a 030/033 Fail).",
+        "Implement the three runner duties missing from the engine: auto-FIN the request side when the publisher ends an announce response; close the runner's send side when the publisher closes one; close the session with PROTOCOL_VIOLATION when a WebTransport client sends Path.",
+        "Add a datagram-less lite WebTransport live test (the picowt test client always sends datagram settings; only validate_connect covers it) and the empty-datagram send with limit 0.",
+        "Live coverage of all 19 scenarios against the real moq CLI (only 6 short scenarios run live today; all 19 run on the simulated clock), then the sweep and triage; record observed results in docs/interop-notes.md.",
+        "Decide the staged-result presentation in the HTTP result and report (verdict Incomplete is never Pass) before enabling runs.",
+        "I2 per-context stream-data cap: kLiteMaximumEvidenceBytes (8 MiB, include/moq/interop/scenarios/lite_probe.h:36) counts every stream-data byte including Group payloads; a 2-5 Mbps source over the ~9 s reset-code probes and the multi-second subscribe windows reaches it, sets event_limit_reached, and evaluate_lite then drops that context's verdicts (030/032/033 and the subscribe rows become NotRun). Options: keep only length and FIN for Group stream data in transcript.events, a larger cap for Group streams, or require a low-bitrate fixture source.",
+        "I3 memory held per run: LiteRun::transcripts_ in src/app/lite_run.cpp keeps every context's full transcript until finalize (about 2.5 GiB theoretical worst case over 19 contexts). Evaluate each context as it ends and keep only verdicts, or drop FRAME payloads from LiteDecoded.",
+        "T9 minors to clear: stop between contexts writes no context_skipped for the remaining contexts; ADeadlineTooShort has a 0.5 s margin (use a larger deadline)."
+      ],
+      "open_items": {
+        "T1 minor (deferred)": [
+          "No live end-to-end test of a datagram-less lite WebTransport peer (only validate_connect is unit-tested)",
+          "Empty-datagram send with limit 0 unexercised",
+          "Close reason string for an ALPN mismatch says 'datagram not negotiated' (pre-existing)"
+        ],
+        "T2 minor (deferred)": [
+          "The enforcement test covers the kAllIssueCodes array, not the kIssue* constants themselves, so a new constant missing from the array escapes"
+        ],
+        "T3 nits (deferred)": [
+          "Peer-close branch sets complete = !harness_failed",
+          "The forever-appending test assertion is loose (harness_failed || event_limit_reached)",
+          "transcript() is not thread-safe: do not read it from another thread while poll runs",
+          "connect_deadline and deadline are separate timeouts; deadline restarts at establishment"
+        ],
+        "T4 nits (deferred)": [
+          "The old reviewer repro Review.HandBuiltSetupStream asserts the old gated behavior (scratchpad only)",
+          "Residual accepted: a publisher that silently stalls only because of the unknown parameter is never debited"
+        ],
+        "T5 minors (deferred)": [
+          "141 passes over a stream truncated by a decode failure while 152 treats it as NotRun (inconsistent)",
+          "Observed violations are discarded when the publisher later closes the session (152/141 NotRun, missed Fails); possible follow-up: allow Fail-only evidence under judgeable() plus stimulus proof",
+          "One missing response stream makes 141/143 NotRun outright",
+          "first_not_ok is unreachable",
+          "Hop ID loop probe (rows 044-046) stays NotTestable for the moq CLI"
+        ],
+        "T6 notes": [
+          "020 extra check (non-zero Frame Start on subscription id 1) is an extension under draft 3.6",
+          "Abutting stage 1 gives up on any id-1 GROUP sequence != G (information only)"
+        ],
+        "T7 minors (deferred)": [
+          "030/033 'other subscription keeps working' needs only B not refused/FINed plus C OK, so a publisher silently stopping B passes",
+          "M3 not done (it would break WithoutAGroupStreamTheCancelIsStillJudged)",
+          "Live deadlines needed with margin: unknown-code more than 9 s, reserved-code and code-space more than 6 s, unknown-stream more than 3 s, client-path more than 2 s"
+        ],
+        "T8 notes": [
+          "Publisher-driver test flaked once under -j8 (unrelated)",
+          "native-quic NativeQuicLive.InboundDropHidesPeerStreamsUntilReenabled flaked once under load (pre-existing test, passes alone)"
+        ],
+        "T9 minors (deferred)": [
+          "Stop between contexts emits no context_skipped for the remaining contexts (lite_run.cpp:176,193,202) and :202 leaves context_ready without context_end",
+          "The exception path names no skipped contexts (consistent with the raw family)",
+          "Stimulus kind mapping is stricter than observed_kinds (a partial refused step is stored as raw_probe_partial_stimulus; unreachable for a Pass)",
+          "Only 3 of 14 live tests call expect_audit_clean",
+          "No test of the 4096/1024 evidence caps or context_event_limit",
+          "Thin timing margin in ADeadlineTooShort (2.5 s deadline vs 2 s allowance, 0.5 s): consider a larger deadline",
+          "The stated allowance or window value is not stored for time-bounded Fails (139/025)",
+          "All 19 scenarios run only on the simulated clock (6 live)",
+          "TSan: 49 data-race reports all in picoquic's process-global public RNG (tls_api.c:1037-1077) between the listener thread and the test client thread; third party, not lite code",
+          "Idle-timeout transcripts labelled context_complete: FIXED (timed_out contexts are context_end)"
+        ],
+        "T5 parked issue (FIXED in the final fix wave)": [
+          "A second ANNOUNCE_OK at the end of a covered announce response stream gave 139 a false Pass: fixed with peer_pending_bytes (rows 139, 141, 152 are NotRun while an incomplete message is pending); with an 8-byte Hop ID the misread still makes the prefix transcript unjudgeable through a Harness-class length_exceeds_limit (NotRun, a lost Fail at worst, never a Pass)."
+        ],
+        "M5 notes": [
+          "141 passes over a stream truncated by a decode failure while 152 treats it as NotRun",
+          "Observed violations are discarded when the publisher later closes the session (152/141 NotRun, missed Fails)"
+        ]
+      }
+    }
   },
   "entries": [
     {

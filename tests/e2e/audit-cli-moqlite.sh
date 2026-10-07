@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The staged moq-lite-06 audit: `moq-interop-audit --draft moq-lite-06` reports the incomplete
-# catalog (rows, reviewed, unreviewed, planned scenarios) and is never a pass. The expected counts
-# are computed independently from requirements/moq-lite-06.json.
+# catalog (rows, reviewed, unreviewed, planned scenarios) and the coverage of its reviewed rows by the
+# L1d executable bindings (every Applicable + Testable row covered, no blocking finding), and is never a
+# pass. The expected counts are computed independently from requirements/moq-lite-06.json.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -60,6 +61,8 @@ check_line "Unreviewed: $(exp unreviewed)"
 check_line "Unreviewed required (MUST/MUST NOT): $(exp unreviewed_required)"
 check_line "Required applicable testable (reviewed rows): $(exp required_at)"
 check_line "Planned scenarios: $(exp scenarios)"
+check_line "Required coverage (reviewed rows): $(exp required_at) of $(exp required_at)"
+check_line "Optional coverage (reviewed rows): $(exp optional_at) of $(exp optional_at)"
 check_line "STAGED: incomplete catalog (not a pass)"
 grep -q '^Findings: [0-9]' "$test_dir/text.out"
 grep -q 'non-blocking' "$test_dir/text.out"
@@ -83,8 +86,12 @@ jq -e --slurpfile e "$test_dir/expected.json" '
     .source_audit.multiply_classified_count == 0 and
     ([.findings[] | select(.blocking)] | length) == 0 and
     ([.findings[] | select(.code == "unreviewed_rows")] | length) == 1 and
-    ([.findings[] | select(.code == "missing_required_evaluator")] | length) == $e[0].required_at and
-    ([.findings[] | select(.code == "missing_optional_evaluator")] | length) == $e[0].optional_at' \
+    .required_covered == $e[0].required_at and
+    .optional_applicable_testable == $e[0].optional_at and
+    .optional_covered == $e[0].optional_at and
+    ([.findings[] | select(.code == "missing_required_evaluator")] | length) == 0 and
+    ([.findings[] | select(.code == "missing_optional_evaluator")] | length) == 0 and
+    (.findings | length) == 1' \
     "$test_dir/audit.json" >/dev/null || { echo "JSON shape mismatch" >&2; cat "$test_dir/audit.json" >&2; exit 1; }
 
 # Spellings other than moq-lite-06 are refused with the usage message and status 2.

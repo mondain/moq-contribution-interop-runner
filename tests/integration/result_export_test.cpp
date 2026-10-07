@@ -1,6 +1,7 @@
 #include "detail.h"
 #include "json.h"
 #include "moq/interop/http/result_schema.h"
+#include "moq/interop/requirements/lite_evaluators.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -312,12 +313,19 @@ TEST(ResultExport, LiteCatalogRowsReviewedFalseSerializeWithoutThrowing) {
     });
 }
 
-TEST(ResultExport, LiteCatalogAuditIsStagedWithoutBindings) {
+TEST(ResultExport, LiteCatalogAuditIsStagedWithTheLiteBindings) {
     const auto selection = detail::audit_catalog(lite_catalog());
-    EXPECT_TRUE(selection.bindings.empty());
+    EXPECT_EQ(selection.bindings.size(), requirements::lite_executable_bindings().size());
+    EXPECT_FALSE(selection.bindings.empty());
     EXPECT_EQ(selection.report.unreviewed_total, 1u);
     EXPECT_EQ(selection.report.unreviewed_required, 1u);
-    for (const auto& finding : selection.report.findings) EXPECT_FALSE(finding.blocking) << finding.code;
+    // audit_catalog now binds a moq-lite catalog with lite_executable_bindings(), whose 34 bindings name rows of the
+    // real requirements/moq-lite-06.json. This synthetic catalog has only the two rows L06-1 and L06-2, so every
+    // lite binding is an orphan_binding (blocking by the audit's rules, and correctly so for a catalog that lacks
+    // the bound rows); that is the only blocking finding accepted here. The real catalog audits with no blocking
+    // finding (tests/unit/lite_evaluators_test.cpp, StagedAuditOfTheRealCatalogCoversEveryRequiredRow).
+    for (const auto& finding : selection.report.findings)
+        EXPECT_TRUE(!finding.blocking || finding.code == "orphan_binding") << finding.code;
     EXPECT_FALSE(selection.report.complete());
 }
 

@@ -1,0 +1,62 @@
+#pragma once
+
+// The moq-lite-06 evaluators bound to requirements/moq-lite-06.json (L1d Task 8): the executable bindings, the
+// evaluator registry and the outcome of every catalog row from a run's transcripts.
+//
+// The evaluators (src/scenarios/lite06_*.cpp) return a verdict only (nullopt = NotRun); they record no evidence
+// text. The evidence a run stores (Task 9's run hook) is what every binding below declares, per scenario context:
+//   raw_probe_stimulus         each runner write the probe delivered (the runner Setup stream included);
+//   raw_probe_transport_event  each peer stream ending: FIN, RESET_STREAM or STOP_SENDING (with its code);
+//   peer_close                 the publisher's session close (code and space);
+//   lite_stream_opened         each publisher stream classified by STREAM_TYPE (session::kLiteStreamOpenedKind);
+//   lite_message               each decoded publisher message (session::kLiteMessageKind);
+//   lite_decode_error          each decode issue (session::kLiteDecodeErrorKind; never required for a Pass).
+// A binding names only kinds its evaluator's Pass condition guarantees, so a stored Pass carries them when the run
+// hook records the kinds as defined above (tests/unit/lite_evaluators_test.cpp derives the kinds from transcripts
+// by this mapping and checks every Pass). The SETUP rows (014, 111, 120, 124, 125) declare no lite_message: they
+// judge a lenient re-read of the Setup stream bytes, and a SETUP with a repeated Parameter ID passes 014 while the
+// strict codec decodes no message from it (only a lite_decode_error).
+//
+// evaluate_lite drops a flagged transcript's verdicts entirely (harness_failed, event_limit_reached or timed_out,
+// the same flags judgeable() refuses): it still counts as a run of its scenario (so a second, clean run of the same
+// scenario cannot pass the row), but none of its evaluators is consulted, so it yields neither Pass nor Fail.
+// Evidence notes the row rationales ask for, for the run hook to record in the event details: the time-bounded
+// flag and the stated allowance/window of a Fail of 139, 025, 108 and 107; the first subscription's Position
+// (Group Start, Frame Start) for 020 (its extension check); the session URL path, query and binding for 120 (and
+// 124/125); which of the reset and STOP_SENDING came first for 108; the `refused` step's gate_expired for 107; the
+// publisher SETUP's Hop parameter for 143.
+
+#include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/completeness.h"
+#include "moq/interop/requirements/scoring.h"
+#include "moq/interop/scenarios/lite_probe.h"
+
+#include <functional>
+#include <map>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace moq::interop::requirements {
+
+inline constexpr unsigned kLiteDraft = 106;
+
+// One binding per (row, scenario, evaluator) of every Applicable + Testable row: the product of each row's scenario
+// and evaluator lists (34: 29 single-scenario rows and row 027 on its five scenarios), draft 106.
+std::vector<ExecutableBinding> lite_executable_bindings();
+
+using LiteEvaluator = std::function<std::optional<bool>(const scenarios::LiteTranscript&)>;
+// Evaluator id -> function (the 30 ids pinned by tests/unit/lite_catalog_test.cpp).
+const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
+
+// One Outcome per catalog row, in catalog order. Unreviewed rows NotRun; not Applicable NotApplicable; NotTestable
+// NotTestable. A scored row is Fail when any of its evaluators returned false on a transcript of one of its
+// scenarios; Pass only when every scenario it names ran exactly once and every one of its evaluators returned true
+// on each of them (row 027: all five scenarios); otherwise NotRun. A transcript that is harness_failed,
+// event_limit_reached or timed_out is never judged (NotRun). Throws std::invalid_argument for a catalog that is not
+// draft 106.
+std::vector<Outcome> evaluate_lite(const RequirementCatalog& catalog,
+                                   std::span<const scenarios::LiteTranscript> transcripts);
+
+}  // namespace moq::interop::requirements

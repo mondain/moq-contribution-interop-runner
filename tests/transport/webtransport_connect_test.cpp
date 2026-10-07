@@ -258,6 +258,57 @@ TEST(WebTransportConnectMoqLite, MoqTransportProfilesStillAnswerOnlyTheirOwnProt
                                   lite_endpoint("moqt-22"), WebTransportProfile::Draft22Wt16).accepted());
 }
 
+// Draft section 4.2: the lite WebTransport binding uses native WebTransport streams only;
+// datagrams are optional there, so only SETTINGS_WT_ENABLED is a capability requirement.
+PeerCapabilities wt_only_capabilities() {
+    return {true, 1, false, false, false};
+}
+
+TEST(WebTransportConnectMoqLite, AcceptsAConnectWithoutDatagramOrResetStreamAtSettings) {
+    const auto result = validate_connect(lite_request("\"moq-lite-06\""), wt_only_capabilities(),
+                                         lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+    EXPECT_TRUE(result.accepted()) << result.evidence;
+    EXPECT_EQ(result.selected_protocol, "moq-lite-06");
+}
+
+TEST(WebTransportConnectMoqLite, StillRequiresWebTransportSettings) {
+    for (int variant = 0; variant < 3; ++variant) {
+        auto caps = wt_only_capabilities();
+        if (variant == 0) caps.settings_received = false;
+        if (variant == 1) caps.wt_enabled_value = 0;
+        if (variant == 2) caps.wt_enabled_value = 2;
+        const auto result = validate_connect(lite_request("\"moq-lite-06\""), caps,
+                                             lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+        EXPECT_FALSE(result.accepted()) << variant;
+        EXPECT_EQ(result.http_status, 400);
+    }
+}
+
+TEST(WebTransportConnectMoqLite, MoqTransportProfilesStillRefuseTheSameConnect) {
+    const struct { WebTransportProfile profile; const char* protocol; } cases[] = {
+        {WebTransportProfile::Draft18Wt15, "moqt-18"},
+        {WebTransportProfile::Draft21Wt16, "moqt-21"},
+        {WebTransportProfile::Draft22Wt16, "moqt-22"}};
+    for (const auto& c : cases) {
+        const auto offer = std::string("\"") + c.protocol + "\"";
+        EXPECT_FALSE(validate_connect(lite_request(offer), wt_only_capabilities(),
+                                      lite_endpoint(c.protocol), c.profile).accepted()) << c.protocol;
+        EXPECT_TRUE(validate_connect(lite_request(offer), capabilities(),
+                                     lite_endpoint(c.protocol), c.profile).accepted()) << c.protocol;
+    }
+}
+
+TEST(WebTransportConnectMoqLite, MixedOffersResolveToTheConfiguredProtocol) {
+    const auto lite = validate_connect(lite_request("\"moqt-22\", \"moq-lite-06\""), wt_only_capabilities(),
+                                       lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+    EXPECT_TRUE(lite.accepted()) << lite.evidence;
+    EXPECT_EQ(lite.selected_protocol, "moq-lite-06");
+    const auto d22 = validate_connect(lite_request("\"moq-lite-06\", \"moqt-22\""), capabilities(),
+                                      lite_endpoint("moqt-22"), WebTransportProfile::Draft22Wt16);
+    EXPECT_TRUE(d22.accepted()) << d22.evidence;
+    EXPECT_EQ(d22.selected_protocol, "moqt-22");
+}
+
 TEST(WebTransportConnectMoqLite, ProtocolMapsToTheProfileBothWays) {
     EXPECT_EQ(profile_for_application_protocol("moq-lite-06"), WebTransportProfile::MoqLite06);
     EXPECT_EQ(profile_for_application_protocol("moqt-22"), WebTransportProfile::Draft22Wt16);

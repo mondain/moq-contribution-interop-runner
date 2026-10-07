@@ -310,9 +310,7 @@ WebTransportListener& WebTransportListener::operator=(WebTransportListener&&) no
 
 WebTransportListenerCreateResult WebTransportListener::create(
     WebTransportListenerConfig config) {
-    // moq-lite-06 is a known protocol identifier but has no WebTransport session handler yet.
     if (!app::known_alpn(config.application_protocol) ||
-        config.application_protocol == app::alpn(app::DraftVersion::MoqLite06) ||
         config.path.empty() || config.path.front() != '/' ||
         (config.require_origin && config.allowed_origins.empty()) ||
         config.quic.max_udp_payload < 1200 ||

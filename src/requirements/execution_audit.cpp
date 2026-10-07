@@ -159,7 +159,10 @@ ExecutionAudit audit_execution(
                 audit.findings.push_back({"run_error", run.id, "",
                     "harness or publisher startup error prevents verification"});
             }
-            if (!same_score(*run.score, score(catalog, run.outcomes))) {
+            // An incomplete (staged) catalog, moq-lite-06's, is scored by score_staged (never a pass).
+            const auto expected = catalog.complete ? score(catalog, run.outcomes)
+                                                   : score_staged(catalog, run.outcomes);
+            if (!same_score(*run.score, expected)) {
                 audit.findings.push_back({"stored_score_mismatch", run.id, "",
                     "stored score does not match catalog and row outcomes"});
             }

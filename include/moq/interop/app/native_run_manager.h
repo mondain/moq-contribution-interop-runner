@@ -76,12 +76,15 @@ public:
         NativeRunManagerConfig config);
     // `draft22` (optional, must be complete like the others) enables draft 22 runs by lineage: the shared
     // scenarios run on draft 21's family and are scored against it. It needs `draft21` as well.
+    // `moqlite06` (optional, a draft 106 catalog; staged, so it need not be complete) enables moq-lite-06 runs
+    // (app/lite_run.h); without it a lite start is Unsupported.
     NativeRunManager(
         std::shared_ptr<const requirements::RequirementCatalog> draft18,
         std::shared_ptr<const requirements::RequirementCatalog> draft21,
         std::shared_ptr<storage::RunStore> store,
         NativeRunManagerConfig config,
-        std::shared_ptr<const requirements::RequirementCatalog> draft22 = nullptr);
+        std::shared_ptr<const requirements::RequirementCatalog> draft22 = nullptr,
+        std::shared_ptr<const requirements::RequirementCatalog> moqlite06 = nullptr);
     ~NativeRunManager();
 
     NativeRunManager(const NativeRunManager&) = delete;

@@ -28,7 +28,9 @@ bool known_evidence_kind(std::string_view kind) {
         "peer_close", "peer_closed", "local_close", "harness_limit",
         "namespace_observed", "namespace_response_delivered",
         "publish_observed", "response_delivered", "unsupported_stream",
-        "invalid_request_opener", "raw_probe_stimulus", "raw_probe_transport_event"};
+        "invalid_request_opener", "raw_probe_stimulus", "raw_probe_transport_event",
+        // moq-lite-06 session evidence (include/moq/interop/session/lite_session.h)
+        "lite_stream_opened", "lite_message", "lite_decode_error"};
     return known.contains(kind);
 }
 struct BoundContexts {

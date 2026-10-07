@@ -34,6 +34,9 @@ struct NativeQuicListenerConfig {
     std::uint64_t initial_max_streams_bidi = 64;
     std::uint64_t initial_max_streams_uni = 64;
     std::uint64_t missing_datagram_application_error = 3;
+    // MoQ Transport needs QUIC DATAGRAM; moq-lite binds to QUIC streams only, so a lite
+    // listener sets this false and accepts a peer that did not negotiate datagrams.
+    bool require_datagram = true;
     // Never extend flow control credit for peer-initiated unidirectional streams
     // beyond initial_max_stream_data_uni, so a peer that writes more than that
     // keeps the stream open and unfinished (picoquic_set_app_flow_control).

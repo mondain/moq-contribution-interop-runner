@@ -2575,6 +2575,90 @@ TEST(NativeQuicLive, MissingDatagramProducesOnlyConfiguredLocalClose) {
     EXPECT_FALSE(established);
 }
 
+// moq-lite-06 does not need QUIC DATAGRAM to be negotiated; the listener opts out of the check.
+TEST(NativeQuicLive, MoqLiteListenerAcceptsAClientWithoutDatagramsWhenNotRequired) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.expected_alpn = bytes({'m', 'o', 'q', '-', 'l', 'i', 't', 'e', '-', '0', '6'});
+    config.require_datagram = false;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = config.expected_alpn,
+         .enable_datagrams = false});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    bool local_close = false;
+    std::vector<std::byte> negotiated;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            if (const auto* connection = std::get_if<ConnectionEstablishedEvent>(&event)) {
+                established = true;
+                negotiated = connection->alpn;
+            }
+            local_close |= std::holds_alternative<LocalCloseEvent>(event);
+        }
+        return established || local_close;
+    }));
+    EXPECT_TRUE(established);
+    EXPECT_FALSE(local_close);
+    EXPECT_EQ(negotiated, config.expected_alpn);
+}
+
+TEST(NativeQuicLive, MoqLiteListenerRefusesAClientWithoutDatagramsWhenRequired) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.expected_alpn = bytes({'m', 'o', 'q', '-', 'l', 'i', 't', 'e', '-', '0', '6'});
+    config.require_datagram = true;
+    config.missing_datagram_application_error = 77;
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = config.expected_alpn,
+         .enable_datagrams = false});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    bool local_close = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            established |= std::holds_alternative<ConnectionEstablishedEvent>(event);
+            if (const auto* close = std::get_if<LocalCloseEvent>(&event))
+                local_close = close->error_space == CloseErrorSpace::Application &&
+                              close->error_code == 77;
+        }
+        return local_close;
+    }));
+    EXPECT_FALSE(established);
+}
+
+TEST(NativeQuicLive, Draft22ListenerStillRefusesAClientWithoutDatagrams) {
+    TestPemFiles pem;
+    auto config = live_config(pem);
+    config.expected_alpn = bytes({'m', 'o', 'q', 't', '-', '2', '2'});
+    config.missing_datagram_application_error = 77;
+    EXPECT_TRUE(config.require_datagram);
+    auto created = NativeQuicListener::create(config);
+    ASSERT_NE(created.listener, nullptr);
+    auto client = test::PicoquicTestClient::create(
+        {.port = created.listener->bound_endpoint().port,
+         .alpn = config.expected_alpn,
+         .enable_datagrams = false});
+    ASSERT_NE(client, nullptr);
+    bool established = false;
+    bool local_close = false;
+    ASSERT_TRUE(pump_until(*client, [&] {
+        for (const auto& event : created.listener->poll(64)) {
+            established |= std::holds_alternative<ConnectionEstablishedEvent>(event);
+            if (const auto* close = std::get_if<LocalCloseEvent>(&event))
+                local_close = close->error_code == 77;
+        }
+        return local_close;
+    }));
+    EXPECT_FALSE(established);
+}
+
 TEST(NativeQuicLive, ReportsPeerAndLocalApplicationCloseEvidence) {
     TestPemFiles pem;
     auto peer_created = NativeQuicListener::create(live_config(pem));
