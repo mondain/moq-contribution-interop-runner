@@ -238,6 +238,12 @@ const LiteStreamRecord* response_stream(const LiteTranscript& transcript, std::s
     return lite06::find_stream(transcript, *step->stream_id);
 }
 
+// An incomplete message is still buffered on a stream the publisher has not ended: what it will say is unknown, so
+// a Pass over the decoded prefix would hide it.
+bool pending_tail(const LiteStreamRecord& record) {
+    return record.peer_pending_bytes != 0 && !record.fin_seen && !record.reset_seen;
+}
+
 enum class Judged { Pass, Fail, Open };  // Open: inconclusive, or the observation was not over
 
 // Row 139 on one response stream.
@@ -292,6 +298,9 @@ Judged judge_answer(const LiteTranscript& transcript, const LiteStreamRecord& re
             }
         }
     }
+    // An incomplete message still buffered on a stream the publisher has not ended hides what follows the decoded
+    // prefix (for example a second ANNOUNCE_OK read as a Type 2 message that waits for bytes): not a Pass.
+    if (pending_tail(record)) open = true;
     return open ? Judged::Open : Judged::Pass;
 }
 
@@ -381,7 +390,7 @@ std::optional<bool> evaluate_l06_announce_hop_list_excludes_own(const LiteTransc
             // Draft 7.5 forbids the ANNOUNCE_OK Hop ID as the LAST entry; elsewhere in the list it is not this row.
             if (!route->hop_ids.empty() && route->hop_ids.back() == view.ok->hop_id) fail = true;
         }
-        if (view.cut) open = true;
+        if (view.cut || pending_tail(*record)) open = true;
     }
     if (fail) return false;
     if (open || !judged) return std::nullopt;  // Pass needs a decoded START or UPDATE on a non-zero Hop ID stream
@@ -416,7 +425,8 @@ std::optional<bool> evaluate_l06_announce_retired_id_unused(const LiteTranscript
         }
     }
     // No retraction in the window: NotRun, never a Pass. An unknown Type or a decode failure hides what followed.
-    if (!retraction || view.cut || view.protocol_issue || view.first_not_ok) return std::nullopt;
+    if (!retraction || view.cut || view.protocol_issue || view.first_not_ok || pending_tail(*record))
+        return std::nullopt;
     return true;
 }
 

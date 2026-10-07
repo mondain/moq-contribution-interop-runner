@@ -116,6 +116,9 @@ struct LiteStreamRecord {
     bool stop_sending_seen{false};  // likewise
     std::size_t local_bytes{0};
     bool local_fin{false};
+    // Bytes of the peer's direction buffered as an incomplete message (the inbound phase is First or Rest), 0
+    // otherwise. A non-zero value at the end of a window means the record hides an undecoded tail.
+    std::size_t peer_pending_bytes{0};
 };
 
 std::string_view to_string(LiteStreamKind kind);
@@ -205,6 +208,7 @@ private:
                 std::size_t event, std::uint64_t at_ns);
     void pump(LiteStreamRecord& record, Direction& direction, std::size_t event, std::uint64_t at_ns);
     void on_kind_known(LiteStreamRecord& record, std::size_t event);
+    void refresh_pending(LiteStreamRecord& record) const;
     void finish(LiteStreamRecord& record, Direction& direction, std::size_t event);
     void issue(LiteStreamRecord& record, const Direction& direction, std::size_t event, std::string_view code,
                std::string detail);

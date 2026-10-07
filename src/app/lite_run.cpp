@@ -362,7 +362,7 @@ private:
                                                "for example another ALPN or WebTransport protocol)");
         }
         if (transcript.event_limit_reached) context_event("context_event_limit", transcript.event_limit_reason);
-        const bool clean = transcript.complete && !transcript.harness_failed && transcript.established;
+        const bool clean = transcript.complete && !transcript.harness_failed && !transcript.timed_out && transcript.established;
         context_event(clean ? "context_complete" : "context_end", end_detail(transcript, deadline_ms, stopped));
         transcripts_.push_back(std::move(transcript));
         return connected;

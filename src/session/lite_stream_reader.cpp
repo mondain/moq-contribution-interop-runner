@@ -366,6 +366,7 @@ void LiteStreamDecoder::feed(LiteStreamRecord& record, std::span<const std::byte
     }
     if (fin) record.fin_seen = true;
     ingest(record, inbound_, data, fin, event, at_ns);
+    refresh_pending(record);
 }
 
 void LiteStreamDecoder::feed_local(LiteStreamRecord& record, std::span<const std::byte> data, bool fin,
@@ -380,6 +381,7 @@ void LiteStreamDecoder::feed_local(LiteStreamRecord& record, std::span<const std
         pump(record, inbound_, event, at_ns);
         if (inbound_.fin) finish(record, inbound_, event);
     }
+    refresh_pending(record);
 }
 
 void LiteStreamDecoder::reset(LiteStreamRecord& record, std::optional<std::uint64_t> code, std::uint64_t at_ns,
@@ -390,6 +392,7 @@ void LiteStreamDecoder::reset(LiteStreamRecord& record, std::optional<std::uint6
     if (code && !record.reset_code) record.reset_code = code;
     // A reset is not a decode error: what was decoded stays, a partial message is dropped silently.
     stop(inbound_);
+    refresh_pending(record);
 }
 
 void LiteStreamDecoder::stop_sending(LiteStreamRecord& record, std::optional<std::uint64_t> code,
@@ -398,6 +401,12 @@ void LiteStreamDecoder::stop_sending(LiteStreamRecord& record, std::optional<std
     begin_event(record, at_ns);
     record.stop_sending_seen = true;
     if (code && !record.stop_sending_code) record.stop_sending_code = code;
+    refresh_pending(record);
+}
+
+void LiteStreamDecoder::refresh_pending(LiteStreamRecord& record) const {
+    const bool mid_message = inbound_.phase == Phase::First || inbound_.phase == Phase::Rest;
+    record.peer_pending_bytes = mid_message ? inbound_.buffer.size() - inbound_.start : 0;
 }
 
 void LiteStreamDecoder::note_runner_issue(LiteStreamRecord& record, std::string_view code, std::string detail,

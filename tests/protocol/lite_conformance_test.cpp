@@ -124,6 +124,8 @@ void check_table(const std::vector<LiteTranscript>& transcripts, LiteBinding bin
         EXPECT_FALSE(t.harness_failed) << t.harness_failure_reason;
         EXPECT_FALSE(t.event_limit_reached) << t.event_limit_reason;
         EXPECT_TRUE(s::judgeable(t));
+        // A conforming publisher leaves no incomplete message buffered on any stream.
+        for (const auto& stream : t.streams) EXPECT_EQ(stream.peer_pending_bytes, 0u) << stream.stream_id;
         for (const auto& entry : evaluators()) {
             const auto verdict = entry.evaluate(t);
             const bool own = entry.scenarios.contains(t.scenario_id);

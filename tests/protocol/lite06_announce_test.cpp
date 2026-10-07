@@ -329,6 +329,49 @@ TEST(Lite06AnnouncePrefix, ConformingPublisherPassesAllThree) {
     EXPECT_EQ(judge_prefix(t), PrefixVerdicts(kPass, kPass, kPass));
 }
 
+TEST(Lite06AnnouncePrefix, ASecondOkAfterTheStartIsNotAPass) {
+    // OK(7,1), START, then a second ANNOUNCE_OK (02 07 00) that reads as a Type 2 message of length 7 and waits for
+    // bytes forever: the undecoded tail must not turn into a Pass of 139 or 141.
+    const auto t = run(answering([](ScriptedLitePeer& peer, transport::StreamId stream, const std::string& prefix) {
+        if (!covered(prefix)) {
+            peer.data(stream, ok(kHop, 0));
+            return;
+        }
+        peer.data(stream, join({ok(kHop, 1), start(suffix_for(prefix)), ok(kHop, 0)}));
+    }));
+    const auto* step = lite06::step_labelled(t, scen::kL06AnnounceEmptyLabel);
+    ASSERT_NE(step, nullptr);
+    ASSERT_TRUE(step->stream_id.has_value());
+    const auto* record = lite06::find_stream(t, *step->stream_id);
+    ASSERT_NE(record, nullptr);
+    EXPECT_GT(record->peer_pending_bytes, 0u);
+    EXPECT_EQ(judge_prefix(t), PrefixVerdicts(kNotRun, kPass, kNotRun));
+}
+
+TEST(Lite06AnnouncePrefix, TwoBytesOfAStartLeftPendingAreNotAPass) {
+    const auto t = run(answering([](ScriptedLitePeer& peer, transport::StreamId stream, const std::string& prefix) {
+        if (!covered(prefix)) {
+            peer.data(stream, ok(kHop, 0));
+            return;
+        }
+        const auto whole = start(suffix_for(prefix));
+        const Bytes half(whole.begin(), whole.begin() + 2);
+        peer.data(stream, join({ok(kHop, 1), start(suffix_for(prefix)), half}));
+    }));
+    EXPECT_EQ(judge_prefix(t), PrefixVerdicts(kNotRun, kPass, kNotRun));
+}
+
+TEST(Lite06AnnouncePrefix, AFinishedStreamLeavesNothingPending) {
+    const auto t = run(answering([](ScriptedLitePeer& peer, transport::StreamId stream, const std::string& prefix) {
+        if (!covered(prefix)) {
+            peer.data(stream, ok(kHop, 0), true);
+            return;
+        }
+        peer.data(stream, join({ok(kHop, 1), start(suffix_for(prefix))}), true);
+    }));
+    EXPECT_EQ(judge_prefix(t), PrefixVerdicts(kPass, kPass, kPass));
+}
+
 TEST(Lite06AnnouncePrefix, OkTwiceFailsOnlyOkThenStarts) {
     const auto t = run(answering([](ScriptedLitePeer& peer, transport::StreamId stream, const std::string& prefix) {
         if (!covered(prefix)) {
@@ -549,6 +592,13 @@ TEST(Lite06AnnounceLifecycle, NoRetractionIsNotRun) {
 TEST(Lite06AnnounceLifecycle, ARetractionAndAFreshIdPass) {
     const auto t = run(lifecycle_probe(), lifecycle({{5, end(0)}, {10, start("/live")}, {15, update(1, {3})}}));
     EXPECT_EQ(evaluate_l06_announce_retired_id_unused(t), kPass);
+}
+
+TEST(Lite06AnnounceLifecycle, APartialMessageAfterTheRetractionIsNotRun) {
+    const auto whole = update(0);
+    const Bytes half(whole.begin(), whole.begin() + 1);
+    const auto t = run(lifecycle_probe(), lifecycle({{5, end(0)}, {10, half}}));
+    EXPECT_EQ(evaluate_l06_announce_retired_id_unused(t), kNotRun);
 }
 
 TEST(Lite06AnnounceLifecycle, UpdatingARetiredIdFails) {
