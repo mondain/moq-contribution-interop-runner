@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft23.err" "$test_dir/moq5.err"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft23.err" "$test_dir/moq5.err" "$test_dir/lite.err"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -160,6 +160,19 @@ status=$?
 set -e
 [[ "$status" -eq 64 ]] || { printf 'moq5 draft 22 request not refused (status %s)\n' "$status" >&2; exit 1; }
 grep -qx 'moq5 adapter: draft 22 is not supported by this adapter' "$test_dir/moq5.err"
+# A moq-lite draft is not a MoQ Transport draft: moqxr and moq5 refuse it (exit 64) and name it.
+make_request '"moq-lite-06"' native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+for litecase in "moqxr:MOQXR_BIN:$adapter" "moq5:MOQ5_MEDIA_SEND_BIN:$moq5_adapter"; do
+    IFS=: read -r lite_name lite_env lite_adapter <<<"$litecase"
+    set +e
+    env "$lite_env=$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+        MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$lite_adapter" >/dev/null 2>"$test_dir/lite.err"
+    status=$?
+    set -e
+    [[ "$status" -eq 64 ]] || { printf '%s moq-lite-06 request not refused (status %s)\n' "$lite_name" "$status" >&2; exit 1; }
+    grep -q "^$lite_name adapter: .*moq-lite-06" "$test_dir/lite.err" ||
+        { printf '%s refusal does not name moq-lite-06: %s\n' "$lite_name" "$(cat "$test_dir/lite.err")" >&2; exit 1; }
+done
 make_request 18 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem" \
     "https://127.0.0.1:4443/moq"
 if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \

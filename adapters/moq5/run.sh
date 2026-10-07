@@ -24,6 +24,10 @@ if jq -e '.draft == 22' "$request_file" >/dev/null 2>&1; then
     fail 'draft 22 is not supported by this adapter'
 fi
 
+if jq -e '.draft == "moq-lite-06"' "$request_file" >/dev/null 2>&1; then
+    fail 'draft moq-lite-06 is not supported by this adapter'
+fi
+
 jq -e '
     .schema_version == 1 and
     (.draft == 18 or .draft == 21) and

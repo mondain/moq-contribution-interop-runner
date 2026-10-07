@@ -14,9 +14,14 @@ publisher_bin=${MOQXR_BIN:-}
 [[ -n "$publisher_bin" && -x "$publisher_bin" ]] ||
     fail 'MOQXR_BIN must name an executable publisher'
 
+# moq-lite is not a MoQ Transport draft: refuse it by name rather than as a malformed request.
+if jq -e '.draft == "moq-lite-06"' "$request_file" >/dev/null 2>&1; then
+    fail 'draft moq-lite-06 is not supported (supported drafts: 18, 21, 22)'
+fi
+
 jq -e '
     .schema_version == 1 and
-    (.draft == 18 or .draft == 21 or .draft == 22) and
+    (.draft == 18or .draft == 21 or .draft == 22) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and

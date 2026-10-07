@@ -1106,6 +1106,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME publisher-driver COMMAND moq-interop-publisher-driver-tests)
     add_test(NAME moqxr-adapter-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-contract.sh")
+    add_test(NAME driver-contract-schema
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/driver-contract-schema.sh")
     add_test(NAME moqxr-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-matrix-plan.sh")
     foreach(moqxr_cmdline_draft 18 21 22)

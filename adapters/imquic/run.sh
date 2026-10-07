@@ -44,6 +44,9 @@ publisher_bin=${IMQUIC_PUB_BIN:-}
 command -v timeout >/dev/null || fail 'coreutils timeout is required'
 
 malformed='unsupported or malformed request (supported drafts: 22)'
+if jq -e '.draft == "moq-lite-06"' "$request_file" >/dev/null 2>&1; then
+    fail 'draft moq-lite-06 is not supported (supported drafts: 22)'
+fi
 draft=$(jq -er '.draft | numbers' "$request_file" 2>/dev/null) || fail "$malformed"
 [[ "$draft" == 22 ]] || fail "draft $draft is not supported (supported drafts: 22)"
 # jq passes number literals through unchanged (2500.0, 1E+3), which the shell arithmetic below cannot

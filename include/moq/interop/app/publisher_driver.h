@@ -63,7 +63,8 @@ struct DriverStartResult {
 };
 
 // The request file handed to the driver: `scenario_id` is the requested scenario id and `draft` the wire draft
-// (see DriverRequest), so a draft 22 run's driver sees draft 22 and d22- ids only.
+// (see DriverRequest), so a draft 22 run's driver sees draft 22 and d22- ids only. `draft` is the integer 18, 21
+// or 22 for a MoQ Transport draft and the string "moq-lite-06" for moq-lite (never the internal number 106).
 std::string serialize_driver_request(const DriverRequest& request);
 std::string serialize_driver_result(const DriverResult& result);
 
