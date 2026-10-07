@@ -123,6 +123,7 @@ add_library(moq-interop-wire
     src/wire/draft22/publisher_request.cpp
     src/wire/moqlite06/varint.cpp
     src/wire/moqlite06/framing.cpp
+    src/wire/moqlite06/setup.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -1274,6 +1275,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME moqlite06-framing
              COMMAND moq-interop-moqlite06-framing-tests)
+
+    add_executable(moq-interop-moqlite06-setup-tests
+                   tests/golden/moqlite06_setup_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-setup-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-setup
+             COMMAND moq-interop-moqlite06-setup-tests)
 
     add_executable(moq-interop-draft22-shared-tests
                    tests/golden/draft22_shared_test.cpp)
