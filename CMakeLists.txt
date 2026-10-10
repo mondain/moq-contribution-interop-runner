@@ -285,6 +285,8 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/lite06_setup.cpp
     src/scenarios/lite06_announce.cpp
     src/scenarios/lite06_subscribe.cpp
+    src/scenarios/lite06_track.cpp
+    src/scenarios/lite06_fetch.cpp
     src/scenarios/lite06_errors.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -1558,6 +1560,28 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
     add_test(NAME moqlite-subscribe
              COMMAND moq-interop-moqlite-subscribe-tests)
+
+    add_executable(moq-interop-moqlite-track-tests
+                   tests/protocol/lite06_track_test.cpp)
+    target_include_directories(moq-interop-moqlite-track-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-track-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-track-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-track
+             COMMAND moq-interop-moqlite-track-tests)
+
+    add_executable(moq-interop-moqlite-fetch-tests
+                   tests/protocol/lite06_fetch_test.cpp)
+    target_include_directories(moq-interop-moqlite-fetch-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-fetch-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-fetch-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-fetch
+             COMMAND moq-interop-moqlite-fetch-tests)
 
     add_executable(moq-interop-moqlite-errors-tests
                    tests/protocol/lite06_errors_test.cpp)

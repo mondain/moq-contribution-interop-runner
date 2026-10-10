@@ -52,8 +52,6 @@ LiteProbeDefinition fixture_probe(std::string_view id, std::chrono::milliseconds
     return definition;
 }
 
-std::vector<std::byte> announce_all_bytes() { return l06_announce_request_bytes(""); }
-
 // The runner's (only) Announce stream has its answer: ANNOUNCE_OK and the Active Count messages after it, or the
 // publisher ended the stream. Never opened by a decode issue (an issue stops decoding; the gate then expires).
 bool announce_answered(const session::LiteSession& session) {
@@ -67,15 +65,6 @@ bool announce_answered(const session::LiteSession& session) {
         return messages.size() - 1 >= ok->active_count;
     }
     return false;
-}
-
-// ANNOUNCE_REQUEST "" then the Wait gated on its answer.
-void add_announce_exchange(LiteProbeDefinition& definition, std::chrono::milliseconds answer_allowance) {
-    definition.steps.push_back(lite_open_bidi(announce_all_bytes(), false, std::string(kL06SubAnnounceLabel)));
-    auto announced = lite_wait(std::chrono::milliseconds{0}, std::string(kL06SubAnnouncedLabel));
-    announced.gate = announce_answered;
-    announced.gate_deadline = answer_allowance;
-    definition.steps.push_back(std::move(announced));
 }
 
 // The first decoded message of a peer stream when it is a GROUP.
@@ -119,6 +108,17 @@ bool elapsed(const LiteProbeContext& context, std::uint64_t since_ns, std::chron
 }
 
 }  // namespace
+
+std::vector<std::byte> l06_announce_all_bytes() { return l06_announce_request_bytes(""); }
+
+// ANNOUNCE_REQUEST "" then the Wait gated on its answer.
+void l06_add_announce_exchange(LiteProbeDefinition& definition, std::chrono::milliseconds answer_allowance) {
+    definition.steps.push_back(lite_open_bidi(l06_announce_all_bytes(), false, std::string(kL06SubAnnounceLabel)));
+    auto announced = lite_wait(std::chrono::milliseconds{0}, std::string(kL06SubAnnouncedLabel));
+    announced.gate = announce_answered;
+    announced.gate_deadline = answer_allowance;
+    definition.steps.push_back(std::move(announced));
+}
 
 std::string l06_uncovered_path(std::string_view broadcast_path) {
     return l06_disjoint_prefix(broadcast_path) + "/l1d-unserved";
@@ -191,7 +191,7 @@ LiteProbeDefinition l06_subscribe_latest_probe(std::chrono::milliseconds deadlin
     require_positive(answer_allowance, "answer allowance");
     auto definition = fixture_probe(kL06SubscribeLatest, deadline, window, answer_allowance + window, broadcast_path,
                                     track_name);
-    add_announce_exchange(definition, answer_allowance);
+    l06_add_announce_exchange(definition, answer_allowance);
     definition.steps.push_back(
         lite_open_bidi(l06_subscribe_bytes(l06_subscribe(kL06LatestSubscribeId, broadcast_path, track_name)), false,
                        std::string(kL06SubscribeLatestLabel)));
@@ -205,7 +205,7 @@ LiteProbeDefinition l06_subscribe_refused_probe(std::chrono::milliseconds deadli
     require_positive(answer_allowance, "answer allowance");
     auto definition = fixture_probe(kL06SubscribeRefused, deadline, allowance, answer_allowance + allowance,
                                     broadcast_path, track_name);
-    add_announce_exchange(definition, answer_allowance);
+    l06_add_announce_exchange(definition, answer_allowance);
     // Ungated and consecutive: both are pending together and share the allowance.
     definition.steps.push_back(lite_open_bidi(
         l06_subscribe_bytes(l06_subscribe(kL06UncoveredSubscribeId, l06_uncovered_path(broadcast_path), track_name)),
@@ -423,7 +423,7 @@ const LiteStreamRecord* latest_stream(const LiteTranscript& transcript) {
     if (transcript.scenario_id != kL06SubscribeLatest || !judgeable_with_stimulus(transcript) ||
         !fixture_present(transcript))
         return nullptr;
-    if (!proved_stimulus(transcript, kL06SubAnnounceLabel, announce_all_bytes())) return nullptr;
+    if (!proved_stimulus(transcript, kL06SubAnnounceLabel, l06_announce_all_bytes())) return nullptr;
     return stimulus_stream(
         transcript, kL06SubscribeLatestLabel,
         l06_subscribe_bytes(l06_subscribe(kL06LatestSubscribeId, transcript.broadcast_path, transcript.track_name)));
@@ -451,7 +451,7 @@ bool dropped(const std::vector<l06::SubscribeDrop>& drops, std::uint64_t from, s
 // Case (a)'s path is shown uncovered: the announce exchange answered (ANNOUNCE_OK first), nothing unreadable on
 // the announce stream (no Inconclusive or PeerProtocol issue), and no decoded ANNOUNCE_START route covers it.
 bool uncovered_shown(const LiteTranscript& transcript) {
-    const auto* record = stimulus_stream(transcript, kL06SubAnnounceLabel, announce_all_bytes());
+    const auto* record = stimulus_stream(transcript, kL06SubAnnounceLabel, l06_announce_all_bytes());
     if (!record) return false;
     for (const auto* issue : session::peer_issues(*record)) {
         const auto kind = session::classify_issue(issue->code);

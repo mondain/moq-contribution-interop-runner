@@ -90,6 +90,13 @@ std::string l06_uncovered_path(std::string_view broadcast_path);
 // The track name of row 062 case (b): the configured track with a suffix the broadcast does not serve.
 std::string l06_unknown_track(std::string_view track_name);
 
+// The ANNOUNCE_REQUEST "" stream bytes (STREAM_TYPE then the request) every fixture scenario that needs the
+// publisher's announced track starts with.
+std::vector<std::byte> l06_announce_all_bytes();
+// ANNOUNCE_REQUEST "" (label kL06SubAnnounceLabel, left open) and a Wait (kL06SubAnnouncedLabel) gated on its answer,
+// ANNOUNCE_OK and the initial set or the stream ended, for at most `answer_allowance`.
+void l06_add_announce_exchange(LiteProbeDefinition& definition, std::chrono::milliseconds answer_allowance);
+
 // A conforming SUBSCRIBE for the fixture: Subscriber Priority 0, kL06LargeMaxAgeMs, the given bounds.
 wire::moqlite06::Subscribe l06_subscribe(std::uint64_t subscribe_id, std::string_view broadcast_path,
                                          std::string_view track_name, std::uint64_t group_start = 0,
