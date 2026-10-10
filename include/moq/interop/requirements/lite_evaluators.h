@@ -35,6 +35,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -50,6 +51,13 @@ std::vector<ExecutableBinding> lite_executable_bindings();
 using LiteEvaluator = std::function<std::optional<bool>(const scenarios::LiteTranscript&)>;
 // Evaluator id -> function (the 30 ids pinned by tests/unit/lite_catalog_test.cpp).
 const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
+
+// Evaluator id -> "this peer cannot be judged by the row" (L2c). True when the peer's own behavior leaves the rule
+// vacuous or out of reach, not when it broke the rule: it advertised a Probe capability (row 075), sent no datagram
+// (105), or ended the session on the first GOAWAY (077, 186). Consulted only for an evaluator that gave no verdict
+// (nullopt); a verdict of true or false is never replaced. Four evaluators have one (pinned by the unit tests).
+using LiteApplicability = std::function<bool(const scenarios::LiteTranscript&)>;
+const std::map<std::string, LiteApplicability>& lite_applicability_registry();
 
 // One Outcome per catalog row, in catalog order. Unreviewed rows NotRun; not Applicable NotApplicable; NotTestable
 // NotTestable. A scored row is Fail when any of its evaluators returned false on a transcript of one of its
@@ -75,6 +83,10 @@ struct LiteContextVerdicts {
     // Evaluator id -> verdict (nullopt: NotRun) for every evaluator of every scored row naming scenario_id; an
     // evaluator id the registry does not hold is recorded as nullopt.
     std::map<std::string, std::optional<bool>> verdicts;
+    // Evaluator ids of `verdicts` that gave nullopt because the peer is outside the rule's reach (see
+    // lite_applicability_registry). A row whose single run of every scenario was inapplicable and that nothing failed
+    // is NotApplicable, which score() leaves out of its denominators.
+    std::set<std::string> inapplicable;
     // Row 027's halves (scenarios::l06_code_space_halves) when the evaluator l06-errors-code-space was consulted.
     std::optional<bool> code_space_stream_half;
     std::optional<bool> code_space_session_half;

@@ -87,4 +87,10 @@ std::optional<bool> evaluate_l06_goaway_second_closes(const LiteTranscript& tran
 // L06-7-18-MUST-179 (scenario l06-goaway-oversize).
 std::optional<bool> evaluate_l06_goaway_oversize_violation(const LiteTranscript& transcript);
 
+// L2c. The publisher ended the session on the first GOAWAY (a graceful shutdown the draft asks for), so rule 077 (no
+// new streams after a GOAWAY) and rule 186 (a second GOAWAY closes the session) have no stream or second GOAWAY to
+// judge. Not a defect of the peer. False unless the first GOAWAY was delivered as built and the peer's close seen.
+bool l06_goaway_single_inapplicable(const LiteTranscript& transcript);
+bool l06_goaway_duplicate_inapplicable(const LiteTranscript& transcript);
+
 }  // namespace moq::interop::scenarios

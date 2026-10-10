@@ -180,6 +180,16 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry() {
     return registry;
 }
 
+const std::map<std::string, LiteApplicability>& lite_applicability_registry() {
+    static const std::map<std::string, LiteApplicability> registry{
+        {"l06-probe-none-reset", s::l06_probe_none_inapplicable},
+        {"l06-datagram-size-limit", s::l06_datagram_size_inapplicable},
+        {"l06-goaway-no-new-streams", s::l06_goaway_single_inapplicable},
+        {"l06-goaway-second-closes", s::l06_goaway_duplicate_inapplicable},
+    };
+    return registry;
+}
+
 namespace {
 
 void require_lite(const RequirementCatalog& catalog) {
@@ -207,6 +217,11 @@ LiteContextVerdicts judge_lite_context(const RequirementCatalog& catalog, const 
             if (judged.verdicts.contains(evaluator)) continue;  // evaluators are pure: once per context
             const auto found = registry.find(evaluator);
             judged.verdicts[evaluator] = found == registry.end() ? std::optional<bool>{} : found->second(transcript);
+            if (!judged.verdicts[evaluator]) {
+                const auto& applicability = lite_applicability_registry();
+                const auto gate = applicability.find(evaluator);
+                if (gate != applicability.end() && gate->second(transcript)) judged.inapplicable.insert(evaluator);
+            }
             if (evaluator == kCodeSpaceEvaluator) {
                 const auto halves = s::l06_code_space_halves(transcript);
                 judged.code_space_stream_half = halves.stream;
@@ -258,11 +273,16 @@ std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span
             // judged true.
             std::map<std::string, std::size_t> runs;
             std::map<std::string, std::size_t> passed;
+            std::map<std::string, std::size_t> not_applicable;
             bool failed = false;
             for (const auto& context : contexts) {
                 if (!contains(row.scenarios, context.scenario_id)) continue;
                 ++runs[context.scenario_id];
                 if (context.flagged) continue;
+                if (!row.evaluators.empty() &&
+                    std::all_of(row.evaluators.begin(), row.evaluators.end(),
+                                [&](const std::string& id) { return context.inapplicable.contains(id); }))
+                    ++not_applicable[context.scenario_id];
                 bool all_true = !row.evaluators.empty();
                 for (const auto& evaluator : row.evaluators) {
                     const auto found = context.verdicts.find(evaluator);
@@ -278,8 +298,14 @@ std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span
                 });
             if (!failed && !settled && row.evaluators == std::vector<std::string>{std::string(kCodeSpaceEvaluator)})
                 settled = code_space_settled(row, contexts);
+            // Inapplicable: every scenario of the row ran exactly once and the peer was outside the rule's reach in each.
+            const bool outside_reach = !row.scenarios.empty() &&
+                std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
+                    return runs[scenario] == 1 && not_applicable[scenario] == 1;
+                });
             if (failed) state = OutcomeState::Fail;
             else if (settled) state = OutcomeState::Pass;
+            else if (outside_reach) state = OutcomeState::NotApplicable;
         }
         outcomes.push_back({row.id, state});
     }
@@ -300,6 +326,7 @@ std::size_t lite_retained_bytes(const LiteContextVerdicts& context) {
     constexpr std::size_t kNode = sizeof(std::pair<const std::string, std::optional<bool>>) + 5 * sizeof(void*);
     std::size_t bytes = sizeof(LiteContextVerdicts) + context.scenario_id.capacity();
     for (const auto& [id, verdict] : context.verdicts) bytes += kNode + id.capacity();
+    for (const auto& id : context.inapplicable) bytes += kNode + id.capacity();
     return bytes;
 }
 

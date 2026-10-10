@@ -184,4 +184,27 @@ std::optional<bool> evaluate_l06_goaway_oversize_violation(const LiteTranscript&
     return lite06::judge_close_probe(transcript, kL06GoawayOversize, stimulus);
 }
 
+bool l06_goaway_single_inapplicable(const LiteTranscript& transcript) {
+    if (transcript.scenario_id != kL06GoawaySingle || !judgeable(transcript) || !fixture_present(transcript) ||
+        !transcript.peer_close || transcript.runner_closed)
+        return false;
+    if (!proved_stimulus(transcript, kL06SubAnnounceLabel, l06_announce_all_bytes())) return false;
+    if (!proved_stimulus(transcript, kL06GoawayLearnLabel,
+                         l06_learning_subscribe_bytes(transcript.broadcast_path, transcript.track_name)))
+        return false;
+    const auto* goaway = proved_stimulus(transcript, kL06GoawayLabel, l06_goaway_bytes(kL06GoawayUri));
+    return goaway && goaway->executed_at_ns;
+}
+
+bool l06_goaway_duplicate_inapplicable(const LiteTranscript& transcript) {
+    if (transcript.scenario_id != kL06GoawayDuplicate || !judgeable(transcript) || !transcript.peer_close ||
+        transcript.runner_closed)
+        return false;
+    const auto* first = proved_stimulus(transcript, kL06GoawayFirstLabel, l06_goaway_bytes(kL06GoawayUri));
+    if (!first || !first->executed_at_ns) return false;
+    // The peer ended the session before the second GOAWAY went out.
+    const auto* second = proved_stimulus(transcript, kL06GoawaySecondLabel, l06_goaway_bytes(kL06GoawayUri));
+    return second == nullptr;
+}
+
 }  // namespace moq::interop::scenarios

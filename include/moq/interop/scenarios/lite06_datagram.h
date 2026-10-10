@@ -36,4 +36,9 @@ LiteProbeDefinition l06_datagram_size_probe(std::chrono::milliseconds deadline, 
 // unjudgeable transcript, the stimuli not delivered as built.
 std::optional<bool> evaluate_l06_datagram_size_limit(const LiteTranscript& transcript);
 
+// L2c. The publisher used no datagram, with the stimuli delivered as built: the rule is vacuous (datagrams are a
+// permission, row 100). False for an unproved transcript, and for any run in which a datagram decoded or exceeded
+// the limit.
+bool l06_datagram_size_inapplicable(const LiteTranscript& transcript);
+
 }  // namespace moq::interop::scenarios

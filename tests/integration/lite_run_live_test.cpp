@@ -669,9 +669,11 @@ TEST(LiteRunLive, AllTwentySevenProbesBuildAndJudgeOnTheSimulatedClock) {
     // needs a broadcast retraction the conforming publisher never makes.
     for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
-    // 075 is judged only for a publisher without a Probe capability; the conforming one advertises Report.
-    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152", "L06-5-1-5-MUST-075"})
+    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152"})
         EXPECT_EQ(states.at(row), OutcomeState::NotRun) << row;
+    // 075 is judged only for a publisher without a Probe capability; the conforming one advertises Report, so the
+    // row is not applicable to it (L2c).
+    EXPECT_EQ(states.at("L06-5-1-5-MUST-075"), OutcomeState::NotApplicable);
     // Too short a timeout for a builder is an exception lite_probe_for passes on (run_lite stores it).
     config.timeout = 1000ms;
     EXPECT_THROW((void)app::lite_probe_for(config, "l06-errors-unknown-reset-code"), std::invalid_argument);
