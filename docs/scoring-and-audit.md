@@ -233,3 +233,10 @@ fields (`schema_version`, `draft`, `source_sha256`, `rows`, `reviewed`, `unrevie
 shape from the other drafts: there is no `source_revision`, `static_complete` or
 `executable_coverage`. Exit status is 0 unless the source-keyword audit fails or a finding is
 blocking (none can be without bindings), 1 in that case, and 2 for an argument or loader error.
+
+The same staged semantics apply to moq-lite-06 runs made through the HTTP API: a run is scored with
+the staged score (`fail` if a required reviewed row failed, otherwise `incomplete`, never `pass`;
+`error` for a harness error), every unreviewed row is `not_run` with its `Unreviewed:` rationale and
+counts in the required, weighted and coverage denominators without earning, and the run record, the
+exports and the completeness entry carry `staged: true` with a `staged_note`. See
+[http-api.md](http-api.md#moq-lite-06-runs).

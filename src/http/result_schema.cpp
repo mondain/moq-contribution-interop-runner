@@ -1,6 +1,7 @@
 #include "moq/interop/http/result_schema.h"
 
 #include "detail.h"
+#include "json.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/unscored_probe_event_22.h"
 
@@ -29,6 +30,10 @@ const char* outcome_name(requirements::OutcomeState state) {
 nlohmann::json aggregate(const requirements::Requirement& requirement,
                          const std::vector<requirements::OutcomeState>& states) {
     if (states.empty()) return nullptr;
+    // An unreviewed row of a staged catalog (classification pending) carries exactly one NotRun outcome.
+    if (!requirement.reviewed)
+        return states.size() == 1 && states.front() == requirements::OutcomeState::NotRun
+                   ? nlohmann::json("not_run") : nlohmann::json("error");
     const bool eligible =
         requirement.applicability == requirements::Applicability::Applicable &&
         requirement.testability == requirements::Testability::Testable;
@@ -95,6 +100,8 @@ nlohmann::json serialize_result(const storage::RunRecord& run,
         for (const auto state : states)
             row["observations"].push_back(outcome_name(state));
         row["evidence_sequences"] = evidence_sequences[requirement.id];
+        // Only an unreviewed row (a staged catalog's) carries the flag, as in the catalog file.
+        if (!requirement.reviewed) row["reviewed"] = false;
         rows.push_back(std::move(row));
     }
     // Scenarios the publisher's declaration ruled out; they were never started.
@@ -124,6 +131,11 @@ nlohmann::json serialize_result(const storage::RunRecord& run,
     // Present only when the run recorded such a verdict, so a result without one (every draft 18/21 result) is
     // unchanged.
     if (!unscored.empty()) result["unscored_probes"] = std::move(unscored);
+    // Present only for a staged (moq-lite) catalog, so every MoQ Transport result is unchanged.
+    if (detail::staged_catalog(catalog)) {
+        result["staged"] = true;
+        result["staged_note"] = detail::kStagedNote;
+    }
     return result;
 }
 

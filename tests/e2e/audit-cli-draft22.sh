@@ -87,7 +87,7 @@ for attempt in {1..50}; do
 done
 [[ -n "$ready" ]] || { echo "runner did not answer /healthz on port $http_port within 5 s" >&2; exit 1; }
 curl --fail --silent --show-error "http://127.0.0.1:$http_port/healthz" |
-    jq -e '.supported_drafts == [18, 21, 22] and
+    jq -e '.supported_drafts == [18, 21, 22, "moq-lite-06"] and
         ([.executable_profiles[] | select(.draft == 22 and .mode == "observed" and .configured)] | length) > 0' \
         >/dev/null || { echo "healthz does not offer draft 22" >&2; exit 1; }
 curl --fail --silent --show-error "http://127.0.0.1:$http_port/api/v1/drafts" |

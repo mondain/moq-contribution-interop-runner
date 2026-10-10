@@ -492,6 +492,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME lite-run-live COMMAND moq-interop-lite-run-live-tests)
+    # moq-lite-06 runs through the HTTP API with the in-process lite publisher (L1e Task 2).
+    add_executable(moq-interop-http-api-lite-tests tests/integration/http_api_lite_test.cpp)
+    target_include_directories(moq-interop-http-api-lite-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src/http")
+    target_link_libraries(moq-interop-http-api-lite-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client moq-interop-execution-audit
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-http-api-lite-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME http-api-lite COMMAND moq-interop-http-api-lite-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)

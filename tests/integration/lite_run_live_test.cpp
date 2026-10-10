@@ -129,13 +129,16 @@ TEST(LiteRunLive, OneScenarioStoresAFinalizedStagedRunOverEveryRow) {
     EXPECT_FALSE(any_event(run, "harness_error"));
     for (const auto& event : run.events)
         if (event.kind == "lite_stream_opened" || event.kind == "lite_message") EXPECT_TRUE(event.stream_id.has_value());
-    // The session URL the run used (row 120's evidence): native QUIC lite has no request URI.
+    // The session URL the run used (row 120's evidence): the fixed path /moq and query token=l1d (L1e).
     const auto ready = std::find_if(run.events.begin(), run.events.end(),
                                     [](const auto& event) { return event.kind == "context_ready"; });
     ASSERT_NE(ready, run.events.end());
     EXPECT_NE(ready->detail.find("endpoint=moql://127.0.0.1:"), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("/moq?token=l1d "), std::string::npos) << ready->detail;
     EXPECT_NE(ready->detail.find("binding=native_quic"), std::string::npos) << ready->detail;
-    EXPECT_NE(ready->detail.find("session_url_has_path=false"), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("session_url_has_path=true session_url_path=/moq session_url_query=token=l1d"),
+              std::string::npos)
+        << ready->detail;
     expect_audit_clean(run);
 }
 
@@ -400,6 +403,7 @@ TEST(LiteRunLive, WebTransportRunJudgesTheSetupStream) {
     ASSERT_EQ(started.status, app::RunStartStatus::Started);
     EXPECT_EQ(started.protocol, "moq-lite-06");
     EXPECT_EQ(started.path, "/moq");
+    EXPECT_EQ(started.url, "https://127.0.0.1:" + std::to_string(started.endpoint.port) + "/moq?token=l1d");
     const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
     drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
         return std::make_unique<LiteWebTransportPublisher>(port, setup);
@@ -413,10 +417,81 @@ TEST(LiteRunLive, WebTransportRunJudgesTheSetupStream) {
                                     [](const auto& event) { return event.kind == "context_ready"; });
     ASSERT_NE(ready, run.events.end());
     EXPECT_NE(ready->detail.find("endpoint=https://127.0.0.1:"), std::string::npos) << ready->detail;
-    EXPECT_NE(ready->detail.find("binding=webtransport session_url_has_path=true session_url_path=/moq"),
+    EXPECT_NE(ready->detail.find("/moq?token=l1d "), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("binding=webtransport session_url_has_path=true session_url_path=/moq "
+                                 "session_url_query=token=l1d"),
               std::string::npos)
         << ready->detail;
     expect_audit_clean(run);
+}
+
+// --- the session URL rows (L1e): 120/124 on native QUIC, 125 on WebTransport ------------------------------------
+
+// The conforming publisher dials moql://127.0.0.1:PORT/moq?token=l1d, so its SETUP Path is "/moq?token=l1d": rows
+// 120 (exact byte match) and 124 (Path sent) pass; 125 is WebTransport only and stays NotRun.
+TEST(LiteRunLive, NativeClientPathRowsAreJudgedAgainstTheFixedSessionUrl) {
+    const auto config = lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::NativeQuic, std::nullopt);
+    const auto run = run_live(config);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::NotRun);
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    expect_audit_clean(run);
+}
+
+// A native publisher that dropped the query from its Path fails row 120 (row 124 still passes: a Path was sent).
+TEST(LiteRunLive, ANativePathWithoutTheQueryFailsRow120) {
+    const auto config = lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::NativeQuic, std::nullopt);
+    const auto tweak = [](ConformingLitePublisherConfig& settings) { settings.session_url_query.clear(); };
+    const auto run = run_live(config, tweak);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::Fail);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
+    EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Fail);
+}
+
+// On WebTransport the URL is the CONNECT :path (/moq?token=l1d) and a conforming SETUP has no Path: row 125 passes;
+// 120 and 124 are native QUIC only.
+TEST(LiteRunLive, WebTransportClientPathRowIsJudgedAgainstTheFixedSessionUrl) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config =
+        lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::WebTransport, std::nullopt);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup);
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::NotRun);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    expect_audit_clean(run);
+}
+
+// A WebTransport CONNECT to the path without the query is refused by the listener (the :path must be the session
+// URL exactly), so the publisher never connects and the run ends without a verdict for the rows.
+TEST(LiteRunLive, AWebTransportConnectWithoutTheQueryIsRefused) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config = lite_config({"l06-setup-stream"}, 4000ms, app::TransportKind::WebTransport, std::nullopt);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup, "/moq");
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "transport_established", "l06-setup-stream"));
+    EXPECT_TRUE(any_event(run, "harness_error", "l06-setup-stream"));
+    EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Error);
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
 }
 
 // --- per-context evaluation and the evidence cap (L1e Task 1) ------------------------------------------------------
@@ -552,7 +627,7 @@ TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation
 
 // The production builder dispatch (lite_probe_for) for all 19 scenarios at a live-sized timeout, judged against the
 // conforming publisher on the simulated clock: every row the conformance table passes on native QUIC passes here
-// (the client-path rows stay NotRun: native QUIC lite gives the publisher no session URL path), and no row fails.
+// (with the fixed session URL the native client-path rows 120/124 pass too), and no row fails.
 TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
     std::vector<std::string> ids;
     for (const auto& traits : app::kLiteExecutableScenarios) ids.emplace_back(traits.id);
@@ -564,7 +639,9 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
         EXPECT_EQ(definition.id, id);
         EXPECT_EQ(definition.requires_track, app::lite_executable_scenario(id)->requires_track) << id;
         EXPECT_EQ(definition.binding, scenarios::LiteBinding::NativeQuic);
-        EXPECT_FALSE(definition.session_url_has_path);
+        EXPECT_TRUE(definition.session_url_has_path);
+        EXPECT_EQ(definition.session_url_path, "/moq");
+        EXPECT_EQ(definition.session_url_query, "token=l1d");
         EXPECT_EQ(definition.connect_deadline, std::optional{std::chrono::milliseconds{15000}});
         // The announce probes name only the broadcast.
         if (definition.requires_track) EXPECT_EQ(definition.broadcast_path, "demo/live") << id;
@@ -575,8 +652,11 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
     for (const auto* row : {"L06-3-1-MUST-014", "L06-7-2-MUST-108", "L06-4-4-MUST-027", "L06-7-13-MUST-172",
                             "L06-3-6-MUST-020", "L06-4-4-MUST-030", "L06-7-4-MUST-139"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
-    for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124", "L06-7-3-2-MUST-NOT-125",
-                            "L06-7-7-MUST-NOT-152"})
+    // The fixed session URL (L1e) makes the native client-path rows judgeable; 125 is WebTransport only and 152
+    // needs a broadcast retraction the conforming publisher never makes.
+    for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124"})
+        EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
+    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152"})
         EXPECT_EQ(states.at(row), OutcomeState::NotRun) << row;
     // Too short a timeout for a builder is an exception lite_probe_for passes on (run_lite stores it).
     config.timeout = 1000ms;

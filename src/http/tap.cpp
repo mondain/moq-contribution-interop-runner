@@ -83,6 +83,9 @@ std::string serialize_tap14(const storage::RunRecord& run,
     if (run.config.scenario_ids.empty())
         return "TAP version 14\n1..0 # SKIP no scenarios selected\n";
     out << "1.." << run.config.scenario_ids.size() << '\n';
+    // A staged (moq-lite) catalog: say so before any point, as the run verdict is never pass.
+    if (detail::staged_catalog(catalog))
+        out << "# staged catalog: " << detail::kStagedNote << '\n';
     if (!run.config.publisher_capabilities.fetch)
         out << "# publisher_capabilities fetch=false (declared: the publisher does not implement FETCH)\n";
     for (std::size_t index = 0; index < run.config.scenario_ids.size(); ++index) {

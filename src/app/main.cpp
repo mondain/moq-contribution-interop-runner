@@ -1,4 +1,5 @@
 #include "moq/interop/app/version.h"
+#include "moq/interop/app/lite_run.h"
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/http/server.h"
 #include "moq/interop/requirements/draft_source.h"
@@ -215,6 +216,12 @@ int main(int argc, char* argv[]) {
             moq::interop::requirements::RequirementCatalog::load(
                 source22, options.requirements / "draft22.json"));
         options.server.draft22_catalog = draft22;
+        // moq-lite-06 is optional: without its catalog file, draft text or digest the runner serves MoQ Transport
+        // only (and says so); a catalog file that is present must load (staged, so incomplete is allowed). One object
+        // serves the run manager and the server, as for draft 22.
+        auto moqlite06 = moq::interop::app::load_lite_catalog_if_available(options.docs, options.requirements,
+                                                                           digest_file, std::cerr);
+        options.server.moqlite06_catalog = moqlite06;
         auto store = std::make_shared<moq::interop::storage::SqliteRunStore>(options.database, build);
         const auto recovered = store->recover_interrupted();
         if (recovered != 0)
@@ -222,7 +229,7 @@ int main(int argc, char* argv[]) {
         std::shared_ptr<moq::interop::app::NativeRunManager> runs;
         if (!options.native.certificate_path.empty()) {
             runs = std::make_shared<moq::interop::app::NativeRunManager>(
-                draft18, draft21, store, options.native, draft22);
+                draft18, draft21, store, options.native, draft22, moqlite06);
         }
         moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server, runs);
         if (!server.start()) throw std::runtime_error("could not bind the HTTP listener");

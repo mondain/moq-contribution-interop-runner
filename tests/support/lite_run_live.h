@@ -7,6 +7,7 @@
 //     (a ScriptedLitePeer) of what the runner did on the wire; what it emits is written to the real connection.
 //   - LiteWebTransportPublisher: a picowt client that offers moq-lite-06 in its CONNECT and sends only its own
 //     Setup stream (enough for l06-setup-stream on the WebTransport binding).
+#include "moq/interop/app/lite_run.h"
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/storage/run_store.h"
@@ -78,7 +79,9 @@ inline app::RunConfig lite_config(std::vector<std::string> ids, std::chrono::mil
                           std::move(track), {}};
 }
 
-// The conforming publisher the live tests run, on `binding` with no session URL path (native QUIC lite has none).
+// The conforming publisher the live tests run, on `binding`, dialing the runner's fixed session URL (the path and
+// query of app::lite_session_url, as the adapter passes them to a real publisher): on native QUIC its SETUP carries
+// Path = "/moq?token=l1d"; on WebTransport the URL is the CONNECT :path and the SETUP carries no Path.
 inline ConformingLitePublisherConfig publisher_config(scenarios::LiteBinding binding = scenarios::LiteBinding::NativeQuic) {
     ConformingLitePublisherConfig config;
     config.broadcast = "demo/live";
@@ -87,6 +90,10 @@ inline ConformingLitePublisherConfig publisher_config(scenarios::LiteBinding bin
     config.setup_parameters = {{wire::moqlite06::kParamHop, Bytes{std::byte{7}}},
                                {wire::moqlite06::kParamCost, Bytes{std::byte{0}}}};
     config.binding = binding;
+    const auto url = app::lite_session_url(binding == scenarios::LiteBinding::WebTransport
+                                               ? app::TransportKind::WebTransport : app::TransportKind::NativeQuic);
+    config.session_url_path = url.path;
+    config.session_url_query = url.query;
     return config;
 }
 
@@ -287,11 +294,19 @@ void drive_contexts(const std::shared_ptr<storage::SqliteRunStore>& store, const
     EXPECT_TRUE(wait_for([&] { return finalized(store, id); }, 30s));
 }
 
-// A WebTransport publisher offering moq-lite-06: CONNECT to https://127.0.0.1:port/moq, then its own Setup stream
+// The CONNECT :path of a lite WebTransport session: the fixed session path and query ("/moq?token=l1d").
+inline std::string lite_webtransport_target() {
+    const auto url = app::lite_session_url(app::TransportKind::WebTransport);
+    return url.path + "?" + url.query;
+}
+
+// A WebTransport publisher offering moq-lite-06: CONNECT to https://127.0.0.1:port/moq?token=l1d (or `target`), then
+// its own Setup stream
 // (STREAM_TYPE 0x1 + `setup`, FIN) on a WebTransport unidirectional stream.
 class LiteWebTransportPublisher {
 public:
-    LiteWebTransportPublisher(std::uint16_t port, Bytes setup_stream) : port_(port), setup_(std::move(setup_stream)) {
+    LiteWebTransportPublisher(std::uint16_t port, Bytes setup_stream, std::string target = lite_webtransport_target())
+        : port_(port), setup_(std::move(setup_stream)), target_(std::move(target)) {
         fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (fd_ < 0) return;
         const int flags = ::fcntl(fd_, F_GETFL, 0);
@@ -360,7 +375,7 @@ public:
             std::array<std::uint8_t, 512> qpack{};
             auto* end = h3zero_create_connect_header_frame(qpack.data(), qpack.data() + qpack.size(),
                                                            authority.c_str(),
-                                                           reinterpret_cast<const std::uint8_t*>("/moq"), 4,
+                                                           reinterpret_cast<const std::uint8_t*>(target_.data()), target_.size(),
                                                            "webtransport-h3", nullptr, nullptr, offered.c_str());
             if (end == nullptr) return false;
             std::array<std::uint8_t, 1024> frame{};
@@ -399,6 +414,7 @@ private:
 
     std::uint16_t port_;
     Bytes setup_;
+    std::string target_;
     int fd_{-1};
     sockaddr_in local_{};
     sockaddr_in remote_{};

@@ -149,13 +149,19 @@ Json catalog_json(const requirements::RequirementCatalog& catalog) {
             ++publisher_relevant;
         }
     }
-    return {{"draft", catalog_draft_json(catalog.draft)},
+    Json result = {{"draft", catalog_draft_json(catalog.draft)},
             {"source_sha256", catalog.source_sha256},
             {"complete", catalog.complete},
             {"requirement_count", catalog.requirements.size()},
             {"publisher_relevant_count", publisher_relevant},
             {"applicability_counts", applicability},
             {"testability_counts", testability}};
+    // Only a staged (moq-lite) catalog carries the staged fields, so the MoQ Transport entries are unchanged.
+    if (staged_catalog(catalog)) {
+        result["staged"] = true;
+        result["staged_note"] = kStagedNote;
+    }
+    return result;
 }
 
 Json requirement_json(const requirements::Requirement& requirement) {
@@ -229,7 +235,7 @@ Json run_json(const storage::RunRecord& run) {
         outcomes.push_back({{"requirement_id", outcome.requirement_id},
                             {"state", name(outcome.state)}});
     }
-    return {{"id", run.id},
+    Json result = {{"id", run.id},
             {"config", config_json(run.config)},
             {"build", build_json(run.build)},
             {"state", name(run.state)},
@@ -246,6 +252,12 @@ Json run_json(const storage::RunRecord& run) {
             {"outcomes", std::move(outcomes)},
             {"events", {{"total", run.events.size()},
                          {"href", "/api/v1/runs/" + run.id + "/events"}}}};
+    // A moq-lite run is staged: its verdict is never pass (kStagedNote). MoQ Transport runs are unchanged.
+    if (staged_draft(run.config.draft)) {
+        result["staged"] = true;
+        result["staged_note"] = kStagedNote;
+    }
+    return result;
 }
 
 Json pagination_json(std::size_t limit, std::size_t offset, std::size_t total,

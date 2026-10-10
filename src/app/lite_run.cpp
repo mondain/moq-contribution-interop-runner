@@ -1,7 +1,9 @@
 #include "moq/interop/app/lite_run.h"
 
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/lite_scenarios.h"
 #include "moq/interop/app/publisher_driver.h"
+#include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/lite06_announce.h"
@@ -14,7 +16,9 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <filesystem>
 #include <iostream>
+#include <ostream>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -35,8 +39,6 @@ constexpr std::size_t kMaximumSelection = 100;
 // event says how many were left out. The transcript keeps every one for the evaluators.
 constexpr std::size_t kMaximumStoredMessages = 4096;
 constexpr std::size_t kMaximumStoredIssues = 1024;
-// The provisional WebTransport session path (plan decision (e)).
-constexpr std::string_view kWebTransportPath = "/moq";
 
 std::string hex(std::span<const std::byte> bytes) {
     constexpr char digits[] = "0123456789abcdef";
@@ -595,14 +597,46 @@ private:
 
 }  // namespace
 
-LiteSessionUrl lite_session_url(TransportKind transport) {
-    if (transport == TransportKind::WebTransport) return {true, std::string(kWebTransportPath), {}};
-    return {};
+// The fixed session path and query (L1e decision): unreserved characters only, so row 120's exact byte match of
+// path + "?" + query needs no normalization. The only definition; everything else derives from these two.
+const std::string_view kLiteSessionPath = "/moq";
+const std::string_view kLiteSessionQuery = "token=l1d";
+
+LiteSessionUrl lite_session_url(TransportKind) {
+    // The same URL on both transports: native QUIC carries it in the publisher's SETUP Path (rows 120/124),
+    // WebTransport in the CONNECT :path, where the SETUP must not repeat it (row 125).
+    return {true, std::string(kLiteSessionPath), std::string(kLiteSessionQuery)};
+}
+
+std::string lite_session_target(TransportKind transport) {
+    const auto url = lite_session_url(transport);
+    return url.query.empty() ? url.path : url.path + "?" + url.query;
 }
 
 std::string lite_endpoint_uri(TransportKind transport, std::string_view authority) {
-    if (transport == TransportKind::WebTransport) return "https://" + std::string(authority) + std::string(kWebTransportPath);
-    return "moql://" + std::string(authority);
+    const char* scheme = transport == TransportKind::WebTransport ? "https://" : "moql://";
+    return scheme + std::string(authority) + lite_session_target(transport);
+}
+
+std::shared_ptr<const requirements::RequirementCatalog> load_lite_catalog_if_available(
+    const std::filesystem::path& docs_root, const std::filesystem::path& requirements_root,
+    const std::filesystem::path& digest_file, std::ostream& log) {
+    const auto catalog_path = requirements_root / "moq-lite-06.json";
+    std::error_code error;
+    if (!std::filesystem::exists(catalog_path, error)) {
+        log << "moq-lite-06 is unavailable: " << catalog_path.string() << " not found; serving MoQ Transport only\n";
+        return nullptr;
+    }
+    std::optional<requirements::DraftSource> source;
+    try {
+        source = requirements::load_draft_source(draft_number(DraftVersion::MoqLite06), docs_root, digest_file);
+    } catch (const std::exception& failure) {
+        log << "moq-lite-06 is unavailable: " << failure.what() << "; serving MoQ Transport only\n";
+        return nullptr;
+    }
+    // Present: it must load (staged, so incomplete is allowed); any loader error is the caller's startup error.
+    return std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog::load(*source, catalog_path, requirements::CatalogLoadMode::AllowIncomplete));
 }
 
 std::optional<RunStartStatus> lite_start_refusal(const RunConfig& config) {

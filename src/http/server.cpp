@@ -351,15 +351,17 @@ std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersi
     throw std::logic_error("unknown draft");
 }
 
-// One entry per configured catalog: drafts 18 and 21 always, draft 22 only when its catalog is configured
-// (`draft22` is null otherwise, and there is then no draft 22 entry).
+// One entry per configured catalog: drafts 18 and 21 always, draft 22 and moq-lite-06 only when their catalogs are
+// configured (`draft22`/`moqlite06` is null otherwise, and there is then no such entry).
 Json completeness_json(const requirements::RequirementCatalog& draft18,
                        const requirements::RequirementCatalog& draft21,
                        const requirements::RequirementCatalog* draft22,
+                       const requirements::RequirementCatalog* moqlite06,
                        const storage::RunStore& store, const app::BuildInfo& build) {
     Json drafts = Json::array();
     std::vector<const requirements::RequirementCatalog*> catalogs{&draft18, &draft21};
     if (draft22) catalogs.push_back(draft22);
+    if (moqlite06) catalogs.push_back(moqlite06);
     for (const auto* catalog : catalogs) {
         const auto selection = detail::audit_catalog(*catalog);
         const auto& bindings = selection.bindings;
@@ -374,7 +376,11 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
         Json residuals = Json::array();
         for (const auto& row : catalog->requirements) {
             const char* classification = nullptr;
-            if (row.applicability == requirements::Applicability::Informative)
+            // An unreviewed row of a staged catalog is not classified yet (its "Unreviewed:" rationale says so):
+            // it is reported as not_run, the outcome every run gives it, never as not_testable.
+            if (!row.reviewed)
+                classification = "not_run";
+            else if (row.applicability == requirements::Applicability::Informative)
                 classification = "informative";
             else if (row.applicability == requirements::Applicability::NotApplicable)
                 classification = "not_applicable";
@@ -439,7 +445,7 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                                   {"not_run_count", not_run.size()},
                                   {"not_run", std::move(not_run)}});
         }
-        drafts.push_back({{"draft", detail::catalog_draft_json(catalog->draft)},
+        Json entry = {{"draft", detail::catalog_draft_json(catalog->draft)},
                           {"source_sha256", catalog->source_sha256},
                           {"catalog_rows", catalog->requirements.size()},
                           {"required_covered", audit.required_covered},
@@ -449,7 +455,13 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                           {"evaluator_complete", audit.complete()},
                           {"findings", std::move(findings)},
                           {"classified_residuals", std::move(residuals)},
-                          {"transports", std::move(transports)}});
+                          {"transports", std::move(transports)}};
+        // Only the staged (moq-lite) entry carries the staged fields; the MoQ Transport entries are unchanged.
+        if (detail::staged_catalog(*catalog)) {
+            entry["staged"] = true;
+            entry["staged_note"] = detail::kStagedNote;
+        }
+        drafts.push_back(std::move(entry));
     }
     return {{"schema_version", 1}, {"source_revision", build.source_revision},
             {"drafts", std::move(drafts)}};
@@ -493,6 +505,10 @@ public:
         }
         if (config.draft22_catalog && config.draft22_catalog->draft != 22) {
             throw std::invalid_argument("HTTP server draft 22 catalog must be draft 22");
+        }
+        if (config.moqlite06_catalog &&
+            config.moqlite06_catalog->draft != app::draft_number(app::DraftVersion::MoqLite06)) {
+            throw std::invalid_argument("HTTP server moq-lite-06 catalog must be moq-lite-06");
         }
         register_routes();
     }
@@ -746,9 +762,24 @@ public:
                             append_profile(22, id, transport.c_str());
                     }
                 }
+                // moq-lite-06, only when this server accepts lite runs (its catalog is configured): every executable
+                // lite scenario (kLiteExecutableScenarios) on both transports, its draft the string "moq-lite-06"
+                // (the API form, as in a run's config.draft).
+                if (accepts_runs(app::DraftVersion::MoqLite06)) {
+                    for (const auto id : app::executable_scenarios(app::draft_number(app::DraftVersion::MoqLite06))) {
+                        for (const char* transport : {"native-quic", "webtransport"}) {
+                            profiles.push_back({{"draft", detail::draft_json(app::DraftVersion::MoqLite06)},
+                                {"transport", transport}, {"mode", "observed"}, {"scenario", id},
+                                {"configured", runs && runs->supports(app::DraftVersion::MoqLite06)}});
+                        }
+                    }
+                }
                 for (auto& profile : profiles) {
+                    const auto& draft = profile.at("draft");
+                    const auto parsed = detail::parse_draft_json(draft);
                     profile["requires_fetch"] = app::scenario_requires_fetch(
-                        profile.at("draft").get<unsigned>(), profile.at("scenario").get<std::string>());
+                        parsed ? app::draft_number(*parsed) : draft.get<unsigned>(),
+                        profile.at("scenario").get<std::string>());
                 }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
@@ -773,6 +804,7 @@ public:
                 Json drafts = Json::array();
                 std::vector<const requirements::RequirementCatalog*> listed = {draft18.get(), draft21.get()};
                 if (config.draft22_catalog) listed.push_back(config.draft22_catalog.get());
+                if (config.moqlite06_catalog) listed.push_back(config.moqlite06_catalog.get());
                 for (const auto* catalog : listed) {
                     auto entry = detail::catalog_json(*catalog);
                     const auto catalog_draft = app::parse_draft(catalog->draft);
@@ -793,10 +825,16 @@ public:
                 if (draft == "18") catalog = draft18.get();
                 else if (draft == "21") catalog = draft21.get();
                 else if (draft == "22") catalog = config.draft22_catalog.get();
+                else if (draft == app::draft_text(app::DraftVersion::MoqLite06))
+                    catalog = config.moqlite06_catalog.get();
                 if (!catalog) {
-                    throw ApiError{400, "unsupported_draft",
-                                   config.draft22_catalog ? "draft must be 18, 21 or 22."
-                                                          : "draft must be 18 or 21."};
+                    // The message lists the drafts this server serves (unchanged without the lite catalog).
+                    std::string message = config.draft22_catalog ? "draft must be 18, 21 or 22."
+                                                                 : "draft must be 18 or 21.";
+                    if (config.moqlite06_catalog)
+                        message = config.draft22_catalog ? "draft must be 18, 21, 22 or moq-lite-06."
+                                                         : "draft must be 18, 21 or moq-lite-06.";
+                    throw ApiError{400, "unsupported_draft", message};
                 }
                 const auto page = query(request);
                 Json items = Json::array();
@@ -831,7 +869,9 @@ public:
                                 "Scenario '" + id + "' is not an executable scenario for draft " +
                                 detail::draft_display(requested.draft) + "."};
                     }
-                    if (requested.scenario_ids.size() > 1) {
+                    // moq-lite scenarios each run as their own context on the lite probe engine (app/lite_run.h), so
+                    // any selection of them is allowed; the typed/raw rule is MoQ Transport's.
+                    if (requested.scenario_ids.size() > 1 && app::is_moqt(requested.draft)) {
                         for (const auto& id : requested.scenario_ids) {
                             if (!app::raw_probe_scenario(draft_number, id))
                                 throw ApiError{422, "unsupported_run_config",
@@ -965,7 +1005,7 @@ public:
                                                         httplib::Response& response) {
             guarded(response, [this, &response] {
                 json_response(response, completeness_json(*draft18, *draft21, config.draft22_catalog.get(),
-                                                          *store, build));
+                                                          config.moqlite06_catalog.get(), *store, build));
             });
         });
         server.Get(R"(/results/(.+)\.json)", [this](const httplib::Request& request,
@@ -1017,7 +1057,8 @@ public:
                 response.status = 200;
                 html_headers(response);
                 response.set_content(detail::render_run_list(
-                    runs.items, completeness_json(*draft18, *draft21, config.draft22_catalog.get(), *store, build)),
+                    runs.items, completeness_json(*draft18, *draft21, config.draft22_catalog.get(),
+                                      config.moqlite06_catalog.get(), *store, build)),
                     "text/html; charset=utf-8");
             });
         });
@@ -1029,28 +1070,30 @@ public:
     }
 
     // Whether POST /api/v1/runs takes runs for `draft`: it must be runnable and this server must have its
-    // catalog to present and score them (a runner without the draft 22 catalog refuses draft 22 runs).
-    // /healthz lists exactly these drafts as supported_drafts.
+    // catalog to present and score them (a runner without the draft 22 or moq-lite-06 catalog refuses those runs
+    // with 422 draft_not_runnable). /healthz lists exactly these drafts as supported_drafts.
     bool accepts_runs(app::DraftVersion draft) const {
         if (!app::runnable(draft)) return false;
         switch (draft) {
             case app::DraftVersion::Draft18: return true;
             case app::DraftVersion::Draft21: return true;
             case app::DraftVersion::Draft22: return config.draft22_catalog != nullptr;
-            case app::DraftVersion::MoqLite06: return false;  // not runnable yet; refused as draft_not_runnable
+            case app::DraftVersion::MoqLite06: return config.moqlite06_catalog != nullptr;
         }
         return false;
     }
 
+    // Each in its API form (draft_json): the integers for MoQ Transport, the string "moq-lite-06" for moq-lite.
     Json supported_drafts() const {
         Json drafts = Json::array();
-        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22})
-            if (accepts_runs(draft)) drafts.push_back(app::draft_number(draft));
+        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22,
+                                 app::DraftVersion::MoqLite06})
+            if (accepts_runs(draft)) drafts.push_back(detail::draft_json(draft));
         return drafts;
     }
 
-    // The catalog a stored run is presented with, chosen by the run's (wire) draft. A stored draft 22 run on a
-    // runner without the draft 22 catalog is a clear conflict, never an internal error.
+    // The catalog a stored run is presented with, chosen by the run's (wire) draft. A stored draft 22 or moq-lite-06
+    // run on a runner without that catalog is a clear conflict, never an internal error.
     const requirements::RequirementCatalog& catalog_for(app::DraftVersion draft) const {
         switch (draft) {
             case app::DraftVersion::Draft18: return *draft18;
@@ -1058,7 +1101,9 @@ public:
             case app::DraftVersion::Draft22:
                 if (config.draft22_catalog) return *config.draft22_catalog;
                 break;
-            case app::DraftVersion::MoqLite06: break;  // no moq-lite catalog is configured yet
+            case app::DraftVersion::MoqLite06:
+                if (config.moqlite06_catalog) return *config.moqlite06_catalog;
+                break;
         }
         const auto number = detail::draft_display(draft);
         throw ApiError{409, "draft_catalog_not_configured",
