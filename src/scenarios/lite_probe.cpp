@@ -344,7 +344,14 @@ bool LiteProbeController::handle(const transport::TransportEvent& event, std::ui
         limit("the transport event queue overflowed; events were lost");
         return true;
     }
-    return true;  // datagrams are recorded only
+    if (std::holds_alternative<transport::DatagramEvent>(event)) {
+        // Draft 6.4: the recorder decodes and stores the peer's datagrams; the runner drops them silently (it has no
+        // subscription a datagram could be routed to beyond what the evaluators read from the transcript).
+        session_.on_event(event, now);
+        stale_ = true;
+        return true;
+    }
+    return true;
 }
 
 bool LiteProbeController::steps_finished() const noexcept { return next_step_ >= steps_.size(); }

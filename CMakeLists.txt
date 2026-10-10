@@ -1538,6 +1538,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME moqlite-l2a-fixture
              COMMAND moq-interop-moqlite-l2a-fixture-tests)
 
+    add_executable(moq-interop-moqlite-l2b-fixture-tests
+                   tests/protocol/lite_l2b_fixture_test.cpp)
+    target_include_directories(moq-interop-moqlite-l2b-fixture-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-l2b-fixture-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-l2b-fixture-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-l2b-fixture
+             COMMAND moq-interop-moqlite-l2b-fixture-tests)
+
     add_executable(moq-interop-moqlite-setup-tests
                    tests/protocol/lite06_setup_test.cpp)
     target_include_directories(moq-interop-moqlite-setup-tests PRIVATE
