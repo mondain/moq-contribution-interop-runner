@@ -597,7 +597,14 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
                 }
                 return;
             case Next::What::Error:
-                issue(record, direction, event, error_code_name(next.error.code), next.error.detail);
+                // A GOAWAY URI over 8192 bytes breaks the draft's own cap (7.18), not a limit the harness chose: when
+                // the peer opened the stream it is the peer's protocol violation.
+                if (record.kind == LiteStreamKind::Goaway && record.origin == LiteOrigin::Peer &&
+                    next.error.code == DecodeErrorCode::LengthExceedsLimit) {
+                    issue(record, direction, event, kIssueProtocolViolation, next.error.detail);
+                } else {
+                    issue(record, direction, event, error_code_name(next.error.code), next.error.detail);
+                }
                 stop(direction);
                 return;
             case Next::What::Unexpected:

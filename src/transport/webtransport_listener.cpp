@@ -331,11 +331,15 @@ struct WebTransportListener::Impl {
             {peer->max_datagram_frame_size, config.quic.max_udp_payload - 50,
              config.quic.max_event_payload_bytes});
         const auto usable = max_datagram > 8 ? max_datagram - 8 : 0;
+        // Received datagrams are bounded by the size this endpoint advertised, not by the peer's send capacity.
+        const auto advertised = std::min<std::size_t>(config.quic.max_udp_payload,
+                                                      config.quic.max_event_payload_bytes);
+        const auto receivable = advertised > 8 ? advertised - 8 : 0;
         session = std::make_unique<WebTransportSession>(
             control->stream_id,
             WebTransportSessionLimits{config.quic.max_events,
                                       config.quic.max_event_payload_bytes,
-                                      usable,
+                                      usable, receivable,
                                       config.quic.max_queued_send_bytes},
             cnx, h3, control, route_callback, this);
         session_connection = cnx;

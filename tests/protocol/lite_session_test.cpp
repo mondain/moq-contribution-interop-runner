@@ -1452,7 +1452,9 @@ TEST(LiteStreamReader, PeerOpenedGoawayFaultsAreIssuesAndOtherTypesStayUnknown) 
 
     LiteStreamReader oversize(kPeerBidi, LiteOrigin::Peer, true);
     oversize.feed(bytes({0x05, 0x02, 0x60, 0x01}), false, 1);  // a URI claiming 8193 bytes
-    EXPECT_EQ(count_issues(oversize.record(), kIssueLengthExceedsLimit), 1u) << describe_issues(oversize.record());
+    // 8192 bytes is the draft's own cap (7.18), not a harness limit: the peer broke the protocol and the run stays judgeable.
+    EXPECT_EQ(count_issues(oversize.record(), kIssueProtocolViolation), 1u) << describe_issues(oversize.record());
+    EXPECT_EQ(count_issues(oversize.record(), kIssueLengthExceedsLimit), 0u);
     EXPECT_TRUE(peer_messages(oversize.record()).empty());
 
     LiteStreamReader trailing(kPeerBidi, LiteOrigin::Peer, true);

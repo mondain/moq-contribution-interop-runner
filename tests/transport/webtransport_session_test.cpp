@@ -55,6 +55,15 @@ TEST(WebTransportSession, DeliversOnlyMatchingSessionPayload) {
     EXPECT_FALSE(session.ingest_stream(8, 4, bytes({3}), false));
 }
 
+// The peer's own max_datagram_frame_size caps what the runner can SEND; what it can receive is bounded by the size the
+// runner advertised. A datagram the peer may legally send must reach the recorder (lite row 105 judges its size).
+TEST(WebTransportSession, ReceivesDatagramsUpToTheAdvertisedSizeNotThePeersSendCapacity) {
+    WebTransportSession session(4, {.max_events = 4, .max_event_payload_bytes = 64,
+                                    .max_datagram_payload = 3, .max_received_datagram_payload = 10});
+    EXPECT_TRUE(session.ingest_datagram(4, bytes({1, 2, 3, 4, 5, 6, 7, 8})));
+    EXPECT_FALSE(session.ingest_datagram(4, bytes({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})));
+}
+
 TEST(WebTransportSession, BoundsIncomingPayloadAndDatagrams) {
     WebTransportSession session(4, {.max_events = 2, .max_event_payload_bytes = 4,
                                     .max_datagram_payload = 3});

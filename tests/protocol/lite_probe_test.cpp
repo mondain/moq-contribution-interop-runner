@@ -1793,6 +1793,30 @@ TEST(LiteProbeDuties, UndecodableFramesAreAnsweredWithAStopSending) {
     }
 }
 
+// The real transports forget a peer stream once its FIN was delivered: a STOP_SENDING on it is refused (InvalidState,
+// or InternalError on WebTransport). The duty has nothing left to do there; that is not a harness failure.
+TEST(LiteProbeDuties, AStopSendingOnAStreamTheTransportAlreadyClosedIsNotAHarnessFailure) {
+    for (const auto refused : {transport::TransportStatus::InvalidState, transport::TransportStatus::InternalError}) {
+        SCOPED_TRACE(static_cast<int>(refused));
+        transport::StreamId group = 0;
+        ScriptedLitePeer peer([&, sent = false](ScriptedLitePeer& p) mutable {
+            if (sent) return;
+            sent = true;
+            group = p.open_peer_uni();
+            p.forced_status[group] = refused;
+            p.data(group, join({stream_type(0x0), group_header({1, 7, 0}), Bytes{std::byte{0}, std::byte{5}, std::byte{0x61}}}),
+                   true);
+        });
+        ManualLiteClock clock;
+        auto definition = duty_probe("duty-closed");
+        definition.steps.push_back(scen::lite_mark("m"));
+        definition.duties.reset_on_undecodable_frames = true;
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_FALSE(t.harness_failed) << t.harness_failure_reason;
+        EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::ResetUndecodableFrames), 1u);
+    }
+}
+
 // A limit the harness set is not the peer's fault and triggers nothing.
 TEST(LiteProbeDuties, AHarnessLimitOnAFrameIsNotTheFaultOfThePeer) {
     transport::StreamId group = 0;

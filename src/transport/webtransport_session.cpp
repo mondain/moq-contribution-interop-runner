@@ -140,7 +140,8 @@ bool WebTransportSession::ingest_stream(StreamId stream_id,
 bool WebTransportSession::ingest_datagram(StreamId source_session_id,
                                           std::span<const std::byte> payload) {
     if (detached_ || source_session_id != connect_stream_id_ ||
-        payload.size() > limits_.max_datagram_payload ||
+        payload.size() > (limits_.max_received_datagram_payload != 0 ? limits_.max_received_datagram_payload
+                                                                      : limits_.max_datagram_payload) ||
         payload.size() > limits_.max_event_payload_bytes) return false;
     enqueue(DatagramEvent{{payload.begin(), payload.end()}});
     return true;

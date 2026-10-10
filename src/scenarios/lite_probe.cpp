@@ -622,7 +622,10 @@ void LiteProbeController::reset_streams_for_duties(std::uint64_t now) {
             if (must_wait(stop.status)) continue;
             if (status == TransportStatus::Success) status = stop.status;
         }
-        if (status != TransportStatus::Success && !peer_refusal(status)) {
+        // The transport forgets a stream once its FIN or reset was delivered: nothing is left to reset or stop, which
+        // is not a harness failure (the action is still recorded, with the transport's status).
+        const bool already_closed = status == TransportStatus::InvalidState || status == TransportStatus::InternalError;
+        if (status != TransportStatus::Success && !peer_refusal(status) && !already_closed) {
             fail("the transport rejected the engine's reset of stream " + std::to_string(item.id));
             return;
         }
