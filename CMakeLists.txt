@@ -450,6 +450,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_test(NAME lite-ref-publisher COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-ref-publisher.sh"
              "$<TARGET_FILE:moq-interop-lite-ref-publisher>")
+    add_test(NAME moq-lite-ref-adapter-cmdlines
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-adapter-cmdlines.sh")
     add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
     target_link_libraries(moq-interop-lite-ref-options-tests PRIVATE moq-interop-lite-ref GTest::gtest_main)
     add_test(NAME lite-ref-options COMMAND moq-interop-lite-ref-options-tests)
