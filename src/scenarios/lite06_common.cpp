@@ -219,31 +219,42 @@ std::optional<bool> judge_close_probe(const LiteTranscript& transcript, std::str
 
 }  // namespace lite06
 
-std::optional<bool> evaluate_l06_errors_code_space(const LiteTranscript& transcript) {
+CodeSpaceHalves l06_code_space_halves(const LiteTranscript& transcript) {
     // Bound (catalog row 027) to its own scenario and the four MUST-level close probes only.
     const auto& id = transcript.scenario_id;
     const bool bound = id == kL06ErrorsCodeSpace || id == kL06SetupDuplicateParameter ||
                        id == kL06SetupDuplicateStream || id == kL06SetupServerPath || id == kL06SetupServerRole;
+    CodeSpaceHalves halves;
     if (!bound || !judgeable(transcript) || !lite06::proved_stimulus(transcript, lite06::kRunnerSetupLabel))
-        return std::nullopt;
+        return halves;
     // Stream half: the peer's RESET_STREAM and STOP_SENDING codes (record fields of the peer's direction only).
-    bool stream_half = false;
     for (const auto& record : transcript.streams) {
         for (const auto& code : {record.reset_code, record.stop_sending_code}) {
             if (!code) continue;
-            if (lite06::is_session_code(*code) && !lite06::is_stream_code(*code)) return false;
-            if (lite06::is_stream_code(*code)) stream_half = true;
+            if (lite06::is_session_code(*code) && !lite06::is_stream_code(*code)) {
+                halves.stream = false;
+                break;
+            }
+            if (lite06::is_stream_code(*code)) halves.stream = true;
         }
+        if (halves.stream == std::optional<bool>{false}) break;
     }
     // Session half: an application-space close by the peer.
-    bool session_half = false;
     if (const auto code = lite06::session_close_code(transcript)) {
-        if (lite06::is_stream_code(*code) && !lite06::is_session_code(*code)) return false;
-        session_half = lite06::is_session_code(*code);  // an unregistered value is not judged here
+        if (lite06::is_stream_code(*code) && !lite06::is_session_code(*code))
+            halves.session = false;
+        else if (lite06::is_session_code(*code))
+            halves.session = true;  // an unregistered value is not judged here
     }
+    return halves;
+}
+
+std::optional<bool> evaluate_l06_errors_code_space(const LiteTranscript& transcript) {
+    const auto halves = l06_code_space_halves(transcript);
+    if (halves.stream == std::optional<bool>{false} || halves.session == std::optional<bool>{false}) return false;
     if (transcript.scenario_id == kL06ErrorsCodeSpace)
-        return stream_half && session_half ? std::optional<bool>{true} : std::nullopt;
-    return session_half ? std::optional<bool>{true} : std::nullopt;
+        return halves.stream && halves.session ? std::optional<bool>{true} : std::nullopt;
+    return halves.session ? std::optional<bool>{true} : std::nullopt;
 }
 
 }  // namespace moq::interop::scenarios

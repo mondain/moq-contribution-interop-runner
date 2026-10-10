@@ -301,6 +301,60 @@ TEST(LiteEvaluate, Row027NeedsAllFiveOfItsScenarios) {
     EXPECT_EQ(failing.at("L06-4-4-MUST-027"), OutcomeState::Fail);
 }
 
+// The behavior of the moq CLI in the first moq-lite-06 sweep (docs/moq-lite-punch-list.md): it ignores a server's
+// SETUP Path and Role (no close) and answers the Message Length mismatch of l06-errors-code-space with a stream reset
+// (CANCEL) instead of a session close.
+void ignore_runner_setup(test::lite::ConformingLitePublisherConfig& config) {
+    config.hooks.on_request = [](auto&, auto&, const test::lite::LiteRunnerRequest& request) {
+        return !request.bidirectional && request.stream_type == 0x1;  // a runner Setup stream, decodable or not
+    };
+}
+void reset_malformed_announce(test::lite::ConformingLitePublisherConfig& config) {
+    config.hooks.on_request = [](test::lite::ConformingLitePublisher& publisher, auto& peer,
+                                 const test::lite::LiteRunnerRequest& request) {
+        if (!request.bidirectional || request.stream_type != 0x1) return false;  // not an Announce stream
+        publisher.refuse(peer, request.stream, 0x1);
+        return true;
+    };
+}
+
+// Catalog rationale of L06-4-4-MUST-027: the session half "also takes evidence from the session closes provoked by
+// the MUST-level probes ... so it is not tied to the SHOULD-level reaction of L06-7-1-SHOULD-107; any one close code
+// from those scenarios suffices for the half". With all five scenarios run, the stream half from l06-errors-code-space
+// and the PROTOCOL_VIOLATION closes of 092 and 112 settle the row, although 107, 126 and 131 got no close.
+TEST(LiteEvaluate, Row027TakesItsSessionHalfFromAnyOfItsScenarios) {
+    auto transcripts = replaced(conforming(), tweaked("l06-errors-code-space", reset_malformed_announce));
+    transcripts = replaced(transcripts, tweaked("l06-setup-server-path", ignore_runner_setup));
+    transcripts = replaced(transcripts, tweaked("l06-setup-server-role", ignore_runner_setup));
+    const auto states = by_id(evaluate_lite(catalog(), transcripts));
+    EXPECT_EQ(states.at("L06-7-1-SHOULD-107"), OutcomeState::Fail);
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-126"), OutcomeState::Fail);
+    EXPECT_EQ(states.at("L06-7-3-3-MUST-131"), OutcomeState::Fail);
+    EXPECT_EQ(states.at("L06-6-3-1-MUST-092"), OutcomeState::Pass);
+    EXPECT_EQ(states.at("L06-7-3-MUST-112"), OutcomeState::Pass);
+    EXPECT_EQ(states.at("L06-4-4-MUST-027"), OutcomeState::Pass);
+    // One close is enough: only l06-setup-duplicate-parameter closes.
+    auto one = replaced(transcripts, tweaked("l06-setup-duplicate-stream", ignore_runner_setup));
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), one)).at("L06-4-4-MUST-027"), OutcomeState::Pass);
+    // No close in any of the five: no session half, NotRun (never a Pass on the stream half alone).
+    auto none = replaced(one, tweaked("l06-setup-duplicate-parameter", ignore_runner_setup));
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), none)).at("L06-4-4-MUST-027"), OutcomeState::NotRun);
+    // The stream half comes only from l06-errors-code-space: without its refusal the closes alone are NotRun.
+    auto no_stream_half = replaced(conforming(), tweaked("l06-errors-code-space", [](auto& config) {
+        config.hooks.on_request = [](auto&, auto&, const test::lite::LiteRunnerRequest& request) {
+            return request.bidirectional && request.stream_type == 0x2;  // leave the unserved SUBSCRIBE pending
+        };
+    }));
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), no_stream_half)).at("L06-4-4-MUST-027"), OutcomeState::NotRun);
+    // Still all five scenarios, once each: without one of them the row stays NotRun (Row027NeedsAllFiveOfItsScenarios).
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), without(transcripts, "l06-setup-server-role"))).at("L06-4-4-MUST-027"),
+              OutcomeState::NotRun);
+    // A wrong space anywhere still fails it.
+    const auto wrong =
+        tweaked("l06-setup-duplicate-stream", [](auto& config) { config.protocol_violation_code = 0x33; });
+    EXPECT_EQ(by_id(evaluate_lite(catalog(), replaced(transcripts, wrong))).at("L06-4-4-MUST-027"), OutcomeState::Fail);
+}
+
 TEST(LiteEvaluate, NothingRunOrEmptyTranscriptsLeaveEveryScoredRowNotRun) {
     std::vector<LiteTranscript> empty;
     for (const auto id : app::executable_scenarios(106)) {

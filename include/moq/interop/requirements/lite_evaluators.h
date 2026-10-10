@@ -54,7 +54,11 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
 // One Outcome per catalog row, in catalog order. Unreviewed rows NotRun; not Applicable NotApplicable; NotTestable
 // NotTestable. A scored row is Fail when any of its evaluators returned false on a transcript of one of its
 // scenarios; Pass only when every scenario it names ran exactly once and every one of its evaluators returned true
-// on each of them (row 027: all five scenarios); otherwise NotRun. A transcript that is harness_failed,
+// on each of them; otherwise NotRun. Row 027 (evaluator l06-errors-code-space) is the exception its catalog
+// rationale states: it also needs all five scenarios run once each (none flagged), but passes when the
+// l06-errors-code-space context saw a stream code of the right space and ANY of the five saw a session close of the
+// right space (scenarios::l06_code_space_halves), so it does not depend on the SHOULD-level close of 107 or on
+// every probe closing. A transcript that is harness_failed,
 // event_limit_reached or timed_out is never judged (NotRun). Throws std::invalid_argument for a catalog that is not
 // draft 106.
 std::vector<Outcome> evaluate_lite(const RequirementCatalog& catalog,
@@ -71,6 +75,9 @@ struct LiteContextVerdicts {
     // Evaluator id -> verdict (nullopt: NotRun) for every evaluator of every scored row naming scenario_id; an
     // evaluator id the registry does not hold is recorded as nullopt.
     std::map<std::string, std::optional<bool>> verdicts;
+    // Row 027's halves (scenarios::l06_code_space_halves) when the evaluator l06-errors-code-space was consulted.
+    std::optional<bool> code_space_stream_half;
+    std::optional<bool> code_space_session_half;
 };
 using LiteVerdicts = std::vector<LiteContextVerdicts>;
 

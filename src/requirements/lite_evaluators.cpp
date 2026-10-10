@@ -18,6 +18,9 @@ namespace {
 
 namespace s = scenarios;
 
+// The evaluator of row L06-4-4-MUST-027 (its aggregation is special: code_space_settled).
+constexpr std::string_view kCodeSpaceEvaluator = "l06-errors-code-space";
+
 // Evidence kind sets, each the observation the evaluator's Pass condition guarantees (lite_evaluators.h).
 // The SETUP rows judge a lenient re-read of the publisher's Setup stream bytes (lite06::peer_setup_message): a SETUP
 // with a repeated Parameter ID passes row 014 although the strict codec decodes no message from it, so these rows
@@ -173,10 +176,39 @@ LiteContextVerdicts judge_lite_context(const RequirementCatalog& catalog, const 
             if (judged.verdicts.contains(evaluator)) continue;  // evaluators are pure: once per context
             const auto found = registry.find(evaluator);
             judged.verdicts[evaluator] = found == registry.end() ? std::optional<bool>{} : found->second(transcript);
+            if (evaluator == kCodeSpaceEvaluator) {
+                const auto halves = s::l06_code_space_halves(transcript);
+                judged.code_space_stream_half = halves.stream;
+                judged.code_space_session_half = halves.session;
+            }
         }
     }
     return judged;
 }
+
+namespace {
+
+// Row 027 (catalog rationale of L06-4-4-MUST-027): every scenario of the row ran exactly once and was judged
+// (not flagged); the l06-errors-code-space context saw the stream half; and any context of the row saw the session
+// half ("any one close code from those scenarios suffices for the half"). A false half fails the row before this.
+bool code_space_settled(const Requirement& row, std::span<const LiteContextVerdicts> contexts) {
+    std::map<std::string, std::size_t> runs;
+    bool stream_half = false;
+    bool session_half = false;
+    for (const auto& context : contexts) {
+        if (!contains(row.scenarios, context.scenario_id)) continue;
+        ++runs[context.scenario_id];
+        if (context.flagged) return false;
+        if (context.scenario_id == s::kL06ErrorsCodeSpace && context.code_space_stream_half == std::optional<bool>{true})
+            stream_half = true;
+        if (context.code_space_session_half == std::optional<bool>{true}) session_half = true;
+    }
+    return stream_half && session_half &&
+           std::all_of(row.scenarios.begin(), row.scenarios.end(),
+                       [&](const std::string& scenario) { return runs[scenario] == 1; });
+}
+
+}  // namespace
 
 std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span<const LiteContextVerdicts> contexts) {
     require_lite(catalog);
@@ -209,10 +241,12 @@ std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span
                 }
                 if (all_true) ++passed[context.scenario_id];
             }
-            const bool settled = !row.scenarios.empty() &&
+            bool settled = !row.scenarios.empty() &&
                 std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
                     return runs[scenario] == 1 && passed[scenario] == 1;
                 });
+            if (!failed && !settled && row.evaluators == std::vector<std::string>{std::string(kCodeSpaceEvaluator)})
+                settled = code_space_settled(row, contexts);
             if (failed) state = OutcomeState::Fail;
             else if (settled) state = OutcomeState::Pass;
         }
