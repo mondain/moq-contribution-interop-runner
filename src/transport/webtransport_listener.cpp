@@ -19,6 +19,9 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -159,6 +162,39 @@ struct WebTransportListener::Impl {
     std::string route_path;
     // The last CONNECT validate_connect refused (refused_connect()).
     std::string refused_connect;
+    // moq-lite only: per connection, the first bytes of the client's unidirectional streams until its control
+    // stream's SETTINGS frame is complete, then whether it enabled WebTransport with a legacy identifier
+    // (PeerCapabilities::legacy_webtransport). h3zero's decoder keeps only SETTINGS_WT_ENABLED.
+    struct ClientSettingsSniff {
+        std::map<std::uint64_t, std::vector<std::uint8_t>> streams;
+        std::set<std::uint64_t> other_streams;  // streams whose type is not 0x00 (control)
+        std::optional<bool> legacy;
+    };
+    std::map<picoquic_cnx_t*, ClientSettingsSniff> client_settings;
+    static constexpr std::size_t kMaximumSniffedBytes = 1024;
+
+    void sniff_client_settings(picoquic_cnx_t* cnx, std::uint64_t stream_id, const std::uint8_t* bytes,
+                               std::size_t length) {
+        auto& sniff = client_settings[cnx];
+        if (sniff.legacy.has_value() || sniff.other_streams.contains(stream_id)) return;
+        auto& seen = sniff.streams[stream_id];
+        if (seen.size() >= kMaximumSniffedBytes) return;
+        seen.insert(seen.end(), bytes, bytes + std::min(length, kMaximumSniffedBytes - seen.size()));
+        if (seen.front() != 0x00) {  // a QPACK or other stream, not the control stream
+            sniff.streams.erase(stream_id);
+            sniff.other_streams.insert(stream_id);
+            return;
+        }
+        if (const auto legacy = legacy_webtransport_settings(seen)) {
+            sniff.legacy = *legacy;
+            sniff.streams.clear();
+        }
+    }
+
+    bool client_legacy_webtransport(picoquic_cnx_t* cnx) const {
+        const auto found = client_settings.find(cnx);
+        return found != client_settings.end() && found->second.legacy.value_or(false);
+    }
     std::unique_ptr<WebTransportSession> session;
     picowt_capsule_t capsule{};
     int socket_fd = -1;
@@ -214,6 +250,12 @@ struct WebTransportListener::Impl {
             }
             self->session->ingest_connection_close(space, error, reason);
             self->session_connection = nullptr;
+        }
+        if (self->profile == WebTransportProfile::MoqLite06) {
+            if ((event == picoquic_callback_stream_data || event == picoquic_callback_stream_fin) &&
+                (stream_id & 3u) == 2u && bytes != nullptr && length != 0)
+                self->sniff_client_settings(cnx, stream_id, bytes, length);
+            if (connection_closing) self->client_settings.erase(cnx);
         }
         const auto result = h3zero_callback(cnx, stream_id, bytes, length, event,
                                             callback_ctx, stream_ctx);
@@ -293,7 +335,8 @@ struct WebTransportListener::Impl {
             h3->settings.webtransport_enabled,
             h3->settings.h3_datagram != 0,
             peer->max_datagram_frame_size > 0,
-            peer->is_reset_stream_at_enabled != 0};
+            peer->is_reset_stream_at_enabled != 0,
+            profile == WebTransportProfile::MoqLite06 && client_legacy_webtransport(cnx)};
         const auto decision = validate_connect(request, caps, run_endpoint, profile);
         if (!decision.accepted()) {
             refused_connect = "status=" + std::to_string(decision.http_status) + " reason=" + decision.evidence +
@@ -468,8 +511,13 @@ WebTransportListenerCreateResult WebTransportListener::create(
     impl->route.path_length = impl->route_path.size();
     impl->route.path_callback = Impl::route_callback;
     impl->route.path_app_ctx = impl.get();
-    impl->route.connect_protocol = "webtransport-h3";
-    impl->route.connect_protocol_length = std::strlen("webtransport-h3");
+    // h3zero refuses (connect_error_status) a CONNECT whose :protocol differs from connect_protocol before the
+    // route callback runs. The moq-lite route leaves that check to validate_connect, which also takes the legacy
+    // token "webtransport" on that profile only; the MoQ Transport routes keep h3zero's exact "webtransport-h3".
+    if (impl->profile != WebTransportProfile::MoqLite06) {
+        impl->route.connect_protocol = "webtransport-h3";
+        impl->route.connect_protocol_length = std::strlen("webtransport-h3");
+    }
     impl->route.connect_error_status = 400;
     impl->parameters.path_table = &impl->route;
     impl->parameters.path_table_nb = 1;

@@ -4,8 +4,10 @@
 // That client refuses a server whose SETTINGS carry no identifier it knows: it needs H3_DATAGRAM (0x33, or 0xffd277)
 // = 1 and then WEBTRANSPORT_MAX_SESSIONS (0xc671706a) non-zero, or the pre-draft-07 pair WEBTRANSPORT_ENABLE
 // (0x2b603742) = 1 [+ MAX_SESSIONS 0x2b603743]. h3zero advertises SETTINGS_WT_ENABLED (0x2c7cf000) only, so the
-// lite listener adds WEBTRANSPORT_MAX_SESSIONS = 1 (one session per connection, as picoquic keeps). The MoQ Transport
-// profiles keep h3zero's SETTINGS byte for byte.
+// lite listener adds WEBTRANSPORT_MAX_SESSIONS = 1 (one session per connection, as picoquic keeps). The client sends
+// those identifiers too and no SETTINGS_WT_ENABLED, so the lite listener also admits a client that enables
+// WebTransport that way (PeerCapabilities::legacy_webtransport). The MoQ Transport profiles keep h3zero's SETTINGS
+// byte for byte and still require SETTINGS_WT_ENABLED from the client.
 
 #include "moq/interop/transport/webtransport_listener.h"
 
@@ -113,8 +115,11 @@ struct Client {
     // When set: the SETTINGS components this client sends instead of h3zero's.
     std::optional<std::vector<std::pair<std::uint64_t, std::uint64_t>>> own_settings;
     bool own_settings_sent = false;
+    // The CONNECT :protocol (the moq CLI sends the pre-draft-09 token "webtransport").
+    const char* upgrade_token = "webtransport-h3";
     bool accepted = false;
     bool refused = false;
+    std::string refused_connect;  // the listener's account of a refused CONNECT
 };
 
 int connect_callback(picoquic_cnx_t*, std::uint8_t*, std::size_t, picohttp_call_back_event_t event,
@@ -139,6 +144,8 @@ int send_own_settings(picoquic_cnx_t* cnx, const std::vector<std::pair<std::uint
     stream.insert(stream.end(), payload.begin(), payload.end());
     const auto control = picoquic_get_next_local_stream_id(cnx, 1);
     if (picoquic_add_to_stream(cnx, control, stream.data(), stream.size(), 0) != 0) return -1;
+    // First on the wire, as h3zero's own control stream: the listener judges the CONNECT on the SETTINGS it holds.
+    if (picoquic_set_stream_priority(cnx, control, 0) != 0) return -1;
     const std::uint8_t encoder = 0x02, decoder = 0x03;
     if (picoquic_add_to_stream(cnx, picoquic_get_next_local_stream_id(cnx, 1), &encoder, 1, 0) != 0) return -1;
     if (picoquic_add_to_stream(cnx, picoquic_get_next_local_stream_id(cnx, 1), &decoder, 1, 0) != 0) return -1;
@@ -238,7 +245,7 @@ std::optional<std::map<std::uint64_t, std::uint64_t>> exchange(const char* appli
             std::array<std::uint8_t, 512> qpack{};
             const auto* path = reinterpret_cast<const std::uint8_t*>("/moq");
             auto* qpack_end = h3zero_create_connect_header_frame(qpack.data(), qpack.data() + qpack.size(),
-                                                                 authority.c_str(), path, 4, "webtransport-h3",
+                                                                 authority.c_str(), path, 4, client.upgrade_token,
                                                                  "https://publisher.test", nullptr, offered.c_str());
             EXPECT_NE(qpack_end, nullptr);
             std::vector<std::uint8_t> frame;
@@ -256,6 +263,7 @@ std::optional<std::map<std::uint64_t, std::uint64_t>> exchange(const char* appli
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     EXPECT_TRUE(connect_sent);
+    client.refused_connect = created.listener->refused_connect();
     std::optional<std::map<std::uint64_t, std::uint64_t>> server_settings;
     for (const auto& [id, bytes] : client.server_uni) {
         if (auto decoded = control_settings(bytes)) server_settings = std::move(decoded);
@@ -302,6 +310,79 @@ TEST(WebTransportLiteSettings, MoqTransportServerSettingsStayH3zeros) {
         EXPECT_EQ(*settings, h3zero_server_settings()) << protocol;
         EXPECT_EQ(settings->count(kWtMaxSessions), 0u) << protocol;
         EXPECT_EQ(deployed_client_view(*settings), 0u) << protocol;
+    }
+}
+
+// The SETTINGS the moq CLI sends (its log: "sending SETTINGS frame"), without SETTINGS_WT_ENABLED.
+const std::vector<std::pair<std::uint64_t, std::uint64_t>> kMoqCliClientSettings{
+    {kWtMaxSessions, 1},  {kEnableConnect, 1}, {kWtMaxSessionsDeprecated, 1},
+    {kH3DatagramDeprecated, 1}, {kH3Datagram, 1}, {kWtEnableDeprecated, 1}};
+
+TEST(WebTransportLiteSettings, LiteAdmitsTheMoqCliClientSettings) {
+    Client client;
+    client.own_settings = kMoqCliClientSettings;
+    (void)exchange("moq-lite-06", client);
+    EXPECT_TRUE(client.accepted) << client.refused_connect;
+    EXPECT_FALSE(client.refused);
+}
+
+// The whole moq CLI handshake: its SETTINGS and its CONNECT :protocol "webtransport".
+TEST(WebTransportLiteSettings, LiteAdmitsTheMoqCliConnect) {
+    Client client;
+    client.own_settings = kMoqCliClientSettings;
+    client.upgrade_token = "webtransport";
+    (void)exchange("moq-lite-06", client);
+    EXPECT_TRUE(client.accepted) << client.refused_connect;
+    EXPECT_FALSE(client.refused);
+}
+
+TEST(WebTransportLiteSettings, LiteStillRefusesOtherUpgradeTokens) {
+    for (const char* token : {"connect-udp", "webtransport-h4", "WebTransport"}) {
+        Client client;
+        client.upgrade_token = token;
+        (void)exchange("moq-lite-06", client);
+        EXPECT_FALSE(client.accepted) << token;
+        EXPECT_TRUE(client.refused) << token;
+    }
+}
+
+TEST(WebTransportLiteSettings, MoqTransportStillRefusesTheLegacyUpgradeToken) {
+    for (const char* protocol : {"moqt-18", "moqt-21", "moqt-22"}) {
+        Client client;
+        client.upgrade_token = "webtransport";
+        (void)exchange(protocol, client);
+        EXPECT_FALSE(client.accepted) << protocol;
+        EXPECT_TRUE(client.refused) << protocol;
+    }
+}
+
+TEST(WebTransportLiteSettings, LiteAdmitsPreDraft07EnableOnly) {
+    Client client;
+    client.own_settings = {{kEnableConnect, 1}, {kH3Datagram, 1}, {kWtEnableDeprecated, 1}};
+    (void)exchange("moq-lite-06", client);
+    EXPECT_TRUE(client.accepted) << client.refused_connect;
+}
+
+TEST(WebTransportLiteSettings, LiteRefusesClientSettingsWithoutWebTransport) {
+    for (const auto& settings : std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>>{
+             {{kEnableConnect, 1}, {kH3Datagram, 1}},
+             {{kEnableConnect, 1}, {kH3Datagram, 1}, {kWtMaxSessions, 0}},
+             {{kEnableConnect, 1}, {kH3Datagram, 1}, {kWtEnableDeprecated, 0}}}) {
+        Client client;
+        client.own_settings = settings;
+        (void)exchange("moq-lite-06", client);
+        EXPECT_FALSE(client.accepted);
+        EXPECT_TRUE(client.refused);
+    }
+}
+
+TEST(WebTransportLiteSettings, MoqTransportStillRequiresWtEnabledFromClients) {
+    for (const char* protocol : {"moqt-18", "moqt-21", "moqt-22"}) {
+        Client client;
+        client.own_settings = kMoqCliClientSettings;
+        (void)exchange(protocol, client);
+        EXPECT_FALSE(client.accepted) << protocol;
+        EXPECT_TRUE(client.refused) << protocol;
     }
 }
 

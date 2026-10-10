@@ -163,12 +163,18 @@ ConnectDecision validate_connect(const H3Request& request,
     // moq-lite runs on native WebTransport streams (draft section 4.2); datagrams are
     // optional there, so the lite profile needs only SETTINGS_WT_ENABLED.
     const bool needs_datagrams = profile != WebTransportProfile::MoqLite06;
-    if (!caps.settings_received || caps.wt_enabled_value != 1 ||
+    // The lite profile also admits a client that enabled WebTransport with a legacy identifier (PeerCapabilities).
+    const bool wt_enabled = caps.wt_enabled_value == 1 ||
+        (profile == WebTransportProfile::MoqLite06 && caps.legacy_webtransport);
+    if (!caps.settings_received || !wt_enabled ||
         (needs_datagrams &&
          (!caps.h3_datagram || !caps.quic_datagram || !caps.reset_stream_at)))
         return reject(400, "required WebTransport capability missing");
-    if (request.method != "CONNECT" || request.protocol != "webtransport-h3" ||
-        request.scheme != "https")
+    // The upgrade token is "webtransport-h3"; the lite profile also takes "webtransport", the token of
+    // draft-ietf-webtrans-http3 before -09, which the moq CLI's stack (web-transport-proto 0.6.2) sends.
+    const bool upgrade_token = request.protocol == "webtransport-h3" ||
+        (profile == WebTransportProfile::MoqLite06 && request.protocol == "webtransport");
+    if (request.method != "CONNECT" || !upgrade_token || request.scheme != "https")
         return reject(400, "invalid WebTransport CONNECT pseudo-header");
     if (request.authority.empty() || request.authority != endpoint.authority ||
         request.path.empty() || request.path != endpoint.path)
@@ -203,6 +209,53 @@ ConnectDecision validate_connect(const H3Request& request,
     if (std::find(values.begin(), values.end(), required_protocol) == values.end())
         return reject(400, "required MOQT protocol not offered");
     return {200, std::string(required_protocol), "WebTransport CONNECT accepted"};
+}
+
+namespace {
+
+// The QUIC variable-length integer at bytes[at] (advancing `at`), or nullopt when the bytes end inside it.
+std::optional<std::uint64_t> read_varint(std::span<const std::uint8_t> bytes, std::size_t& at) {
+    if (at >= bytes.size()) return std::nullopt;
+    const std::size_t width = std::size_t{1} << (bytes[at] >> 6u);
+    if (bytes.size() - at < width) return std::nullopt;
+    std::uint64_t value = bytes[at] & 0x3fu;
+    for (std::size_t index = 1; index < width; ++index) value = (value << 8u) | bytes[at + index];
+    at += width;
+    return value;
+}
+
+}  // namespace
+
+std::optional<bool> legacy_webtransport_settings(std::span<const std::uint8_t> prefix) {
+    std::size_t at = 0;
+    const auto stream_type = read_varint(prefix, at);
+    if (!stream_type) return std::nullopt;
+    if (*stream_type != 0x00) return false;
+    const auto frame_type = read_varint(prefix, at);
+    if (!frame_type) return std::nullopt;
+    if (*frame_type != 0x04) return false;  // RFC 9114 6.2.1: SETTINGS is the control stream's first frame
+    const auto length = read_varint(prefix, at);
+    if (!length) return std::nullopt;
+    if (prefix.size() - at < *length) return std::nullopt;
+    const auto frame = prefix.subspan(at, static_cast<std::size_t>(*length));
+    std::size_t cursor = 0;
+    std::optional<std::uint64_t> datagram, datagram_deprecated, max_sessions, enable;
+    while (cursor < frame.size()) {
+        const auto id = read_varint(frame, cursor);
+        const auto value = id ? read_varint(frame, cursor) : std::nullopt;
+        if (!value) return false;
+        const std::uint64_t pair[2]{*id, *value};
+        switch (pair[0]) {
+            case 0x33: datagram = pair[1]; break;
+            case 0xffd277: datagram_deprecated = pair[1]; break;
+            case 0xc671706a: max_sessions = pair[1]; break;
+            case 0x2b603742: enable = pair[1]; break;
+            default: break;
+        }
+    }
+    if ((datagram ? datagram : datagram_deprecated) != std::optional<std::uint64_t>{1}) return false;
+    if (max_sessions) return *max_sessions != 0;
+    return enable == std::optional<std::uint64_t>{1};
 }
 
 }  // namespace moq::interop::transport

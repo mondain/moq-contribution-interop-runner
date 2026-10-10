@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,7 +34,19 @@ struct PeerCapabilities {
     bool h3_datagram = false;
     bool quic_datagram = false;
     bool reset_stream_at = false;
+    // The client's SETTINGS enabled WebTransport with an identifier of draft-ietf-webtrans-http3 before
+    // SETTINGS_WT_ENABLED (legacy_webtransport_settings). Honored by the moq-lite profile only, whose draft names
+    // no WebTransport draft: the moq CLI's stack (web-transport-proto 0.6.2) sends only those identifiers.
+    bool legacy_webtransport = false;
 };
+
+// The pre-SETTINGS_WT_ENABLED WebTransport support a client's HTTP/3 control stream announces, from the first bytes
+// of a client-initiated unidirectional stream: nullopt while those bytes hold no complete SETTINGS frame yet; false
+// when the stream is not a control stream (type 0x00), its first frame is not a well-formed SETTINGS frame, or the
+// frame enables WebTransport by no legacy identifier; true when it carries SETTINGS_WEBTRANSPORT_MAX_SESSIONS
+// (0xc671706a) non-zero or SETTINGS_ENABLE_WEBTRANSPORT (0x2b603742) = 1, and H3_DATAGRAM (0x33, or 0xffd277) = 1
+// (the rule of web-transport-proto 0.6.2, which the moq CLI applies to its peer).
+[[nodiscard]] std::optional<bool> legacy_webtransport_settings(std::span<const std::uint8_t> control_stream_prefix);
 
 struct RunEndpoint {
     std::string authority;
