@@ -295,6 +295,17 @@ enum class LiteDefect {
     IgnoreUnknownStreams,  // neither resets nor stops a runner stream of an unknown type (draft 7.2)
     CloseOnInvalidSubscribe,  // closes the session (PROTOCOL_VIOLATION) on an undecodable SUBSCRIBE (draft 3.6)
     OffsetGroupStart,         // reads a SUBSCRIBE Group Start offset by one: starts at max(latest, Group Start - 1)
+    // L2a (TRACK, FETCH, PROBE, GOAWAY). Each is one named departure from the draft:
+    FetchTruncatesOnShortRange,       // FIN after one frame fewer than the range (draft 5.1.3: MUST reset instead)
+    FetchIgnoresUnknownGroup,         // serves a group it does not have instead of resetting NOT_FOUND
+    TrackInfoChangesBetweenRequests,  // each TRACK_INFO reply differs from the last (draft 7.12: immutable)
+    TrackInfoZeroTimescale,           // Timescale 0 (draft 7.12: MUST be non-zero)
+    ProbeResetsOnTarget,              // resets the Probe stream with MALFORMED_TRACK on a runner target (the moq CLI, P1)
+    ProbeNoneNotReset,                // answers reports at Probe level None (draft 5.1.5: MUST reset)
+    GoawayOversizeLogged,             // an oversize GOAWAY URI is only logged (the moq CLI, P8)
+    GoawayDuplicateIgnored,           // a second GOAWAY does not close the session
+    GoawayClosesSessionOnFirst,       // closes the session (NO_ERROR) on the first GOAWAY instead of carrying on
+    OpensStreamsAfterGoaway,          // keeps opening Group streams after a GOAWAY (draft 5.1.6: MUST NOT)
 };
 
 // A request the runner opened, decoded far enough to answer.
@@ -302,9 +313,13 @@ struct LiteRunnerRequest {
     transport::StreamId stream{0};
     bool bidirectional{false};
     std::uint64_t stream_type{0};
-    // monostate: a stream type the publisher does not serve (unknown, or Fetch/Probe/Goaway/Track).
-    std::variant<std::monostate, l06::SetupMessage, l06::AnnounceRequest, l06::Subscribe> message;
+    // monostate: a stream type the publisher does not serve (unknown), or a Probe stream whose first target has not
+    // arrived (the publisher answers a Probe stream on its type alone).
+    std::variant<std::monostate, l06::SetupMessage, l06::AnnounceRequest, l06::Subscribe, l06::TrackRequest,
+                 l06::FetchRequest, l06::ProbeMessage, l06::GoawayMessage>
+        message;
     std::size_t setup_streams_seen{0};  // runner Setup streams so far, this one included
+    bool oversize{false};               // a GOAWAY URI above the draft 7.18 limit (the message did not decode)
 };
 
 class ConformingLitePublisher;
@@ -344,6 +359,31 @@ struct ConformingLitePublisherConfig {
     // Draft 4.3: close the send direction (FIN) of a stream this publisher answered once the runner closed (FIN) its
     // own. A test whose hooks script the reaction to the runner's FIN themselves (the row 025 tests) sets it false.
     bool echo_runner_fin{true};
+    // L2a. TRACK_INFO, defaulting to the moq CLI's video track (priority 60, max age 30 s, source timescale 90000).
+    std::uint8_t track_priority{60};
+    std::uint64_t track_max_age_ms{30000};
+    std::uint64_t track_timescale{90000};
+    // FETCH serves groups fetch_first_group..fetch_last_group (inclusive), each of fetch_frames_per_group frames
+    // with timestamp group * 1000 + index * 33 and the payload text "frame-<group>-<index>" (the Group streams' text).
+    // Frames before fetch_first_retained_frame were evicted: asking for one is a TOO_FAR_BEHIND reset (the moq CLI
+    // keeps one cached group whose head can be gone).
+    std::uint64_t fetch_first_group{0};
+    std::uint64_t fetch_last_group{5};
+    std::uint64_t fetch_frames_per_group{6};
+    std::uint64_t fetch_first_retained_frame{0};
+    // Stream error code for FETCH asking for evicted frames (TOO_FAR_BEHIND, draft 4.4.2).
+    std::uint64_t too_far_behind_code{0x5};
+    // Stream error code for a FETCH whose range is inverted. Draft 7.16 names no code (it calls the request a
+    // protocol violation, and the stream table has no such code), so INTERNAL_ERROR, like invalid_subscribe_code.
+    std::uint64_t invalid_fetch_code{0x0};
+    // PROBE reports (draft 7.17): the level comes from the Probe Parameter in setup_parameters (absent = None).
+    // Level None resets the Probe stream. Otherwise a report is sent at once and then every
+    // probe_report_interval_polls polls while the stream is open.
+    std::uint64_t probe_bitrate{5000000};
+    std::uint64_t probe_rtt_ms{25};
+    std::size_t probe_report_interval_polls{20};
+    // The code ProbeResetsOnTarget uses (MALFORMED_TRACK, as the moq CLI does).
+    std::uint64_t probe_target_reset_code{0x12};
     // The session URL the adapter gave this publisher, and the binding (draft 7.3.2): on native QUIC the SETUP
     // carries Path = path + "?" + query (no '?' when the query is empty); on WebTransport (or Unknown) no Path.
     std::string session_url_path{};
@@ -388,7 +428,15 @@ struct ConformingLitePublisherConfig {
 //   - the ANNOUNCE_START hop list is empty and both route costs are 0 (the publisher is the origin);
 //   - prefix coverage is plain std::string::starts_with on the configured broadcast path (no segment rules);
 //   - one Group stream per poll, so the group rate follows the test tick, not media time;
-//   - Fetch, Probe, Goaway and Track streams (L2 kinds) are refused like unknown types;
+//   - L2a: TRACK is answered with one TRACK_INFO then FIN (NOT_FOUND reset for another broadcast or track); FETCH
+//     with the requested bare FRAMEs (Frame End is index + 1, 0 = to the end, clipped to the group) then FIN, a
+//     NOT_FOUND reset for an unknown group, broadcast or track, a TOO_FAR_BEHIND reset for evicted frames, and a
+//     stream reset (invalid_fetch_code) for an inverted range, never a shorter run (draft 5.1.3); PROBE is answered
+//     per the Probe level (reset at None; a report at once and periodically otherwise, runner targets ignored);
+//     GOAWAY is recorded (goaways()), the session stays open, a second GOAWAY, an oversize URI (draft 7.18) or a
+//     malformed one closes the session with PROTOCOL_VIOLATION, and after a GOAWAY no new Group stream is opened
+//     (draft 5.1.6) while the existing ones are served to the end. Stream types the publisher does not serve are
+//     still refused like unknown types;
 //   - the Subscriber Max Age is not consulted: no history is held, every unfloored subscription starts at
 //     latest_group;
 //   - a bounded subscription ends with its last group (no SUBSCRIBE_END, the Subscribe stream stays open).
@@ -414,7 +462,9 @@ public:
             if (publisher_uni(id)) continue;  // a Group stream the runner stopped: handled below
             read_runner_stream(peer, id, stream);
         }
+        ++polls_;
         if (!peer.peer_closed()) react_to_runner_endings(peer);
+        if (!peer.peer_closed()) serve_probes(peer);
         if (!peer.peer_closed()) emit_one_group(peer);
         if (config_.hooks.on_poll) config_.hooks.on_poll(*this, peer);
     }
@@ -502,8 +552,15 @@ public:
     [[nodiscard]] std::size_t runner_setups() const { return runner_setups_; }
     [[nodiscard]] const std::vector<LiteRunnerRequest>& requests() const { return requests_; }
     [[nodiscard]] std::size_t groups_sent() const { return groups_sent_; }
+    // The New Session URI of every GOAWAY that decoded, in arrival order.
+    [[nodiscard]] const std::vector<std::string>& goaways() const { return goaways_; }
+    [[nodiscard]] bool goaway_received() const { return goaway_received_; }
 
 private:
+    struct ProbeStream {
+        std::size_t offset{0};         // where the runner's PROBE messages start in its stream bytes
+        std::size_t next_report{0};    // the poll that sends the next report
+    };
     struct Parse {
         std::size_t offset{0};
         std::optional<std::uint64_t> type;
@@ -547,12 +604,14 @@ private:
         wire::Cursor body(std::span<const std::byte>(stream.bytes).subspan(parse.offset));
         bool malformed = false;
         std::string error_detail;
+        std::optional<wire::DecodeErrorCode> error_code;
         // False while the message is incomplete; true once decoded (into target) or malformed.
         const auto take = [&](auto result, auto& target) {
             if (std::holds_alternative<wire::NeedMore>(result)) return false;
             if (const auto* error = std::get_if<wire::DecodeError>(&result)) {
                 malformed = true;
                 error_detail = error->detail;
+                error_code = error->code;
                 return true;
             }
             target = std::move(std::get<0>(result));
@@ -570,6 +629,23 @@ private:
             l06::Subscribe message;
             if (!take(l06::decode_subscribe(body), message)) return;
             if (!malformed) request.message = message;
+        } else if (bidi && *parse.type == 0x6) {
+            l06::TrackRequest message;
+            if (!take(l06::decode_track_request(body), message)) return;
+            if (!malformed) request.message = message;
+        } else if (bidi && *parse.type == 0x3) {
+            l06::FetchRequest message;
+            if (!take(l06::decode_fetch_request(body), message)) return;
+            if (!malformed) request.message = message;
+        } else if (bidi && *parse.type == 0x5) {
+            l06::GoawayMessage message;
+            if (!take(l06::decode_goaway(body), message)) return;
+            if (!malformed) request.message = message;
+            request.oversize = error_code == wire::DecodeErrorCode::LengthExceedsLimit;
+        } else if (bidi && *parse.type == 0x4) {
+            // A Probe stream is answered on its type alone; the first target, when already here, is recorded.
+            auto result = l06::decode_probe(body);
+            if (auto* decoded = std::get_if<l06::ProbeMessage>(&result)) request.message = *decoded;
         }
         parse.request_done = true;
         requests_.push_back(request);
@@ -586,6 +662,10 @@ private:
         if (!request.bidirectional && request.stream_type == 0x1) {
             if (malformed || request.setup_streams_seen > 1 || carries_client_only_parameter(request))
                 close(peer, config_.protocol_violation_code);
+            return;
+        }
+        if (request.bidirectional && request.stream_type == 0x5) {
+            handle_goaway(peer, request, malformed);
             return;
         }
         if (malformed && request.bidirectional && request.stream_type == 0x2 &&
@@ -607,6 +687,18 @@ private:
             answer_subscribe(peer, request.stream, *subscribe);
             return;
         }
+        if (const auto* track = std::get_if<l06::TrackRequest>(&request.message)) {
+            answer_track(peer, request.stream, *track);
+            return;
+        }
+        if (const auto* fetch = std::get_if<l06::FetchRequest>(&request.message)) {
+            answer_fetch(peer, request.stream, *fetch);
+            return;
+        }
+        if (request.bidirectional && request.stream_type == 0x4) {
+            start_probe(peer, request.stream);
+            return;
+        }
         if (config_.defect == LiteDefect::IgnoreUnknownStreams) return;
         refuse(peer, request.stream, config_.unknown_stream_code);
     }
@@ -619,6 +711,141 @@ private:
         for (const auto& parameter : setup->parameters)
             if (parameter.id == l06::kParamPath || parameter.id == l06::kParamRole) return true;
         return false;
+    }
+
+    // --- L2a ---
+
+    // Draft 7.11/7.12: one TRACK_INFO then FIN; another broadcast or track is a NOT_FOUND reset.
+    void answer_track(ScriptedLitePeer& peer, transport::StreamId stream, const l06::TrackRequest& request) {
+        if (request.broadcast_path != config_.broadcast || request.track_name != config_.track) {
+            refuse(peer, stream, config_.not_found_code);
+            return;
+        }
+        l06::TrackInfo info{config_.track_priority, config_.track_max_age_ms, config_.track_timescale};
+        if (config_.defect == LiteDefect::TrackInfoChangesBetweenRequests) {
+            info.publisher_max_age_ms += 1000 * track_infos_sent_;
+        }
+        if (config_.defect == LiteDefect::TrackInfoZeroTimescale) info.timescale = 0;
+        ++track_infos_sent_;
+        peer.data(stream, track_info(info), true);
+        answered_.insert(stream);
+        send_ended_.insert(stream);
+    }
+
+    [[nodiscard]] static std::int64_t fetch_timestamp(std::uint64_t group, std::uint64_t index) {
+        return static_cast<std::int64_t>(group * 1000 + index * 33);
+    }
+
+    // Draft 5.1.3 and 7.16: the requested frames as bare FRAMEs then FIN, or a reset; never a shorter run.
+    void answer_fetch(ScriptedLitePeer& peer, transport::StreamId stream, const l06::FetchRequest& request) {
+        if (request.broadcast_path != config_.broadcast || request.track_name != config_.track) {
+            refuse(peer, stream, config_.not_found_code);
+            return;
+        }
+        if (l06::fetch_range_inverted(request)) {
+            refuse(peer, stream, config_.invalid_fetch_code);
+            return;
+        }
+        const bool known = request.group_sequence >= config_.fetch_first_group &&
+                           request.group_sequence <= config_.fetch_last_group;
+        if (!known && config_.defect != LiteDefect::FetchIgnoresUnknownGroup) {
+            refuse(peer, stream, config_.not_found_code);
+            return;
+        }
+        if (request.frame_start < config_.fetch_first_retained_frame) {
+            refuse(peer, stream, config_.too_far_behind_code);
+            return;
+        }
+        const std::uint64_t total = config_.fetch_frames_per_group;
+        const std::uint64_t end = request.frame_end == 0 ? total : std::min(request.frame_end, total);
+        std::uint64_t count = end > request.frame_start ? end - request.frame_start : 0;
+        if (config_.defect == LiteDefect::FetchTruncatesOnShortRange && count > 0) --count;
+        Bytes bytes;
+        for (std::uint64_t i = 0; i < count; ++i) {
+            const std::uint64_t index = request.frame_start + i;
+            l06::Frame value;
+            value.timestamp_delta = i == 0 ? fetch_timestamp(request.group_sequence, index) : 33;
+            value.payload = bytes_of("frame-" + std::to_string(request.group_sequence) + "-" + std::to_string(index));
+            if (value.payload.size() < config_.frame_payload_bytes)
+                value.payload.resize(config_.frame_payload_bytes, std::byte{0x2e});
+            const auto encoded = frame(value);
+            bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+        }
+        peer.data(stream, std::move(bytes), true);
+        answered_.insert(stream);
+        send_ended_.insert(stream);
+    }
+
+    // The Probe level this publisher advertised in SETUP (draft 7.3.1): 0 None (also when absent), 1 Report, 2 Increase.
+    [[nodiscard]] std::uint64_t probe_level() const {
+        for (const auto& parameter : config_.setup_parameters) {
+            if (parameter.id != l06::kParamProbe) continue;
+            wire::Cursor cursor(parameter.value);
+            const auto level = l06::read_varint(cursor);
+            if (const auto* value = std::get_if<std::uint64_t>(&level)) return *value;
+        }
+        return 0;
+    }
+
+    // Draft 5.1.5: no Probe capability resets the stream; otherwise a report at once, then periodically. Runner
+    // targets are read (serve_probes) and ignored, since this publisher never pads.
+    void start_probe(ScriptedLitePeer& peer, transport::StreamId stream) {
+        if (probe_level() == 0 && config_.defect != LiteDefect::ProbeNoneNotReset) {
+            refuse(peer, stream, config_.unknown_stream_code);
+            return;
+        }
+        answered_.insert(stream);
+        probes_[stream] = ProbeStream{parse_[stream].offset, polls_ + config_.probe_report_interval_polls};
+        send_probe_report(peer, stream);
+    }
+
+    void send_probe_report(ScriptedLitePeer& peer, transport::StreamId stream) {
+        peer.data(stream, probe_message({config_.probe_bitrate, config_.probe_rtt_ms}));
+    }
+
+    void serve_probes(ScriptedLitePeer& peer) {
+        for (auto& [stream, state] : probes_) {
+            if (send_ended_.contains(stream) || cancelled_.contains(stream)) continue;
+            const auto* runner = peer.runner_stream(stream);
+            if (runner == nullptr) continue;
+            // Each complete PROBE message after the STREAM_TYPE is a new target.
+            while (true) {
+                wire::Cursor cursor(std::span<const std::byte>(runner->bytes).subspan(state.offset));
+                const auto target = l06::decode_probe(cursor);
+                if (!std::holds_alternative<l06::ProbeMessage>(target)) break;
+                state.offset += cursor.offset();
+                if (config_.defect == LiteDefect::ProbeResetsOnTarget) {
+                    peer.peer_reset(stream, config_.probe_target_reset_code);
+                    send_ended_.insert(stream);
+                    break;
+                }
+            }
+            if (send_ended_.contains(stream)) continue;
+            if (polls_ >= state.next_report) {
+                send_probe_report(peer, stream);
+                state.next_report = polls_ + config_.probe_report_interval_polls;
+            }
+        }
+    }
+
+    // Draft 5.1.6 and 7.18: carry on after the first GOAWAY; a second, an oversize URI or a malformed one is a
+    // PROTOCOL_VIOLATION; no new Group streams afterwards.
+    void handle_goaway(ScriptedLitePeer& peer, const LiteRunnerRequest& request, bool malformed) {
+        if (request.oversize) {
+            if (config_.defect != LiteDefect::GoawayOversizeLogged) close(peer, config_.protocol_violation_code);
+            return;
+        }
+        if (malformed) {
+            close(peer, config_.protocol_violation_code);
+            return;
+        }
+        goaways_.push_back(std::get<l06::GoawayMessage>(request.message).new_session_uri);
+        if (goaways_.size() > 1 && config_.defect != LiteDefect::GoawayDuplicateIgnored) {
+            close(peer, config_.protocol_violation_code);
+            return;
+        }
+        goaway_received_ = true;
+        if (config_.defect == LiteDefect::GoawayClosesSessionOnFirst) close(peer, 0x0);
     }
 
     // Ends a served subscription: its open Group streams reset (CANCELLED), no further groups.
@@ -656,6 +883,10 @@ private:
     }
 
     void emit_one_group(ScriptedLitePeer& peer) {
+        if (goaway_received_ && config_.defect != LiteDefect::OpensStreamsAfterGoaway) {
+            pending_groups_.clear();  // draft 5.1.6: no new streams after a GOAWAY; open ones are served on
+            return;
+        }
         while (!pending_groups_.empty()) {
             const auto group = pending_groups_.front();
             pending_groups_.pop_front();
@@ -691,6 +922,11 @@ private:
     std::vector<LiteRunnerRequest> requests_;
     std::size_t runner_setups_{0};
     std::size_t groups_sent_{0};
+    std::size_t polls_{0};
+    std::size_t track_infos_sent_{0};
+    std::map<transport::StreamId, ProbeStream> probes_;
+    std::vector<std::string> goaways_;
+    bool goaway_received_{false};
 };
 
 // Runs a probe to completion on a manual clock advancing `tick` per poll (at most `max_polls` polls).
