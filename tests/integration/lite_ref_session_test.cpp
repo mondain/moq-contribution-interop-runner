@@ -6,6 +6,13 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <nlohmann/json.hpp>
+
 #include <memory>
 #include <string>
 #include <string_view>
@@ -64,6 +71,80 @@ TEST(LiteRefSession, TheConformingPublisherPassesTheSubscribeRowOnBothTransports
         ASSERT_EQ(run.state, storage::RunState::Finalized);
         EXPECT_EQ(state_of(run, "L06-6-3-2-MUST-093"), OutcomeState::Pass);
         for (const auto& outcome : run.outcomes) EXPECT_NE(outcome.state, OutcomeState::Fail) << outcome.requirement_id;
+    }
+}
+
+// A reference publisher run as the shipped binary: a child process whose standard output is read when it ends.
+class ChildPublisher {
+public:
+    ChildPublisher(const std::string& binary, const std::string& url) {
+        int fds[2];
+        if (::pipe(fds) != 0) return;
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
+        posix_spawn_file_actions_addclose(&actions, fds[0]);
+        const char* argv[] = {binary.c_str(), "--connect", url.c_str(), nullptr};
+        if (posix_spawn(&pid_, binary.c_str(), &actions, nullptr, const_cast<char* const*>(argv), environ) != 0) pid_ = 0;
+        posix_spawn_file_actions_destroy(&actions);
+        ::close(fds[1]);
+        out_ = fds[0];
+        ::fcntl(out_, F_SETFL, ::fcntl(out_, F_GETFL, 0) | O_NONBLOCK);
+    }
+    ~ChildPublisher() {
+        if (pid_ > 0 && !exited_) {
+            ::kill(pid_, SIGTERM);
+            ::waitpid(pid_, &status_, 0);
+        }
+        if (out_ >= 0) ::close(out_);
+    }
+    // Called by drive_contexts in its loop.
+    bool step() {
+        char buffer[512];
+        for (;;) {
+            const auto n = ::read(out_, buffer, sizeof(buffer));
+            if (n <= 0) break;
+            output_.append(buffer, static_cast<std::size_t>(n));
+        }
+        if (pid_ > 0 && !exited_ && ::waitpid(pid_, &status_, WNOHANG) == pid_) exited_ = true;
+        return !exited_;
+    }
+    bool wait_for_exit(std::chrono::milliseconds limit) {
+        const auto deadline = std::chrono::steady_clock::now() + limit;
+        while (step() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(5ms);
+        return exited_;
+    }
+    [[nodiscard]] int exit_code() const { return WIFEXITED(status_) ? WEXITSTATUS(status_) : -1; }
+    [[nodiscard]] const std::string& output() const { return output_; }
+
+private:
+    pid_t pid_{0};
+    int out_{-1};
+    int status_{0};
+    bool exited_{false};
+    std::string output_;
+};
+
+TEST(LiteRefSession, TheShippedBinaryRunsAContextAndEndsWithOneJsonLine) {
+    for (const auto transport : {app::TransportKind::NativeQuic, app::TransportKind::WebTransport}) {
+        SCOPED_TRACE(transport == app::TransportKind::WebTransport ? "webtransport" : "native_quic");
+        auto store = memory_store();
+        auto runner = manager(store);
+        const auto started = runner.start(lite_config({"l06-setup-stream"}, 8000ms, transport, pinned_fixture()));
+        ASSERT_EQ(started.status, app::RunStartStatus::Started);
+        std::shared_ptr<ChildPublisher> child;
+        drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+            child = std::make_shared<ChildPublisher>(MOQ_INTEROP_LITE_REF_PUBLISHER, endpoint(transport, port));
+            return child;
+        });
+        (void)runner.stop(started.id);
+        ASSERT_NE(child, nullptr);
+        ASSERT_TRUE(child->wait_for_exit(15000ms)) << child->output();
+        EXPECT_EQ(child->exit_code(), 0);
+        const auto line = nlohmann::json::parse(child->output());
+        EXPECT_EQ(line.at("defect"), "none");
+        EXPECT_EQ(line.at("transport"), transport == app::TransportKind::WebTransport ? "webtransport" : "native_quic");
+        EXPECT_EQ(state_of(store->load(started.id), "L06-3-1-MUST-014"), OutcomeState::Pass);
     }
 }
 

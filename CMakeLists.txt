@@ -444,6 +444,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-transport)
     target_compile_options(moq-interop-lite-ref PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_executable(moq-interop-lite-ref-publisher tools/lite-ref/main.cpp)
+    target_link_libraries(moq-interop-lite-ref-publisher PRIVATE moq-interop-lite-ref nlohmann_json::nlohmann_json)
+    target_compile_options(moq-interop-lite-ref-publisher PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_test(NAME lite-ref-publisher COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/lite-ref-publisher.sh"
+             "$<TARGET_FILE:moq-interop-lite-ref-publisher>")
     add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
     target_link_libraries(moq-interop-lite-ref-options-tests PRIVATE moq-interop-lite-ref GTest::gtest_main)
     add_test(NAME lite-ref-options COMMAND moq-interop-lite-ref-options-tests)
@@ -517,7 +523,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lite-run-live-tests tests/integration/lite_run_live_test.cpp)
     target_include_directories(moq-interop-lite-run-live-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-lite-run-live-tests PRIVATE
-        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-lite-run-live-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
@@ -525,10 +531,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lite-ref-session-tests tests/integration/lite_ref_session_test.cpp)
     target_include_directories(moq-interop-lite-ref-session-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-lite-ref-session-tests PRIVATE
-        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-lite-ref-session-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        MOQ_INTEROP_LITE_REF_PUBLISHER="$<TARGET_FILE:moq-interop-lite-ref-publisher>"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_dependencies(moq-interop-lite-ref-session-tests moq-interop-lite-ref-publisher)
     add_test(NAME lite-ref-session COMMAND moq-interop-lite-ref-session-tests)
     # Writes moq-lite-06 run databases for tests/e2e/audit-cli-moqlite.sh.
     add_executable(moq-interop-lite-audit-fixture tests/support/lite_audit_fixture.cpp)
