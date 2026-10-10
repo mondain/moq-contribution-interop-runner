@@ -1424,12 +1424,47 @@ TEST(LiteAccessors, HarnessIssuesExemptOnlyTheRunnersDeliberateProbeBytes) {
         EXPECT_FALSE(is_runner_anomaly(code)) << code;
 }
 
-TEST(LiteStreamReader, PeerOpenedGoawayTypeIsUnknownWithItsRawType) {
+// L2b: the publisher may open a Goaway Stream (draft 5.1.6: either endpoint can); it is decoded now (it was raw in
+// L1). Every other peer-opened bidirectional type stays Unknown, and publisher_opened_bidi is still raised.
+TEST(LiteStreamReader, PeerOpenedGoawayIsDecoded) {
     LiteStreamReader reader(kPeerBidi, LiteOrigin::Peer, true);
-    reader.feed(bytes({0x05, 0x00}), false, 1);
-    EXPECT_EQ(reader.record().kind, LiteStreamKind::Unknown);
+    reader.feed(bytes({0x05, 0x01, 0x00}), false, 1);
+    EXPECT_EQ(reader.record().kind, LiteStreamKind::Goaway);
     EXPECT_EQ(reader.record().stream_type.value_or(0), 0x5u);
     EXPECT_EQ(count_issues(reader.record(), kIssuePublisherOpenedBidi), 1u);
+    EXPECT_EQ(reader.record().issues.size(), 1u) << describe_issues(reader.record());
+    const auto messages = peer_messages(reader.record());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_EQ(std::get<wire::moqlite06::GoawayMessage>(messages[0]->message), (wire::moqlite06::GoawayMessage{""}));
+
+    LiteStreamReader with_uri(kPeerBidi, LiteOrigin::Peer, true);
+    with_uri.feed(concat({bytes({0x05, 0x0b, 0x0a}), text("moql://b/x")}), true, 1);
+    ASSERT_EQ(peer_messages(with_uri.record()).size(), 1u);
+    EXPECT_EQ(std::get<wire::moqlite06::GoawayMessage>(peer_messages(with_uri.record())[0]->message).new_session_uri,
+              "moql://b/x");
+    EXPECT_EQ(with_uri.record().issues.size(), 1u) << describe_issues(with_uri.record());
+}
+
+TEST(LiteStreamReader, PeerOpenedGoawayFaultsAreIssuesAndOtherTypesStayUnknown) {
+    LiteStreamReader malformed(kPeerBidi, LiteOrigin::Peer, true);
+    malformed.feed(bytes({0x05, 0x00}), false, 1);
+    EXPECT_EQ(count_issues(malformed.record(), kIssueProtocolViolation), 1u) << describe_issues(malformed.record());
+
+    LiteStreamReader oversize(kPeerBidi, LiteOrigin::Peer, true);
+    oversize.feed(bytes({0x05, 0x02, 0x60, 0x01}), false, 1);  // a URI claiming 8193 bytes
+    EXPECT_EQ(count_issues(oversize.record(), kIssueLengthExceedsLimit), 1u) << describe_issues(oversize.record());
+    EXPECT_TRUE(peer_messages(oversize.record()).empty());
+
+    LiteStreamReader trailing(kPeerBidi, LiteOrigin::Peer, true);
+    trailing.feed(bytes({0x05, 0x01, 0x00, 0x00}), false, 1);
+    EXPECT_EQ(count_issues(trailing.record(), kIssueTrailingAfterRequest), 1u) << describe_issues(trailing.record());
+    EXPECT_EQ(peer_messages(trailing.record()).size(), 1u);
+
+    LiteStreamReader other(kPeerBidi, LiteOrigin::Peer, true);
+    other.feed(bytes({0x03, 0x00}), false, 1);
+    EXPECT_EQ(other.record().kind, LiteStreamKind::Unknown);
+    EXPECT_EQ(other.record().stream_type.value_or(0), 0x3u);
+    EXPECT_TRUE(peer_messages(other.record()).empty());
 }
 
 TEST(LiteStreamReader, RunnerWritesDoNotUseUpThePeersMessageCap) {

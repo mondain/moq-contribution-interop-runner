@@ -545,9 +545,15 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
             const auto value = std::get<std::uint64_t>(type);
             record.stream_type = value;
             if (record.origin == LiteOrigin::Peer && record.bidirectional) {
-                // Recorded as Unknown (publisher_opened_bidi was raised when the stream was created).
+                // publisher_opened_bidi was raised when the stream was created. A Goaway Stream (draft 5.1.6: either
+                // endpoint can open one) is decoded; every other type is recorded as Unknown.
                 kind_final_ = true;
-                direction.phase = Phase::Raw;
+                if (value == static_cast<std::uint64_t>(BidiStreamType::Goaway)) {
+                    record.kind = LiteStreamKind::Goaway;
+                    direction.phase = Phase::First;
+                } else {
+                    direction.phase = Phase::Raw;
+                }
                 continue;
             }
             record.kind = classify(value, record.bidirectional);
