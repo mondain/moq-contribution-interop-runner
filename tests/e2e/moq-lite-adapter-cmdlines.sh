@@ -38,7 +38,9 @@ header="$root_dir/include/moq/interop/app/lite_scenarios.h"
 work=$(mktemp -d /tmp/moq-lite-adapter-cmdlines.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/bin" "$work/log" "$work/record"
-touch "$work/fixture.mp4"
+# The runner always fills tls_ca (its --driver-ca or --tls-cert); the default is still
+# --connect-tls-insecure.
+touch "$work/fixture.mp4" "$work/ca.pem"
 
 # The stub `timeout`: records its arguments in record/timeout-<command name>, skips its own options
 # and the duration, and runs the command.
@@ -97,15 +99,15 @@ command_line() {
         endpoint='moql://127.0.0.1:4443/moq?token=l1d'
     fi
     jq -n --arg id "$id" --arg transport "$transport" --arg endpoint "$endpoint" \
-        --arg fixture "$work/fixture.mp4" --arg log_dir "$work/log" '{
+        --arg fixture "$work/fixture.mp4" --arg ca "$work/ca.pem" --arg log_dir "$work/log" '{
             schema_version: 1, run_id: "run-1", scenario_id: $id,
             endpoint: $endpoint, draft: "moq-lite-06", transport: $transport,
             namespace_hex: ["696e7465726f702e68616e67"], track_name_hex: "302e6d3473",
-            fixture: $fixture, tls_ca: "", log_dir: $log_dir,
+            fixture: $fixture, tls_ca: $ca, log_dir: $log_dir,
             scenario_timeout_ms: 2500, process_timeout_ms: 6000
         }' >"$work/request.json"
     rm -f -- "$work/record/"* "$work/log/"*
-    env -u MOQ_FFMPEG_BIN -u MOQ_LITE_TLS_INSECURE PATH="$work/bin:$PATH" MOQ_CLI_BIN="$work/bin/moq" \
+    env -u MOQ_FFMPEG_BIN -u MOQ_LITE_TLS_INSECURE -u MOQ_LITE_TLS_ROOT -u NO_COLOR PATH="$work/bin:$PATH" MOQ_CLI_BIN="$work/bin/moq" \
         STUB_RECORD_DIR="$work/record" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
         MOQ_INTEROP_DRIVER_REQUEST_FILE="$work/request.json" "$adapter" >/dev/null 2>"$work/err" ||
         { printf 'adapter refused %s %s: %s\n' "$id" "$transport" "$(cat "$work/err")" >&2; return 1; }

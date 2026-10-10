@@ -774,10 +774,13 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   `moq-cli` is refused with exit 64). It runs `ffmpeg` (a 640x360 30 fps test pattern, H.264 at about 200 kbit/s, a
   1 s GOP, video only, fragmented MP4 for the scenario timeout rounded up plus 3 s; `MOQ_FFMPEG_BIN` overrides the
   binary) into `moq --log-level debug --connect-version moq-lite-06 --connect-once --connect-timeout 10s
-  --connect-tls-insecure --connect <endpoint> --broadcast interop.hang import fmp4`, the endpoint passed verbatim,
-  with `--connect-tls-root <tls_ca>` instead when the request's `tls_ca` is non-empty (the runner always fills it;
-  `MOQ_LITE_TLS_INSECURE=1` keeps `--connect-tls-insecure` for a self-signed test certificate). The logs are
-  `<log_dir>/publisher.log` (moq) and `<log_dir>/ffmpeg.log`; the exit status is moq's. Like the imquic adapter it
+  --connect-tls-insecure --connect <endpoint> --broadcast interop.hang import fmp4`, the endpoint passed verbatim.
+  TLS is not verified by default, even though the runner always fills `tls_ca`: its usual self-signed certificate
+  carries CA:TRUE, which the CLI's verifier (rustls-webpki) refuses as a server certificate (`invalid peer
+  certificate: CaUsedAsEndEntity`). `MOQ_LITE_TLS_ROOT=1` opts in to `--connect-tls-root <tls_ca>` (exit 64 if
+  `tls_ca` is empty or unreadable); `MOQ_LITE_TLS_INSECURE` is accepted as a no-op. The logs are
+  `<log_dir>/publisher.log` (moq, without ANSI colours: the adapter sets `NO_COLOR=1`; `RUST_LOG`, if set,
+  overrides `--log-level`) and `<log_dir>/ffmpeg.log`; the exit status is moq's. Like the imquic adapter it
   stays alive as a supervisor: on the runner's group SIGTERM it exits 0 at once while ffmpeg and moq, signalled by
   the group, end on their own, each bounded by `timeout -k 2`. It accepts only the fixture
   `namespace_hex: ["696e7465726f702e68616e67"]` (`interop.hang`) and `track_name_hex: "302e6d3473"` (`0.m4s`);

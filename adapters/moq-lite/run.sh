@@ -16,9 +16,9 @@
 #                                  WebTransport protocol moq-lite-06 on https)
 #   --connect-once                 dial once, never redial: one session per context
 #   --connect-timeout 10s          give up dialing after 10 s (exit 1)
-#   --connect-tls-insecure         do not verify the runner's certificate; with a non-empty
-#     or --connect-tls-root FILE   tls_ca the CA file is trusted instead (MOQ_LITE_TLS_INSECURE=1
-#                                  keeps --connect-tls-insecure; see the TLS block below)
+#   --connect-tls-insecure         do not verify the runner's certificate (the default); with
+#     or --connect-tls-root FILE   MOQ_LITE_TLS_ROOT=1 the request's tls_ca is trusted instead
+#                                  (see the TLS block below)
 #   --connect URL                  the request's endpoint, VERBATIM: moql:// or moqt:// is raw QUIC
 #                                  (the path and query go into the SETUP Path parameter), https:// is
 #                                  WebTransport (the path and query are the CONNECT :path)
@@ -63,9 +63,15 @@ if [[ -n "${MOQ_FFMPEG_BIN:-}" ]]; then
 else
     ffmpeg_bin=$(command -v ffmpeg) || fail 'ffmpeg is required on PATH (or MOQ_FFMPEG_BIN)'
 fi
+case "${MOQ_LITE_TLS_ROOT:-}" in
+    '' | 0) use_tls_root=0 ;;
+    1) use_tls_root=1 ;;
+    *) fail 'MOQ_LITE_TLS_ROOT must be 0 or 1' ;;
+esac
+# MOQ_LITE_TLS_INSECURE: the former opt-out, now the default; accepted as a no-op alias.
 case "${MOQ_LITE_TLS_INSECURE:-}" in
-    '' | 0) force_insecure=0 ;;
-    1) force_insecure=1 ;;
+    '' | 0) ;;
+    1) ((!use_tls_root)) || fail 'MOQ_LITE_TLS_ROOT=1 and MOQ_LITE_TLS_INSECURE=1 contradict each other' ;;
     *) fail 'MOQ_LITE_TLS_INSECURE must be 0 or 1' ;;
 esac
 # Everything this adapter reads from the environment is read; the CLI's own MOQ_* variables (and the
@@ -75,6 +81,9 @@ for name in $(compgen -e); do
         unset "$name"
     fi
 done
+# Plain logs: the CLI's tracing output has no ANSI colour codes with NO_COLOR set to a non-empty
+# value (an empty NO_COLOR does not disable them).
+export NO_COLOR=1
 
 # The request. Exactly one JSON object; every field is checked on its own, so a refusal names it.
 jq -en '[inputs] | length == 1 and (.[0] | type == "object")' "$request_file" >/dev/null 2>&1 ||
@@ -138,15 +147,19 @@ authority=${authority%%[/?#]*}
 [[ -d "$log_dir" && -w "$log_dir" ]] || fail 'log_dir is not a writable directory'
 
 # TLS. The runner's listener presents its --tls-cert; the request's tls_ca is --driver-ca, else
-# that certificate, so the runner always fills it in. A non-empty tls_ca is trusted with
-# --connect-tls-root (it replaces the system roots); MOQ_LITE_TLS_INSECURE=1 keeps
-# --connect-tls-insecure instead, for a self-signed test certificate the CLI's verifier will not
-# take as a root. An empty tls_ca also means --connect-tls-insecure.
-if ((force_insecure)) || [[ -z "$tls_ca" ]]; then
-    tls_args=(--connect-tls-insecure)
-else
+# that certificate, so the runner always fills it in. The default is --connect-tls-insecure,
+# whatever tls_ca says: the runner's usual certificate is self-signed with CA:TRUE (openssl req
+# -x509), and the CLI's verifier (rustls-webpki) refuses a CA certificate as the server's own
+# ("invalid peer certificate: CaUsedAsEndEntity"), so --connect-tls-root with it fails every
+# handshake. MOQ_LITE_TLS_ROOT=1 opts in to --connect-tls-root <tls_ca> (it replaces the system
+# roots) for a listener whose certificate chains to a real CA file; tls_ca must then be a readable
+# file.
+if ((use_tls_root)); then
+    [[ -n "$tls_ca" ]] || fail 'MOQ_LITE_TLS_ROOT=1 needs a non-empty tls_ca'
     [[ -f "$tls_ca" && -r "$tls_ca" ]] || fail 'tls_ca is not a readable file'
     tls_args=(--connect-tls-root "$tls_ca")
+else
+    tls_args=(--connect-tls-insecure)
 fi
 
 # The binary must be the current moq CLI. Checked last, so a refused request runs nothing.

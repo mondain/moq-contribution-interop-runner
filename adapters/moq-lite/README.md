@@ -16,7 +16,7 @@ scenario expects. `adapter.json` is a descriptive manifest; the runner does not 
 | Namespace | exactly `["696e7465726f702e68616e67"]` (`interop.hang`), published as `--broadcast interop.hang` |
 | Track name | exactly `302e6d3473` (`0.m4s`); not passed to the CLI (it names its media tracks `<id>.m4s` itself), it only names the track the runner subscribes to |
 | Fixture | ignored: the source is ffmpeg's test pattern |
-| TLS CA | `--connect-tls-root FILE` when non-empty, `--connect-tls-insecure` when empty or when `MOQ_LITE_TLS_INSECURE=1` (below) |
+| TLS CA | not used by default (`--connect-tls-insecure`, whatever `tls_ca` says); with `MOQ_LITE_TLS_ROOT=1`, `--connect-tls-root <tls_ca>` (below) |
 | Scenario id | any single-line string; all 19 executable scenarios use the same command line |
 | `scenario_timeout_ms`, `process_timeout_ms` | plain integers (`2500.0` and `1e3` are refused); the scenario timeout from 1 to 3600000 |
 | Publisher | `MOQ_CLI_BIN`, which must name an executable regular file that is the current `moq` CLI; there is no default |
@@ -25,7 +25,8 @@ scenario expects. `adapter.json` is a descriptive manifest; the runner does not 
 The adapter exits 64 with a `moq-lite adapter: ...` message on stderr that names the
 problem, before anything starts, when the contract version is not 1, the request file is
 unreadable or not one JSON object, a field above is missing or wrong (each field has its
-own message), `log_dir` is not a writable directory, `tls_ca` is not a readable file,
+own message), `log_dir` is not a writable directory, `MOQ_LITE_TLS_ROOT=1` is set and
+`tls_ca` is empty or not a readable file,
 `MOQ_CLI_BIN`, `MOQ_FFMPEG_BIN`, `ffmpeg` or `timeout` is unusable, or `MOQ_CLI_BIN` is
 not the current CLI.
 
@@ -35,13 +36,18 @@ not the current CLI.
 |---|---|
 | `MOQ_CLI_BIN` | the `moq` binary (required) |
 | `MOQ_FFMPEG_BIN` | the ffmpeg binary (optional; default: `ffmpeg` on `PATH`) |
-| `MOQ_LITE_TLS_INSECURE` | `1`: always `--connect-tls-insecure`, even when the request names a CA; `0` or unset: use `tls_ca`; anything else exits 64 |
+| `MOQ_LITE_TLS_ROOT` | `1`: `--connect-tls-root <tls_ca>` instead of the default `--connect-tls-insecure` (exit 64 if `tls_ca` is empty or unreadable); `0` or unset: the default; anything else exits 64 |
+| `MOQ_LITE_TLS_INSECURE` | accepted for compatibility and a no-op: `0`, `1` or unset (insecure is the default); `1` together with `MOQ_LITE_TLS_ROOT=1` exits 64; anything else exits 64 |
 
 The CLI reads every flag from a `MOQ_*` environment variable as well (`MOQ_CONNECT`,
 `MOQ_HOP`, `MOQ_CONNECT_TLS_ROOT`, ...). The adapter unsets every `MOQ_*` variable
 (including the three above and `MOQ_INTEROP_*`, after reading them) before it runs
-anything, so only its command line configures the publisher. `RUST_LOG` is left alone and,
-if set, overrides `--log-level debug`.
+anything, so only its command line configures the publisher. It sets `NO_COLOR=1` (a
+non-empty value: an empty `NO_COLOR` does not turn the colours off), so `publisher.log` has
+no ANSI colour codes. `RUST_LOG` is passed through on purpose, for debugging: if set, it
+overrides `--log-level debug` and so changes how much `publisher.log` holds (a filter
+such as `RUST_LOG=trace` makes it much larger, `RUST_LOG=warn` drops the debug lines a
+triage relies on).
 
 ## The binary: the current moq CLI, built offline
 
@@ -83,7 +89,10 @@ timeout --foreground --preserve-status -k 2 -s TERM <S+2> ffmpeg -hide_banner -v
     --connect-tls-insecure --connect "E" --broadcast interop.hang import fmp4
 ```
 
-with `--connect-tls-root FILE` in place of `--connect-tls-insecure` when `tls_ca` is used.
+with `--connect-tls-root <tls_ca>` in place of `--connect-tls-insecure` only when
+`MOQ_LITE_TLS_ROOT=1` is set. `-frag_duration` is in microseconds, so `1000` (1 ms) makes
+ffmpeg write about one fragment per frame; this is the recipe verified with the CLI, and the
+live smoke (L1e Task 4) may change it to `1000000` (1 s, one fragment per GOP).
 ffmpeg's standard input is `/dev/null`, its standard error goes to `<log_dir>/ffmpeg.log`;
 moq's standard output and standard error go to `<log_dir>/publisher.log`. Every argument
 is a separate array element: nothing from the request is evaluated or word-split, and the
@@ -118,12 +127,16 @@ the transport (`moqt://` is accepted for native QUIC too) and that it is printab
 with an authority. An `https://` dial also races a WebSocket fallback over TCP on the same
 port, which is harmless when nothing listens there.
 
-**TLS.** The runner always fills `tls_ca` (its `--driver-ca`, else its `--tls-cert`), so by
-default the CLI is told `--connect-tls-root` with that file, which replaces the system
-roots. A self-signed test certificate that the CLI's verifier will not take as a root (for
-example one with CA:TRUE used as the server certificate) fails the handshake; for such a
-listener set `MOQ_LITE_TLS_INSECURE=1`, which keeps `--connect-tls-insecure` (the sweep
-setting). Which one a given certificate needs is settled in the live smoke.
+**TLS.** The default is `--connect-tls-insecure`, whatever the request's `tls_ca` says.
+The runner always fills `tls_ca` (its `--driver-ca`, else its `--tls-cert`), and its usual
+certificate is a self-signed one made with `openssl req -x509`, which carries CA:TRUE. The
+CLI's verifier (rustls-webpki) refuses a CA certificate presented as the server's own:
+`--connect-tls-root` with that file fails every handshake with `invalid peer certificate:
+CaUsedAsEndEntity` (checked with moq 0.14.1). Trusting `tls_ca` is therefore an explicit
+opt-in: `MOQ_LITE_TLS_ROOT=1` passes `--connect-tls-root <tls_ca>` (which replaces the
+system roots), for a listener whose server certificate is issued by the CA in that file;
+the adapter then exits 64 when `tls_ca` is empty or unreadable. `MOQ_LITE_TLS_INSECURE`,
+the opt-out of an earlier version, is still accepted (`0` or `1`) and changes nothing.
 
 ## Exit codes
 
@@ -188,13 +201,12 @@ get the same command line on a transport; they differ only in what the runner do
 - Only the pinned fixture: one broadcast, the first video track.
 - `--connect-once`: a session the runner closes is not redialed; each context starts a
   new process.
-- `publisher.log` keeps the CLI's ANSI colour codes.
 
 ## Tests and goldens
 
 | ctest | What it pins |
 |---|---|
-| `moq-lite-adapter-contract` | validation and every refusal (exit 64 with a message naming the problem), the endpoint passed verbatim (also with shell metacharacters), TLS handling, `MOQ_FFMPEG_BIN`, the cleared `MOQ_*` environment, the separate logs, exit statuses, the `timeout` deadline, and the supervisor's shutdown (adapter exit and the end of ffmpeg and moq within the 100 ms grace, no orphan; the `-k 2` bound for processes that ignore SIGTERM) |
+| `moq-lite-adapter-contract` | validation and every refusal (exit 64 with a message naming the problem), the endpoint passed verbatim (also with shell metacharacters), TLS handling (insecure by default, also with a `tls_ca`; the `MOQ_LITE_TLS_ROOT=1` opt-in and its refusals), `MOQ_FFMPEG_BIN`, the cleared `MOQ_*` environment and `NO_COLOR=1`, the separate logs, exit statuses, the `timeout` deadline, and the supervisor's shutdown (adapter exit and the end of ffmpeg and moq within the 100 ms grace, no orphan; the `-k 2` bound for processes that ignore SIGTERM) |
 | `moq-lite-adapter-cmdlines` | the full ffmpeg and moq command lines for every executable moq-lite-06 id on both transports, in `tests/golden/moq-lite-cmdlines.txt`; that the id list equals `kLiteExecutableScenarios` and that every id has the same command line |
 
 Both use stub binaries and need no network (the contract test also needs python3). Run them

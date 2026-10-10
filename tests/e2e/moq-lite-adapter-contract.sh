@@ -51,6 +51,7 @@ case "${1:-}" in
 esac
 printf '<%s>\n' "$@" >"$STUB_RECORD_DIR/moq"
 env | grep '^MOQ_' | sort >"$STUB_RECORD_DIR/moq-env" || true
+printf '%s\n' "${NO_COLOR-unset}" >"$STUB_RECORD_DIR/moq-no-color"
 cat >"$STUB_RECORD_DIR/moq-stdin"
 printf 'moq stub: stdout\n'
 printf 'moq stub: stderr\n' >&2
@@ -71,13 +72,13 @@ make_request() {
         fi
     fi
     jq -n --arg endpoint "$endpoint" --arg transport "$transport" \
-        --arg fixture "$test_dir/fixture.mp4" --arg log_dir "$log_dir" \
+        --arg fixture "$test_dir/fixture.mp4" --arg ca "$test_dir/runner ca.pem" --arg log_dir "$log_dir" \
         --argjson namespace "$namespace" --arg track "$track" --argjson draft "$draft" \
         --argjson timeout_ms "$timeout_ms" '{
             schema_version: 1, run_id: "run 1", scenario_id: "l06-subscribe-latest",
             endpoint: $endpoint, draft: $draft, transport: $transport,
             namespace_hex: $namespace, track_name_hex: $track,
-            fixture: $fixture, tls_ca: "", log_dir: $log_dir,
+            fixture: $fixture, tls_ca: $ca, log_dir: $log_dir,
             scenario_timeout_ms: $timeout_ms, process_timeout_ms: (2 * $timeout_ms + 1000)
         }' >"$test_dir/request.json"
 }
@@ -94,7 +95,7 @@ run_adapter() {
     (($#)) && shift
     rm -f -- "$log_dir/publisher.log" "$log_dir/ffmpeg.log" "$record/"*
     set +e
-    env -u MOQ_FFMPEG_BIN -u MOQ_LITE_TLS_INSECURE PATH="$bin:$PATH" MOQ_CLI_BIN="$moq_bin" \
+    env -u MOQ_FFMPEG_BIN -u MOQ_LITE_TLS_INSECURE -u MOQ_LITE_TLS_ROOT -u NO_COLOR PATH="$bin:$PATH" MOQ_CLI_BIN="$moq_bin" \
         STUB_RECORD_DIR="$record" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
         MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$@" \
         "$adapter" >"$test_dir/out" 2>"$test_dir/err"
@@ -165,7 +166,12 @@ for transport in native_quic webtransport; do
         fail "publisher.log: $log"
     [[ "$ffmpeg_log" == 'ffmpeg stub: stderr' ]] || fail "ffmpeg.log: $ffmpeg_log"
     [[ ! -s "$record/moq-env" ]] || fail "moq saw MOQ_* variables: $(cat "$record/moq-env")"
+    # NO_COLOR=1 (non-empty: an empty NO_COLOR keeps the colours) gives a publisher.log without ANSI codes.
+    [[ "$(cat "$record/moq-no-color")" == 1 ]] || fail "moq ran with NO_COLOR=$(cat "$record/moq-no-color")"
 done
+# An operator's empty NO_COLOR is replaced too.
+run_adapter "$moq_stub" NO_COLOR=
+[[ "$status" -eq 0 && "$(cat "$record/moq-no-color")" == 1 ]] || fail "empty NO_COLOR reached moq"
 # The source runs for the scenario timeout rounded up to whole seconds plus 3.
 make_request '"moq-lite-06"' native_quic "" "$namespace_ok" "$track_ok" 9001
 run_adapter
@@ -197,23 +203,40 @@ for endpoint in 'https://[::1]:443/moq?token=l1d' 'https://relay.example:4443/ot
         fail "WebTransport endpoint $endpoint: $(args_of moq 2>/dev/null) $err"
 done
 
-# TLS: a non-empty tls_ca is trusted with --connect-tls-root; MOQ_LITE_TLS_INSECURE=1 keeps
-# --connect-tls-insecure regardless; an unreadable tls_ca and other override values are refused.
+# TLS: --connect-tls-insecure by default, also with a tls_ca (the runner always fills it, and the
+# CLI refuses its usual CA:TRUE self-signed certificate as a root: CaUsedAsEndEntity), and with an
+# empty tls_ca. MOQ_LITE_TLS_ROOT=1 opts in to --connect-tls-root <tls_ca>, which must then be a
+# non-empty readable file. MOQ_LITE_TLS_INSECURE=0/1 is an accepted no-op alias of the default.
+wt='https://127.0.0.1:4443/moq?token=l1d'
 make_request '"moq-lite-06"' webtransport
-edit_request '.tls_ca = "'"$test_dir"'/runner ca.pem"'
-run_adapter
-[[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args 'https://127.0.0.1:4443/moq?token=l1d' \
-    --connect-tls-root "$test_dir/runner ca.pem")" ]] || fail "tls_ca: $(args_of moq 2>/dev/null) $err"
-run_adapter "$moq_stub" MOQ_LITE_TLS_INSECURE=1
-[[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args 'https://127.0.0.1:4443/moq?token=l1d')" ]] ||
-    fail "MOQ_LITE_TLS_INSECURE=1: $(args_of moq 2>/dev/null) $err"
-run_adapter "$moq_stub" MOQ_LITE_TLS_INSECURE=0
-[[ "$status" -eq 0 && "$(args_of moq)" == *"<--connect-tls-root>"* ]] || fail "MOQ_LITE_TLS_INSECURE=0: $(args_of moq 2>/dev/null) $err"
+[[ "$(jq -r .tls_ca "$test_dir/request.json")" == "$test_dir/runner ca.pem" ]] || fail 'the request has no tls_ca'
+for setting in MOQ_LITE_TLS_ROOT=0 MOQ_LITE_TLS_INSECURE=1 MOQ_LITE_TLS_INSECURE=0 MOQ_LITE_TLS_ROOT=; do
+    run_adapter "$moq_stub" "$setting"
+    [[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args "$wt")" ]] ||
+        fail "default TLS with tls_ca and $setting: $(args_of moq 2>/dev/null) $err"
+done
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=1
+[[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args "$wt" --connect-tls-root "$test_dir/runner ca.pem")" ]] ||
+    fail "MOQ_LITE_TLS_ROOT=1: $(args_of moq 2>/dev/null) $err"
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=1 MOQ_LITE_TLS_INSECURE=0
+[[ "$status" -eq 0 && "$(args_of moq)" == *"<--connect-tls-root>"* ]] ||
+    fail "MOQ_LITE_TLS_ROOT=1 MOQ_LITE_TLS_INSECURE=0: $(args_of moq 2>/dev/null) $err"
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=1 MOQ_LITE_TLS_INSECURE=1
+expect_refused 'MOQ_LITE_TLS_ROOT=1 and MOQ_LITE_TLS_INSECURE=1 contradict each other'
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=yes
+expect_refused 'MOQ_LITE_TLS_ROOT must be 0 or 1'
 run_adapter "$moq_stub" MOQ_LITE_TLS_INSECURE=yes
 expect_refused 'MOQ_LITE_TLS_INSECURE must be 0 or 1'
 edit_request '.tls_ca = "'"$test_dir"'/missing.pem"'
 run_adapter
+[[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args "$wt")" ]] || fail "default TLS with a missing tls_ca: $err"
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=1
 expect_refused 'tls_ca is not a readable file'
+edit_request '.tls_ca = ""'
+run_adapter
+[[ "$status" -eq 0 && "$(args_of moq)" == "$(moq_args "$wt")" ]] || fail "default TLS with an empty tls_ca: $err"
+run_adapter "$moq_stub" MOQ_LITE_TLS_ROOT=1
+expect_refused 'MOQ_LITE_TLS_ROOT=1 needs a non-empty tls_ca'
 
 # MOQ_FFMPEG_BIN names another ffmpeg; it must be executable.
 make_request '"moq-lite-06"' native_quic
@@ -559,7 +582,7 @@ PY
 # group_term MOQ_BIN FFMPEG_BIN LIMIT_S: sets adapter_ms, status, group_ms, log, ffmpeg_log.
 group_term() {
     rm -f -- "$log_dir/publisher.log" "$log_dir/ffmpeg.log" "$record/"*
-    read -r adapter_ms status group_ms < <(env -u MOQ_LITE_TLS_INSECURE PATH="$bin:$PATH" \
+    read -r adapter_ms status group_ms < <(env -u MOQ_LITE_TLS_INSECURE -u MOQ_LITE_TLS_ROOT -u NO_COLOR PATH="$bin:$PATH" \
         MOQ_CLI_BIN="$1" MOQ_FFMPEG_BIN="$2" STUB_RECORD_DIR="$record" \
         MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" \
         python3 "$test_dir/group_term.py" "$adapter" "$test_dir/out" "$test_dir/err" "$3" \
