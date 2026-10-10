@@ -7,7 +7,7 @@ set -euo pipefail
 #   RUNNER_BIN the built moq-interop-runner. The audit CLI is the moq-interop-audit next to it
 #              (MOQ_INTEROP_AUDIT_BIN overrides).
 #   SCENARIO   moq-lite-06 scenario ids, each posted as its own driven run, in order; default every
-#              executable moq-lite-06 scenario (the 19 of include/moq/interop/app/lite_scenarios.h).
+#              executable moq-lite-06 scenario (the 26 of include/moq/interop/app/lite_scenarios.h).
 #              Ids joined by commas (a,b,c) are posted as ONE run of those scenarios (a group run: one
 #              context, and one publisher, per scenario).
 #   --dry-run  print the plan instead of running it: the runner invocation (`runner:` line, the
@@ -55,6 +55,8 @@ all_scenarios=(
     l06-subscribe-refused l06-subscribe-invalid-frame-bounds l06-subscribe-group-floor
     l06-subscribe-abutting-frame-start l06-errors-unknown-stream-type l06-errors-unknown-reset-code
     l06-errors-reserved-reset-code l06-errors-code-space
+    l06-track-info l06-fetch-group l06-fetch-unknown-group l06-probe-report
+    l06-goaway-single l06-goaway-duplicate l06-goaway-oversize
 )
 if [[ $# -gt 0 ]]; then
     scenarios=("$@")
@@ -113,12 +115,12 @@ audit_args=(--draft moq-lite-06 --database "$test_dir/runs.sqlite3"
 api_transport=$transport
 if [[ "$transport" == native_quic ]]; then api_transport=native-quic; fi
 # The timeout bounds the connection wait and each probe, and must exceed the longest probe's windows
-# (l06-subscribe-abutting-frame-start: 2 x 3 s + 6 s, refused at exactly 12000 ms).
+# (l06-fetch-group: 2 x 3 s + 15 s + 3 s, refused at exactly 24000 ms).
 request_for() {
     jq -cn --arg transport "$api_transport" --arg scenario "$1" \
         --argjson namespace "$namespace_hex" --argjson name "$track_name_hex" \
         '{draft: "moq-lite-06", transport: $transport, mode: "driven", scenarios: ($scenario | split(",")),
-          timeout_ms: 15000, track: {namespace_hex: $namespace, name_hex: $name}}'
+          timeout_ms: 30000, track: {namespace_hex: $namespace, name_hex: $name}}'
 }
 
 if ((dry_run)); then
@@ -191,9 +193,9 @@ for scenario in "${scenarios[@]}"; do
     run_id=$(jq -er '.run.id' <<<"$created")
     result=
     # A context waits up to the timeout for the publisher, then runs its probe up to the timeout:
-    # 40 s per scenario of the run (a group run has one context per scenario).
+    # 70 s per scenario of the run (a group run has one context per scenario).
     IFS=, read -r -a group <<<"$scenario"
-    attempts=$((400 * ${#group[@]}))
+    attempts=$((700 * ${#group[@]}))
     for ((attempt = 1; attempt <= attempts; attempt++)); do
         result=$(curl --fail --silent --show-error \
             "http://127.0.0.1:$http_port/api/v1/runs/$run_id")

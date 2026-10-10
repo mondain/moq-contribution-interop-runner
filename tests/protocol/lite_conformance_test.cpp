@@ -1,6 +1,6 @@
-// The end-to-end conformance table (L1d Task 8): every one of the 19 moq-lite-06 scenarios run against the
+// The end-to-end conformance table (L1d Task 8, extended by L2a): every one of the 26 moq-lite-06 scenarios run against the
 // conforming scripted publisher (tests/support/scripted_lite_peer.h, unmodified defaults plus the fixture and the
-// session URL), and every one of the 30 evaluators judged on every transcript. A draft-conforming publisher must
+// session URL), and every one of the 39 evaluators judged on every transcript. A draft-conforming publisher must
 // give true on every evaluator's own scenario(s), except the NotRun cases justified below, and NotRun everywhere
 // else. A false here is a defect of the evaluator or of the publisher, never something to weaken silently.
 
@@ -95,6 +95,9 @@ std::map<std::pair<std::string_view, std::string_view>, std::string_view> expect
         // whose broadcast stays up the whole session never retracts, so there is nothing to judge (catalog
         // rationale: "no retraction in the window is NotRun, never a Pass").
         {{"l06-announce-retired-id-unused", "l06-announce-lifecycle"}, "no retraction within the window"},
+        // Row 075 is judged only for a publisher that advertised no Probe capability; the conforming publisher
+        // advertises Report (row 072 is judged instead), so the level None row has nothing to judge.
+        {{"l06-probe-none-reset", "l06-probe-report"}, "the publisher advertises Probe level Report"},
     };
     // Rows 124/120 are restricted to native QUIC, row 125 to WebTransport (draft 7.3.2); an Unknown binding
     // cannot be judged by any of the three.
@@ -144,18 +147,18 @@ void check_table(const std::vector<LiteTranscript>& transcripts, LiteBinding bin
 }
 
 TEST(LiteConformance, TheTableCoversEveryScenarioAndEvaluator) {
-    EXPECT_EQ(evaluators().size(), 30u);
+    EXPECT_EQ(evaluators().size(), 39u);
     std::set<std::string_view> ids;
     std::set<std::string_view> scenarios;
     for (const auto& entry : evaluators()) {
         ids.insert(entry.id);
         scenarios.insert(entry.scenarios.begin(), entry.scenarios.end());
     }
-    EXPECT_EQ(ids.size(), 30u);
-    EXPECT_EQ(scenarios.size(), 19u);
+    EXPECT_EQ(ids.size(), 39u);
+    EXPECT_EQ(scenarios.size(), 26u);
     std::set<std::string> probed;
     for (const auto& probe : conformance_probes(LiteBinding::NativeQuic)) probed.insert(probe.id);
-    EXPECT_EQ(probed.size(), 19u);
+    EXPECT_EQ(probed.size(), 26u);
     for (const auto scenario : scenarios) EXPECT_TRUE(probed.contains(std::string(scenario))) << scenario;
 }
 
@@ -215,7 +218,7 @@ TEST(LiteConformance, PublisherBehaviorBehindTheTable) {
     const auto transcripts = conformance_transcripts(LiteBinding::NativeQuic);
     std::map<std::string, const LiteTranscript*> by_id;
     for (const auto& t : transcripts) by_id[t.scenario_id] = &t;
-    ASSERT_EQ(by_id.size(), 19u);
+    ASSERT_EQ(by_id.size(), 26u);
     // The unknown-reset-code probe really stopped an OPEN Group stream of A (the row 098 note's check ran).
     const auto* stop = s::lite06::step_labelled(*by_id.at(std::string(s::kL06ErrorsUnknownResetCode)),
                                                 s::kL06StopGroupLabel);
@@ -269,7 +272,7 @@ std::map<std::pair<std::string, std::string>, Verdict> verdict_table(const std::
     return out;
 }
 
-// The 19 scenarios on `binding` with the duties as the builders set them (on) or switched off.
+// The 26 scenarios on `binding` with the duties as the builders set them (on) or switched off.
 std::vector<LiteTranscript> table_with_duties(LiteBinding binding, bool duties,
                                               const std::function<void(ConformingLitePublisherConfig&)>& tweak = {}) {
     std::vector<LiteTranscript> out;
@@ -295,23 +298,34 @@ TEST(LiteConformanceDuties, EveryProductionBuilderTurnsTheDutiesOn) {
     }
 }
 
-// The table (all 30 evaluators, every scenario, every binding) gives the same verdicts with the duties on and off:
-// against the conforming publisher the duties never even fire (it never ends a runner stream first except with a
-// STOP_SENDING, and sends no Path on WebTransport).
+// The table (all 39 evaluators, every scenario, every binding) gives the same verdicts with the duties on and off.
+// The L1 scenarios never fire a duty against the conforming publisher (it never ends a runner stream first except
+// with a STOP_SENDING, and sends no Path on WebTransport). The track and fetch scenarios do: the publisher answers a
+// Track Stream with TRACK_INFO and FIN, and a Fetch Stream with its frames and FIN (draft 5.1.3, 5.1.4), so the
+// runner closes its own send direction (draft 4.3). Those FINs are no step, so no verdict moves.
 TEST(LiteConformanceDuties, TheTableIsTheSameWithTheDutiesOnAndOff) {
     for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport, LiteBinding::Unknown}) {
         SCOPED_TRACE(static_cast<int>(binding));
         const auto on = table_with_duties(binding, true);
         const auto off = table_with_duties(binding, false);
-        EXPECT_EQ(engine_actions(on), 0u);
+        // Track lookups: l06-track-info 2, l06-fetch-group 1, l06-fetch-unknown-group 1; Fetch Streams: 3 and 0
+        // (the unknown group is reset, not finished); the goaway scenario's subscription is never finished.
+        std::map<std::string, std::size_t> fired;
+        for (const auto& t : on) {
+            if (!t.engine_actions.empty()) fired[t.scenario_id] = t.engine_actions.size();
+        }
+        EXPECT_EQ(fired, (std::map<std::string, std::size_t>{{"l06-track-info", 2},
+                                                              {"l06-fetch-group", 4},
+                                                              {"l06-fetch-unknown-group", 1}}));
+        EXPECT_EQ(engine_actions(off), 0u);
         check_table(on, binding);
         EXPECT_EQ(verdict_table(on), verdict_table(off));
     }
 }
 
 // A publisher that ends every announce answer (FIN right after ANNOUNCE_OK and its ANNOUNCE_STARTs) and every
-// served subscription (FIN right after SUBSCRIBE_OK) itself: the send-close duty fires, and no verdict of the 30
-// evaluators on the 19 scenarios differs from the duties-off run (the engine's FINs are no step: no stimulus proof,
+// served subscription (FIN right after SUBSCRIBE_OK) itself: the send-close duty fires, and no verdict of the 39
+// evaluators on the 26 scenarios differs from the duties-off run (the engine's FINs are no step: no stimulus proof,
 // no allowance and no same-poll ordering sees them).
 TEST(LiteConformanceDuties, TheDutiesFiringChangeNoVerdict) {
     const auto ends_answers = [](ConformingLitePublisherConfig& config) {

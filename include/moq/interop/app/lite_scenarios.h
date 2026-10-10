@@ -1,6 +1,6 @@
 #pragma once
 
-// The executable moq-lite-06 scenarios (L1d): the 19 scenario ids of requirements/moq-lite-06.json with their
+// The executable moq-lite-06 scenarios (L1d, L2a): the 26 scenario ids of requirements/moq-lite-06.json with their
 // track-fixture trait. Free of scenario code, like own_scenarios_22.h, so every registry predicate links without
 // the scenarios library. The probe of each id is built by src/scenarios/lite06_*.cpp (its builder's
 // requires_track equals the trait here; tests/unit/lite_evaluators_test.cpp checks it).
@@ -39,6 +39,14 @@ inline constexpr auto kLiteExecutableScenarios = std::to_array<LiteScenarioTrait
     {"l06-errors-unknown-reset-code", true},
     {"l06-errors-reserved-reset-code", true},
     {"l06-errors-code-space", false},
+    // L2a: Track, Fetch, Probe and Goaway.
+    {"l06-track-info", true},
+    {"l06-fetch-group", true},
+    {"l06-fetch-unknown-group", true},
+    {"l06-probe-report", false},
+    {"l06-goaway-single", true},
+    {"l06-goaway-duplicate", false},
+    {"l06-goaway-oversize", false},
 });
 
 // The ids of kLiteExecutableScenarios, in the same order (what executable_scenarios(106) lists).

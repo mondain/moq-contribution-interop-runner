@@ -72,7 +72,7 @@ for entry in "native-quic 19231" "webtransport 19233"; do
         fail "the last $api_transport request is not the row 027 group run: $group"
     jq -e --arg transport "$api_transport" --argjson fixture "$fixture" -s '
         all(.[]; .draft == "moq-lite-06" and .transport == $transport and .mode == "driven" and
-            .timeout_ms == 15000 and .track == $fixture)' \
+            .timeout_ms == 30000 and .track == $fixture)' \
         <<<"$bodies" >/dev/null || fail "a $api_transport request has the wrong draft, mode, timeout or fixture"
 done
 grep -qF '<--port> <19231> ' "$work/plan.txt" && grep -qF '<--publisher-port-start> <19232> ' "$work/plan.txt" &&

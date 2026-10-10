@@ -87,8 +87,14 @@ inline ConformingLitePublisherConfig publisher_config(scenarios::LiteBinding bin
     config.broadcast = "demo/live";
     config.track = "video";
     config.hop_id = 7;
+    // Probe level Report (row 072 judged), four frames in every group and in every group a FETCH may ask for (the
+    // fetch probe learns a group of at least three frames): the same settings as the conformance table.
     config.setup_parameters = {{wire::moqlite06::kParamHop, Bytes{std::byte{7}}},
-                               {wire::moqlite06::kParamCost, Bytes{std::byte{0}}}};
+                               {wire::moqlite06::kParamCost, Bytes{std::byte{0}}},
+                               {wire::moqlite06::kParamProbe, Bytes{std::byte{1}}}};
+    config.frames_per_group = 4;
+    config.fetch_frames_per_group = 4;
+    config.fetch_last_group = 1000;
     config.binding = binding;
     const auto url = app::lite_session_url(binding == scenarios::LiteBinding::WebTransport
                                                ? app::TransportKind::WebTransport : app::TransportKind::NativeQuic);

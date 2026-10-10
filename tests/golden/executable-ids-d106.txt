@@ -4,6 +4,12 @@ l06-errors-code-space
 l06-errors-reserved-reset-code
 l06-errors-unknown-reset-code
 l06-errors-unknown-stream-type
+l06-fetch-group
+l06-fetch-unknown-group
+l06-goaway-duplicate
+l06-goaway-oversize
+l06-goaway-single
+l06-probe-report
 l06-session-stream-close
 l06-setup-client-path
 l06-setup-duplicate-parameter
@@ -17,3 +23,4 @@ l06-subscribe-group-floor
 l06-subscribe-invalid-frame-bounds
 l06-subscribe-latest
 l06-subscribe-refused
+l06-track-info

@@ -13,16 +13,20 @@
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
 #include "moq/interop/scenarios/lite06_errors.h"
+#include "moq/interop/scenarios/lite06_fetch.h"
+#include "moq/interop/scenarios/lite06_goaway.h"
+#include "moq/interop/scenarios/lite06_probe.h"
 #include "moq/interop/scenarios/lite06_setup.h"
 #include "moq/interop/scenarios/lite06_subscribe.h"
+#include "moq/interop/scenarios/lite06_track.h"
 #include "moq/interop/scenarios/lite_probe.h"
 #include "support/scripted_lite_peer.h"
 
 namespace moq::interop::test::lite {
 
 inline constexpr std::chrono::milliseconds kConformanceTick{10};
-// Above every builder's stated sum (the largest: unknown-reset-code 2 * 3 s + 3 s; abutting 2 * 3 s + 6 s).
-inline constexpr std::chrono::milliseconds kConformanceDeadline{20000};
+// Above every builder's stated sum (the largest: fetch-group 2 * 3 s + 15 s + 3 s; goaway-single 3 s + 10 s + 6 s).
+inline constexpr std::chrono::milliseconds kConformanceDeadline{40000};
 inline const std::string kConformanceBroadcast = "demo/live";
 inline const std::string kConformanceTrack = "video";
 inline const std::string kConformanceUrlPath = "/moq";
@@ -42,10 +46,17 @@ inline ConformingLitePublisherConfig conformance_publisher_config(scenarios::Lit
     config.session_url_path = kConformanceUrlPath;
     config.session_url_query = kConformanceUrlQuery;
     config.binding = binding;
+    // L2a. Every group has four frames, so the fetch probe learns a group with the three frames its ranges need and
+    // every group the subscriptions deliver is one FETCH holds; the publisher advertises Probe level Report (so
+    // row 072 is judged and row 075, which needs level None, is NotRun on the conforming table).
+    config.frames_per_group = 4;
+    config.fetch_frames_per_group = 4;
+    config.fetch_last_group = 1000;
+    config.setup_parameters.push_back(l06::SetupParameter{l06::kParamProbe, Bytes{std::byte{1}}});
     return config;
 }
 
-// The 19 scenario definitions with the default allowances and kConformanceDeadline, each carrying `binding`.
+// The 26 scenario definitions with the default allowances and kConformanceDeadline, each carrying `binding`.
 inline std::vector<scenarios::LiteProbeDefinition> conformance_probes(scenarios::LiteBinding binding) {
     namespace s = scenarios;
     const auto d = kConformanceDeadline;
@@ -71,6 +82,13 @@ inline std::vector<scenarios::LiteProbeDefinition> conformance_probes(scenarios:
         s::l06_errors_reserved_reset_code_probe(d, path, track),
         s::l06_errors_code_space_probe(d),
         s::l06_setup_client_path_probe(d, kConformanceUrlPath, kConformanceUrlQuery),
+        s::l06_track_info_probe(d, path, track),
+        s::l06_fetch_group_probe(d, path, track),
+        s::l06_fetch_unknown_group_probe(d, path, track),
+        s::l06_probe_report_probe(d),
+        s::l06_goaway_single_probe(d, path, track),
+        s::l06_goaway_duplicate_probe(d),
+        s::l06_goaway_oversize_probe(d),
     };
     for (auto& probe : probes) probe.binding = binding;
     return probes;
@@ -88,7 +106,7 @@ inline scenarios::LiteTranscript run_conforming(
     return run_lite_probe(peer, std::move(definition), clock, kConformanceTick);
 }
 
-// One transcript per scenario (19), in conformance_probes order, all on `binding`.
+// One transcript per scenario (26), in conformance_probes order, all on `binding`.
 inline std::vector<scenarios::LiteTranscript> conformance_transcripts(
     scenarios::LiteBinding binding = scenarios::LiteBinding::NativeQuic) {
     std::vector<scenarios::LiteTranscript> out;
