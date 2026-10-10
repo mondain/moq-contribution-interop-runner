@@ -139,8 +139,9 @@ run's draft (every moq-lite run, since it has no catalog), while the catalog-bac
 lite catalog is complete (L2). Run summaries in `GET /api/v1/runs` carry no `staged` field.
 
 A WebTransport lite CONNECT the listener refuses (for example a `:path` without the query) is named in the
-context's `harness_error` detail as `refused CONNECT: status=404 reason=unknown WebTransport endpoint path=<the
-received :path>`. Adapters dial `url` verbatim: `path` is the URL path only.
+context's `harness_error` detail as `refused CONNECT: validator_status=404 reason=unknown WebTransport endpoint path=<the
+received :path>`; `validator_status` is the validator's decision, and the status the client sees on the wire is the
+HTTP/3 stack's own (h3zero answered 501), so the two numbers differ. Adapters dial `url` verbatim: `path` is the URL path only.
 
 ### Declaring publisher capabilities
 

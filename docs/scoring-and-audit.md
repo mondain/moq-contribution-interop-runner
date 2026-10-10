@@ -208,8 +208,9 @@ build/moq-interop-audit --draft moq-lite-06 [--format text|json] [--database PAT
 ```
 
 `--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
-(`complete: false`). No evaluators are bound yet, so the audit reports the catalog's state
-instead of coverage, and its verdict is never a pass. Other spellings (`106`, `moq-lite-05`)
+(`complete: false`). Thirty evaluators are bound to the 19 scenarios (34 bindings), so the static audit
+reports the coverage of the reviewed required rows by those bindings (26 of 26 required and 4 of 4 optional
+reviewed Applicable and Testable rows) next to the catalog's state, and its verdict is never a pass. Other spellings (`106`, `moq-lite-05`)
 are refused. With `--database PATH` the stored moq-lite-06 runs of that database are also
 audited (the execution audit of the MoQ Transport drafts with the lite bindings: each stored
 score is recomputed with the staged scoring, and every scored row must be bound to a selected
@@ -246,3 +247,16 @@ the staged score (`fail` if a required reviewed row failed, otherwise `incomplet
 counts in the required, weighted and coverage denominators without earning, and the run record, the
 exports and the completeness entry carry `staged: true` with a `staged_note`. See
 [http-api.md](http-api.md#moq-lite-06-runs).
+
+What `not_run` means for a bound moq-lite-06 row (the run is still `fail` or `incomplete`; none of these is a
+failure): row 125 (no Path on a WebTransport session) is judged only on WebTransport and rows 120 and 124 (the
+Path equals `/moq?token=l1d`, a Path is sent) only on native QUIC, so each is `not_run` on the other transport;
+row 126 (a server's SETUP Path closes the session) is judged only on native QUIC; row 152 (a retired announce id is
+not reused) needs the adapter to end and restart a broadcast inside one session, which the driver contract does
+not offer, so it is `not_run` on both transports; and when a WebTransport client's SETUP carries Path the runner
+closes the session for it (draft 7.3.2, a receiver MUST close) and every other row of that session is `not_run`
+except 111 and 125. Row `L06-4-4-MUST-027` takes its session half from any of its five scenarios and its stream
+half from `l06-errors-code-space`, so it settles only in a run (a group run) that holds all five and is `not_run`
+in a single-scenario run. A Fail by the absence of a close (rows 107, 126 and 131, whose bindings declare
+`peer_close`) is counted as observed on the completeness page for the staged moq-lite-06 catalog; a Pass still
+needs the evidence its binding declares.

@@ -792,6 +792,23 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   longest probe. Rows such as 152 (the publisher must end and restart a broadcast within one session; the adapter has
   no CLI option that asks for it) are `not_run` by the runner's decision, not the adapter's. Build, environment and tests:
   [adapters/moq-lite/README.md](../adapters/moq-lite/README.md).
+- **Building the CLI and running the matrix by hand.** Build the `moq` CLI offline from a scratch copy of the
+  moq-dev checkout, never inside it: copy the checkout without `target/`, `.git/` and `rust-toolchain.toml`, then
+  `CARGO_TARGET_DIR=<scratch>/target cargo +1.98.1 build -p moq-cli --release --offline --locked` (the dependencies
+  must already be in the cargo cache; about 3 minutes) and export `MOQ_CLI_BIN=<scratch>/target/release/moq`. The
+  adapter also needs `ffmpeg` with libx264, `jq` and coreutils `timeout`. With the runner built,
+  `MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner` runs the 19 scenarios on both
+  transports (native QUIC on ports 19231/19232, WebTransport on 19233/19234) with `timeout_ms` 15000 (the
+  `l06-subscribe-abutting-frame-start` probe needs more than 12000), audits each database and posts the
+  five-scenario group run that row `L06-4-4-MUST-027` needs (that row stays `not_run` in single runs).
+  `tests/e2e/driven-moq-lite.sh TRANSPORT RUNNER_BIN [SCENARIO...]` runs one transport; comma-joined ids are one
+  group run. These scripts are not ctests and skip (exit 77) without the prerequisites. CI runs only the stub-based
+  adapter tests (`moq-lite-adapter-contract`, `moq-lite-adapter-cmdlines`, `moq-lite-matrix-plan`) as part of the
+  full `ctest`.
+- **Meaning of `not_run` per transport.** Row 125 is judged only on WebTransport; rows 120 and 124 only on native
+  QUIC; row 126 only on native QUIC; row 152 on neither (it needs the adapter to end and restart the broadcast, which
+  the driver contract does not offer). A publisher that sends a Path on WebTransport makes the runner close the
+  session, which leaves every row of that session `not_run` except 111 and 125 (the `moq` CLI does not do this).
 - **Results are staged.** A moq-lite-06 run covers 30 testable rows of a catalog with 75 still-unreviewed rows, so its
   verdict is `incomplete` or `fail`, never `pass`; unreviewed rows are listed as not tested.
 

@@ -849,12 +849,20 @@ engine, 30 evaluators bound to catalog rows, and a lite family in the native run
   moq-lite-06` reports 26 of 26 required reviewed rows covered and exits 0 while saying the catalog is staged.
 - **Evidence.** A passing row records exactly the evidence kinds its binding declares; a transcript that is
   harness-failed, hit the event limit or timed out contributes no verdicts.
-- **Not reachable yet.** The HTTP API and the server refuse moq-lite-06 runs, `runnable(MoqLite06)` is false, and no
-  adapter ships; L1e flips these and runs the 19 scenarios against the real moq CLI. Until then the family runs only
-  through the native run manager in tests, against a scripted conforming publisher. No sweep against a real
-  publisher has been done, so there are no observed results to record here. (That was the L1d state; L1e makes
-  moq-lite-06 runnable through the API, and its first sweep against a real publisher is
-  [below](#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235).)
+- **Reachability (L1e).** The HTTP API accepts moq-lite-06 runs (`"draft": "moq-lite-06"`, a string; the MoQ
+  Transport drafts stay integers) when the runner loaded the lite catalog, `runnable(MoqLite06)` is true, and
+  `adapters/moq-lite` drives the real `moq` CLI as the publisher. In L1d the family ran only through the native run
+  manager in tests against a scripted conforming publisher; the first real-publisher sweep is
+  [below](#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235). The session URL is fixed: path `/moq`, query
+  `token=l1d` (native `moql://HOST:PORT/moq?token=l1d`, WebTransport `https://HOST:PORT/moq?token=l1d`).
+- **Runner duties and the Group-payload rule (L1e Task 1).** The engine FINs the runner's send side of a runner-opened
+  bidirectional stream when the publisher ends it (recorded as an engine action; it does not count as a stimulus),
+  and closes a WebTransport session with PROTOCOL_VIOLATION when the client's strictly decoded SETUP carries Path
+  (draft 7.3.2): row 125 fails, 111 is judged, and every other row of that session, 014 included, is `not_run`.
+  That consequence was never observed against the `moq` CLI (it sends no Path on WebTransport). The payload bytes of
+  FRAMEs on Group streams are not stored (length and FIN are, plus the counter `group_payload_bytes_dropped`), so
+  a media publisher does not exhaust the recorder; the ceilings that remain (16384 events, 64 MiB) are about 15 to
+  57 Mbps and far above the 200 kbps test source.
 - **Incomplete trailing messages.** An incomplete message still buffered on an announce response stream when the window ends (for example a second ANNOUNCE_OK, which reads as a message waiting for bytes) leaves rows 139, 141 and 152 not run instead of passing.
 
 ## moq-lite-06 first sweep against the moq CLI b8b0d235

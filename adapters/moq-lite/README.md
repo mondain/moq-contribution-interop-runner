@@ -268,3 +268,27 @@ source (the timeout rounded up plus 3 s) outlasts every probe. The run timeout m
 the longest probe's windows: `l06-subscribe-abutting-frame-start` needs more than 12000 ms
 (two 3 s response allowances plus the 6 s observation window) and is refused with a harness
 error at exactly 12000, hence 15000.
+
+Row `L06-4-4-MUST-027` (the close code space) settles only in a run that holds all five of its
+scenarios (`l06-errors-code-space`, `l06-setup-duplicate-stream`, `l06-setup-duplicate-parameter`,
+`l06-setup-server-path`, `l06-setup-server-role`); in the 19 single runs it stays `not_run`.
+`moq-lite-matrix.sh` therefore also posts that five-scenario group run on each transport, and
+the driven script waits 40 s per scenario of a group run. To run it by hand:
+
+```sh
+MOQ_CLI_BIN=/path/to/moq bash tests/e2e/driven-moq-lite.sh native_quic build/moq-interop-runner \
+    l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role
+```
+
+To run the matrix manually: build the CLI as above, make sure `ffmpeg` (with libx264), `jq`,
+`curl`, `openssl` and coreutils `timeout` are installed, build the runner (`cmake --build build`),
+export `MOQ_CLI_BIN` (and `MOQ_FFMPEG_BIN` if ffmpeg is not on `PATH`), and run the matrix
+script; the ports above must be free and every run uses `timeout_ms` 15000.
+
+## CI
+
+The CI workflow (`.github/workflows/ci.yml`, job `native`) runs the full `ctest`, which already
+includes `moq-lite-adapter-contract`, `moq-lite-adapter-cmdlines` and `moq-lite-matrix-plan`
+(stub binaries; the contract test needs python3), the `audit-cli-moqlite` end-to-end test and the
+lite unit and integration tests, so no workflow step is specific to this adapter. The live
+matrix and the driven script are not run in CI: they need the Rust binary and ffmpeg.
