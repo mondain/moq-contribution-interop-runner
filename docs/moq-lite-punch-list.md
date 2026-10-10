@@ -203,3 +203,17 @@ they are listed in the interop notes, not here.
   (a defect mode reproduces each failing behavior, for example `probe-resets-on-target` for ML-04 and
   `goaway-oversize-logged` for ML-05). Nothing new for upstream; the list stays local until the final review is done and
   the user decides to send it.
+
+## Filed upstream
+
+Filed on 2026-10-10 against moq-dev/moq, after the items were reproduced on `moq 0.14.2` built from `main` at
+`954505e6` (all five failing rows fail there too; row 126 on native QUIC only, as before):
+
+| Items | Issue |
+|---|---|
+| ML-01, ML-02 (Path and Role in a server's SETUP) | https://github.com/moq-dev/moq/issues/5257 |
+| ML-04 (PROBE target resets the Probe Stream) | https://github.com/moq-dev/moq/issues/5258 |
+| ML-05, ML-03 (oversize GOAWAY URI, Message Length mismatch) | https://github.com/moq-dev/moq/issues/5259 |
+
+ML-Q1 (which stream code answers a protocol violation on one stream) is a question for the draft, not the CLI, and was not
+filed.
