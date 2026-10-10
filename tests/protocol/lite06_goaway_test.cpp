@@ -309,4 +309,59 @@ TEST(Lite06GoawayBuilders, TheBuildersValidateTheirInputs) {
     EXPECT_EQ(oversize.id, scen::kL06GoawayOversize);
 }
 
+
+// --- L2c: when the first GOAWAY ends the session, rows 077 and 186 are not applicable - and only then -----------------
+
+session::PeerCloseInfo close_info(std::uint64_t code, std::uint64_t at_ns) {
+    session::PeerCloseInfo info;
+    info.space = moq::interop::transport::CloseErrorSpace::Application;
+    info.code = code;
+    info.at_ns = at_ns;
+    return info;
+}
+
+TEST(Lite06GoawayInapplicable, AGracefulCloseOnTheFirstGoawayMakesBothRowsInapplicable) {
+    ConformingLitePublisherConfig config;
+    config.defect = LiteDefect::GoawayClosesSessionOnFirst;
+    EXPECT_TRUE(scen::l06_goaway_single_inapplicable(run_single(config)));
+    EXPECT_TRUE(scen::l06_goaway_duplicate_inapplicable(run_duplicate(config)));
+}
+
+TEST(Lite06GoawayInapplicable, ACarryingOnPublisherIsJudgedNotInapplicable) {
+    EXPECT_FALSE(scen::l06_goaway_single_inapplicable(run_single(busy_config())));
+    EXPECT_FALSE(scen::l06_goaway_duplicate_inapplicable(run_duplicate()));
+}
+
+// A publisher that keeps opening streams past the allowance and only then closes the session broke row 077: the close
+// must not turn that into "not applicable" (the run would pass).
+TEST(Lite06GoawayInapplicable, StreamsOpenedAfterTheAllowanceKeepRow077InapplicableOut) {
+    auto config = busy_config();
+    config.defect = LiteDefect::OpensStreamsAfterGoaway;
+    auto t = run_single(config);
+    ASSERT_EQ(evaluate_l06_goaway_no_new_streams(t), kFail);
+    t.peer_close = close_info(0x0, t.ended_ns);
+    EXPECT_EQ(evaluate_l06_goaway_no_new_streams(t), kNotRun);  // the evaluator gives no verdict on a close...
+    EXPECT_FALSE(scen::l06_goaway_single_inapplicable(t));       // ...and the predicate must not excuse the streams
+}
+
+// Only the graceful close the draft allows (an application close with NO_ERROR) is "not applicable".
+TEST(Lite06GoawayInapplicable, ACloseWithAnotherCodeOrSpaceIsNot) {
+    ConformingLitePublisherConfig config;
+    config.defect = LiteDefect::GoawayClosesSessionOnFirst;
+    for (const auto code : {std::uint64_t{0x3}, std::uint64_t{0x1}}) {
+        auto single = run_single(config);
+        ASSERT_TRUE(single.peer_close.has_value());
+        single.peer_close = close_info(code, single.peer_close->at_ns);
+        EXPECT_FALSE(scen::l06_goaway_single_inapplicable(single)) << code;
+        auto duplicate = run_duplicate(config);
+        ASSERT_TRUE(duplicate.peer_close.has_value());
+        duplicate.peer_close = close_info(code, duplicate.peer_close->at_ns);
+        EXPECT_FALSE(scen::l06_goaway_duplicate_inapplicable(duplicate)) << code;
+    }
+    auto transport_space = run_single(config);
+    ASSERT_TRUE(transport_space.peer_close.has_value());
+    transport_space.peer_close->space = moq::interop::transport::CloseErrorSpace::Transport;
+    EXPECT_FALSE(scen::l06_goaway_single_inapplicable(transport_space));
+}
+
 }  // namespace
