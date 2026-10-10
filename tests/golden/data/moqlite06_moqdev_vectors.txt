@@ -10,7 +10,7 @@
 #
 # Format, one vector per line:  name | message | hex bytes | source file:line | expected fields
 #   source is relative to the moq.dev checkout root. expected fields are key=value pairs separated by ';'.
-#   message is SETUP, VARINT or ANNOUNCE_END.
+#   message is SETUP, VARINT, ANNOUNCE_END or TRACK_INFO.
 #
 # Coverage. moq.dev's Rust tests hold very few literal Lite06 wire bytes: nearly every other test builds a
 # message in memory and round-trips it. The usable literals are the SETUP cost vector and the three Lite06
@@ -18,8 +18,11 @@
 # ANNOUNCE_START, ANNOUNCE_UPDATE, SUBSCRIBE, SUBSCRIBE_UPDATE, SUBSCRIBE_OK, SUBSCRIBE_END, SUBSCRIBE_DROP,
 # GROUP or FRAME in announce.rs, subscribe.rs, group.rs, message.rs or datagram.rs, so the cross-check for
 # those messages is limited to the structural facts the crosscheck test cites from the Rust tests.
-# The only TRACK_INFO literal (track.rs:215) is a Lite05 vector for a message that is out of scope for L1b
-# and is deliberately not extracted.
+# The only TRACK_INFO literal (track.rs:215) is a Lite05 vector (0c 7f 00 c0 1f ff ff ff ff ff ff 43 e8): its
+# body has FOUR fields (priority 7f, a 00 byte, max age c0 1f.., timescale 43 e8), one more than the draft-06
+# figure (draft 7.12: priority, max age, timescale), so the Lite06 wire is NOT identical and the literal is not
+# extracted. The L2a derived vector below drops that extra 00 byte and re-lengths the message (0b), which gives
+# the Lite06 encoding of the same defaults: priority 127, unlimited max age (2^53-1), timescale 1000.
 #
 # One vector is DERIVED, not a literal: moq.dev announce.rs:829 asserts only that an ANNOUNCE_END for id 42
 # on Lite06 encodes to 3 bytes ("type byte, size prefix, id varint"). The bytes below are built from draft
@@ -30,3 +33,4 @@ varint_63_lite06 | VARINT | 3F | rs/moq-net/src/coding/varint.rs:487 | value=63
 varint_64_lite06 | VARINT | 40 40 | rs/moq-net/src/coding/varint.rs:488 | value=64
 varint_16384_lite06 | VARINT | 80 00 40 00 | rs/moq-net/src/coding/varint.rs:489 | value=16384
 announce_end_id_42_lite06_derived | ANNOUNCE_END | 01 01 2A | rs/moq-net/src/lite/announce.rs:829 | announce_id=42;derived=true
+track_info_defaults_lite06_derived | TRACK_INFO | 0B 7F C0 1F FF FF FF FF FF FF 43 E8 | rs/moq-net/src/lite/track.rs:215 | priority=127;max_age=9007199254740991;timescale=1000;derived=true
