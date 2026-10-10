@@ -514,6 +514,40 @@ elapsed=$((SECONDS - started))
 [[ "$status" -eq 0 && "$log" == *"moq stub: SIGTERM"* ]] || fail "lingering moq: status $status, log $log"
 ((elapsed >= 5 && elapsed <= 9)) || fail "lingering moq ended after ${elapsed}s (expected about 6s)"
 
+# moq starts only once ffmpeg has written its first bytes: the CLI announces the broadcast when it
+# connects but creates the media track from the moov, and refuses a SUBSCRIBE that comes earlier.
+cat >"$test_dir/late ffmpeg" <<'STUB'
+#!/usr/bin/env bash
+sleep 1.5
+date +%s%N >"$STUB_RECORD_DIR/ffmpeg-wrote"
+printf 'fmp4 bytes\n'
+STUB
+cat >"$test_dir/silent ffmpeg" <<'STUB'
+#!/usr/bin/env bash
+sleep 0.5
+STUB
+cat >"$test_dir/timed moq" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    --version) printf 'moq 0.14.1\n'; exit 0 ;;
+    --help) printf '      --connect-version <CONNECT_VERSION>\n'; exit 0 ;;
+esac
+date +%s%N >"$STUB_RECORD_DIR/moq-started"
+cat >"$STUB_RECORD_DIR/moq-stdin"
+STUB
+chmod +x "$test_dir/late ffmpeg" "$test_dir/silent ffmpeg" "$test_dir/timed moq"
+make_request '"moq-lite-06"' native_quic
+run_adapter "$test_dir/timed moq" MOQ_FFMPEG_BIN="$test_dir/late ffmpeg"
+[[ "$status" -eq 0 && -f "$record/moq-started" && -f "$record/ffmpeg-wrote" ]] ||
+    fail "late ffmpeg: status $status, err $err"
+(($(cat "$record/moq-started") >= $(cat "$record/ffmpeg-wrote"))) ||
+    fail 'moq started before ffmpeg wrote anything'
+[[ "$(cat "$record/moq-stdin")" == 'fmp4 bytes' ]] || fail 'moq did not read the source from its start'
+# A source that ends without output: moq still starts (end of file counts) and sees an empty input.
+run_adapter "$test_dir/timed moq" MOQ_FFMPEG_BIN="$test_dir/silent ffmpeg"
+[[ "$status" -eq 0 && -f "$record/moq-started" && ! -s "$record/moq-stdin" ]] ||
+    fail "silent ffmpeg: status $status, err $err"
+
 # Shutdown by the runner: SIGTERM to the adapter's process group, SIGKILL 100 ms later (recorded as a
 # driver failure). group_term.py mirrors that: it starts the adapter in a new session, waits for the
 # stubs' "started" lines, sends SIGTERM to the group, polls the adapter's exit every millisecond and
@@ -624,6 +658,7 @@ printf '%s\n' "$$" >"$STUB_RECORD_DIR/ffmpeg-pid"
 sleep 30 &
 child=$!
 trap 'kill "$child" 2>/dev/null; printf "ffmpeg stub: SIGTERM\n" >&2; exit 255' TERM
+printf 'fmp4 bytes\n'  # the first output, which lets the adapter start moq
 printf 'ffmpeg stub: started\n' >&2
 wait "$child"
 exit 3
@@ -668,6 +703,7 @@ cat >"$test_dir/deaf ffmpeg" <<'STUB'
 #!/usr/bin/env bash
 trap '' TERM
 printf '%s\n' "$$" >"$STUB_RECORD_DIR/ffmpeg-pid"
+printf 'fmp4 bytes\n'
 printf 'ffmpeg stub: started\n' >&2
 exec sleep 30
 STUB

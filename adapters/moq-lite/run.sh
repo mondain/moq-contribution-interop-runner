@@ -35,8 +35,12 @@
 # --version and no --connect-version, and is refused (exit 64).
 set -euo pipefail
 
-# The track fixture: the only broadcast and track this adapter publishes. PROVISIONAL until the live
-# smoke (L1e Task 4) pins them; change these three lines, adapters/moq-lite/adapter.json and the
+# The track fixture: the only broadcast and track this adapter publishes, pinned by the L1e live smoke
+# against moq 0.14.1 (b8b0d235) on both transports: the CLI announces exactly the broadcast path
+# "interop.hang" (ANNOUNCE_START suffix "interop.hang" for prefix "", "" for prefix "interop.hang";
+# the session path /moq is not part of it), and its first video track is "0.m4s", one group per GOP
+# (about every 0.95 s with this source). It also publishes catalog.json, catalog.json.z, catalog and
+# the timeline tracks *.timeline.z. Change these three lines, adapters/moq-lite/adapter.json and the
 # goldens together. The broadcast is the namespace field (one field; a broadcast path joins the
 # fields with "/"); the track name is not passed to the CLI (the CLI names its media tracks
 # <id>.m4s itself), it only names the track the runner subscribes to.
@@ -210,10 +214,22 @@ supervise=(timeout --foreground --preserve-status -k 2 -s TERM "$((source_second
 # ffmpeg exits nonzero whenever moq ended first (the runner closed the session; ffmpeg's next write
 # fails), so ffmpeg's status cannot tell a failed run. A nonzero ffmpeg status is reported on the
 # adapter's standard error (the runner's stderr.bin), its messages are in ffmpeg.log.
+# moq starts only once ffmpeg has written its first bytes (read -t 0 tests for input without reading
+# any): the CLI announces the broadcast as soon as it connects, but creates the media track only when
+# it has read the moov, and a SUBSCRIBE that arrives before that is refused ("not found", reset 51;
+# seen in the L1e live smoke, where the CLI connected in about 40 ms and ffmpeg needed longer for its
+# first fragment). The wait is bounded by the source length; at ffmpeg's end, EOF also counts as input.
+await_source() {
+    local attempt
+    for ((attempt = 0; attempt < source_seconds * 50; ++attempt)); do
+        read -r -t 0 && return 0
+        sleep 0.02
+    done
+}
 publish() {
     set +e +o pipefail
     "${supervise[@]}" "$ffmpeg_bin" "${ffmpeg_args[@]}" </dev/null 2>"$log_dir/ffmpeg.log" |
-        "${supervise[@]}" "$moq_bin" "${moq_args[@]}" >"$log_dir/publisher.log" 2>&1
+        { await_source; exec "${supervise[@]}" "$moq_bin" "${moq_args[@]}"; } >"$log_dir/publisher.log" 2>&1
     local statuses=("${PIPESTATUS[@]}")
     if ((statuses[0] != 0)); then
         printf 'moq-lite adapter: ffmpeg exited with status %s (see ffmpeg.log)\n' "${statuses[0]}" >&2

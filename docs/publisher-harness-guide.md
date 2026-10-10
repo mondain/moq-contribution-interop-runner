@@ -783,8 +783,10 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   overrides `--log-level`) and `<log_dir>/ffmpeg.log`; the exit status is moq's. Like the imquic adapter it
   stays alive as a supervisor: on the runner's group SIGTERM it exits 0 at once while ffmpeg and moq, signalled by
   the group, end on their own, each bounded by `timeout -k 2`. It accepts only the fixture
-  `namespace_hex: ["696e7465726f702e68616e67"]` (`interop.hang`) and `track_name_hex: "302e6d3473"` (`0.m4s`);
-  these are provisional until the live smoke pins them. The adapter has no per-scenario options: all 19 executable
+  `namespace_hex: ["696e7465726f702e68616e67"]` (`interop.hang`) and `track_name_hex: "302e6d3473"` (`0.m4s`),
+  pinned by the L1e live smoke (the CLI announces exactly `interop.hang`; `0.m4s` is its first video track, one group
+  per GOP). moq starts only once ffmpeg has written its first bytes: the CLI creates the media track from the moov
+  and refuses a SUBSCRIBE that arrives earlier. The adapter has no per-scenario options: all 19 executable
   scenarios use the same command line and differ only in what the runner does
   (`tests/golden/moq-lite-cmdlines.txt`). The CLI has no duration flag, so use a run `timeout_ms` that fits the
   longest probe. Rows such as 152 (the publisher must end and restart a broadcast within one session; the adapter has

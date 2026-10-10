@@ -91,8 +91,18 @@ timeout --foreground --preserve-status -k 2 -s TERM <S+2> ffmpeg -hide_banner -v
 
 with `--connect-tls-root <tls_ca>` in place of `--connect-tls-insecure` only when
 `MOQ_LITE_TLS_ROOT=1` is set. `-frag_duration` is in microseconds, so `1000` (1 ms) makes
-ffmpeg write about one fragment per frame; this is the recipe verified with the CLI, and the
-live smoke (L1e Task 4) may change it to `1000000` (1 s, one fragment per GOP).
+ffmpeg write about one fragment per frame; the live smoke (L1e Task 4) kept it: the CLI
+imports it without complaint, sends one FRAME per video frame and starts a group at each
+keyframe.
+
+**moq starts after the source.** The moq side of the pipeline waits (`read -t 0`, which reads
+nothing) until ffmpeg has written its first bytes, then `exec`s the `timeout ... moq` command
+above. The CLI announces the broadcast as soon as it connects (about 40 ms after it starts on
+the loopback) but creates the media track only when it has read the moov, and it refuses a
+SUBSCRIBE that arrives earlier ("subscribed error ... err=not found", the subscribe stream
+reset with code 51): in the live smoke, without the wait, most runs of the subscribe
+scenarios lost that race. ffmpeg writes `ftyp` and `moov` together, about 40 ms after it
+starts. The wait is bounded by the source length; ffmpeg's end of file also ends it.
 ffmpeg's standard input is `/dev/null`, its standard error goes to `<log_dir>/ffmpeg.log`;
 moq's standard output and standard error go to `<log_dir>/publisher.log`. Every argument
 is a separate array element: nothing from the request is evaluated or word-split, and the
@@ -170,15 +180,26 @@ SIGINT) and the pipeline runs on to its deadline.
 
 The adapter publishes exactly one broadcast, `interop.hang`, and accepts only the track
 fixture `namespace_hex: ["696e7465726f702e68616e67"]`, `track_name_hex: "302e6d3473"`
-(`0.m4s`, the name the CLI gives the first media track, from the moov trak order). These
-are the expected shape from the survey of the CLI and are PROVISIONAL: the live smoke of
-L1e Task 4 pins them from the CLI's real announcements. They are defined once, at the top
-of `run.sh` (`fixture_namespace_hex`, `fixture_track_name_hex`, `fixture_broadcast`), and in
-`adapter.json`; change both and regenerate the golden. Post the matching fixture with the
-run:
+(`0.m4s`, the name the CLI gives the first media track, from the moov trak order). The live
+smoke of L1e Task 4 (moq 0.14.1 at `b8b0d235`, 2026-10-09, native QUIC and WebTransport)
+pinned them from the CLI's own messages:
+
+- the announced broadcast path is exactly `interop.hang`: an ANNOUNCE_PLEASE with the empty
+  prefix gets ANNOUNCE_START with suffix `interop.hang`, one with prefix `interop.hang` gets
+  the empty suffix, and a disjoint prefix gets nothing; the session path `/moq` is not part
+  of it;
+- the CLI's log names the tracks it publishes: `catalog.json`, `catalog.json.z`, `catalog`,
+  `catalog.json.timeline.z`, `0.m4s` and `0.m4s.timeline.z`;
+- a SUBSCRIBE to `interop.hang` / `0.m4s` gets SUBSCRIBE_OK and one group per GOP: groups 0,
+  1, 2, ... opened about every 0.95 s (27 to 37 KB each with this source).
+
+They are defined once, at the top of `run.sh` (`fixture_namespace_hex`,
+`fixture_track_name_hex`, `fixture_broadcast`), and in `adapter.json`; change both and
+regenerate the golden. `tests/e2e/driven-moq-lite.sh` reads the fixture it posts from
+`adapter.json`. Post the matching fixture with the run:
 
 ```json
-{"draft": "moq-lite-06", "transport": "native-quic", "mode": "driven", "timeout_ms": 12000,
+{"draft": "moq-lite-06", "transport": "native-quic", "mode": "driven", "timeout_ms": 15000,
  "scenarios": ["l06-subscribe-latest"],
  "track": {"namespace_hex": ["696e7465726f702e68616e67"], "name_hex": "302e6d3473"}}
 ```
@@ -206,14 +227,42 @@ get the same command line on a transport; they differ only in what the runner do
 
 | ctest | What it pins |
 |---|---|
-| `moq-lite-adapter-contract` | validation and every refusal (exit 64 with a message naming the problem), the endpoint passed verbatim (also with shell metacharacters), TLS handling (insecure by default, also with a `tls_ca`; the `MOQ_LITE_TLS_ROOT=1` opt-in and its refusals), `MOQ_FFMPEG_BIN`, the cleared `MOQ_*` environment and `NO_COLOR=1`, the separate logs, exit statuses, the `timeout` deadline, and the supervisor's shutdown (adapter exit and the end of ffmpeg and moq within the 100 ms grace, no orphan; the `-k 2` bound for processes that ignore SIGTERM) |
+| `moq-lite-adapter-contract` | validation and every refusal (exit 64 with a message naming the problem), the endpoint passed verbatim (also with shell metacharacters), TLS handling (insecure by default, also with a `tls_ca`; the `MOQ_LITE_TLS_ROOT=1` opt-in and its refusals), `MOQ_FFMPEG_BIN`, the cleared `MOQ_*` environment and `NO_COLOR=1`, the separate logs, exit statuses, the `timeout` deadline, moq starting only after ffmpeg's first output (or its end), and the supervisor's shutdown (adapter exit and the end of ffmpeg and moq within the 100 ms grace, no orphan; the `-k 2` bound for processes that ignore SIGTERM) |
 | `moq-lite-adapter-cmdlines` | the full ffmpeg and moq command lines for every executable moq-lite-06 id on both transports, in `tests/golden/moq-lite-cmdlines.txt`; that the id list equals `kLiteExecutableScenarios` and that every id has the same command line |
+| `moq-lite-matrix-plan` | the dry-run plan of `tests/e2e/moq-lite-matrix.sh` (runner invocation, one run request per executable scenario per transport, the audit) in `tests/golden/moq-lite-matrix-plan.txt`; the fixture equals `adapter.json`; the ports; the real matrix against a stub runner and a stub curl does what its plan says |
 
-Both use stub binaries and need no network (the contract test also needs python3). Run them
-with `ctest --test-dir build -R moq-lite-adapter` or directly:
+These use stub binaries and need no network (the contract test also needs python3). Run them
+with `ctest --test-dir build -R moq-lite` or directly:
 
 ```sh
 bash tests/e2e/moq-lite-adapter-contract.sh
 bash tests/e2e/moq-lite-adapter-cmdlines.sh            # compare with the golden
 bash tests/e2e/moq-lite-adapter-cmdlines.sh --update   # or MOQ_UPDATE_GOLDEN=1: rewrite it, then review the diff
 ```
+
+## Live runs against the real CLI
+
+`tests/e2e/driven-moq-lite.sh TRANSPORT RUNNER_BIN [SCENARIO...]` starts the runner (a
+temporary database and certificate, the lite catalog from `requirements/`, this adapter as
+`--driver-executable`), posts each scenario (default: all 19) as its own driven run with
+`timeout_ms` 15000 and the fixture above, polls each run to its end, prints the verdict, the
+publisher's process status and the judged rows, and then audits the database. It skips
+(exit 77) without `MOQ_CLI_BIN`, ffmpeg, jq, curl, openssl or the runner binary.
+`tests/e2e/moq-lite-matrix.sh RUNNER_BIN` runs the adapter contract and then every scenario
+on both transports (native QUIC on ports 19231/19232, WebTransport on 19233/19234; the
+driven script alone defaults to 19235/19236; `MOQ_INTEROP_TEST_HTTP_PORT` and
+`MOQ_INTEROP_TEST_UDP_PORT` choose others, `MOQ_INTEROP_TEST_KEEP=1` keeps the temporary
+directory). Neither is a ctest: they need the real CLI.
+
+```sh
+MOQ_CLI_BIN=/path/to/moq bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner
+MOQ_CLI_BIN=/path/to/moq bash tests/e2e/driven-moq-lite.sh webtransport build/moq-interop-runner l06-setup-stream
+```
+
+`moq-interop-audit --draft moq-lite-06` has no execution audit yet (it refuses `--database`
+for moq-lite-06), so the driven script reports that and runs the static staged audit.
+In the L1e smoke the CLI connected about 40 ms after its start on both transports, so the
+source (the timeout rounded up plus 3 s) outlasts every probe. The run timeout must exceed
+the longest probe's windows: `l06-subscribe-abutting-frame-start` needs more than 12000 ms
+(two 3 s response allowances plus the 6 s observation window) and is refused with a harness
+error at exactly 12000, hence 15000.

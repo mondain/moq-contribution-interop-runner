@@ -1215,6 +1215,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-adapter-contract.sh")
     add_test(NAME moq-lite-adapter-cmdlines
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-adapter-cmdlines.sh")
+    add_test(NAME moq-lite-matrix-plan
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-matrix-plan.sh")
     add_executable(moq-interop-executable-ids-golden-tests tests/unit/executable_ids_golden_test.cpp)
     target_compile_definitions(moq-interop-executable-ids-golden-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
