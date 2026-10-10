@@ -326,6 +326,168 @@ TEST(LiteEvaluate, RefusesAnotherDraftsCatalog) {
     EXPECT_THROW((void)evaluate_lite(other, conforming()), std::invalid_argument);
 }
 
+// --- per-context evaluation (L1e Task 1, item I3) ----------------------------------------------------------------
+
+// The L1d evaluate_lite algorithm, copied verbatim as the reference the per-context path must reproduce (the
+// production evaluate_lite is now built on aggregate_lite, so it cannot be its own reference).
+std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
+                                             std::span<const LiteTranscript> transcripts) {
+    const auto& registry = lite_evaluator_registry();
+    std::vector<Outcome> outcomes;
+    for (const auto& row : catalog.requirements) {
+        auto state = OutcomeState::NotRun;
+        if (!row.reviewed) {
+            state = OutcomeState::NotRun;
+        } else if (row.applicability != Applicability::Applicable) {
+            state = OutcomeState::NotApplicable;
+        } else if (row.testability == Testability::NotTestable) {
+            state = OutcomeState::NotTestable;
+        } else {
+            std::map<std::string, std::size_t> runs;
+            std::map<std::string, std::size_t> passed;
+            bool failed = false;
+            for (const auto& transcript : transcripts) {
+                if (std::find(row.scenarios.begin(), row.scenarios.end(), transcript.scenario_id) ==
+                    row.scenarios.end())
+                    continue;
+                ++runs[transcript.scenario_id];
+                if (transcript.harness_failed || transcript.event_limit_reached || transcript.timed_out) continue;
+                bool all_true = !row.evaluators.empty();
+                for (const auto& evaluator : row.evaluators) {
+                    const auto found = registry.find(evaluator);
+                    const auto verdict =
+                        found == registry.end() ? std::optional<bool>{} : found->second(transcript);
+                    if (verdict == std::optional<bool>{false}) failed = true;
+                    if (verdict != std::optional<bool>{true}) all_true = false;
+                }
+                if (all_true) ++passed[transcript.scenario_id];
+            }
+            const bool settled = !row.scenarios.empty() &&
+                std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
+                    return runs[scenario] == 1 && passed[scenario] == 1;
+                });
+            if (failed) state = OutcomeState::Fail;
+            else if (settled) state = OutcomeState::Pass;
+        }
+        outcomes.push_back({row.id, state});
+    }
+    return outcomes;
+}
+
+std::vector<Outcome> per_context(std::span<const LiteTranscript> transcripts) {
+    LiteVerdicts judged;
+    for (const auto& t : transcripts) judged.push_back(judge_lite_context(catalog(), t));
+    return aggregate_lite(catalog(), judged);
+}
+
+void expect_identical(const std::vector<Outcome>& expected, const std::vector<Outcome>& actual,
+                      const std::string& label) {
+    ASSERT_EQ(expected.size(), actual.size()) << label;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(expected[i].requirement_id, actual[i].requirement_id) << label;
+        EXPECT_EQ(expected[i].state, actual[i].state) << label << ": " << expected[i].requirement_id;
+    }
+}
+
+// Every transcript set below: the reference, evaluate_lite and the per-context aggregation agree row by row.
+TEST(LitePerContext, MatchesTheAllTranscriptsEvaluationOverTheConformanceTableAndItsDefects) {
+    std::vector<std::pair<std::string, std::vector<LiteTranscript>>> sets;
+    for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport, LiteBinding::Unknown})
+        sets.emplace_back("conforming " + std::to_string(static_cast<int>(binding)),
+                          lite::conformance_transcripts(binding));
+    // Defect transcripts (each turns at least one row): one per named defect and fixture switch.
+    const std::vector<std::pair<std::string, LiteTranscript>> defects{
+        {"ignore-unknown-streams", ignoring_unknown_streams()},
+        {"offset-group-start", tweaked("l06-subscribe-group-floor",
+                                       [](auto& c) { c.defect = test::lite::LiteDefect::OffsetGroupStart; })},
+        {"close-on-invalid-subscribe",
+         tweaked("l06-subscribe-invalid-frame-bounds",
+                 [](auto& c) { c.defect = test::lite::LiteDefect::CloseOnInvalidSubscribe; })},
+        {"no-fin-echo", tweaked("l06-session-stream-close", [](auto& c) { c.echo_runner_fin = false; })},
+        {"stream-code-close",
+         tweaked("l06-setup-duplicate-stream", [](auto& c) { c.protocol_violation_code = 0x33; })},
+        {"no-path", tweaked("l06-setup-client-path", [](auto& c) { c.session_url_path.clear(); })},
+        {"silent-on-announce",
+         tweaked("l06-announce-prefix", [](auto& c) { c.defect = test::lite::LiteDefect::SilentOnAnnounce; })},
+        {"no-setup-stream",
+         tweaked("l06-setup-stream", [](auto& c) { c.defect = test::lite::LiteDefect::NoSetupStream; })},
+    };
+    std::vector<LiteTranscript> all_defects = conforming();
+    for (const auto& [label, defect] : defects) {
+        sets.emplace_back(label, replaced(conforming(), defect));
+        all_defects.push_back(defect);
+    }
+    sets.emplace_back("every defect beside the conforming runs", all_defects);
+    // Flagged transcripts: each flag on a failing and on a passing context.
+    for (const auto flag : {&LiteTranscript::harness_failed, &LiteTranscript::event_limit_reached,
+                            &LiteTranscript::timed_out}) {
+        auto failing = ignoring_unknown_streams();
+        failing.*flag = true;
+        sets.emplace_back("flagged failing", replaced(conforming(), failing));
+        auto passing = transcript_of("l06-setup-stream");
+        passing.*flag = true;
+        sets.emplace_back("flagged passing", replaced(conforming(), passing));
+        auto twice = conforming();
+        twice.push_back(passing);
+        sets.emplace_back("flagged second run", twice);
+    }
+    // Repeats, partial sets, empty and foreign transcripts.
+    auto twice = conforming();
+    twice.push_back(transcript_of("l06-setup-stream"));
+    sets.emplace_back("twice", twice);
+    sets.emplace_back("without code-space", without(conforming(), "l06-errors-code-space"));
+    sets.emplace_back("nothing", std::vector<LiteTranscript>{});
+    std::vector<LiteTranscript> empty;
+    for (const auto id : app::executable_scenarios(106)) {
+        LiteTranscript t;
+        t.scenario_id = std::string(id);
+        empty.push_back(t);
+    }
+    LiteTranscript stranger;
+    stranger.scenario_id = "not-a-lite-scenario";
+    empty.push_back(stranger);
+    sets.emplace_back("empty and foreign", empty);
+    std::size_t turned = 0;
+    for (const auto& [label, transcripts] : sets) {
+        const auto reference = reference_evaluate_lite(catalog(), transcripts);
+        expect_identical(reference, evaluate_lite(catalog(), transcripts), label + " (evaluate_lite)");
+        expect_identical(reference, per_context(transcripts), label + " (per context)");
+        for (const auto& outcome : reference) turned += outcome.state == OutcomeState::Fail ? 1u : 0u;
+    }
+    EXPECT_GT(turned, 0u) << "the defect sets exercise Fail outcomes";
+}
+
+TEST(LitePerContext, AFlaggedContextKeepsNoVerdictsAndOnlyItsOwnEvaluators) {
+    auto flagged = transcript_of("l06-setup-stream");
+    flagged.timed_out = true;
+    const auto judged = judge_lite_context(catalog(), flagged);
+    EXPECT_EQ(judged.scenario_id, "l06-setup-stream");
+    EXPECT_TRUE(judged.flagged);
+    EXPECT_TRUE(judged.verdicts.empty());
+    const auto clean = judge_lite_context(catalog(), transcript_of("l06-setup-stream"));
+    EXPECT_FALSE(clean.flagged);
+    std::set<std::string> expected;
+    for (const auto& r : catalog().requirements) {
+        if (!scored(r) ||
+            std::find(r.scenarios.begin(), r.scenarios.end(), "l06-setup-stream") == r.scenarios.end())
+            continue;
+        expected.insert(r.evaluators.begin(), r.evaluators.end());
+    }
+    std::set<std::string> held;
+    for (const auto& [id, verdict] : clean.verdicts) {
+        held.insert(id);
+        EXPECT_EQ(verdict, std::optional<bool>{true}) << id;
+    }
+    EXPECT_EQ(held, expected);
+    // What a context keeps is tiny next to its transcript.
+    EXPECT_LT(lite_retained_bytes(clean), std::size_t{4096});
+    EXPECT_THROW((void)judge_lite_context([] { auto other = catalog(); other.draft = 22; return other; }(),
+                                          transcript_of("l06-setup-stream")),
+                 std::invalid_argument);
+    EXPECT_THROW((void)aggregate_lite([] { auto other = catalog(); other.draft = 22; return other; }(), {}),
+                 std::invalid_argument);
+}
+
 // --- staged score ------------------------------------------------------------------------------------------------
 
 TEST(LiteScore, AConformingRunIsIncompleteNeverPass) {

@@ -31,6 +31,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/lite_probe.h"
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -58,5 +59,28 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
 // draft 106.
 std::vector<Outcome> evaluate_lite(const RequirementCatalog& catalog,
                                    std::span<const scenarios::LiteTranscript> transcripts);
+
+// Per-context evaluation (L1e, item I3): what evaluate_lite needs of one transcript, so a run can judge each
+// context as it ends and keep this instead of the transcript. evaluate_lite(catalog, transcripts) is
+// aggregate_lite(catalog, {judge_lite_context(catalog, t) for each t}), so both give identical outcomes.
+struct LiteContextVerdicts {
+    // The scenario the context ran: every context counts as one run of it (judged or not).
+    std::string scenario_id;
+    // harness_failed, event_limit_reached or timed_out: no evaluator was consulted and `verdicts` is empty.
+    bool flagged{false};
+    // Evaluator id -> verdict (nullopt: NotRun) for every evaluator of every scored row naming scenario_id; an
+    // evaluator id the registry does not hold is recorded as nullopt.
+    std::map<std::string, std::optional<bool>> verdicts;
+};
+using LiteVerdicts = std::vector<LiteContextVerdicts>;
+
+// Judges one context. Throws std::invalid_argument for a catalog that is not draft 106.
+LiteContextVerdicts judge_lite_context(const RequirementCatalog& catalog, const scenarios::LiteTranscript& transcript);
+// The outcomes of the contexts judged above, by the rules of evaluate_lite. Throws std::invalid_argument for a
+// catalog that is not draft 106.
+std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span<const LiteContextVerdicts> contexts);
+// An upper estimate of the memory one judged context holds (its strings, map nodes and verdicts), for the run
+// hook's retention bound.
+std::size_t lite_retained_bytes(const LiteContextVerdicts& context);
 
 }  // namespace moq::interop::requirements

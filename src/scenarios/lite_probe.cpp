@@ -229,6 +229,20 @@ void LiteProbeController::finish(std::uint64_t now) {
     stale_ = true;
 }
 
+bool LiteProbeController::is_peer_group_data(const transport::StreamDataEvent& data) const {
+    // The runner is the QUIC server: a client-initiated unidirectional stream (id & 3 == 2) is the peer's.
+    if ((data.stream_id & 3u) != 2u) return false;
+    if (const auto* record = session_.find(data.stream_id)) {
+        if (record->stream_type) return *record->stream_type == static_cast<std::uint64_t>(l06::UniStreamType::Group);
+        if (record->bytes != 0) return false;  // a STREAM_TYPE split over events: keep (and count) these bytes
+    }
+    // The stream's first bytes (the recorder has not seen it yet): read its STREAM_TYPE the way the recorder will.
+    wire::Cursor cursor(data.data);
+    const auto type = l06::read_stream_type(cursor);
+    const auto* value = std::get_if<std::uint64_t>(&type);
+    return value && *value == static_cast<std::uint64_t>(l06::UniStreamType::Group);
+}
+
 void LiteProbeController::record(const transport::TransportEvent& event, std::uint64_t now) {
     if (transcript_.event_limit_reached) return;
     if (transcript_.events.size() >= kLiteMaximumEvents) {
@@ -236,14 +250,30 @@ void LiteProbeController::record(const transport::TransportEvent& event, std::ui
         return;
     }
     if (const auto* data = std::get_if<transport::StreamDataEvent>(&event)) {
-        if (data->data.size() > kLiteMaximumEvidenceBytes - evidence_bytes_) {
+        const auto size = data->data.size();
+        if (is_peer_group_data(*data)) {
+            // Media: the recorder decodes these bytes (GROUP, FRAMEs); the transcript keeps the event's stream,
+            // length and FIN only, so a media source cannot reach the evidence bound.
+            transcript_.events.push_back(transport::StreamDataEvent{data->stream_id, {}, data->fin});
+            transcript_.event_times.push_back(now);
+            transcript_.event_data_sizes.push_back(size);
+            transcript_.payload_bytes_dropped += size;
+            if (size != 0) ++transcript_.payload_events_elided;
+            return;
+        }
+        if (size > kLiteMaximumEvidenceBytes - evidence_bytes_) {
             limit("more than " + std::to_string(kLiteMaximumEvidenceBytes) + " bytes of stream data in this context");
             return;
         }
-        evidence_bytes_ += data->data.size();
+        evidence_bytes_ += size;
+        transcript_.events.push_back(event);
+        transcript_.event_times.push_back(now);
+        transcript_.event_data_sizes.push_back(size);
+        return;
     }
     transcript_.events.push_back(event);
     transcript_.event_times.push_back(now);
+    transcript_.event_data_sizes.push_back(0);
 }
 
 // False when the probe must stop processing this batch (harness failure).

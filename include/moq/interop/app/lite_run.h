@@ -23,6 +23,7 @@
 #include "moq/interop/transport/session_transport.h"
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -72,9 +73,15 @@ struct LiteRunEnvironment {
     const std::atomic<bool>& stop_requested;
     // A fresh listener on the run's port for every context after the first.
     std::function<LiteRunListener()> recreate_listener;
+    // Optional (tests): called on the worker thread after each context was judged, with the number of contexts the
+    // run now holds verdicts for and the bytes those verdicts hold (requirements::lite_retained_bytes). A context's
+    // transcript is judged (requirements::judge_lite_context) and dropped when the context ends; only the verdicts
+    // stay until finalize.
+    std::function<void(std::size_t contexts, std::size_t retained_bytes)> on_context_judged{};
 };
 
-// The worker body: every selected scenario as one context, then evaluate_lite -> score_staged -> store.finalize.
+// The worker body: every selected scenario as one context (each judged as it ends), then aggregate_lite ->
+// score_staged -> store.finalize (the outcomes evaluate_lite gives the same transcripts).
 // Never throws; always finalizes the run. The verdict is Error when any context recorded a harness_error or the
 // run was stopped. A context whose publisher never connected (or never negotiated moq-lite-06) within the timeout
 // stores harness_error and ends the run: the contexts after it store context_skipped.

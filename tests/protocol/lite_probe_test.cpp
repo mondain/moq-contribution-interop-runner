@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -1209,6 +1210,134 @@ TEST(LiteProbe, APeerThatDoesNotReactIsJudgeableThroughTheObservationWindow) {
     ASSERT_NE(record, nullptr);
     EXPECT_FALSE(record->reset_seen) << "the absence of the reset is the observation";
     EXPECT_LT(t.ended_ns, 100 * kMs);
+}
+
+// --- the evidence cap and Group payloads (L1e Task 1, item I2) ---
+
+// One whole Group stream of `frames` FRAMEs of `payload` bytes each (STREAM_TYPE 0x0, GROUP, FRAMEs).
+Bytes big_group(std::uint64_t sequence, std::size_t frames, std::size_t payload) {
+    Bytes bytes = join({stream_type(0x0), group_header({1, sequence, 0})});
+    for (std::size_t f = 0; f < frames; ++f) {
+        l06::Frame value;
+        value.timestamp_delta = 33;
+        value.payload = Bytes(payload, static_cast<std::byte>(0x40 + (f & 0x3f)));
+        const auto encoded = frame(value);
+        bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+    }
+    return bytes;
+}
+
+// The publisher's Setup stream, the answer to the runner's announce request and then 20 MiB of Group streams, each
+// written in several chunks: the Group payloads are kept as length and FIN only, so the context stays judgeable,
+// while the Setup stream and the bidirectional answer keep their bytes.
+TEST(LiteProbe, AGroupPayloadFloodKeepsLengthAndFinButNotTheBytes) {
+    constexpr std::size_t kGroups = 20;
+    constexpr std::size_t kFrames = 2;
+    constexpr std::size_t kPayload = 512 * 1024;
+    constexpr std::size_t kChunk = 300 * 1000;
+    std::size_t group_bytes = 0;
+    std::size_t group_events = 0;
+    std::vector<transport::StreamId> group_ids;
+    const Bytes publisher_setup = setup_stream(l06::SetupMessage{{{l06::kParamHop, Bytes{std::byte{7}}}}});
+    const Bytes answer = announce_ok({7, 0});
+    bool answered = false;
+    bool flooded = false;
+    ScriptedLitePeer peer([&](ScriptedLitePeer& p) {
+        if (!flooded) {
+            flooded = true;
+            p.data(p.open_peer_uni(), publisher_setup, true);
+            for (std::size_t g = 0; g < kGroups; ++g) {
+                const auto id = p.open_peer_uni();
+                group_ids.push_back(id);
+                const auto bytes = big_group(g, kFrames, kPayload);
+                for (std::size_t offset = 0; offset < bytes.size(); offset += kChunk) {
+                    const auto end = std::min(bytes.size(), offset + kChunk);
+                    p.data(id, Bytes(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                                     bytes.begin() + static_cast<std::ptrdiff_t>(end)),
+                           end == bytes.size());
+                    group_bytes += end - offset;
+                    ++group_events;
+                }
+            }
+        }
+        if (!answered && p.runner_stream(1) != nullptr) {
+            answered = true;
+            p.data(1, answer);
+        }
+    });
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 2000ms;
+    definition.steps.push_back(scen::lite_open_bidi(announce_bytes(), false, "announce"));
+    definition.observation_window = 100ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    ASSERT_GE(group_bytes, std::size_t{20} << 20);
+    EXPECT_FALSE(t.event_limit_reached) << t.event_limit_reason;
+    EXPECT_TRUE(judgeable(t));
+    EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+    EXPECT_EQ(t.payload_bytes_dropped, group_bytes);
+    EXPECT_EQ(t.payload_events_elided, group_events);
+    ASSERT_EQ(t.event_data_sizes.size(), t.events.size());
+    std::size_t kept_group_fins = 0;
+    std::size_t sized_group_bytes = 0;
+    Bytes setup_seen;
+    Bytes answer_seen;
+    for (std::size_t i = 0; i < t.events.size(); ++i) {
+        const auto* data = std::get_if<transport::StreamDataEvent>(&t.events[i]);
+        if (!data) {
+            EXPECT_EQ(t.event_data_sizes[i], 0u);
+            continue;
+        }
+        if (std::find(group_ids.begin(), group_ids.end(), data->stream_id) != group_ids.end()) {
+            EXPECT_TRUE(data->data.empty()) << "Group payload bytes are not kept";
+            sized_group_bytes += t.event_data_sizes[i];
+            if (data->fin) ++kept_group_fins;
+        } else {
+            EXPECT_EQ(t.event_data_sizes[i], data->data.size()) << "other streams keep their bytes";
+            if (data->stream_id == 2) setup_seen.insert(setup_seen.end(), data->data.begin(), data->data.end());
+            if (data->stream_id == 1) answer_seen.insert(answer_seen.end(), data->data.begin(), data->data.end());
+        }
+    }
+    EXPECT_EQ(sized_group_bytes, group_bytes);
+    EXPECT_EQ(kept_group_fins, kGroups);
+    EXPECT_EQ(setup_seen, publisher_setup);
+    EXPECT_EQ(answer_seen, answer);
+    // The recorder decoded every GROUP and FRAME before the bytes were dropped.
+    std::size_t frames = 0;
+    for (const auto id : group_ids) {
+        const auto* record = find_stream(t, id);
+        ASSERT_NE(record, nullptr);
+        EXPECT_EQ(record->kind, LiteStreamKind::Group);
+        EXPECT_TRUE(record->fin_seen);
+        for (const auto* message : sess::peer_messages(*record)) {
+            if (const auto* f = std::get_if<l06::Frame>(&message->message)) {
+                EXPECT_EQ(f->payload.size(), kPayload);
+                ++frames;
+            }
+        }
+    }
+    EXPECT_EQ(frames, kGroups * kFrames);
+}
+
+// Only Group streams lose their payload: a flood on a peer Setup stream (or an unknown uni type, above:
+// EvidenceByteLimitStopsRecording) still reaches the cap.
+TEST(LiteProbe, AFloodOnAPeerSetupStreamStillReachesTheEvidenceCap) {
+    bool flooded = false;
+    ScriptedLitePeer peer([&](ScriptedLitePeer& p) {
+        if (flooded) return;
+        flooded = true;
+        const auto id = p.open_peer_uni();
+        p.data(id, stream_type(0x1));
+        Bytes chunk(1u << 20, std::byte{0x7});
+        for (std::size_t i = 0; i < kLiteMaximumEvidenceBytes / chunk.size() + 2; ++i) p.data(id, chunk);
+    });
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 50ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_TRUE(t.event_limit_reached);
+    EXPECT_EQ(t.payload_bytes_dropped, 0u);
+    EXPECT_FALSE(judgeable(t));
 }
 
 }  // namespace

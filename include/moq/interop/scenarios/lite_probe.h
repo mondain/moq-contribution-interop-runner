@@ -32,6 +32,9 @@ inline constexpr std::string_view kLiteAlpn = "moq-lite-06";
 
 // Bounds on what one context records into LiteTranscript::events. Reaching either sets
 // LiteTranscript::event_limit_reached; recording stops but stepping goes on, and the transcript is never judged.
+// The byte bound counts the stream-data bytes KEPT in the events: the payload of the peer's Group streams is not
+// kept (LiteTranscript::payload_bytes_dropped), so media volume never reaches it; every other stream's bytes
+// (Setup streams, the publisher's answers on runner bidirectional streams, unknown stream types) count in full.
 inline constexpr std::size_t kLiteMaximumEvents = 16384;
 inline constexpr std::size_t kLiteMaximumEvidenceBytes = std::size_t{8} << 20;
 // Steps (static plus dynamically appended) one probe may hold; more is a definition error (harness_failed).
@@ -202,8 +205,21 @@ struct LiteTranscript {
     // Every transport event, bounded by kLiteMaximumEvents; stream data bytes count against
     // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: lite uses no datagrams and the
     // transport bounds each one to the path MTU, so they are bounded by the event count).
+    //
+    // A StreamDataEvent on a stream the PEER opened unidirectionally whose STREAM_TYPE is Group (0x0) is kept with
+    // its stream id and FIN but WITHOUT its bytes (data empty); event_data_sizes holds how many bytes it carried.
+    // The recorder (streams) decoded those bytes before they were dropped, so GROUP and FRAME messages are intact;
+    // only a reader of raw StreamDataEvent bytes would miss them, and the evaluators read raw bytes of the peer's
+    // Setup stream only (lite06::peer_setup_message). Setup streams, runner-opened bidirectional streams and every
+    // other stream keep their bytes.
     std::vector<transport::TransportEvent> events;
     std::vector<std::uint64_t> event_times;
+    // Parallel to events: the stream-data bytes each StreamDataEvent carried as received (kept or not), 0 for every
+    // other event.
+    std::vector<std::size_t> event_data_sizes;
+    // Group payload bytes received but not kept in events (above), and how many events lost theirs.
+    std::size_t payload_bytes_dropped{0};
+    std::size_t payload_events_elided{0};
     bool established{false};
     std::string alpn;
     bool complete{false};
@@ -283,6 +299,8 @@ private:
     void limit(std::string reason);
     void finish(std::uint64_t now);
     void record(const transport::TransportEvent& event, std::uint64_t now);
+    // True for data of a peer unidirectional stream whose STREAM_TYPE is (or, on its first bytes, reads as) Group.
+    [[nodiscard]] bool is_peer_group_data(const transport::StreamDataEvent& data) const;
     bool handle(const transport::TransportEvent& event, std::uint64_t now);
     void run_steps(std::uint64_t now);
     void continue_steps(std::uint64_t now);

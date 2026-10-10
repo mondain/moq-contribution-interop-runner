@@ -305,6 +305,9 @@ struct ConformingLitePublisherConfig {
     std::uint64_t latest_group{5};
     std::size_t groups_per_subscription{2};
     std::size_t frames_per_group{2};
+    // 0: each FRAME payload is the text "frame-<group>-<frame>"; otherwise that text padded to this many bytes (a
+    // media-sized source for the evidence-cap tests).
+    std::size_t frame_payload_bytes{0};
     // Code for resetting / stopping a runner stream of an unknown or unserved type.
     std::uint64_t unknown_stream_code{0x0};
     // Stream error code for a SUBSCRIBE naming something the publisher does not have (NOT_FOUND).
@@ -637,6 +640,8 @@ private:
                 value.timestamp_delta = f == 0 ? static_cast<std::int64_t>(group.sequence * 1000) : 33;
                 value.payload = bytes_of("frame-" + std::to_string(group.sequence) + "-" +
                                          std::to_string(group.frame_start + f));
+                if (value.payload.size() < config_.frame_payload_bytes)
+                    value.payload.resize(config_.frame_payload_bytes, std::byte{0x2e});
                 const auto encoded = frame(value);
                 bytes.insert(bytes.end(), encoded.begin(), encoded.end());
             }

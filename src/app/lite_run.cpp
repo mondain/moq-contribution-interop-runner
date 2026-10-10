@@ -364,7 +364,10 @@ private:
         if (transcript.event_limit_reached) context_event("context_event_limit", transcript.event_limit_reason);
         const bool clean = transcript.complete && !transcript.harness_failed && !transcript.timed_out && transcript.established;
         context_event(clean ? "context_complete" : "context_end", end_detail(transcript, deadline_ms, stopped));
-        transcripts_.push_back(std::move(transcript));
+        // Judged now; only the verdicts stay until finalize (the transcript ends with this context).
+        verdicts_.push_back(requirements::judge_lite_context(env_.catalog, transcript));
+        retained_bytes_ += requirements::lite_retained_bytes(verdicts_.back());
+        if (env_.on_context_judged) env_.on_context_judged(verdicts_.size(), retained_bytes_);
         return connected;
     }
 
@@ -384,6 +387,8 @@ private:
             " time_bounded=true deadline_ms=" + std::to_string(deadline.count()) +
             " elapsed_ms=" + ms_since(base, t.ended_ns) +
             " lite_messages_stored=" + std::to_string(stored_messages_) + "/" + std::to_string(total_messages_) +
+            // Group payload bytes the transcript kept as length and FIN only (the recorder decoded them).
+            " group_payload_bytes_dropped=" + std::to_string(t.payload_bytes_dropped) +
             " lite_decode_errors_stored=" + std::to_string(stored_issues_) + "/" + std::to_string(total_issues_) +
             " steps=";
         for (std::size_t i = 0; i < t.steps.size(); ++i) {
@@ -449,7 +454,9 @@ private:
                 if (!data->fin) continue;
                 event.kind = "raw_probe_transport_event";
                 event.stream_id = std::to_string(data->stream_id);
-                event.detail = "operation=peer-fin bytes=" + std::to_string(data->data.size());
+                // The bytes the event carried as received (a Group stream's are not kept in the transcript).
+                const auto size = index < t.event_data_sizes.size() ? t.event_data_sizes[index] : data->data.size();
+                event.detail = "operation=peer-fin bytes=" + std::to_string(size);
             } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&source)) {
                 event.kind = "raw_probe_transport_event";
                 event.stream_id = std::to_string(reset->stream_id);
@@ -530,7 +537,7 @@ private:
 
     void finalize() {
         try {
-            auto outcomes = requirements::evaluate_lite(env_.catalog, transcripts_);
+            auto outcomes = requirements::aggregate_lite(env_.catalog, verdicts_);
             auto summary = requirements::score_staged(env_.catalog, outcomes);
             if (operational_error_ || env_.stop_requested) summary.verdict = requirements::RunVerdict::Error;
             if (env_.stop_requested)
@@ -561,7 +568,8 @@ private:
     std::size_t ordinal_{0};
     std::string connection_id_;
     bool operational_error_{false};
-    std::vector<scenarios::LiteTranscript> transcripts_;
+    requirements::LiteVerdicts verdicts_;
+    std::size_t retained_bytes_{0};
     std::size_t stored_messages_{0};
     std::size_t total_messages_{0};
     std::size_t stored_issues_{0};

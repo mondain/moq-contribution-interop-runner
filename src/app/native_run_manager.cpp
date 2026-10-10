@@ -1674,7 +1674,7 @@ public:
                         if (replacement.listener && replacement.endpoint.port == port)
                             return {std::move(replacement.listener), {}};
                         return {nullptr, describe_listener_failure(replacement, port)};
-                    }};
+                    }, {}};
                 run_lite(environment, std::move(listener), requested);
                 {
                     std::lock_guard released(mutex);

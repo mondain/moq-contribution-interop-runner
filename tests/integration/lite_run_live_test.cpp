@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -415,6 +416,76 @@ TEST(LiteRunLive, WebTransportRunJudgesTheSetupStream) {
               std::string::npos)
         << ready->detail;
     expect_audit_clean(run);
+}
+
+// --- per-context evaluation and the evidence cap (L1e Task 1) ------------------------------------------------------
+
+// run_lite itself over in-process scripted publishers (ScriptedLitePeer as the listener): the first context's
+// publisher also pushes 20 MiB of Group streams. The run hook judges each context as it ends and keeps only the
+// verdicts (a bounded size reported through on_context_judged), the flood costs no verdict (before L1e it set
+// event_limit_reached and 014/111 were NotRun), and the stored outcomes are what evaluate_lite gives the same
+// scenarios on the simulated clock.
+TEST(LiteRunLive, TheRunHookJudgesEachContextAndKeepsOnlyItsVerdicts) {
+    auto store = memory_store();
+    const auto lite = catalog(106);
+    const auto settings = manager_config();
+    const auto config = lite_config({"l06-setup-stream", "l06-setup-server-role"}, 4000ms);
+    const auto id = store->create_run(config);
+    std::atomic<bool> stop{false};
+    std::vector<std::unique_ptr<ConformingLitePublisher>> publishers;
+    std::size_t flood_bytes = 0;
+    const auto make = [&]() -> std::unique_ptr<transport::SessionTransport> {
+        auto publisher_settings = publisher_config();
+        if (publishers.empty()) {
+            publisher_settings.hooks.on_poll = [&flood_bytes, done = false](ConformingLitePublisher&,
+                                                                            ScriptedLitePeer& peer) mutable {
+                if (done) return;
+                done = true;
+                for (std::uint64_t group = 0; group < 20; ++group) {
+                    Bytes bytes = test::lite::join({test::lite::stream_type(0x0),
+                                                    test::lite::group_header({1, group, 0})});
+                    for (int f = 0; f < 2; ++f) {
+                        wire::moqlite06::Frame value;
+                        value.payload = Bytes(512 * 1024, std::byte{0x2e});
+                        const auto encoded = test::lite::frame(value);
+                        bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+                    }
+                    flood_bytes += bytes.size();
+                    peer.data(peer.open_peer_uni(), std::move(bytes), true);
+                }
+            };
+        }
+        publishers.push_back(std::make_unique<ConformingLitePublisher>(std::move(publisher_settings)));
+        return std::make_unique<ScriptedLitePeer>(publishers.back()->reaction());
+    };
+    std::vector<std::pair<std::size_t, std::size_t>> judged;
+    app::LiteRunEnvironment environment{id, "127.0.0.1:4443", *store, *lite, settings, stop,
+                                        [&]() { return app::LiteRunListener{make(), {}}; },
+                                        [&](std::size_t contexts, std::size_t bytes) {
+                                            judged.emplace_back(contexts, bytes);
+                                        }};
+    app::run_lite(environment, make(), config);
+    const auto run = store->load(id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    ASSERT_GE(flood_bytes, std::size_t{20} << 20);
+    EXPECT_FALSE(any_event(run, "context_event_limit"));
+    EXPECT_EQ(count_events(run, "context_complete"), 2u);
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-MUST-NOT-111"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-3-MUST-131"), OutcomeState::Pass);
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
+    // One report per context; what the run holds stays a few kilobytes whatever the context carried.
+    ASSERT_EQ(judged.size(), 2u);
+    EXPECT_EQ(judged[0].first, 1u);
+    EXPECT_EQ(judged[1].first, 2u);
+    for (const auto& [contexts, bytes] : judged) EXPECT_LT(bytes, std::size_t{16} << 10) << contexts;
+    // The context end carries the dropped payload count.
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-setup-stream";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("group_payload_bytes_dropped="), std::string::npos) << end->detail;
+    EXPECT_EQ(end->detail.find("group_payload_bytes_dropped=0 "), std::string::npos) << end->detail;
 }
 
 // --- every scenario, simulated ---------------------------------------------------------------------------------

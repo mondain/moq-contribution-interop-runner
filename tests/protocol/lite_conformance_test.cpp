@@ -233,6 +233,30 @@ TEST(LiteConformance, PublisherBehaviorBehindTheTable) {
     EXPECT_NE(s::lite06::step_labelled(floor, s::kL06FloorAboveLabel), nullptr);
 }
 
+// --- media-sized Group payloads (L1e Task 1, item I2) --------------------------------------------------------------
+
+// The subscribe-latest scenario against a publisher whose groups carry more than 20 MiB of FRAME payload in all:
+// before L1e the payload bytes counted against kLiteMaximumEvidenceBytes (8 MiB), set event_limit_reached and lost
+// every verdict of the context. Now they are kept as length and FIN only and the group rows are still judged.
+TEST(LiteConformance, AMediaSizedGroupFloodIsStillJudged) {
+    const auto binding = LiteBinding::NativeQuic;
+    std::optional<s::LiteProbeDefinition> probe;
+    for (auto& definition : conformance_probes(binding))
+        if (definition.id == s::kL06SubscribeLatest) probe = std::move(definition);
+    ASSERT_TRUE(probe.has_value());
+    const auto t = run_conforming(std::move(*probe), binding, [](ConformingLitePublisherConfig& config) {
+        config.frames_per_group = 8;
+        config.frame_payload_bytes = 900 * 1000;
+    });
+    EXPECT_FALSE(t.event_limit_reached) << t.event_limit_reason;
+    EXPECT_TRUE(s::judgeable(t));
+    EXPECT_GE(t.payload_bytes_dropped, std::size_t{20} << 20);
+    for (const auto& entry : evaluators()) {
+        if (!entry.scenarios.contains(t.scenario_id)) continue;
+        EXPECT_EQ(entry.evaluate(t), Verdict{true}) << entry.id;
+    }
+}
+
 // --- the fixture's SUBSCRIBE decode handling -----------------------------------------------------------------------
 
 // A probe opening one SUBSCRIBE stream with `bytes` (no FIN), observed for 500 ms.
