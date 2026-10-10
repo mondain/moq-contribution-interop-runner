@@ -5,8 +5,8 @@
 #   moq-interop-lite-ref-publisher --connect ENDPOINT [MOQ_LITE_REF_ARGS...]
 #
 # The endpoint is passed unchanged. MOQ_LITE_REF_ARGS (word-split) are the operator's flags (--defect NAME,
-# --datagrams, --probe-level, --frames-per-group); they are never taken from the request, so the runner does not decide
-# what the publisher does. Every one of the 27 executable scenarios gets the same command line but two, which need a
+# --datagrams, --probe-level, --frames-per-group, ...); the request never carries flags, so the runner does not decide
+# what the publisher does (only scenario_id is read, to add the two flag sets below). Every one of the 27 executable scenarios gets the same command line but two, which need a
 # capability or an event (below), unless the operator sets flags (tests/golden/moq-lite-ref-cmdlines.txt).
 set -euo pipefail
 

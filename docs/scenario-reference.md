@@ -1022,6 +1022,6 @@ In every row the transcript must be judgeable: the publisher connected, the sess
 | Authorization tokens | The credential flag was not set, `MAX_AUTH_TOKEN_CACHE_SIZE` was too small, or the error code mapping is unassigned |
 | Publisher-initiated flows | The publisher never produced the request the scenario waits for |
 | WebTransport-only or native-only rows | The run used the other transport |
-| moq-lite-06 per-transport rows | 125 on native QUIC; 120 and 124 on WebTransport; 126 on WebTransport (a Path there is a URI-binding violation); 152 on both (needs an adapter that ends and restarts a broadcast; the `moq` CLI keeps one); every row but 111 and 125 of a WebTransport session whose SETUP carried a Path; 027 outside a run holding its five scenarios |
+| moq-lite-06 rows | 125 on native QUIC; 120, 124 and 126 on WebTransport are `not_applicable` since L2c (the other transport's rule), not `not_run`; 075, 105, 077 and 186 are `not_applicable` to a publisher that advertised a Probe capability, sent no datagram, or ended the session on the first GOAWAY; 152 is `not_run` unless the publisher retracts its broadcast inside the window (the `moq` CLI keeps it; the reference publisher does with `--retract-after-polls`); every row but 111 and 125 of a WebTransport session whose SETUP carried a Path; 027 outside a run holding its five scenarios |
 
 `NOT_RUN` is not a failure and never counts as a pass.

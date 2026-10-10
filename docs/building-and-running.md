@@ -23,7 +23,9 @@ nlohmann/json, cpp-httplib and GoogleTest with CMake `FetchContent`, so it needs
 network access. The pins are recorded in `cmake/Dependencies.cmake` and are
 printed by `build/moq-interop-runner --version`.
 
-The build produces two programs in `build/`:
+The build produces two programs in `build/` (plus, when tests are built, the moq-lite-06 reference publisher
+`build/moq-interop-lite-ref-publisher`, described in [publisher-harness-guide.md](publisher-harness-guide.md) and
+[../adapters/moq-lite-ref/README.md](../adapters/moq-lite-ref/README.md)):
 
 | Program | Purpose |
 |---|---|
