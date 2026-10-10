@@ -769,6 +769,12 @@ TEST(LiteExecutionAudit, AcceptsAStoredStagedRun) {
         ADD_FAILURE() << finding.code << " " << finding.requirement_id << " " << finding.detail;
     EXPECT_TRUE(audit.consistent());
     EXPECT_EQ(audit.scored_rows, 37u);
+    // Row 075 is stored as NotApplicable (the conforming publisher advertises Report): a scored row the audit accepts
+    // without evidence and leaves out of the scored count (L2c).
+    const auto stored = std::find_if(run.outcomes.begin(), run.outcomes.end(),
+                                     [](const auto& o) { return o.requirement_id == "L06-5-1-5-MUST-075"; });
+    ASSERT_NE(stored, run.outcomes.end());
+    EXPECT_EQ(stored->state, OutcomeState::NotApplicable);
 }
 
 TEST(LiteExecutionAudit, StillCatchesAWrongScoreAndMissingEvidence) {
