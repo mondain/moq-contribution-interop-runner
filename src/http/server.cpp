@@ -162,8 +162,10 @@ detail::ReportFilters report_filters(const httplib::Request& request) {
     return filters;
 }
 
+// `lite_served`: this server accepts moq-lite-06 runs, so the invalid-draft message names it too (the message of a
+// server without the lite catalog is unchanged).
 app::RunConfig parse_run_config(const httplib::Request& request,
-                                const app::PublisherCapabilities& default_capabilities) {
+                                const app::PublisherCapabilities& default_capabilities, bool lite_served) {
     Json body;
     try {
         body = Json::parse(request.body);
@@ -181,7 +183,8 @@ app::RunConfig parse_run_config(const httplib::Request& request,
         const auto timeout = body.at("timeout_ms").get<std::int64_t>();
         // The integer form is MoQ Transport only and moq-lite is its string; 106 is never accepted.
         if (!parsed_draft) {
-            throw ApiError{400, "invalid_run_config", "draft must be 18, 21 or 22."};
+            throw ApiError{400, "invalid_run_config",
+                           lite_served ? "draft must be 18, 21, 22 or moq-lite-06." : "draft must be 18, 21 or 22."};
         }
         const unsigned draft = app::draft_number(*parsed_draft);
         if (transport != "native-quic" && transport != "webtransport") {
@@ -762,24 +765,9 @@ public:
                             append_profile(22, id, transport.c_str());
                     }
                 }
-                // moq-lite-06, only when this server accepts lite runs (its catalog is configured): every executable
-                // lite scenario (kLiteExecutableScenarios) on both transports, its draft the string "moq-lite-06"
-                // (the API form, as in a run's config.draft).
-                if (accepts_runs(app::DraftVersion::MoqLite06)) {
-                    for (const auto id : app::executable_scenarios(app::draft_number(app::DraftVersion::MoqLite06))) {
-                        for (const char* transport : {"native-quic", "webtransport"}) {
-                            profiles.push_back({{"draft", detail::draft_json(app::DraftVersion::MoqLite06)},
-                                {"transport", transport}, {"mode", "observed"}, {"scenario", id},
-                                {"configured", runs && runs->supports(app::DraftVersion::MoqLite06)}});
-                        }
-                    }
-                }
                 for (auto& profile : profiles) {
-                    const auto& draft = profile.at("draft");
-                    const auto parsed = detail::parse_draft_json(draft);
                     profile["requires_fetch"] = app::scenario_requires_fetch(
-                        parsed ? app::draft_number(*parsed) : draft.get<unsigned>(),
-                        profile.at("scenario").get<std::string>());
+                        profile.at("draft").get<unsigned>(), profile.at("scenario").get<std::string>());
                 }
                 const auto observed_count = profiles.size();
                 for (std::size_t index = 0; index < observed_count; ++index) {
@@ -789,14 +777,39 @@ public:
                         runs->supports_driven();
                     profiles.push_back(std::move(driven));
                 }
-                json_response(response, {{"schema_version", 1},
-                                         {"status", "ok"},
-                                         {"database", {{"ready", true}}},
-                                         {"supported_drafts", supported_drafts()},
-                                         {"executable_profiles", std::move(profiles)},
-                                         {"publisher_capability_defaults",
-                                          {{"fetch", config.default_publisher_capabilities.fetch}}},
-                                         {"validator", detail::build_json(build)}});
+                Json body = {{"schema_version", 1},
+                             {"status", "ok"},
+                             {"database", {{"ready", true}}},
+                             {"supported_drafts", supported_drafts()},
+                             {"executable_profiles", std::move(profiles)},
+                             {"publisher_capability_defaults",
+                              {{"fetch", config.default_publisher_capabilities.fetch}}},
+                             {"validator", detail::build_json(build)}};
+                // moq-lite-06 is listed apart, only when this server accepts lite runs (its catalog is configured):
+                // supported_drafts and executable_profiles stay MoQ Transport only (integer drafts), so their
+                // consumers are unaffected. Every executable lite scenario on both transports, observed then driven,
+                // its draft the string "moq-lite-06" (the API form, as in a run's config.draft).
+                if (accepts_runs(app::DraftVersion::MoqLite06)) {
+                    Json lite_profiles = Json::array();
+                    for (const auto id : app::executable_scenarios(app::draft_number(app::DraftVersion::MoqLite06))) {
+                        for (const char* transport : {"native-quic", "webtransport"}) {
+                            lite_profiles.push_back({{"draft", detail::draft_json(app::DraftVersion::MoqLite06)},
+                                {"transport", transport}, {"mode", "observed"}, {"scenario", id},
+                                {"configured", runs && runs->supports(app::DraftVersion::MoqLite06)},
+                                {"requires_fetch", false}});
+                        }
+                    }
+                    const auto lite_observed = lite_profiles.size();
+                    for (std::size_t index = 0; index < lite_observed; ++index) {
+                        auto driven = lite_profiles.at(index);
+                        driven["mode"] = "driven";
+                        driven["configured"] = driven.at("configured").get<bool>() && runs->supports_driven();
+                        lite_profiles.push_back(std::move(driven));
+                    }
+                    body["supported_lite_drafts"] = Json::array({detail::draft_json(app::DraftVersion::MoqLite06)});
+                    body["lite_executable_profiles"] = std::move(lite_profiles);
+                }
+                json_response(response, body);
             });
         });
         server.Get("/api/v1/drafts", [this](const httplib::Request&, httplib::Response& response) {
@@ -854,7 +867,8 @@ public:
         server.Post("/api/v1/runs", [this](const httplib::Request& request,
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
-                const auto requested = parse_run_config(request, config.default_publisher_capabilities);
+                const auto requested = parse_run_config(request, config.default_publisher_capabilities,
+                                                  accepts_runs(app::DraftVersion::MoqLite06));
                 if (!accepts_runs(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
                         "Draft " + detail::draft_display(requested.draft) +
@@ -1071,7 +1085,8 @@ public:
 
     // Whether POST /api/v1/runs takes runs for `draft`: it must be runnable and this server must have its
     // catalog to present and score them (a runner without the draft 22 or moq-lite-06 catalog refuses those runs
-    // with 422 draft_not_runnable). /healthz lists exactly these drafts as supported_drafts.
+    // with 422 draft_not_runnable). /healthz lists exactly these drafts: the MoQ Transport ones as supported_drafts,
+    // moq-lite-06 as supported_lite_drafts.
     bool accepts_runs(app::DraftVersion draft) const {
         if (!app::runnable(draft)) return false;
         switch (draft) {
@@ -1083,12 +1098,11 @@ public:
         return false;
     }
 
-    // Each in its API form (draft_json): the integers for MoQ Transport, the string "moq-lite-06" for moq-lite.
+    // The MoQ Transport drafts only (integers); moq-lite-06 is /healthz supported_lite_drafts.
     Json supported_drafts() const {
         Json drafts = Json::array();
-        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22,
-                                 app::DraftVersion::MoqLite06})
-            if (accepts_runs(draft)) drafts.push_back(detail::draft_json(draft));
+        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22})
+            if (accepts_runs(draft)) drafts.push_back(app::draft_number(draft));
         return drafts;
     }
 

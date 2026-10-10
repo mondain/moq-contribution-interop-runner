@@ -94,12 +94,14 @@ stops startup like the other catalogs.
 }
 ```
 
-- `scenarios` take the 19 `l06-` ids of the lite catalog (`executable_profiles` in `/healthz` lists them).
+- `scenarios` take the 19 `l06-` ids of the lite catalog (`lite_executable_profiles` in `/healthz` lists them).
   Any number of them may be selected together (1 to 100): each runs as its own context with a fresh session,
   and the typed/raw-probe single-selection rule of the MoQ Transport drafts does not apply.
 - `timeout_ms` bounds each context's wait for the publisher and, separately, the probe once the session is
   established. A timeout too short for a scenario's stated windows is stored as a `harness_error` for that
   context (the run is `error`).
+- An invalid `draft` value is `400 invalid_run_config` with the message `draft must be 18, 21, 22 or
+  moq-lite-06.` on a runner that serves moq-lite-06 (`draft must be 18, 21 or 22.` on one that does not).
 - `track`: the scenarios that name the publisher's broadcast (the announce, subscribe, session-close and
   reset-code scenarios) need the `track` fixture: the `namespace_hex` fields joined with `/` are the broadcast
   path and `name_hex` is the track name. Driven mode always needs it.
@@ -131,7 +133,14 @@ report and the lite completeness entry carry `staged: true` and a `staged_note` 
 after the plan; HTML: a "Staged catalog" paragraph). The verdict is `fail`, `incomplete` or `error`, never `pass`:
 the catalog's unreviewed rows (classification pending) are each `not_run` with the reason in their rationale
 (`Unreviewed: classification pending.`) and count in the denominators without earning. See
-[scoring-and-audit.md](scoring-and-audit.md#staged-moq-lite-06-audit).
+[scoring-and-audit.md](scoring-and-audit.md#staged-moq-lite-06-audit). The run record decides `staged` by the
+run's draft (every moq-lite run, since it has no catalog), while the catalog-backed routes (`/results/{id}`,
+`.json`, `.tap`, the completeness entry) decide it by the catalog (`complete: false`); the two differ only once the
+lite catalog is complete (L2). Run summaries in `GET /api/v1/runs` carry no `staged` field.
+
+A WebTransport lite CONNECT the listener refuses (for example a `:path` without the query) is named in the
+context's `harness_error` detail as `refused CONNECT: status=404 reason=unknown WebTransport endpoint path=<the
+received :path>`. Adapters dial `url` verbatim: `path` is the URL path only.
 
 ### Declaring publisher capabilities
 
@@ -359,17 +368,28 @@ evidence-backed pass or fail), `not_run_count` with the `not_run` rows,
 stored in the current database. A pass or fail observation is not proof of
 conformance; inspect the run's evidence.
 
-`GET /healthz` returns `status`, `database.ready`, `supported_drafts` (the drafts
-this runner accepts runs for, each in its API form: `[18, 21, 22]` when the draft 22
-catalog is loaded, and `[18, 21, 22, "moq-lite-06"]` when the lite catalog is too,
-as in production), the
+`GET /healthz` returns `status`, `database.ready`, `supported_drafts` (the MoQ
+Transport drafts this runner accepts runs for, integers only: `[18, 21, 22]` when the
+draft 22 catalog is loaded, as in production), the
 `validator` build identity, `publisher_capability_defaults` and
 `executable_profiles`: one entry per `draft`, `transport`, `mode` and `scenario`
 with a `configured` flag that is true only when the TLS material (and, for
 `driven`, an adapter) is set, and a `requires_fetch` flag. Draft 22 profiles
 name the 221 executable draft 22 scenarios; the two unscored probes are not
-listed, although a run may select them by ID. With the lite catalog loaded the 19
-moq-lite-06 scenarios are listed on both transports with `"draft": "moq-lite-06"`.
+listed, although a run may select them by ID. `supported_drafts` and
+`executable_profiles` list MoQ Transport only (integer `draft` values), with or
+without the lite catalog.
+
+When the runner loaded the moq-lite-06 catalog, `/healthz` adds two fields (absent
+otherwise): `supported_lite_drafts` (`["moq-lite-06"]`) and
+`lite_executable_profiles`, built like `executable_profiles` (the 19 lite scenarios
+on both transports, observed first and then driven, `"draft": "moq-lite-06"`,
+`requires_fetch: false`). A driven lite profile is `configured: true` whenever any
+`--driver-executable` is set, whether or not that adapter supports moq-lite (an
+adapter that does not refuses the request with exit 64 and the context ends with a
+`harness_error`). A readiness probe that looks only at `executable_profiles`, such
+as the CI check `any(.executable_profiles[]; .mode == "driven" and .configured)`,
+is intentionally not satisfied by lite profiles.
 
 ## Error codes
 

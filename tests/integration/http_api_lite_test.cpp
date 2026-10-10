@@ -158,16 +158,22 @@ TEST_F(LiteHttpApi, TheRequirementsRouteServesTheLiteCatalog) {
     EXPECT_EQ(get("/api/v1/requirements?draft=moq-lite-07", 400).at("error"), refused.at("error"));
 }
 
-TEST_F(LiteHttpApi, HealthListsMoqLiteAsASupportedDraftWithItsProfiles) {
+TEST_F(LiteHttpApi, HealthListsMoqLiteApartFromTheMoqTransportDraftsAndProfiles) {
     const auto health = get("/healthz");
-    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21, 22, "moq-lite-06"}));
+    // supported_drafts and executable_profiles stay MoQ Transport only (integer drafts), byte-identical to a server
+    // without the lite catalog; moq-lite-06 is listed in the two additive fields.
+    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21, 22}));
+    EXPECT_EQ(health.at("supported_lite_drafts"), Json::array({"moq-lite-06"}));
+    for (const auto& profile : health.at("executable_profiles"))
+        EXPECT_TRUE(profile.at("draft").is_number_integer()) << profile.dump();
     std::set<std::string> observed;
-    std::size_t lite_profiles = 0;
-    for (const auto& profile : health.at("executable_profiles")) {
-        if (!profile.at("draft").is_string()) continue;
-        ++lite_profiles;
+    const auto& lite_profiles = health.at("lite_executable_profiles");
+    for (std::size_t index = 0; index < lite_profiles.size(); ++index) {
+        const auto& profile = lite_profiles.at(index);
         EXPECT_EQ(profile.at("draft"), "moq-lite-06");
         EXPECT_FALSE(profile.at("requires_fetch"));
+        // Observed first, then the same profiles driven.
+        EXPECT_EQ(profile.at("mode"), index < lite_profiles.size() / 2 ? "observed" : "driven") << index;
         const auto id = profile.at("scenario").get<std::string>();
         EXPECT_TRUE(app::lite_executable_scenario(id).has_value()) << id;
         // Observed lite profiles run on this manager; driven ones need --driver-executable.
@@ -176,7 +182,20 @@ TEST_F(LiteHttpApi, HealthListsMoqLiteAsASupportedDraftWithItsProfiles) {
     }
     // 19 scenarios on both transports, observed and driven.
     EXPECT_EQ(observed.size(), 2 * app::kLiteExecutableScenarios.size());
-    EXPECT_EQ(lite_profiles, 4 * app::kLiteExecutableScenarios.size());
+    EXPECT_EQ(lite_profiles.size(), 4 * app::kLiteExecutableScenarios.size());
+    const auto with_lite = health.at("executable_profiles").dump();
+    build(false, true);
+    const auto without = get("/healthz");
+    EXPECT_EQ(without.at("executable_profiles").dump(), with_lite);
+    EXPECT_EQ(without.at("supported_drafts"), health.at("supported_drafts"));
+    EXPECT_FALSE(without.contains("supported_lite_drafts"));
+    EXPECT_FALSE(without.contains("lite_executable_profiles"));
+}
+
+TEST_F(LiteHttpApi, DrivenLiteProfilesAreConfiguredWheneverADriverIsSet) {
+    build(true, true, true);
+    const auto health = get("/healthz");
+    for (const auto& profile : health.at("lite_executable_profiles")) EXPECT_TRUE(profile.at("configured"));
 }
 
 // ---- one run through every route ----------------------------------------------------------------------------------
@@ -394,6 +413,8 @@ TEST_F(LiteHttpApi, BadDraftValuesAndAnUnusableFixtureAreInvalid) {
         const auto [status, error] = post(body);
         EXPECT_EQ(status, 400) << draft.dump();
         EXPECT_EQ(error.at("error").at("code"), "invalid_run_config") << draft.dump();
+        // This server serves moq-lite-06, so the message names it (a server without it keeps the old message).
+        EXPECT_EQ(error.at("error").at("message"), "draft must be 18, 21, 22 or moq-lite-06.") << draft.dump();
     }
     // An empty track name is no broadcast track: the manager refuses it as invalid.
     auto body = lite_request({"l06-subscribe-latest"}, "native-quic", "observed", true);
@@ -414,6 +435,14 @@ TEST_F(LiteHttpApi, AServerWithoutTheLiteCatalogKeepsTheExistingRefusals) {
     EXPECT_EQ(get("/healthz").at("supported_drafts"), Json::array({18, 21, 22}));
     EXPECT_EQ(get("/api/v1/requirements?draft=moq-lite-06", 400).at("error").at("message"),
               "draft must be 18, 21 or 22.");
+    auto invalid = lite_request({"l06-setup-stream"});
+    invalid["draft"] = 106;
+    const auto [invalid_status, invalid_error] = post(invalid);
+    EXPECT_EQ(invalid_status, 400);
+    EXPECT_EQ(invalid_error.at("error").at("message"), "draft must be 18, 21 or 22.");
+    const auto health = get("/healthz");
+    EXPECT_FALSE(health.contains("supported_lite_drafts"));
+    EXPECT_FALSE(health.contains("lite_executable_profiles"));
     // A stored lite run answers 409 on the catalog-backed routes.
     const auto id = store_->create_run(app::RunConfig{app::DraftVersion::MoqLite06, app::TransportKind::NativeQuic,
                                                       app::RunMode::Observed, {"l06-setup-stream"}, 1s});

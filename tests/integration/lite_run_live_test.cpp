@@ -490,6 +490,15 @@ TEST(LiteRunLive, AWebTransportConnectWithoutTheQueryIsRefused) {
     ASSERT_EQ(run.state, storage::RunState::Finalized);
     EXPECT_FALSE(any_event(run, "transport_established", "l06-setup-stream"));
     EXPECT_TRUE(any_event(run, "harness_error", "l06-setup-stream"));
+    // The evidence names the refused CONNECT and the :path it carried.
+    const auto refusal = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "harness_error" && event.detail.find("refused CONNECT:") != std::string::npos;
+    });
+    ASSERT_NE(refusal, run.events.end());
+    EXPECT_NE(refusal->detail.find("refused CONNECT: status=404 reason=unknown WebTransport endpoint path=/moq"),
+              std::string::npos)
+        << refusal->detail;
+    EXPECT_EQ(refusal->detail.find("path=/moq?"), std::string::npos) << refusal->detail;  // the received :path
     EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Error);
     EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
 }

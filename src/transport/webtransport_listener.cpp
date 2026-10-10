@@ -88,6 +88,12 @@ struct WebTransportListener::Impl {
     picoquic_quic_t* quic = nullptr;
     picoquic_cnx_t* session_connection = nullptr;
     bool drop_inbound = false;
+    // The HTTP/3 route: config.path up to any '?'. h3zero routes that path with or without a query, so a CONNECT
+    // whose query differs still reaches validate_connect (which compares the whole :path) and is recorded below.
+    // Equal to config.path when it has no query (every MoQ Transport listener).
+    std::string route_path;
+    // The last CONNECT validate_connect refused (refused_connect()).
+    std::string refused_connect;
     std::unique_ptr<WebTransportSession> session;
     picowt_capsule_t capsule{};
     int socket_fd = -1;
@@ -210,7 +216,11 @@ struct WebTransportListener::Impl {
             peer->max_datagram_frame_size > 0,
             peer->is_reset_stream_at_enabled != 0};
         const auto decision = validate_connect(request, caps, run_endpoint, profile);
-        if (!decision.accepted()) return -1;
+        if (!decision.accepted()) {
+            refused_connect = "status=" + std::to_string(decision.http_status) + " reason=" + decision.evidence +
+                              " path=" + request.path;
+            return -1;
+        }
         if (picowt_set_wt_protocol(control, decision.selected_protocol.c_str()) != 0)
             return -1;
         if (h3zero_declare_stream_prefix(h3, control->stream_id,
@@ -374,8 +384,9 @@ WebTransportListenerCreateResult WebTransportListener::create(
                           impl->config.allowed_origins,
                           impl->config.application_protocol,
                           impl->config.require_origin};
-    impl->route.path = impl->config.path.c_str();
-    impl->route.path_length = impl->config.path.size();
+    impl->route_path = impl->config.path.substr(0, impl->config.path.find('?'));
+    impl->route.path = impl->route_path.c_str();
+    impl->route.path_length = impl->route_path.size();
     impl->route.path_callback = Impl::route_callback;
     impl->route.path_app_ctx = impl.get();
     impl->route.connect_protocol = "webtransport-h3";
@@ -453,6 +464,8 @@ OperationResult WebTransportListener::grant_peer_streams(bool bidirectional,
     return impl_->session ? impl_->session->grant_peer_streams(bidirectional, additional) :
                             OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
 }
+std::string WebTransportListener::refused_connect() const { return impl_->refused_connect; }
+
 OperationResult WebTransportListener::set_inbound_drop(bool enabled) {
     impl_->drop_inbound = enabled;
     return {TransportStatus::Success, 0, std::nullopt};

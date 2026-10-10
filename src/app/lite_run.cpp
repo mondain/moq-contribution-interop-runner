@@ -358,10 +358,14 @@ private:
                 ? "harness failure without a recorded reason" : transcript.harness_failure_reason);
         } else if (!transcript.established && !stopped) {
             operational_error_ = true;
+            // A WebTransport CONNECT the listener refused (for example a :path other than the session target)
+            // is named with what was received.
+            const auto refused = listener.refused_connect();
             context_event("harness_error", "the publisher did not establish a moq-lite-06 session within " +
                                                std::to_string(config_.timeout.count()) +
                                                " ms (no connection, or a connection refused by the listener: "
-                                               "for example another ALPN or WebTransport protocol)");
+                                               "for example another ALPN or WebTransport protocol)" +
+                                               (refused.empty() ? std::string{} : "; refused CONNECT: " + refused));
         }
         if (transcript.event_limit_reached) context_event("context_event_limit", transcript.event_limit_reason);
         const bool clean = transcript.complete && !transcript.harness_failed && !transcript.timed_out && transcript.established;
