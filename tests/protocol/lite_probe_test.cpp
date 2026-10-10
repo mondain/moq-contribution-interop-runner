@@ -989,6 +989,51 @@ TEST(LiteProbe, ASubscribeRefusedByAResetWakesTheContinuation) {
     EXPECT_TRUE(scen::judgeable_with_stimulus(t));
 }
 
+// L2a runner defect 1: the continuation was woken by new messages, new streams, resets, STOP_SENDING and the peer
+// close only, so a decision that waits for a peer FIN (a Probe Stream ended without a reset) or for time to pass (a
+// give-up allowance) was never made while the publisher stayed silent, and the probe ended at its deadline.
+TEST(LiteProbe, APeerFinWakesTheContinuation) {
+    ScriptedLitePeer peer([](ScriptedLitePeer& p) {
+        if (p.runner_stream(1) != nullptr && p.polls() == 5) p.fin(1);
+    });
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 1000ms;
+    definition.steps.push_back(scen::lite_open_bidi(subscribe_bytes(), false, "sub"));
+    std::size_t woken_by_fin = 0;
+    definition.next_steps = [&](const LiteSession& s, LiteProbeContext& context) {
+        for (const auto* record : sess::runner_streams(s))
+            if (record->fin_seen) {
+                ++woken_by_fin;
+                context.finished = true;
+            }
+        return std::vector<LiteStep>{};
+    };
+    definition.observation_window = 5ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_GE(woken_by_fin, 1u);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+}
+
+TEST(LiteProbe, TimePassingWakesTheContinuationOfASilentPeer) {
+    ScriptedLitePeer peer;  // never sends anything after the connection is established
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 5000ms;
+    definition.steps.push_back(scen::lite_mark("m"));
+    definition.next_steps = [](const LiteSession&, LiteProbeContext& context) {
+        // A give-up allowance: the decision depends on the clock alone.
+        if (context.now_ns - context.established_ns >= 500 * kMs) context.finished = true;
+        return std::vector<LiteStep>{};
+    };
+    definition.observation_window = 5ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+    EXPECT_LT(t.ended_ns - t.established_ns, 1000 * kMs);
+}
+
 TEST(LiteProbe, AContinuationAppendingForeverHitsTheStepLimit) {
     ConformingLitePublisher publisher;
     ScriptedLitePeer peer(publisher.reaction());

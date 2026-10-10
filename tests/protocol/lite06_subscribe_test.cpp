@@ -1014,9 +1014,12 @@ TEST(Lite06SubscribeGroupFloor, ALearningSubscriptionThatIsRefusedEndsWithoutFlo
     EXPECT_EQ(judge_floor(t), Pair(kNotRun, kNotRun));
 }
 
-TEST(Lite06SubscribeGroupFloor, ASilentLearningSubscriptionTimesOutNotRun) {
+// L2a runner defect 1: the continuation is also woken by the clock now, so a silent learning subscription ends at
+// its learning allowance instead of at the deadline (it used to leave the continuation open and time out).
+TEST(Lite06SubscribeGroupFloor, ASilentLearningSubscriptionGivesUpAtItsAllowanceAndIsNotRun) {
     const auto t = run(floor_probe(), pending(0));
-    EXPECT_TRUE(t.timed_out);
+    EXPECT_FALSE(t.timed_out);
+    EXPECT_EQ(lite06::step_labelled(t, scen::kL06FloorAtLatestLabel), nullptr);
     EXPECT_EQ(judge_floor(t), Pair(kNotRun, kNotRun));
 }
 

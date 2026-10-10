@@ -43,6 +43,8 @@ inline constexpr std::size_t kLiteMaximumEvidenceBytes = std::size_t{8} << 20;
 inline constexpr std::size_t kLiteMaximumSteps = 1024;
 // Events taken from the transport per poll.
 inline constexpr std::size_t kLitePollBatch = 256;
+// How often the dynamic continuation is called at least, with no recorder change (a clock-only wake).
+inline constexpr std::chrono::milliseconds kLiteContinuationTick{100};
 
 // The engine's time source, in nanoseconds on a monotonic scale. The name avoids scenarios::Clock (engine.h), which
 // is a std::chrono clock type rather than an injectable object.
@@ -215,8 +217,9 @@ struct LiteProbeDefinition {
     // Draft 6.3.1: the opener sends one SETUP and immediately FINs. False only for deliberate probes.
     bool runner_setup_fin{true};
     // Optional dynamic continuation, called once after establishment and then whenever the recorder changed: new
-    // decoded messages, new streams, a new peer RESET_STREAM or STOP_SENDING, or the peer's close. The steps it
-    // returns are appended in order. Until it sets LiteProbeContext::finished the continuation counts as pending:
+    // decoded messages, new streams, a new peer FIN, RESET_STREAM or STOP_SENDING, or the peer's close, and at least
+    // every kLiteContinuationTick of the clock (so a decision that only waits for time to pass is made even while the
+    // publisher is silent). The steps it returns are appended in order. Until it sets LiteProbeContext::finished the continuation counts as pending:
     // the deadline then sets timed_out, stimulus_delivered stays false and a peer close is peer_closed_early.
     std::function<std::vector<LiteStep>(const session::LiteSession&, LiteProbeContext&)> next_steps;
     std::vector<LiteStep> steps;
@@ -391,7 +394,7 @@ private:
     std::set<transport::StreamId> send_ended_;
     std::set<transport::StreamId> engine_fins_;
     // (decoded messages, streams, peer resets + stop-sendings, peer close) when next_steps was last called.
-    std::optional<std::array<std::size_t, 4>> continuation_seen_;
+    std::optional<std::array<std::size_t, 6>> continuation_seen_;
 };
 
 }  // namespace moq::interop::scenarios

@@ -22,11 +22,12 @@
 // builder) or when a fixture value is empty. Pass a deadline of at least that plus a margin (a second or more live).
 //
 // l06-subscribe-group-floor and l06-subscribe-abutting-frame-start learn the latest group from a default
-// subscription first, through the engine's dynamic next_steps continuation. The continuation runs only when the
-// recorder changes: a learning step whose allowance passed is closed on the next change; a publisher that never
-// sends anything more (a silent learning subscription) leaves the continuation open until the deadline, which sets
-// timed_out, so every evaluator of the probe is NotRun. Task 9 must treat timed_out on these two probes as NotRun,
-// NOT as a harness error, and give them deadlines of at least the stated sums plus a margin.
+// subscription first, through the engine's dynamic next_steps continuation. The continuation runs when the
+// recorder changes and at least every kLiteContinuationTick of the clock, so a learning step whose allowance passed
+// is closed even when the publisher stays silent (a silent learning subscription ends at its allowance and every
+// evaluator of the probe is NotRun; before L2a it left the continuation open until the deadline, which set
+// timed_out). Task 9 still treats timed_out on these two probes as NotRun, NOT as a harness error, and gives them
+// deadlines of at least the stated sums plus a margin.
 
 #include <chrono>
 #include <cstddef>
