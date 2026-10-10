@@ -172,8 +172,8 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `schema_version` | `1` | Contract version |
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
-| `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged |
-| `draft` | `18`, `21`, `22` or `"moq-lite-06"` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21). The string `"moq-lite-06"` (a moq-lite draft, never the number 106) is carried by the contract and `adapters/contract.schema.json` but no bundled adapter runs it: moqxr, moq5 and imquic refuse it (exit 64, naming "moq-lite-06") |
+| `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged. A moq-lite-06 run uses `moql://HOST:PORT/moq?token=l1d` and `https://HOST:PORT/moq?token=l1d` for every scenario (section 7.1) |
+| `draft` | `18`, `21`, `22` or `"moq-lite-06"` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21). The string `"moq-lite-06"` (a moq-lite draft, never the number 106) is carried by the contract and `adapters/contract.schema.json`; only `adapters/moq-lite` (the moq CLI) runs it, and it refuses every numeric draft. moqxr, moq5 and imquic refuse `"moq-lite-06"` (exit 64, naming "moq-lite-06") |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -313,7 +313,7 @@ against imquic and its triage are in
 [interop-notes.md](interop-notes.md#draft-22-sweep-against-imquic-6836173); the imquic findings
 are in [imquic-punch-list.md](imquic-punch-list.md).
 
-How to build, run and test against each bundled peer: [adapters/moqxr/README.md](../adapters/moqxr/README.md) and [adapters/imquic/README.md](../adapters/imquic/README.md).
+How to build, run and test against each bundled peer: [adapters/moqxr/README.md](../adapters/moqxr/README.md), [adapters/imquic/README.md](../adapters/imquic/README.md) and, for moq-lite-06, [adapters/moq-lite/README.md](../adapters/moq-lite/README.md) (section 7.1).
 
 A real request file from a run:
 
@@ -744,29 +744,49 @@ is the only capability so far. To see which scenarios are affected, read
 `requires_fetch` in `GET /healthz`, or the list in
 [scenario-reference.md](scenario-reference.md#scenarios-that-need-fetch).
 
-### 7.1 moq-lite-06 publishers (L1d)
+### 7.1 moq-lite-06 publishers
 
-These notes describe what an adapter for a moq-lite-06 publisher (for example the moq CLI) must provide. moq-lite-06
-runs are not startable through the HTTP API yet (L1e flips that); the expectations below are what the scenarios
-already assume.
+These notes describe what an adapter for a moq-lite-06 publisher must provide. A moq-lite-06 run is started through
+the HTTP API with `"draft": "moq-lite-06"` (the server must have loaded the lite catalog); the request file carries the
+string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (below).
 
 - **The publisher under test is the client.** It dials the runner; the runner is the server and the subscriber. The
   runner sends its own SETUP stream first (except in the violation probes) and still offers QUIC DATAGRAM
   but does not require it: a moq-lite-06 listener accepts a peer that did not negotiate datagrams. The ALPN is `moq-lite-06`
   for native QUIC; a publisher that offers another ALPN ends the run with a harness error (verdict `error`).
-- **Endpoint forms are provisional.** Native QUIC is `moql://host:port` and WebTransport is `https://host:port/moq`.
-  Both are fixed in L1e against the moq CLI and may change; do not hard-code them in a published adapter.
+- **Endpoint forms are fixed.** Native QUIC is `moql://HOST:PORT/moq?token=l1d` and WebTransport is
+  `https://HOST:PORT/moq?token=l1d`, for every scenario. The path `/moq` and query `token=l1d` are constants
+  (`kLiteSessionPath`, `kLiteSessionQuery` in `src/app/lite_run.cpp`); the WebTransport listener accepts exactly that
+  CONNECT `:path`. Dial the request's `endpoint` verbatim; do not rebuild it from its parts.
 - **Capabilities some scenarios need from the adapter:**
-  - `l06-setup-client-path` needs the publisher to be given a session URL with a path and a query (unreserved
-    characters only, for example `/moq?token=l1d`) and to put them in its SETUP Path (native QUIC; the path and query
-    appended) or send no Path (WebTransport). Without them rows 120, 124 and 125 are `not_run`.
+  - `l06-setup-client-path` needs the publisher to put the session URL's path and query in its SETUP Path on native
+    QUIC (rows 120 and 124, an exact byte match of `/moq?token=l1d`) and to send no Path on WebTransport (row 125).
+    A publisher that cannot carry them leaves those rows `not_run`.
   - `l06-announce-lifecycle` needs the publisher to end a broadcast and start it again within one session. Without that,
     row 152 is `not_run`.
   - The unknown-code and reserved-code probes (`l06-errors-unknown-reset-code`, `l06-errors-reserved-reset-code`) run
     about 9 s and 6 s. The publisher needs a media source that keeps producing for that long; a source that ends
     inside the probe makes the publisher close the session with NO_ERROR, which those rows judge as a Fail.
   - Ten scenarios need the track fixture (broadcast path and track name); the adapter must publish exactly that
-    broadcast and track.
+    broadcast and track. A driven run always passes the run's `track` fixture in the request.
+- **The moq CLI adapter.** `adapters/moq-lite/run.sh` drives the `moq` CLI of moq-dev/moq (`MOQ_CLI_BIN`; the current
+  CLI only: `--version` must print `moq <version>` and `--help` must mention `--connect-version`, so the older
+  `moq-cli` is refused with exit 64). It runs `ffmpeg` (a 640x360 30 fps test pattern, H.264 at about 200 kbit/s, a
+  1 s GOP, video only, fragmented MP4 for the scenario timeout rounded up plus 3 s; `MOQ_FFMPEG_BIN` overrides the
+  binary) into `moq --log-level debug --connect-version moq-lite-06 --connect-once --connect-timeout 10s
+  --connect-tls-insecure --connect <endpoint> --broadcast interop.hang import fmp4`, the endpoint passed verbatim,
+  with `--connect-tls-root <tls_ca>` instead when the request's `tls_ca` is non-empty (the runner always fills it;
+  `MOQ_LITE_TLS_INSECURE=1` keeps `--connect-tls-insecure` for a self-signed test certificate). The logs are
+  `<log_dir>/publisher.log` (moq) and `<log_dir>/ffmpeg.log`; the exit status is moq's. Like the imquic adapter it
+  stays alive as a supervisor: on the runner's group SIGTERM it exits 0 at once while ffmpeg and moq, signalled by
+  the group, end on their own, each bounded by `timeout -k 2`. It accepts only the fixture
+  `namespace_hex: ["696e7465726f702e68616e67"]` (`interop.hang`) and `track_name_hex: "302e6d3473"` (`0.m4s`);
+  these are provisional until the live smoke pins them. The adapter has no per-scenario options: all 19 executable
+  scenarios use the same command line and differ only in what the runner does
+  (`tests/golden/moq-lite-cmdlines.txt`). The CLI has no duration flag, so use a run `timeout_ms` that fits the
+  longest probe. Rows such as 152 (the publisher must end and restart a broadcast within one session; the adapter has
+  no CLI option that asks for it) are `not_run` by the runner's decision, not the adapter's. Build, environment and tests:
+  [adapters/moq-lite/README.md](../adapters/moq-lite/README.md).
 - **Results are staged.** A moq-lite-06 run covers 30 testable rows of a catalog with 75 still-unreviewed rows, so its
   verdict is `incomplete` or `fail`, never `pass`; unreviewed rows are listed as not tested.
 
