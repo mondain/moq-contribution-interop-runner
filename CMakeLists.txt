@@ -290,6 +290,7 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/lite06_fetch.cpp
     src/scenarios/lite06_probe.cpp
     src/scenarios/lite06_goaway.cpp
+    src/scenarios/lite06_datagram.cpp
     src/scenarios/lite06_errors.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -1625,6 +1626,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
     add_test(NAME moqlite-goaway
              COMMAND moq-interop-moqlite-goaway-tests)
+
+    add_executable(moq-interop-moqlite-datagram-tests
+                   tests/protocol/lite06_datagram_test.cpp)
+    target_include_directories(moq-interop-moqlite-datagram-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-datagram-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-datagram-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-datagram
+             COMMAND moq-interop-moqlite-datagram-tests)
 
     add_executable(moq-interop-moqlite-errors-tests
                    tests/protocol/lite06_errors_test.cpp)
