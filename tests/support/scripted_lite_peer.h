@@ -29,10 +29,14 @@
 #include "moq/interop/scenarios/lite_probe.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/moqlite06/announce.h"
+#include "moq/interop/wire/moqlite06/fetch.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/goaway.h"
 #include "moq/interop/wire/moqlite06/group.h"
+#include "moq/interop/wire/moqlite06/probe.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 #include "moq/interop/wire/moqlite06/subscribe.h"
+#include "moq/interop/wire/moqlite06/track.h"
 #include "moq/interop/wire/moqlite06/varint.h"
 
 namespace moq::interop::test::lite {
@@ -79,6 +83,21 @@ inline Bytes group_header(const l06::GroupHeader& header) {
 }
 inline Bytes frame(const l06::Frame& value) {
     return encode_with([&](wire::ByteWriter& out) { return !l06::encode_frame(value, out).has_value(); });
+}
+inline Bytes track_request(const l06::TrackRequest& message) {
+    return encode_with([&](wire::ByteWriter& out) { return !l06::encode_track_request(message, out).has_value(); });
+}
+inline Bytes track_info(const l06::TrackInfo& message) {
+    return encode_with([&](wire::ByteWriter& out) { return !l06::encode_track_info(message, out).has_value(); });
+}
+inline Bytes fetch_request(const l06::FetchRequest& message) {
+    return encode_with([&](wire::ByteWriter& out) { return !l06::encode_fetch_request(message, out).has_value(); });
+}
+inline Bytes probe_message(const l06::ProbeMessage& message) {
+    return encode_with([&](wire::ByteWriter& out) { return !l06::encode_probe(message, out).has_value(); });
+}
+inline Bytes goaway_message(const l06::GoawayMessage& message) {
+    return encode_with([&](wire::ByteWriter& out) { return !l06::encode_goaway(message, out).has_value(); });
 }
 // STREAM_TYPE 0x1 + SETUP: a whole Setup stream.
 inline Bytes setup_stream(const l06::SetupMessage& message = {}) { return join({stream_type(0x1), setup(message)}); }

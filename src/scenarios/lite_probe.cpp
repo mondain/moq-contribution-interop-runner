@@ -240,6 +240,12 @@ void LiteProbeController::finish(std::uint64_t now) {
 }
 
 bool LiteProbeController::is_peer_group_data(const transport::StreamDataEvent& data) const {
+    // A FETCH response is media too: the peer's bytes on a runner-opened bidirectional stream (id & 3 == 1) whose
+    // STREAM_TYPE the runner wrote as Fetch. The recorder decodes the FRAMEs; the transcript keeps length and FIN.
+    if ((data.stream_id & 3u) == 1u) {
+        const auto* record = session_.find(data.stream_id);
+        return record != nullptr && record->kind == session::LiteStreamKind::Fetch;
+    }
     // The runner is the QUIC server: a client-initiated unidirectional stream (id & 3 == 2) is the peer's.
     if ((data.stream_id & 3u) != 2u) return false;
     if (const auto* record = session_.find(data.stream_id)) {

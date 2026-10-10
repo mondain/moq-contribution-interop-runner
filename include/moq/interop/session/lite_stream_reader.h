@@ -12,10 +12,14 @@
 #include <vector>
 
 #include "moq/interop/wire/moqlite06/announce.h"
+#include "moq/interop/wire/moqlite06/fetch.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/goaway.h"
 #include "moq/interop/wire/moqlite06/group.h"
+#include "moq/interop/wire/moqlite06/probe.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 #include "moq/interop/wire/moqlite06/subscribe.h"
+#include "moq/interop/wire/moqlite06/track.h"
 
 namespace moq::interop::session {
 
@@ -29,7 +33,9 @@ enum class LiteOrigin { Peer, Runner };
 using LiteMessage = std::variant<wire::moqlite06::SetupMessage, wire::moqlite06::GroupHeader, wire::moqlite06::Frame,
     wire::moqlite06::AnnounceRequest, wire::moqlite06::AnnounceOk, wire::moqlite06::AnnounceStart, wire::moqlite06::AnnounceEnd,
     wire::moqlite06::AnnounceUpdate, wire::moqlite06::Subscribe, wire::moqlite06::SubscribeUpdate, wire::moqlite06::SubscribeOk,
-    wire::moqlite06::SubscribeEnd, wire::moqlite06::SubscribeDrop>;
+    wire::moqlite06::SubscribeEnd, wire::moqlite06::SubscribeDrop, wire::moqlite06::TrackRequest,
+    wire::moqlite06::TrackInfo, wire::moqlite06::FetchRequest, wire::moqlite06::ProbeMessage,
+    wire::moqlite06::GoawayMessage>;
 
 // stream_event_index: the 0-based index of the event on THIS stream (every feed, local write, reset or
 // STOP_SENDING counts as one event) that completed the message or raised the issue. `from` tells which endpoint
@@ -45,11 +51,12 @@ struct LiteDecoded {
 // "invalid_value", "length_exceeds_limit", "offset_overflow", "key_value_formatting_error",
 // "length_not_representable" (the last two are never returned by the lite codecs). From the reader:
 // "unknown_announce_type" (skipped by Message Length, decoding continues), "trailing_after_fin",
-// "trailing_after_setup", "trailing_after_request", "truncated_at_fin", "publisher_opened_bidi",
-// "l2_stream_not_decoded", "undeclared_runner_stream", "message_limit_reached", "buffer_limit_reached",
-// "local_bidi_mismatch". Every code except "unknown_announce_type", "publisher_opened_bidi",
-// "l2_stream_not_decoded" and "local_bidi_mismatch" stops decoding that direction of the stream; further bytes
-// are only counted.
+// "trailing_after_setup", "trailing_after_request", "trailing_after_response" (a second TRACK_INFO),
+// "unexpected_response" (reply bytes on a GOAWAY stream), "truncated_at_fin", "publisher_opened_bidi",
+// "l2_stream_not_decoded" (kept for a stream kind the reader does not decode; none since L2a),
+// "undeclared_runner_stream", "message_limit_reached", "buffer_limit_reached", "local_bidi_mismatch". Every code
+// except "unknown_announce_type", "publisher_opened_bidi", "l2_stream_not_decoded" and "local_bidi_mismatch" stops
+// decoding that direction of the stream; further bytes are only counted.
 struct LiteDecodeIssue {
     std::size_t stream_event_index;
     std::string code;
@@ -67,6 +74,8 @@ inline constexpr std::string_view kIssueLengthNotRepresentable = "length_not_rep
 inline constexpr std::string_view kIssueTrailingAfterFin = "trailing_after_fin";
 inline constexpr std::string_view kIssueTrailingAfterSetup = "trailing_after_setup";
 inline constexpr std::string_view kIssueTrailingAfterRequest = "trailing_after_request";
+inline constexpr std::string_view kIssueTrailingAfterResponse = "trailing_after_response";
+inline constexpr std::string_view kIssueUnexpectedResponse = "unexpected_response";
 inline constexpr std::string_view kIssueTruncatedAtFin = "truncated_at_fin";
 inline constexpr std::string_view kIssuePublisherOpenedBidi = "publisher_opened_bidi";
 inline constexpr std::string_view kIssueL2StreamNotDecoded = "l2_stream_not_decoded";
@@ -76,12 +85,12 @@ inline constexpr std::string_view kIssueBufferLimitReached = "buffer_limit_reach
 inline constexpr std::string_view kIssueLocalBidiMismatch = "local_bidi_mismatch";
 
 // Every issue code the reader and session emit (the test pins that each has an explicit class).
-inline constexpr std::array<std::string_view, 17> kAllIssueCodes{
+inline constexpr std::array<std::string_view, 19> kAllIssueCodes{
     kIssueUnknownAnnounceType, kIssueProtocolViolation, kIssueInvalidValue, kIssueLengthExceedsLimit,
     kIssueOffsetOverflow, kIssueKeyValueFormattingError, kIssueLengthNotRepresentable, kIssueTrailingAfterFin,
     kIssueTrailingAfterSetup, kIssueTrailingAfterRequest, kIssueTruncatedAtFin, kIssuePublisherOpenedBidi,
     kIssueL2StreamNotDecoded, kIssueUndeclaredRunnerStream, kIssueMessageLimitReached, kIssueBufferLimitReached,
-    kIssueLocalBidiMismatch};
+    kIssueLocalBidiMismatch, kIssueTrailingAfterResponse, kIssueUnexpectedResponse};
 
 // How an evaluator may use an issue.
 //   PeerProtocol: the peer's bytes broke the wire format; an evaluator may judge the peer on it (Fail).
@@ -131,6 +140,12 @@ std::string_view lite_message_name(const LiteMessage& message);
 // until the record changes.
 std::vector<const LiteDecoded*> peer_messages(const LiteStreamRecord& record);
 std::vector<const LiteDecoded*> runner_messages(const LiteStreamRecord& record);
+// The peer's TRACK_INFO replies (more than one is also a trailing_after_response issue), its FETCH response FRAMEs
+// in arrival order (zigzag deltas as decoded; cumulative timestamps are the evaluator's), and its PROBE reports.
+// Each returns the peer's messages of that alternative only, never the runner's own TRACK, FETCH or PROBE target.
+std::vector<const LiteDecoded*> peer_track_info(const LiteStreamRecord& record);
+std::vector<const LiteDecoded*> peer_fetch_frames(const LiteStreamRecord& record);
+std::vector<const LiteDecoded*> peer_probe_reports(const LiteStreamRecord& record);
 // Issues raised by the peer's bytes or the peer's stream (any class).
 std::vector<const LiteDecodeIssue*> peer_issues(const LiteStreamRecord& record);
 // The only issues an evaluator may turn into a Fail of the peer: from the peer and classified PeerProtocol.

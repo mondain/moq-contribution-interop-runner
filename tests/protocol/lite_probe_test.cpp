@@ -1320,6 +1320,72 @@ TEST(LiteProbe, AGroupPayloadFloodKeepsLengthAndFinButNotTheBytes) {
     EXPECT_EQ(frames, kGroups * kFrames);
 }
 
+// A FETCH response is media too (L2a): 20 MiB of FRAMEs on the runner's Fetch stream keep their length and FIN in
+// the transcript but not their bytes, the recorder decodes every FRAME first, and the context stays judgeable. The
+// runner's own FETCH request keeps its bytes.
+TEST(LiteProbe, AFetchResponseFloodKeepsLengthAndFinButNotTheBytes) {
+    constexpr std::size_t kFrames = 40;
+    constexpr std::size_t kPayload = 512 * 1024;
+    constexpr std::size_t kChunk = 300 * 1000;
+    l06::FetchRequest request;
+    request.broadcast_path = "demo/live";
+    request.track_name = "video";
+    const Bytes fetch_bytes = join({stream_type(0x3), fetch_request(request)});
+    Bytes response;
+    for (std::size_t f = 0; f < kFrames; ++f) {
+        l06::Frame value;
+        value.timestamp_delta = 2;
+        value.payload = Bytes(kPayload, static_cast<std::byte>(0x40 + (f & 0x3f)));
+        const auto encoded = frame(value);
+        response.insert(response.end(), encoded.begin(), encoded.end());
+    }
+    std::size_t sent_bytes = 0;
+    bool answered = false;
+    ScriptedLitePeer peer([&](ScriptedLitePeer& p) {
+        if (answered || p.runner_stream(1) == nullptr) return;
+        answered = true;
+        for (std::size_t offset = 0; offset < response.size(); offset += kChunk) {
+            const auto end = std::min(response.size(), offset + kChunk);
+            p.data(1, Bytes(response.begin() + static_cast<std::ptrdiff_t>(offset),
+                            response.begin() + static_cast<std::ptrdiff_t>(end)),
+                   end == response.size());
+            sent_bytes += end - offset;
+        }
+    });
+    ManualLiteClock clock;
+    LiteProbeDefinition definition;
+    definition.deadline = 2000ms;
+    definition.steps.push_back(scen::lite_open_bidi(fetch_bytes, false, "fetch"));
+    definition.observation_window = 100ms;
+    const auto t = run_lite_probe(peer, definition, clock);
+    ASSERT_GE(sent_bytes, std::size_t{20} << 20);
+    EXPECT_FALSE(t.event_limit_reached) << t.event_limit_reason;
+    EXPECT_TRUE(judgeable(t));
+    EXPECT_EQ(t.payload_bytes_dropped, sent_bytes);
+    Bytes request_seen;
+    std::size_t kept_response_bytes = 0;
+    std::size_t sized_response_bytes = 0;
+    bool fin_kept = false;
+    for (std::size_t i = 0; i < t.events.size(); ++i) {
+        const auto* data = std::get_if<transport::StreamDataEvent>(&t.events[i]);
+        if (data == nullptr || data->stream_id != 1) continue;
+        kept_response_bytes += data->data.size();
+        sized_response_bytes += t.event_data_sizes[i];
+        fin_kept = fin_kept || data->fin;
+    }
+    EXPECT_EQ(kept_response_bytes, 0u);
+    EXPECT_EQ(sized_response_bytes, sent_bytes);
+    EXPECT_TRUE(fin_kept);
+    // The runner's request is a step, not a peer event, and keeps its bytes.
+    ASSERT_FALSE(t.steps.empty());
+    EXPECT_EQ(t.steps[0].bytes, fetch_bytes);
+    const auto* record = find_stream(t, 1);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->kind, LiteStreamKind::Fetch);
+    EXPECT_EQ(sess::peer_fetch_frames(*record).size(), kFrames);
+    EXPECT_TRUE(record->fin_seen);
+}
+
 // Only Group streams lose their payload: a flood on a peer Setup stream (or an unknown uni type, above:
 // EvidenceByteLimitStopsRecording) still reaches the cap.
 TEST(LiteProbe, AFloodOnAPeerSetupStreamStillReachesTheEvidenceCap) {
