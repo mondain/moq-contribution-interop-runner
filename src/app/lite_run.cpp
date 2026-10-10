@@ -9,8 +9,12 @@
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
 #include "moq/interop/scenarios/lite06_errors.h"
+#include "moq/interop/scenarios/lite06_fetch.h"
+#include "moq/interop/scenarios/lite06_goaway.h"
+#include "moq/interop/scenarios/lite06_probe.h"
 #include "moq/interop/scenarios/lite06_setup.h"
 #include "moq/interop/scenarios/lite06_subscribe.h"
+#include "moq/interop/scenarios/lite06_track.h"
 #include "moq/interop/session/lite_session.h"
 
 #include <algorithm>
@@ -135,6 +139,13 @@ scenarios::LiteProbeDefinition build(std::string_view id, std::chrono::milliseco
     if (id == "l06-errors-unknown-reset-code") return s::l06_errors_unknown_reset_code_probe(deadline, path, track);
     if (id == "l06-errors-reserved-reset-code") return s::l06_errors_reserved_reset_code_probe(deadline, path, track);
     if (id == "l06-errors-code-space") return s::l06_errors_code_space_probe(deadline);
+    if (id == "l06-track-info") return s::l06_track_info_probe(deadline, path, track);
+    if (id == "l06-fetch-group") return s::l06_fetch_group_probe(deadline, path, track);
+    if (id == "l06-fetch-unknown-group") return s::l06_fetch_unknown_group_probe(deadline, path, track);
+    if (id == "l06-probe-report") return s::l06_probe_report_probe(deadline);
+    if (id == "l06-goaway-single") return s::l06_goaway_single_probe(deadline, path, track);
+    if (id == "l06-goaway-duplicate") return s::l06_goaway_duplicate_probe(deadline);
+    if (id == "l06-goaway-oversize") return s::l06_goaway_oversize_probe(deadline);
     throw std::invalid_argument("no moq-lite-06 probe builder for scenario " + std::string(id));
 }
 
@@ -168,6 +179,11 @@ std::string describe(const session::LiteMessage& message) {
         } else if constexpr (std::is_same_v<T, l06::SubscribeDrop>) {
             return "group_start=" + std::to_string(value.group_start) + " group_end=" +
                    std::to_string(value.group_end) + " error_code=" + std::to_string(value.error_code);
+        } else if constexpr (std::is_same_v<T, l06::TrackInfo>) {
+            return "publisher_priority=" + std::to_string(value.publisher_priority) + " publisher_max_age_ms=" +
+                   std::to_string(value.publisher_max_age_ms) + " timescale=" + std::to_string(value.timescale);
+        } else if constexpr (std::is_same_v<T, l06::ProbeMessage>) {
+            return "bitrate=" + std::to_string(value.bitrate) + " rtt_ms=" + std::to_string(value.rtt_ms);
         } else {
             return {};
         }

@@ -62,11 +62,6 @@ LiteStreamKind classify(std::uint64_t type, bool bidirectional) {
     return *uni == UniStreamType::Group ? LiteStreamKind::Group : LiteStreamKind::Setup;
 }
 
-bool is_l2(LiteStreamKind kind) {
-    return kind == LiteStreamKind::Fetch || kind == LiteStreamKind::Probe || kind == LiteStreamKind::Goaway ||
-           kind == LiteStreamKind::Track;
-}
-
 // Where decoding starts once the kind is known. The opener's bytes follow its STREAM_TYPE; the responder's bytes
 // on a bidirectional stream carry no STREAM_TYPE.
 Phase initial_phase(LiteStreamKind kind, bool opener) {
@@ -75,13 +70,21 @@ Phase initial_phase(LiteStreamKind kind, bool opener) {
             case LiteStreamKind::Setup:
             case LiteStreamKind::Group:
             case LiteStreamKind::Announce:
-            case LiteStreamKind::Subscribe: return Phase::First;
+            case LiteStreamKind::Subscribe:
+            case LiteStreamKind::Track:
+            case LiteStreamKind::Fetch:
+            case LiteStreamKind::Probe:
+            case LiteStreamKind::Goaway: return Phase::First;
             default: return Phase::Raw;
         }
     }
     switch (kind) {
         case LiteStreamKind::Announce: return Phase::First;   // ANNOUNCE_OK, then START/END/UPDATE
         case LiteStreamKind::Subscribe: return Phase::Rest;   // SUBSCRIBE_OK/END/DROP, any order
+        case LiteStreamKind::Track: return Phase::First;      // one TRACK_INFO, then FIN
+        case LiteStreamKind::Fetch: return Phase::Rest;       // bare FRAMEs until FIN
+        case LiteStreamKind::Probe: return Phase::Rest;       // PROBE reports until the stream ends
+        case LiteStreamKind::Goaway: return Phase::Done;      // the publisher sends nothing back
         default: return Phase::Raw;
     }
 }
@@ -172,6 +175,20 @@ Next decode_next(LiteStreamKind kind, bool opener, Phase phase, Cursor& input, c
                 return from_result(decode_subscribe_update(input, limits), Phase::Rest);
             }
             return from_result(decode_subscribe_response(input, limits), Phase::Rest);
+        case LiteStreamKind::Track:
+            if (phase != Phase::First) break;
+            if (opener) return from_result(decode_track_request(input, limits), Phase::Done);
+            return from_result(decode_track_info(input, limits), Phase::Done);
+        case LiteStreamKind::Fetch:
+            if (opener) {
+                if (phase == Phase::First) return from_result(decode_fetch_request(input, limits), Phase::Done);
+                break;
+            }
+            return from_result(decode_frame(input, limits), Phase::Rest);
+        case LiteStreamKind::Probe: return from_result(decode_probe(input, limits), Phase::Rest);
+        case LiteStreamKind::Goaway:
+            if (opener && phase == Phase::First) return from_result(decode_goaway(input, limits), Phase::Done);
+            break;
         default: break;
     }
     Next out;
@@ -181,7 +198,12 @@ Next decode_next(LiteStreamKind kind, bool opener, Phase phase, Cursor& input, c
 
 std::string_view trailing_code(LiteStreamKind kind, bool opener) {
     if (kind == LiteStreamKind::Setup) return kIssueTrailingAfterSetup;
-    if (kind == LiteStreamKind::Announce && opener) return kIssueTrailingAfterRequest;
+    if (opener && (kind == LiteStreamKind::Announce || kind == LiteStreamKind::Track ||
+                   kind == LiteStreamKind::Fetch || kind == LiteStreamKind::Goaway)) {
+        return kIssueTrailingAfterRequest;
+    }
+    if (kind == LiteStreamKind::Track) return kIssueTrailingAfterResponse;
+    if (kind == LiteStreamKind::Goaway) return kIssueUnexpectedResponse;
     return kIssueProtocolViolation;
 }
 
@@ -207,7 +229,8 @@ std::string_view to_string(LiteStreamKind kind) {
 std::string_view lite_message_name(const LiteMessage& message) {
     static constexpr std::array<std::string_view, std::variant_size_v<LiteMessage>> kNames{
         "SETUP", "GROUP", "FRAME", "ANNOUNCE_REQUEST", "ANNOUNCE_OK", "ANNOUNCE_START", "ANNOUNCE_END",
-        "ANNOUNCE_UPDATE", "SUBSCRIBE", "SUBSCRIBE_UPDATE", "SUBSCRIBE_OK", "SUBSCRIBE_END", "SUBSCRIBE_DROP"};
+        "ANNOUNCE_UPDATE", "SUBSCRIBE", "SUBSCRIBE_UPDATE", "SUBSCRIBE_OK", "SUBSCRIBE_END", "SUBSCRIBE_DROP",
+        "TRACK", "TRACK_INFO", "FETCH", "PROBE", "GOAWAY"};
     return message.index() < kNames.size() ? kNames[message.index()] : std::string_view{};
 }
 
@@ -224,6 +247,10 @@ std::optional<LiteIssueClass> explicit_issue_class(std::string_view code) {
         {kIssueKeyValueFormattingError, LiteIssueClass::PeerProtocol},
         {kIssueTrailingAfterSetup, LiteIssueClass::PeerProtocol},
         {kIssueTrailingAfterRequest, LiteIssueClass::PeerProtocol},
+        // L2a: a second TRACK_INFO on a Track stream (draft 7.12: one reply per TRACK) and any byte the publisher
+        // sends on a GOAWAY stream (draft 7.18 gives it no response).
+        {kIssueTrailingAfterResponse, LiteIssueClass::PeerProtocol},
+        {kIssueUnexpectedResponse, LiteIssueClass::PeerProtocol},
         {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
         // Decision (a): the draft is inconclusive on an unknown ANNOUNCE Type; rows 139, 141, 152 are NotRun.
         {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
@@ -266,6 +293,34 @@ std::vector<const LiteDecoded*> runner_messages(const LiteStreamRecord& record) 
         if (message.from == LiteOrigin::Runner) out.push_back(&message);
     }
     return out;
+}
+
+namespace {
+
+template <class T>
+std::vector<const LiteDecoded*> peer_messages_of(const LiteStreamRecord& record) {
+    std::vector<const LiteDecoded*> out;
+    for (const auto& message : record.messages) {
+        if (message.from == LiteOrigin::Peer && std::holds_alternative<T>(message.message)) out.push_back(&message);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::vector<const LiteDecoded*> peer_track_info(const LiteStreamRecord& record) {
+    return record.kind == LiteStreamKind::Track ? peer_messages_of<wire::moqlite06::TrackInfo>(record)
+                                                : std::vector<const LiteDecoded*>{};
+}
+
+std::vector<const LiteDecoded*> peer_fetch_frames(const LiteStreamRecord& record) {
+    return record.kind == LiteStreamKind::Fetch ? peer_messages_of<wire::moqlite06::Frame>(record)
+                                                : std::vector<const LiteDecoded*>{};
+}
+
+std::vector<const LiteDecoded*> peer_probe_reports(const LiteStreamRecord& record) {
+    return record.kind == LiteStreamKind::Probe ? peer_messages_of<wire::moqlite06::ProbeMessage>(record)
+                                                : std::vector<const LiteDecoded*>{};
 }
 
 std::vector<const LiteDecodeIssue*> peer_issues(const LiteStreamRecord& record) {
@@ -559,13 +614,9 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
     }
 }
 
-void LiteStreamDecoder::on_kind_known(LiteStreamRecord& record, std::size_t event) {
+void LiteStreamDecoder::on_kind_known(LiteStreamRecord& record, std::size_t /*event*/) {
     if (kind_final_) return;  // an undeclared runner stream keeps its raw inbound handling
     kind_final_ = true;
-    if (is_l2(record.kind)) {
-        issue(record, local_, event, kIssueL2StreamNotDecoded,
-              std::string(to_string(record.kind)) + " streams are L2 and recorded raw");
-    }
     if (inbound_.phase == Phase::AwaitKind) {
         // The peer's held bytes are decoded once the runner's write is (see feed_local), so the runner's request
         // precedes the peer's response in the record; they keep their own arrival times (HeldChunk).

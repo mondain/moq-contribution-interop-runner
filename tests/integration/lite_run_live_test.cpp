@@ -634,15 +634,15 @@ TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation
 
 // --- every scenario, simulated ---------------------------------------------------------------------------------
 
-// The production builder dispatch (lite_probe_for) for all 19 scenarios at a live-sized timeout, judged against the
+// The production builder dispatch (lite_probe_for) for all 26 scenarios at a live-sized timeout, judged against the
 // conforming publisher on the simulated clock: every row the conformance table passes on native QUIC passes here
 // (with the fixed session URL the native client-path rows 120/124 pass too), and no row fails.
-TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
+TEST(LiteRunLive, AllTwentySixProbesBuildAndJudgeOnTheSimulatedClock) {
     std::vector<std::string> ids;
     for (const auto& traits : app::kLiteExecutableScenarios) ids.emplace_back(traits.id);
-    ASSERT_EQ(ids.size(), 19u);
-    // Above every builder's stated sum (the largest, abutting: 2 * 3 s + 6 s) with a margin.
-    auto config = lite_config(ids, 15000ms);
+    ASSERT_EQ(ids.size(), 26u);
+    // Above every builder's stated sum (the largest, fetch-group: 2 * 3 s + 15 s + 3 s) with a margin.
+    auto config = lite_config(ids, 30000ms);
     for (const auto& id : ids) {
         const auto definition = app::lite_probe_for(config, id);
         EXPECT_EQ(definition.id, id);
@@ -651,7 +651,7 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
         EXPECT_TRUE(definition.session_url_has_path);
         EXPECT_EQ(definition.session_url_path, "/moq");
         EXPECT_EQ(definition.session_url_query, "token=l1d");
-        EXPECT_EQ(definition.connect_deadline, std::optional{std::chrono::milliseconds{15000}});
+        EXPECT_EQ(definition.connect_deadline, std::optional{std::chrono::milliseconds{30000}});
         // The announce probes name only the broadcast.
         if (definition.requires_track) EXPECT_EQ(definition.broadcast_path, "demo/live") << id;
         if (definition.requires_track && !id.starts_with("l06-announce-")) EXPECT_EQ(definition.track_name, "video") << id;
@@ -659,13 +659,18 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
     const auto states = by_row(simulated(config));
     for (const auto& [row, state] : states) EXPECT_NE(state, OutcomeState::Fail) << row;
     for (const auto* row : {"L06-3-1-MUST-014", "L06-7-2-MUST-108", "L06-4-4-MUST-027", "L06-7-13-MUST-172",
-                            "L06-3-6-MUST-020", "L06-4-4-MUST-030", "L06-7-4-MUST-139"})
+                            "L06-3-6-MUST-020", "L06-4-4-MUST-030", "L06-7-4-MUST-139",
+                            // L2a: the track, fetch, probe and goaway rows the conforming publisher passes.
+                            "L06-7-12-MUST-NOT-163", "L06-7-12-MUST-170", "L06-7-16-MUST-177",
+                            "L06-5-1-3-MUST-066", "L06-5-1-5-MUST-072", "L06-5-1-6-MUST-NOT-077",
+                            "L06-7-18-MUST-186", "L06-7-18-MUST-179"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
     // The fixed session URL (L1e) makes the native client-path rows judgeable; 125 is WebTransport only and 152
     // needs a broadcast retraction the conforming publisher never makes.
     for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
-    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152"})
+    // 075 is judged only for a publisher without a Probe capability; the conforming one advertises Report.
+    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152", "L06-5-1-5-MUST-075"})
         EXPECT_EQ(states.at(row), OutcomeState::NotRun) << row;
     // Too short a timeout for a builder is an exception lite_probe_for passes on (run_lite stores it).
     config.timeout = 1000ms;

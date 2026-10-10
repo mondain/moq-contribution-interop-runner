@@ -127,6 +127,10 @@ add_library(moq-interop-wire
     src/wire/moqlite06/announce.cpp
     src/wire/moqlite06/subscribe.cpp
     src/wire/moqlite06/group.cpp
+    src/wire/moqlite06/track.cpp
+    src/wire/moqlite06/fetch.cpp
+    src/wire/moqlite06/probe.cpp
+    src/wire/moqlite06/goaway.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -281,6 +285,10 @@ target_sources(moq-interop-scenarios PRIVATE
     src/scenarios/lite06_setup.cpp
     src/scenarios/lite06_announce.cpp
     src/scenarios/lite06_subscribe.cpp
+    src/scenarios/lite06_track.cpp
+    src/scenarios/lite06_fetch.cpp
+    src/scenarios/lite06_probe.cpp
+    src/scenarios/lite06_goaway.cpp
     src/scenarios/lite06_errors.cpp)
 # Draft-18 publisher-contribution probe families (gap-closing block).
 target_sources(moq-interop-scenarios PRIVATE
@@ -1398,6 +1406,34 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME moqlite06-group
              COMMAND moq-interop-moqlite06-group-tests)
 
+    add_executable(moq-interop-moqlite06-track-tests
+                   tests/golden/moqlite06_track_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-track-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-track
+             COMMAND moq-interop-moqlite06-track-tests)
+
+    add_executable(moq-interop-moqlite06-fetch-tests
+                   tests/golden/moqlite06_fetch_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-fetch-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-fetch
+             COMMAND moq-interop-moqlite06-fetch-tests)
+
+    add_executable(moq-interop-moqlite06-probe-tests
+                   tests/golden/moqlite06_probe_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-probe-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-probe
+             COMMAND moq-interop-moqlite06-probe-tests)
+
+    add_executable(moq-interop-moqlite06-goaway-tests
+                   tests/golden/moqlite06_goaway_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-goaway-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-goaway
+             COMMAND moq-interop-moqlite06-goaway-tests)
+
     add_executable(moq-interop-moqlite06-wire-audit-tests
                    tests/golden/moqlite06_wire_audit_test.cpp)
     target_compile_definitions(moq-interop-moqlite06-wire-audit-tests PRIVATE
@@ -1483,6 +1519,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_test(NAME moqlite-probe
              COMMAND moq-interop-moqlite-probe-tests)
 
+    add_executable(moq-interop-moqlite-l2a-fixture-tests
+                   tests/protocol/lite_l2a_fixture_test.cpp)
+    target_include_directories(moq-interop-moqlite-l2a-fixture-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-l2a-fixture-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-l2a-fixture-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-l2a-fixture
+             COMMAND moq-interop-moqlite-l2a-fixture-tests)
+
     add_executable(moq-interop-moqlite-setup-tests
                    tests/protocol/lite06_setup_test.cpp)
     target_include_directories(moq-interop-moqlite-setup-tests PRIVATE
@@ -1515,6 +1562,50 @@ if(MOQ_INTEROP_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
     add_test(NAME moqlite-subscribe
              COMMAND moq-interop-moqlite-subscribe-tests)
+
+    add_executable(moq-interop-moqlite-track-tests
+                   tests/protocol/lite06_track_test.cpp)
+    target_include_directories(moq-interop-moqlite-track-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-track-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-track-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-track
+             COMMAND moq-interop-moqlite-track-tests)
+
+    add_executable(moq-interop-moqlite-fetch-tests
+                   tests/protocol/lite06_fetch_test.cpp)
+    target_include_directories(moq-interop-moqlite-fetch-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-fetch-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-fetch-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-fetch
+             COMMAND moq-interop-moqlite-fetch-tests)
+
+    add_executable(moq-interop-moqlite-probe-scenario-tests
+                   tests/protocol/lite06_probe_test.cpp)
+    target_include_directories(moq-interop-moqlite-probe-scenario-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-probe-scenario-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-probe-scenario-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-probe-scenario
+             COMMAND moq-interop-moqlite-probe-scenario-tests)
+
+    add_executable(moq-interop-moqlite-goaway-tests
+                   tests/protocol/lite06_goaway_test.cpp)
+    target_include_directories(moq-interop-moqlite-goaway-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-moqlite-goaway-tests PRIVATE
+                          moq-interop-scenarios GTest::gtest_main)
+    target_compile_options(moq-interop-moqlite-goaway-tests PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
+    add_test(NAME moqlite-goaway
+             COMMAND moq-interop-moqlite-goaway-tests)
 
     add_executable(moq-interop-moqlite-errors-tests
                    tests/protocol/lite06_errors_test.cpp)

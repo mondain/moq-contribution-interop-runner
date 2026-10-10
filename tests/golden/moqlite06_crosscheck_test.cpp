@@ -7,6 +7,7 @@
 #include "moq/interop/wire/moqlite06/framing.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 #include "moq/interop/wire/moqlite06/subscribe.h"
+#include "moq/interop/wire/moqlite06/track.h"
 #include "moq/interop/wire/moqlite06/varint.h"
 
 #include <gtest/gtest.h>
@@ -101,8 +102,9 @@ TEST(MoqLite06CrossCheck, DataFileIsPresentAndCoversTheExtractedLiterals) {
     const auto vectors = load_vectors();
     std::map<std::string, int> per_message;
     for (const auto& vector : vectors) ++per_message[vector.message];
-    // 1 SETUP literal, 3 varint literals, 1 derived ANNOUNCE_END (see the data file header).
-    EXPECT_EQ(per_message, (std::map<std::string, int>{{"SETUP", 1}, {"VARINT", 3}, {"ANNOUNCE_END", 1}}));
+    // 1 SETUP literal, 3 varint literals, 1 derived ANNOUNCE_END, 1 derived TRACK_INFO (see the data file header).
+    EXPECT_EQ(per_message,
+              (std::map<std::string, int>{{"SETUP", 1}, {"VARINT", 3}, {"ANNOUNCE_END", 1}, {"TRACK_INFO", 1}}));
 }
 
 TEST(MoqLite06CrossCheck, VarintVectorsDecodeAndReEncode) {
@@ -178,6 +180,31 @@ TEST(MoqLite06CrossCheck, AnnounceEndDerivedVectorMatchesTheThreeByteLength) {
         EXPECT_EQ(std::get<AnnounceEnd>(message).announce_id, std::stoull(vector.fields.at("announce_id")));
         ByteWriter writer(16);
         ASSERT_FALSE(encode_announce_message(message, writer).has_value());
+        EXPECT_EQ(hex_of(writer.bytes()), hex_of(data));
+        ++checked;
+    }
+    EXPECT_EQ(checked, 1u);
+}
+
+// moq.dev track.rs:215 pins the CLI's default TRACK_INFO on Lite05 (one extra byte); the Lite06 form is derived
+// from the draft 7.12 figure and must decode here and re-encode byte for byte.
+TEST(MoqLite06CrossCheck, TrackInfoDerivedVectorMatchesTheDraftFigure) {
+    std::size_t checked = 0;
+    for (const auto& vector : load_vectors()) {
+        if (vector.message != "TRACK_INFO") continue;
+        SCOPED_TRACE(vector.name);
+        EXPECT_TRUE(vector.derived);
+        const auto data = vector.bytes();
+        Cursor input(data);
+        const auto result = decode_track_info(input);
+        ASSERT_TRUE(std::holds_alternative<TrackInfo>(result));
+        const auto& info = std::get<TrackInfo>(result);
+        EXPECT_EQ(info.publisher_priority, std::stoul(vector.fields.at("priority")));
+        EXPECT_EQ(info.publisher_max_age_ms, std::stoull(vector.fields.at("max_age")));
+        EXPECT_EQ(info.timescale, std::stoull(vector.fields.at("timescale")));
+        EXPECT_EQ(input.remaining(), 0u);
+        ByteWriter writer(32);
+        ASSERT_FALSE(encode_track_info(info, writer).has_value());
         EXPECT_EQ(hex_of(writer.bytes()), hex_of(data));
         ++checked;
     }

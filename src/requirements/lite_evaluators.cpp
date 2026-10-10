@@ -3,8 +3,12 @@
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
 #include "moq/interop/scenarios/lite06_errors.h"
+#include "moq/interop/scenarios/lite06_fetch.h"
+#include "moq/interop/scenarios/lite06_goaway.h"
+#include "moq/interop/scenarios/lite06_probe.h"
 #include "moq/interop/scenarios/lite06_setup.h"
 #include "moq/interop/scenarios/lite06_subscribe.h"
+#include "moq/interop/scenarios/lite06_track.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -90,6 +94,18 @@ const std::vector<BindingRow>& binding_rows() {
         {"L06-4-4-MUST-NOT-033", "l06-errors-reserved-reset-code", "l06-errors-reserved-code-tolerated",
          &kStreamEndingAndAnswer},
         {"L06-7-1-SHOULD-107", "l06-errors-code-space", "l06-errors-message-length-close", &kClose},
+        // L2a. A Pass of the TRACK_INFO rows rests on the decoded TRACK_INFO messages; the FETCH rows on the Fetch
+        // Stream's ending (and, for the short-run row, the frames it carried); the Probe rows on the reports or the
+        // reset; the goaway rows on the session close, or (row 077) on the absence of new streams after a GOAWAY.
+        {"L06-7-12-MUST-NOT-163", "l06-track-info", "l06-track-info-immutable", &kMessages},
+        {"L06-7-12-MUST-170", "l06-track-info", "l06-track-info-timescale-nonzero", &kMessages},
+        {"L06-7-16-MUST-177", "l06-fetch-group", "l06-fetch-short-run", &kStreamEndingAndAnswer},
+        {"L06-5-1-3-MUST-066", "l06-fetch-unknown-group", "l06-fetch-unknown-group-reset", &kStreamEnding},
+        {"L06-5-1-5-MUST-072", "l06-probe-report", "l06-probe-target-continues", &kMessages},
+        {"L06-5-1-5-MUST-075", "l06-probe-report", "l06-probe-none-reset", &kStreamEnding},
+        {"L06-5-1-6-MUST-NOT-077", "l06-goaway-single", "l06-goaway-no-new-streams", &kGroups},
+        {"L06-7-18-MUST-186", "l06-goaway-duplicate", "l06-goaway-second-closes", &kClose},
+        {"L06-7-18-MUST-179", "l06-goaway-oversize", "l06-goaway-oversize-violation", &kClose},
     };
     return rows;
 }
@@ -147,6 +163,15 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry() {
         {"l06-errors-no-assumed-unauthorized", s::evaluate_l06_errors_no_assumed_unauthorized},
         {"l06-errors-reserved-code-tolerated", s::evaluate_l06_errors_reserved_code_tolerated},
         {"l06-errors-message-length-close", s::evaluate_l06_errors_message_length_close},
+        {"l06-track-info-immutable", s::evaluate_l06_track_info_immutable},
+        {"l06-track-info-timescale-nonzero", s::evaluate_l06_track_info_timescale_nonzero},
+        {"l06-fetch-short-run", s::evaluate_l06_fetch_short_run},
+        {"l06-fetch-unknown-group-reset", s::evaluate_l06_fetch_unknown_group_reset},
+        {"l06-probe-target-continues", s::evaluate_l06_probe_target_continues},
+        {"l06-probe-none-reset", s::evaluate_l06_probe_none_reset},
+        {"l06-goaway-no-new-streams", s::evaluate_l06_goaway_no_new_streams},
+        {"l06-goaway-second-closes", s::evaluate_l06_goaway_second_closes},
+        {"l06-goaway-oversize-violation", s::evaluate_l06_goaway_oversize_violation},
     };
     return registry;
 }

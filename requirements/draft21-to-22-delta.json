@@ -926,6 +926,47 @@
           "All L1d open_items under from_L1d remain as listed there unless fixed above (T1-T9 minors, TSan reports in picoquic's RNG, the T9 stop-between-contexts context_skipped gap)"
         ]
       }
+    },
+    "from_L2a": {
+      "files_and_interfaces": [
+        "Wire (1c59804, 5d678ff): include/moq/interop/wire/moqlite06/{track,fetch,probe,goaway}.h and src/wire/moqlite06/ (TrackRequest, TrackInfo, FetchRequest + fetch_range_inverted, ProbeMessage, GoawayMessage + kMaxGoawayUri 8192 rejected from the length prefix with LengthExceedsLimit and a detail naming draft 7.18); tests/golden/moqlite06_{track,fetch,probe,goaway}_test.cpp; the wire audit now maps all 18 section 7 messages (none out of scope); tests/golden/data/moqlite06_moqdev_vectors.txt gains a DERIVED Lite06 TRACK_INFO vector (moq.dev track.rs:215 is a Lite05 literal with one extra byte).",
+        "Session reader (d604a1c): LiteMessage gains TrackRequest, TrackInfo, FetchRequest, ProbeMessage, GoawayMessage; new issue codes trailing_after_response and unexpected_response (PeerProtocol; kAllIssueCodes has 19); accessors peer_track_info, peer_fetch_frames, peer_probe_reports; l2_stream_not_decoded is no longer raised (code kept); src/scenarios/lite_probe.cpp elides FETCH response bytes from transcript.events like Group payloads (counter payload_bytes_dropped now counts both).",
+        "Scripted publisher (51a4d43): tests/support/scripted_lite_peer.h ConformingLitePublisher answers TRACK, FETCH (groups fetch_first_group..fetch_last_group, fetch_frames_per_group frames, TOO_FAR_BEHIND for frames before fetch_first_retained_frame, NOT_FOUND, a reset for an inverted range), PROBE (level from the Probe SETUP parameter, absent = None resets) and GOAWAY (second one, oversize or malformed closes with PROTOCOL_VIOLATION; no new Group streams afterwards); defects: FetchTruncatesOnShortRange, FetchIgnoresUnknownGroup, TrackInfoChangesBetweenRequests, TrackInfoZeroTimescale, ProbeResetsOnTarget, ProbeNoneNotReset, GoawayOversizeLogged, GoawayDuplicateIgnored, GoawayClosesSessionOnFirst, OpensStreamsAfterGoaway; tests/protocol/lite_l2a_fixture_test.cpp.",
+        "Catalog (a9a0a0c): requirements/moq-lite-06.json 173 of 212 rows reviewed (36 classified: 9 Applicable+Testable 066 072 075 077 163 170 177 179 186; 15 Applicable+NotTestable; 12 NotApplicable); 39 unreviewed, 19 of them required, all L2b (6.1, 6.2, 6.4, 8, 10).",
+        "Scenarios and evaluators (206bcfe, 05effc5, 2400dac): include/moq/interop/scenarios/lite06_{track,fetch,probe,goaway}.h + src/scenarios; 7 scenarios l06-track-info, l06-fetch-group, l06-fetch-unknown-group, l06-probe-report, l06-goaway-single, l06-goaway-duplicate, l06-goaway-oversize; 9 evaluators; registry, bindings (43), kLiteExecutableScenarios (26), src/app/lite_run.cpp builders; tests/protocol/lite06_{track,fetch,probe,goaway}_test.cpp, the conformance table (tests/support/lite_conformance.h: deadline 40 s, frames 4, Probe level Report), tests/golden/executable-ids-d106.txt, moq-lite-cmdlines.txt, moq-lite-matrix-plan.txt; tests/e2e/driven-moq-lite.sh and moq-lite-matrix.sh run the 26 ids with timeout_ms 30000.",
+        "Engine (487c2f7): LiteProbeDefinition::next_steps is also woken by a peer FIN and at least every kLiteContinuationTick (100 ms); the L1 test of a silent learning subscription now expects the probe to end at its allowance (still not_run), not at the deadline.",
+        "Docs: docs/moq-lite-punch-list.md (ML-04, ML-05), docs/interop-notes.md (second sweep), docs/scenario-reference.md, docs/scoring-and-audit.md, docs/http-api.md, docs/publisher-harness-guide.md, adapters/moq-lite/README.md."
+      ],
+      "decisions": [
+        "Ruling: the first catalog commit leaves lite-evaluators, moqlite-conformance and audit-cli-moqlite red until the evaluators and bindings land (B4); HEAD is green.",
+        "Ruling: row 178 (the sender's URI limit) is NotTestable because the CLI never sends a GOAWAY; row 179 (the receiver) carries the oversize probe. Rows 072 and 075 share l06-probe-report and are mutually exclusive by the publisher's advertised Probe level (read from its decoded SETUP; absent = None; no SETUP = NotRun).",
+        "Ruling: rows 066 (an unservable FETCH must be reset) and 177 (a held group must be served in full or reset) never share evidence: 066 asks for group 4 000 000 000, 177 for a group a subscription just delivered completely; a reset in 177 is NotRun, a short FIN is the Fail.",
+        "Ruling: l06-goaway-single judges 077 only after a cadence proof (two Group streams before the GOAWAY, an observation longer than the longest gap after a 2000 ms flight allowance); a session close after the GOAWAY is a graceful shutdown and NotRun.",
+        "Ruling: the draft 7.16 sentence that an inverted FETCH range is a protocol violation has no normative keyword and so no catalog row; no scenario sends one. Candidate P5 stays a source-survey note."
+      ],
+      "sweep_summary": {
+        "peer": "moq 0.14.1 (rs/moq-cli) at b8b0d235a99bddb9043f453c46c958362d6c9247, as in L1e; loopback, one machine, 2026-10-10",
+        "native_quic": "27 runs (26 single + the 027 group): 22 incomplete, 5 fail, 0 error; 39 scored rows; bound rows (39) 29 pass / 5 fail (107, 126, 131, 072, 179) / 5 not_run (125, 152, 075, 077, 186)",
+        "webtransport": "27 runs: 23 incomplete, 4 fail, 0 error; 36 scored rows; bound rows 28 pass / 4 fail (107, 131, 072, 179) / 7 not_run (120, 124, 126, 152, 075, 077, 186)",
+        "new_rows": "163, 170, 177, 066 pass on both transports; 072 fail (ML-04); 179 fail (ML-05); 075, 077, 186 not_run (the CLI advertises Probe level Report and ends the session on its first GOAWAY)"
+      },
+      "how_to_rerun": [
+        "MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner (both transports, 26 single runs plus the row 027 group run, timeout_ms 30000); one transport: tests/e2e/driven-moq-lite.sh native_quic|webtransport build/moq-interop-runner [SCENARIO...].",
+        "The runner needs the CLI binary and ffmpeg as in L1e; the seven new scenarios alone take about 40 s per transport."
+      ],
+      "not_covered": [
+        "Rows 077 and 186 against a real publisher: the CLI ends the session on its first GOAWAY, so they need a scripted publisher on the wire (L2b).",
+        "Row 075 against a real publisher: the CLI advertises Probe level Report.",
+        "Candidate defects P3 (publisher priority tie-break), P4 (datagram cap), P5 (inverted FETCH range), P6 (unlimited max age encoded as 2^53-1; this track reports 30000), P7 (GOAWAY on other stream openers): not exercised.",
+        "Rows 181 and 182 (GOAWAY URI validation) are visible in the CLI log but NotTestable."
+      ],
+      "for_L2b": [
+        "Classify the remaining 39 rows (sections 6.1, 6.1.1, 6.1.2, 6.2, 6.4, 8, 10): datagrams, priority and group order, expiry timing, outbound GOAWAY, security. They need a scripted publisher on the wire: the CLI cannot publish datagrams, never sends a GOAWAY and ends the session on receiving one.",
+        "A scripted-publisher peer that can carry the runner's three unobservable rows (075, 077, 186) end to end would turn them into scored rows."
+      ],
+      "open_items": [
+        "Known runner gaps recorded in docs/interop-notes.md: the runner does not reset a stream whose frames do not decode against the TRACK_INFO (rows 069, 171) and does not close the session on a non-empty GOAWAY URI it receives (row 184); no catalog scenario depends on either."
+      ]
     }
   },
   "entries": [

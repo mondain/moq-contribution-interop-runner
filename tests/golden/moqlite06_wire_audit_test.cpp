@@ -3,9 +3,13 @@
 // The draft loader and digest for moq-lite are L1c's job, so this test reads the text file directly. A
 // checkout without the (untracked) draft text skips every test with a message instead of failing.
 #include "moq/interop/wire/moqlite06/announce.h"
+#include "moq/interop/wire/moqlite06/fetch.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/goaway.h"
+#include "moq/interop/wire/moqlite06/probe.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 #include "moq/interop/wire/moqlite06/subscribe.h"
+#include "moq/interop/wire/moqlite06/track.h"
 
 #include <gtest/gtest.h>
 
@@ -130,12 +134,10 @@ std::uint64_t parse_code(const std::string& cell) { return std::stoull(cell, nul
 
 struct Mapping {
     bool implemented;
-    std::string detail;                    // codec functions, or the out-of-scope reason
+    std::string detail;                    // the codec functions
     std::vector<std::string> fields;       // the figure, mirroring the codec's field order
     std::optional<std::uint64_t> type;     // the `Type (i) = 0xN` value, for the Type-prefixed messages
 };
-
-const std::string kOutOfScope = "L2, not exercised by the L1 scenarios";
 
 const std::map<std::string, Mapping>& mappings() {
     static const std::map<std::string, Mapping> table = {
@@ -189,11 +191,21 @@ const std::map<std::string, Mapping>& mappings() {
         {"FRAME",
          {true, "encode_frame/decode_frame",
           {"Timestamp Delta (i)", "Message Length (i)", "Payload (b)"}, std::nullopt}},
-        {"TRACK", {false, kOutOfScope, {}, std::nullopt}},
-        {"TRACK_INFO", {false, kOutOfScope, {}, std::nullopt}},
-        {"FETCH", {false, kOutOfScope, {}, std::nullopt}},
-        {"PROBE", {false, kOutOfScope, {}, std::nullopt}},
-        {"GOAWAY", {false, kOutOfScope, {}, std::nullopt}},
+        {"TRACK",
+         {true, "encode_track_request/decode_track_request",
+          {"Message Length (i)", "Broadcast Path (s)", "Track Name (s)"}, std::nullopt}},
+        {"TRACK_INFO",
+         {true, "encode_track_info/decode_track_info",
+          {"Message Length (i)", "Publisher Priority (8)", "Publisher Max Age (i)", "Timescale (i)"}, std::nullopt}},
+        {"FETCH",
+         {true, "encode_fetch_request/decode_fetch_request",
+          {"Message Length (i)", "Broadcast Path (s)", "Track Name (s)", "Subscriber Priority (8)",
+           "Group Sequence (i)", "Frame Start (i)", "Frame End (i)"},
+          std::nullopt}},
+        {"PROBE",
+         {true, "encode_probe/decode_probe", {"Message Length (i)", "Bitrate (i)", "RTT (i)"}, std::nullopt}},
+        {"GOAWAY",
+         {true, "encode_goaway/decode_goaway", {"Message Length (i)", "New Session URI (s)"}, std::nullopt}},
     };
     return table;
 }
@@ -210,24 +222,19 @@ TEST(MoqLite06WireAudit, Section7MessageSetMatchesTheMapping) {
     EXPECT_EQ(mapped.size(), 18u);
     for (const auto& name : drafted) {
         EXPECT_TRUE(mapped.contains(name))
-            << name << " is in draft section 7 but has no Implemented/OutOfScope mapping in this audit";
+            << name << " is in draft section 7 but has no mapping in this audit";
     }
     for (const auto& name : mapped) {
         EXPECT_TRUE(drafted.contains(name)) << name << " is mapped but has no figure in draft section 7";
     }
 }
 
-TEST(MoqLite06WireAudit, OutOfScopeMessagesCarryTheAgreedReason) {
-    std::set<std::string> out_of_scope;
+// L2a closes the audit: every message of draft section 7 has a codec, so nothing is out of scope any more.
+TEST(MoqLite06WireAudit, EveryMessageIsImplementedAndNamesItsCodec) {
     for (const auto& [name, mapping] : mappings()) {
-        if (!mapping.implemented) {
-            out_of_scope.insert(name);
-            EXPECT_EQ(mapping.detail, "L2, not exercised by the L1 scenarios") << name;
-        } else {
-            EXPECT_FALSE(mapping.detail.empty()) << name << " must name its codec functions";
-        }
+        EXPECT_TRUE(mapping.implemented) << name << " must have a codec";
+        EXPECT_FALSE(mapping.detail.empty()) << name << " must name its codec functions";
     }
-    EXPECT_EQ(out_of_scope, (std::set<std::string>{"TRACK", "TRACK_INFO", "FETCH", "PROBE", "GOAWAY"}));
 }
 
 TEST(MoqLite06WireAudit, ImplementedFiguresMatchTheCodecFieldOrder) {
@@ -243,7 +250,7 @@ TEST(MoqLite06WireAudit, ImplementedFiguresMatchTheCodecFieldOrder) {
         EXPECT_EQ(it->second, mapping.fields) << "the draft figure no longer matches the codec field order";
         ++compared;
     }
-    EXPECT_EQ(compared, 13u);
+    EXPECT_EQ(compared, 18u);
 }
 
 TEST(MoqLite06WireAudit, TypePrefixedMessagesPinTheSixTypeValues) {

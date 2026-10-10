@@ -240,6 +240,12 @@ void LiteProbeController::finish(std::uint64_t now) {
 }
 
 bool LiteProbeController::is_peer_group_data(const transport::StreamDataEvent& data) const {
+    // A FETCH response is media too: the peer's bytes on a runner-opened bidirectional stream (id & 3 == 1) whose
+    // STREAM_TYPE the runner wrote as Fetch. The recorder decodes the FRAMEs; the transcript keeps length and FIN.
+    if ((data.stream_id & 3u) == 1u) {
+        const auto* record = session_.find(data.stream_id);
+        return record != nullptr && record->kind == session::LiteStreamKind::Fetch;
+    }
     // The runner is the QUIC server: a client-initiated unidirectional stream (id & 3 == 2) is the peer's.
     if ((data.stream_id & 3u) != 2u) return false;
     if (const auto* record = session_.find(data.stream_id)) {
@@ -591,11 +597,17 @@ bool LiteProbeController::run_duties(std::uint64_t now) {
 void LiteProbeController::continue_steps(std::uint64_t now) {
     if (!definition_.next_steps || context_.finished) return;
     std::size_t stream_signals = 0;
-    for (const auto& record : session_.streams())
+    std::size_t stream_fins = 0;
+    for (const auto& record : session_.streams()) {
         stream_signals +=
             static_cast<std::size_t>(record.reset_seen) + static_cast<std::size_t>(record.stop_sending_seen);
-    const std::array<std::size_t, 4> seen{session_.message_count(), session_.streams().size(), stream_signals,
-                                          static_cast<std::size_t>(session_.peer_close().has_value())};
+        stream_fins += static_cast<std::size_t>(record.fin_seen);
+    }
+    const auto tick = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(kLiteContinuationTick).count());
+    const std::array<std::size_t, 6> seen{session_.message_count(), session_.streams().size(), stream_signals,
+                                          static_cast<std::size_t>(session_.peer_close().has_value()), stream_fins,
+                                          static_cast<std::size_t>(now / tick)};
     if (continuation_seen_ && *continuation_seen_ == seen) return;
     continuation_seen_ = seen;
     context_.now_ns = now;

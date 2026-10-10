@@ -864,6 +864,14 @@ engine, 30 evaluators bound to catalog rows, and a lite family in the native run
   a media publisher does not exhaust the recorder; the ceilings that remain (16384 events, 64 MiB) are about 15 to
   57 Mbps and far above the 200 kbps test source.
 - **Incomplete trailing messages.** An incomplete message still buffered on an announce response stream when the window ends (for example a second ANNOUNCE_OK, which reads as a message waiting for bytes) leaves rows 139, 141 and 152 not run instead of passing.
+- **L2a (Fetch, Track, Probe, Goaway).** The session reader decodes the Track, Fetch, Probe and Goaway streams (a
+  second TRACK_INFO is `trailing_after_response`, reply bytes on a Goaway Stream are `unexpected_response`, both
+  PeerProtocol issues); a Fetch response is media like a Group stream, so its bytes are not kept in the transcript
+  (the counter `group_payload_bytes_dropped` counts both). The catalog gains 36 reviewed rows (173 of 212), the runner
+  26 scenarios, 39 evaluators and 43 bindings; the second sweep is
+  [below](#moq-lite-06-second-sweep-l2a-against-the-moq-cli-b8b0d235). The runner's send-close duty now fires on the
+  conforming Track and Fetch answers (the publisher FINs them), which moves no verdict. The L1 numbers above (19
+  scenarios, 30 evaluators, 75 unreviewed rows) are the state of that stage.
 
 ## moq-lite-06 first sweep against the moq CLI b8b0d235
 
@@ -1043,8 +1051,8 @@ Other checks of the sweep:
   (Probe 1, Path `/moq?token=l1d`, Role Publisher, Hop), WebTransport the same without Path.
   Its Hop ID changes per process, which rows 141 and 143 tolerate (both pass). It opens no
   Probe stream: the runner's SETUP has no Probe parameter, so the CLI logs "peer does not
-  support probing; skipping probe stream", and the Probe behavior under Role=Publisher is not
-  exercised.
+  support probing; skipping probe stream" (its publisher half answers a Probe Stream the runner
+  opens: the second sweep, below).
 - After the runner's STOP_SENDING with 0x4d1 or 0x2a on a Group stream the stream is reset
   with the same code: the QUIC stack copying the code (RFC 9000 section 3.5), not a moq-lite
   meaning given to it (030, 032, 033 pass).
@@ -1071,6 +1079,92 @@ ffmpeg test pattern, video only); `moqt://` was not tried (the adapter dials `mo
 catalog is staged (75 rows unreviewed), so the 19 scenarios judge 30 rows and a run can never
 pass; row 152 needs an adapter action the contract lacks; row 027 is judged only in a run that
 holds all five of its scenarios (the matrix script posts that group run since `428b151`).
+
+## moq-lite-06 second sweep (L2a) against the moq CLI b8b0d235
+
+Same peer, same rules and same caveats as the [first sweep](#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235):
+one revision on one date, a `pass` row is wire evidence in one run, and the staged catalog means no run is ever
+`pass`. L2a classified 36 more catalog rows (the Fetch, Track, Probe and Goaway streams: sections 5.1.3 to 5.1.6, 7.12,
+7.16 and 7.18) and added seven scenarios, nine evaluators and nine bound rows. The upstream work list is
+[moq-lite-punch-list.md](moq-lite-punch-list.md) (ML-04 and ML-05 are new).
+
+| Item | Value |
+|---|---|
+| Peer, build, payload, fixture, endpoints | as in the first sweep (`moq 0.14.1` at `b8b0d235`, the bundled adapter, broadcast `interop.hang`, track `0.m4s`) |
+| Runner | this repository on the L2a branch (`worktree-moqlite-l2a`), `tests/e2e/driven-moq-lite.sh` posting `"timeout_ms": 30000` (the `l06-fetch-group` probe needs more than 24000) |
+| Date | 2026-10-10, loopback, one machine |
+| Catalog | 212 rows: 173 reviewed (137 + 36), 39 unreviewed (19 of them required); 26 scenarios, 39 evaluators, 43 bindings, 35 required reviewed rows covered |
+
+Method: the seven new scenarios were first run alone on each transport (to read the wire evidence, below), then
+`MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner` ran all 26 scenarios as their own driven
+runs plus the five-scenario row 027 group run on both transports. Every run finalized and every `--database` audit has
+status 0.
+
+| Sweep | transport | runs | incomplete | fail | error | scored rows | execution audit |
+|---|---|---:|---:|---:|---:|---:|---|
+| L2a matrix, 26 single + 1 group run | native QUIC | 27 | 22 | 5 | 0 | 39 | consistent, 0 findings |
+| L2a matrix, 26 single + 1 group run | WebTransport | 27 | 23 | 4 | 0 | 36 | consistent, 0 findings |
+
+The 19 first-sweep scenarios gave exactly the first sweep's states again (no regression): `fail` runs are the ones
+holding `l06-setup-server-path` (native QUIC), `l06-setup-server-role`, the row 027 group run, and now
+`l06-probe-report` and `l06-goaway-oversize`.
+
+Bound rows (the 39 rows the 26 scenarios judge; best state over the runs of the matrix, `fail` if any run failed
+it, else `pass` if any run passed it):
+
+| Transport | pass | fail | not_run | fail rows | not_run rows |
+|---|---:|---:|---:|---|---|
+| native QUIC | 29 | 5 | 5 | 107, 126, 131, 072, 179 | 125, 152, 075, 077, 186 |
+| WebTransport | 28 | 4 | 7 | 107, 131, 072, 179 | 120, 124, 126, 152, 075, 077, 186 |
+
+Of the 35 required (MUST / MUST NOT) bound rows: native QUIC 26 pass, 4 fail (126, 131, 072, 179), 5 not_run; WebTransport
+26 pass, 3 fail (131, 072, 179), 6 not_run. The four SHOULD rows are as in the first sweep.
+
+Per new scenario (the same on both transports and in every repeat):
+
+| Scenario | row(s) | state | What the wire showed |
+|---|---|---|---|
+| `l06-track-info` | 163, 170 | pass, pass | Two Track Streams for `0.m4s` 500 ms apart: `TRACK_INFO {priority 60, max age 30000 ms, timescale 15360}` both times, then FIN |
+| `l06-fetch-group` | 177 | pass | The CLI keeps the groups it just delivered: a FETCH for a completed group returns exactly the requested frames (the whole group, the first two, all but the first) then FIN; the group is learned about 0.85 s after the subscription starts (one Group per GOP) |
+| `l06-fetch-unknown-group` | 066 | pass | A FETCH for group 4 000 000 000 is reset (a reset, not an empty FIN) |
+| `l06-probe-report` | 072 (075 not_run) | fail (ML-04) | The CLI advertises Probe level Report, so 075 is not judged; the first PROBE target resets the Probe Stream with MALFORMED_TRACK (0x12) |
+| `l06-goaway-single` | 077 | not_run | The CLI ends the session at once on the GOAWAY (application close 0, reason `dropped`): nothing to observe after it |
+| `l06-goaway-duplicate` | 186 | not_run | Same: the session ends on the first GOAWAY, before the second one is sent |
+| `l06-goaway-oversize` | 179 | fail (ML-05) | The Goaway Stream is reset with CANCELLED (0x1); the session stays open |
+
+Run ids: native QUIC `run-18dd3618d98fe9bf` (first single run) to `run-18dd362d85e9d7ef` (`l06-goaway-oversize`),
+`run-18dd362e5fb5a034` (row 027 group); WebTransport `run-18dd36314512bd56` to `run-18dd36460f395fc0`,
+`run-18dd3646dfd9af55`.
+
+### Triage of the new rows
+
+- **(a) Runner defect, fixed (a failing test first):** the dynamic continuation of a probe (`next_steps`) was woken
+  only by new messages, new streams, resets, STOP_SENDING and the peer close. A decision that waits for a peer FIN, or
+  for time to pass (the give-up allowance of the learning subscriptions, the choice to send the second PROBE target
+  after waiting for a report), was therefore never made while the publisher stayed silent, and the probe ran to its
+  deadline with `timed_out`. It is now also woken by a peer FIN and at least every 100 ms of the clock
+  (`kLiteContinuationTick`). The one L1 test that pinned the old behavior, a silent learning subscription timing out,
+  now expects the probe to end at its allowance with the same `not_run` verdicts. Found while writing the probe
+  scenario's tests, before the live runs. The L2a runner-defect count is 1.
+- **(b) Peer defects (the punch list):** ML-04 (072, a subscriber's PROBE target resets the Probe Stream although the
+  CLI advertised Report; source: `ProbeServe` only waits for the stream to close) and ML-05 (179, an oversize GOAWAY URI
+  resets only the Goaway Stream; source: a decode error is logged and the session is kept on purpose).
+- **(c) Expectation questions:** none new.
+- **(d) Not observable against this peer:** 075 (the CLI advertises Probe level Report, so the level None path never
+  runs), 077 and 186 (the CLI ends the session on its first GOAWAY, which the draft allows, so there is no second
+  GOAWAY to refuse and no stream to watch). The scripted publisher in the runner's tests judges all three; a scripted
+  publisher on the wire is L2b. Rows 066, 163, 170 and 177 pass, and the unscored GOAWAY rules 181 and 182 are visible
+  in the CLI log (`GOAWAY redirect refused: the GOAWAY redirect leaves the current host`).
+- **Source survey versus the wire.** The source survey that preceded L2a expected the CLI to carry on after a GOAWAY and
+  to reset the Probe Stream only at level None (candidates P1, P2, P7, P8). The live runs settled it: P1 is confirmed (ML-04
+  is the same behavior, found on the first target, not only on the runner's `target` message), P8 is confirmed in the
+  form of ML-05, P2 could not be tried (the CLI advertises Report), P7 (the CLI sends GOAWAY on other stream openers)
+  and P3 to P6 were not exercised. A GOAWAY is not carried on: the CLI terminates the session.
+
+Known limits: as in the first sweep (one machine on the loopback, one test-pattern source, `moqt://` not tried), plus: the
+catalog is staged (39 rows unreviewed, 19 required), so a run can never pass; `l06-goaway-single` and
+`l06-goaway-duplicate` can only judge a publisher that survives a GOAWAY; `l06-probe-report` judges row 072 only for
+a publisher that advertised Report or Increase and row 075 only for one that advertised none.
 
 ## Other publishers
 

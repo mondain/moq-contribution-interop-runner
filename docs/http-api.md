@@ -94,7 +94,7 @@ stops startup like the other catalogs.
 }
 ```
 
-- `scenarios` take the 19 `l06-` ids of the lite catalog (`lite_executable_profiles` in `/healthz` lists them).
+- `scenarios` take the 26 `l06-` ids of the lite catalog (`lite_executable_profiles` in `/healthz` lists them).
   Any number of them may be selected together (1 to 100): each runs as its own context with a fresh session,
   and the typed/raw-probe single-selection rule of the MoQ Transport drafts does not apply.
 - `timeout_ms` bounds each context's wait for the publisher and, separately, the probe once the session is
@@ -383,7 +383,7 @@ without the lite catalog.
 
 When the runner loaded the moq-lite-06 catalog, `/healthz` adds two fields (absent
 otherwise): `supported_lite_drafts` (`["moq-lite-06"]`) and
-`lite_executable_profiles`, built like `executable_profiles` (the 19 lite scenarios
+`lite_executable_profiles`, built like `executable_profiles` (the 26 lite scenarios
 on both transports, observed first and then driven, `"draft": "moq-lite-06"`,
 `requires_fetch: false`). A driven lite profile is `configured: true` whenever any
 `--driver-executable` is set, whether or not that adapter supports moq-lite (an

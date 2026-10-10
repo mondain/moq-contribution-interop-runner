@@ -22,11 +22,12 @@
 // builder) or when a fixture value is empty. Pass a deadline of at least that plus a margin (a second or more live).
 //
 // l06-subscribe-group-floor and l06-subscribe-abutting-frame-start learn the latest group from a default
-// subscription first, through the engine's dynamic next_steps continuation. The continuation runs only when the
-// recorder changes: a learning step whose allowance passed is closed on the next change; a publisher that never
-// sends anything more (a silent learning subscription) leaves the continuation open until the deadline, which sets
-// timed_out, so every evaluator of the probe is NotRun. Task 9 must treat timed_out on these two probes as NotRun,
-// NOT as a harness error, and give them deadlines of at least the stated sums plus a margin.
+// subscription first, through the engine's dynamic next_steps continuation. The continuation runs when the
+// recorder changes and at least every kLiteContinuationTick of the clock, so a learning step whose allowance passed
+// is closed even when the publisher stays silent (a silent learning subscription ends at its allowance and every
+// evaluator of the probe is NotRun; before L2a it left the continuation open until the deadline, which set
+// timed_out). Task 9 still treats timed_out on these two probes as NotRun, NOT as a harness error, and gives them
+// deadlines of at least the stated sums plus a margin.
 
 #include <chrono>
 #include <cstddef>
@@ -89,6 +90,13 @@ inline constexpr std::uint64_t kL06InvalidFrameEnd = 1;
 std::string l06_uncovered_path(std::string_view broadcast_path);
 // The track name of row 062 case (b): the configured track with a suffix the broadcast does not serve.
 std::string l06_unknown_track(std::string_view track_name);
+
+// The ANNOUNCE_REQUEST "" stream bytes (STREAM_TYPE then the request) every fixture scenario that needs the
+// publisher's announced track starts with.
+std::vector<std::byte> l06_announce_all_bytes();
+// ANNOUNCE_REQUEST "" (label kL06SubAnnounceLabel, left open) and a Wait (kL06SubAnnouncedLabel) gated on its answer,
+// ANNOUNCE_OK and the initial set or the stream ended, for at most `answer_allowance`.
+void l06_add_announce_exchange(LiteProbeDefinition& definition, std::chrono::milliseconds answer_allowance);
 
 // A conforming SUBSCRIBE for the fixture: Subscriber Priority 0, kL06LargeMaxAgeMs, the given bounds.
 wire::moqlite06::Subscribe l06_subscribe(std::uint64_t subscribe_id, std::string_view broadcast_path,

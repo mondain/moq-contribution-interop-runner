@@ -928,18 +928,19 @@ sees it.
 | `d22-location-filter-unknown-type` | SUBSCRIBE whose LOCATION_FILTER has Type 0x06, the first undefined value | pass on a PROTOCOL_VIOLATION close, fail on another close code, no verdict without a close in the reaction window (Section 9.20.9: any other Location Filter Type is a PROTOCOL_VIOLATION) |
 | `d22-location-filter-absolute-origin` | SUBSCRIBE whose LOCATION_FILTER is Absolute Start (Type 0x02) {0, 0}, a form no draft 21 field list can express | pass when the publisher answers SUBSCRIBE_OK and delivers an Object, fail on a PROTOCOL_VIOLATION close (the valid filter read as malformed), no verdict otherwise; a control for the probe above |
 
-## moq-lite-06 scenarios (L1d)
+## moq-lite-06 scenarios (L1d, L2a)
 
-Counts: 19 scenarios, 30 evaluators, 34 evaluator bindings (29 single-scenario rows and row `L06-4-4-MUST-027`, which is
-bound once per scenario on five scenarios). They are defined by `requirements/moq-lite-06.json`, a staged
-catalog (`complete: false`, 137 of 212 rows reviewed, 75 unreviewed, 40 of those required). The publisher under test is the
+Counts: 26 scenarios (19 from L1d and 7 from L2a), 39 evaluators, 43 evaluator bindings (38 single-scenario rows and row
+`L06-4-4-MUST-027`, which is bound once per scenario on five scenarios). They are defined by `requirements/moq-lite-06.json`,
+a staged catalog (`complete: false`, 173 of 212 rows reviewed, 39 unreviewed, 19 of those required). The publisher under test is the
 CLIENT that dials the runner; the runner is the server and the subscriber. A moq-lite-06 run is scored with the staged
 scorer: its verdict is Fail when a required reviewed row failed and otherwise Incomplete, never Pass. Every unreviewed row
 is reported as not tested (reason "Unreviewed: classification pending"). The scenarios exist in the registry and the
-audit CLI (`moq-interop-audit --draft moq-lite-06` reports 26 of 26 required reviewed rows covered), and since L1e the
+audit CLI (`moq-interop-audit --draft moq-lite-06` reports 35 of 35 required reviewed rows covered), and since L1e the
 HTTP API accepts moq-lite-06 runs (`"draft": "moq-lite-06"`, see [http-api.md](http-api.md#moq-lite-06-runs)) and
-`adapters/moq-lite` drives the `moq` CLI as the publisher. The first sweep is in
-[interop-notes.md](interop-notes.md#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235). The session URL is fixed:
+`adapters/moq-lite` drives the `moq` CLI as the publisher. The sweeps are in
+[interop-notes.md](interop-notes.md#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235) and
+[interop-notes.md](interop-notes.md#moq-lite-06-second-sweep-l2a-against-the-moq-cli-b8b0d235). The session URL is fixed:
 path `/moq`, query `token=l1d`, on both transports (see below).
 
 Scenarios marked "track" need the track fixture (broadcast path = namespace fields joined with `/`, plus the track name).
@@ -967,6 +968,13 @@ its windows is refused as a harness error for that context.
 | `l06-errors-unknown-reset-code` (track) | Two live SUBSCRIBEs; STOP_SENDING on a Group stream, then RESET_STREAM and STOP_SENDING of one with unregistered code 0x4d1, then a later SUBSCRIBE; about 9 s | `l06-errors-unknown-code-tolerated` (030), `l06-errors-no-assumed-unauthorized` (032) | 030: any close except UNAUTHORIZED, or the other or later subscription refused. 032: a close with UNAUTHORIZED | The subscriptions were not both live, no step carrying the code was delivered, the cancel was not delivered or did not end the cancelled subscription, the later SUBSCRIBE got no SUBSCRIBE_OK, or the live transport refused the Group STOP_SENDING (harness failure); 030 on an UNAUTHORIZED close, 032 on any other close |
 | `l06-errors-reserved-reset-code` (track) | As above with reserved code 0x2a, about 6 s | `l06-errors-reserved-code-tolerated` (033) | Any session close, or the other or later subscription refused | As above |
 | `l06-errors-code-space` | SUBSCRIBE for an unserved broadcast (stream half), then an ANNOUNCE_REQUEST whose Message Length covers extra bytes (session half) | `l06-errors-code-space` (027), `l06-errors-message-length-close` (107) | 027: a stream code used as a session close or the reverse. 107: a close other than PROTOCOL_VIOLATION, or no close by the end of the allowance | 027: the run does not hold all five of its scenarios (each once), no stream code on this scenario, or no session close of the right space on any of the five (one close suffices: the catalog rationale), or an unregistered code; 107: the Message Length stimulus was not delivered |
+| `l06-track-info` (track) | Announce exchange, a Track Stream for the track, 500 ms, a second Track Stream for the same track | `l06-track-info-immutable` (163), `l06-track-info-timescale-nonzero` (170) | 163: the two TRACK_INFO replies differ in Publisher Priority, Publisher Max Age or Timescale. 170: a Timescale of 0 | Fewer than two replies for 163 (a reset, the track unknown, silence, a second reply on one stream, an unreadable reply); no reply for 170; the stimulus was not delivered |
+| `l06-fetch-group` (track) | Announce exchange, a Track Stream lookup, a learning SUBSCRIBE (Max Age 0) until a Group stream ends with FIN and at least 3 frames, then three FETCHes of that group: whole, frames 0 and 1, all but frame 0 | `l06-fetch-short-run` (177) | A FIN after fewer frames than the requested range holds in the reference group | No complete group learned in 15 s (no FETCH is sent), every FETCH reset or unanswered (a reset is conforming: the group may have been dropped), more frames than asked on a range (that range gives no verdict), an unreadable answer, no TRACK_INFO |
+| `l06-fetch-unknown-group` (track) | Announce exchange, a Track Stream lookup, one FETCH of group 4 000 000 000 | `l06-fetch-unknown-group-reset` (066) | A FIN (empty or with frames), frames, or a session close instead of the stream reset | No answer by the end of the allowance, an unreadable answer, no TRACK_INFO |
+| `l06-probe-report` | A Probe Stream with a 4 Mbit/s target, a second target of 8 Mbit/s once the publisher reported (or after 3 s), unless it already reset or ended the stream, then a 3 s allowance | `l06-probe-target-continues` (072), `l06-probe-none-reset` (075) | 072 (publisher advertised Report or Increase): a RESET_STREAM of the Probe Stream or a session close after a target; 075 (advertised no Probe capability or Level 0): a PROBE report, or a FIN or session close instead of a reset | 072: Level None or no decodable SETUP, no report after the second target, the stream unreadable. 075: Level Report or Increase, no decodable SETUP, no reaction by the end of the allowance |
+| `l06-goaway-single` (track) | Announce exchange, a SUBSCRIBE; once three Group streams were opened (the cadence proof, within 10 s), a Goaway Stream with a URI on the reserved `.invalid` host, then 6 s | `l06-goaway-no-new-streams` (077) | A stream the publisher opened more than 2 s after the GOAWAY was written | No GOAWAY sent (no cadence), a session close after the GOAWAY (a graceful shutdown), fewer Group streams before the GOAWAY than three, an observation after the 2 s flight allowance shorter than the longest gap between those Group streams |
+| `l06-goaway-duplicate` | A Goaway Stream with a valid GOAWAY, 500 ms, a second Goaway Stream, then a 3 s allowance | `l06-goaway-second-closes` (186) | A session still open at the end of the allowance, or a close with a code other than PROTOCOL_VIOLATION | The first GOAWAY not delivered, or a close before the second GOAWAY was written (including a close on the first) |
+| `l06-goaway-oversize` | A Goaway Stream whose GOAWAY claims and carries a 8193 byte URI (a named deliberate violation), then a 3 s allowance | `l06-goaway-oversize-violation` (179) | A session still open at the end of the allowance (a reset of the Goaway Stream alone included), or a close with another code | The stimulus was not delivered, or the peer closed before it |
 
 In every row the transcript must be judgeable: the publisher connected, the session was not cut short by a harness failure, the event limit or the deadline, and the runner's SETUP was delivered. Otherwise all its rows are not run. Rows 014, 111, 110, 109, 112, 092, 126, 131, 107, 027, 025, 139, 062, 023 and 030 to 033 treat a publisher close as part of the observation and prove their own stimulus; rows 141, 143, 152, 093, 097, 190, 159, 172, 020 and 120, 124, 125 instead require that all stimuli were delivered and the publisher had not closed early. Row 108 is not run on any publisher close. A transcript flagged as harness-failed, event-limit reached or timed out drops all its verdicts to not run.
 
@@ -989,7 +997,9 @@ In every row the transcript must be judgeable: the publisher connected, the sess
 - **Group payload evidence rule.** The payload bytes of FRAME messages on Group streams are not stored in the
   transcript (length and FIN are kept; the counter `group_payload_bytes_dropped` records the elision), so a
   publisher streaming media does not exhaust the recorder; the evaluators of the Group-stream rows use the stream
-  structure (headers, sequences, lengths, FIN), never the payload.
+  structure (headers, sequences, lengths, FIN), never the payload. Since L2a the same holds for the publisher's bytes
+  on a Fetch Stream the runner opened (a FETCH response is bare FRAMEs): the decoded frames are kept, the bytes are not,
+  and `group_payload_bytes_dropped` counts both.
 - **Evidence status names.** Engine actions and refused steps in the `context_complete` evidence name the transport
   status (`status=Success`, `refused=WouldBlock`). A refused WebTransport CONNECT is reported as `refused CONNECT:
   validator_status=404 reason=... path=...`; `validator_status` is the validator's decision, while the status on the

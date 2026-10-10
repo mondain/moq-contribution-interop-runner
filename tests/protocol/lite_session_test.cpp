@@ -19,10 +19,14 @@
 
 #include "moq/interop/transport/session_transport.h"
 #include "moq/interop/wire/moqlite06/announce.h"
+#include "moq/interop/wire/moqlite06/fetch.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/goaway.h"
 #include "moq/interop/wire/moqlite06/group.h"
+#include "moq/interop/wire/moqlite06/probe.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 #include "moq/interop/wire/moqlite06/subscribe.h"
+#include "moq/interop/wire/moqlite06/track.h"
 #include "moq/interop/wire/moqlite06/varint.h"
 
 namespace moq::interop::session {
@@ -41,11 +45,14 @@ using wire::moqlite06::AnnounceRequest;
 using wire::moqlite06::AnnounceStart;
 using wire::moqlite06::AnnounceUpdate;
 using wire::moqlite06::DecodeLimits;
+using wire::moqlite06::FetchRequest;
 using wire::moqlite06::Frame;
+using wire::moqlite06::GoawayMessage;
 using wire::moqlite06::GroupHeader;
 using wire::moqlite06::kMaxFrameDelta;
 using wire::moqlite06::kMaxVarint;
 using wire::moqlite06::kMinFrameDelta;
+using wire::moqlite06::ProbeMessage;
 using wire::moqlite06::RouteMetadata;
 using wire::moqlite06::SetupMessage;
 using wire::moqlite06::SetupParameter;
@@ -55,6 +62,8 @@ using wire::moqlite06::SubscribeEnd;
 using wire::moqlite06::SubscribeOk;
 using wire::moqlite06::SubscribeRange;
 using wire::moqlite06::SubscribeUpdate;
+using wire::moqlite06::TrackInfo;
+using wire::moqlite06::TrackRequest;
 
 using Bytes = std::vector<std::byte>;
 
@@ -187,6 +196,22 @@ Vector subscribe_response(std::string name, Bytes wire, LiteMessage value) {
             LiteStreamKind::Subscribe};
 }
 
+// L2a streams. The runner writes the STREAM_TYPE and the request; the peer answers on the same stream.
+const Bytes kTrackLocal = bytes({0x06, 0x04, 0x01, 0x62, 0x01, 0x74});  // Track stream, TRACK{"b", "t"}
+const Bytes kFetchRequestWire = bytes({0x08, 0x01, 0x62, 0x01, 0x74, 0x80, 0x00, 0x00, 0x00});
+const Bytes kFetchLocal = concat({bytes({0x03}), kFetchRequestWire});  // Fetch stream, FETCH{"b", "t", 0x80, 0, 0, 0}
+const Bytes kProbeLocal = bytes({0x04, 0x02, 0x00, 0x00});             // Probe stream, target {0, 0}
+const Bytes kGoawayLocal = bytes({0x05, 0x01, 0x00});                  // Goaway stream, empty URI
+const Bytes kTrackInfoWire = bytes({0x09, 0x3c, 0x80, 0x00, 0x75, 0x30, 0x80, 0x01, 0x5f, 0x90});  // {60, 30000, 90000}
+const Bytes kProbeReportWire = bytes({0x05, 0x80, 0x4c, 0x4b, 0x40, 0x19});                       // {5000000, 25}
+
+Vector l2_local(std::string name, LiteStreamKind kind, Bytes stream, LiteMessage value, std::size_t count = 1) {
+    return {std::move(name), Path::Local, {}, std::move(stream), std::move(value), count, kind};
+}
+Vector l2_response(std::string name, LiteStreamKind kind, Bytes local, Bytes wire, LiteMessage value) {
+    return {std::move(name), Path::PeerResponse, std::move(local), std::move(wire), std::move(value), 2, kind};
+}
+
 const std::vector<Vector>& vectors() {
     static const std::vector<Vector> table = {
         // moqlite06_setup_test.cpp
@@ -255,6 +280,28 @@ const std::vector<Vector>& vectors() {
         subscribe_response("subscribe_drop_multibyte",
                            bytes({0x02, 0x08, 0x41, 0x00, 0x41, 0x2c, 0x80, 0x00, 0x40, 0x00}),
                            SubscribeDrop{256, 300, 16384}),
+        // moqlite06_track_test.cpp, moqlite06_fetch_test.cpp, moqlite06_probe_test.cpp, moqlite06_goaway_test.cpp
+        l2_local("track_request", LiteStreamKind::Track, kTrackLocal, TrackRequest{"b", "t"}),
+        l2_local("fetch_request", LiteStreamKind::Fetch, kFetchLocal, FetchRequest{"b", "t", 0x80, 0, 0, 0}),
+        l2_local("fetch_request_range",
+                 LiteStreamKind::Fetch,
+                 bytes({0x03, 0x0a, 0x02, 0x61, 0x62, 0x01, 0x63, 0x7f, 0x41, 0x2c, 0x02, 0x05}),
+                 FetchRequest{"ab", "c", 0x7f, 300, 2, 5}),
+        l2_local("probe_target", LiteStreamKind::Probe, bytes({0x04, 0x05, 0x80, 0x4c, 0x4b, 0x40, 0x19}),
+                 ProbeMessage{5000000, 25}),
+        l2_local("probe_second_target", LiteStreamKind::Probe, concat({kProbeLocal, kProbeReportWire}),
+                 ProbeMessage{5000000, 25}, 2),
+        l2_local("goaway_empty", LiteStreamKind::Goaway, kGoawayLocal, GoawayMessage{""}),
+        l2_local("goaway_uri", LiteStreamKind::Goaway,
+                 bytes({0x05, 0x0b, 0x0a, 0x6d, 0x6f, 0x71, 0x6c, 0x3a, 0x2f, 0x2f, 0x62, 0x2f, 0x78}),
+                 GoawayMessage{"moql://b/x"}),
+        l2_response("track_info", LiteStreamKind::Track, kTrackLocal, kTrackInfoWire, TrackInfo{60, 30000, 90000}),
+        l2_response("fetch_frame", LiteStreamKind::Fetch, kFetchLocal, bytes({0x02, 0x03, 0x61, 0x62, 0x63}),
+                    Frame{1, text("abc")}),
+        l2_response("fetch_frame_empty", LiteStreamKind::Fetch, kFetchLocal, bytes({0x00, 0x00}), Frame{0, {}}),
+        l2_response("fetch_frame_negative_delta", LiteStreamKind::Fetch, kFetchLocal,
+                    bytes({0x40, 0x41, 0x00}), Frame{-33, {}}),
+        l2_response("probe_report", LiteStreamKind::Probe, kProbeLocal, kProbeReportWire, ProbeMessage{5000000, 25}),
     };
     return table;
 }
@@ -634,21 +681,200 @@ TEST(LiteStreamReader, PeerBytesBufferedBeforeTheKindAreBounded) {
     EXPECT_EQ(reader.record().bytes, 60u);
 }
 
-TEST(LiteStreamReader, L2StreamsAreRecordedRawAndFlagged) {
-    const std::vector<std::pair<unsigned, LiteStreamKind>> kinds = {
-        {0x3, LiteStreamKind::Fetch}, {0x4, LiteStreamKind::Probe}, {0x5, LiteStreamKind::Goaway},
-        {0x6, LiteStreamKind::Track}};
-    for (const auto& [type, kind] : kinds) {
+// ---- L2a streams: Track, Fetch, Probe and Goaway are decoded (they used to be recorded raw) -----------------------
+
+TEST(LiteStreamReader, L2aStreamKindsAreDecodedAndNoLongerFlaggedAsRaw) {
+    const std::vector<std::pair<Bytes, LiteStreamKind>> kinds = {
+        {kFetchLocal, LiteStreamKind::Fetch}, {kProbeLocal, LiteStreamKind::Probe},
+        {kGoawayLocal, LiteStreamKind::Goaway}, {kTrackLocal, LiteStreamKind::Track}};
+    for (const auto& [local, kind] : kinds) {
         LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
-        reader.feed_local(bytes({type, 0x01, 0x00}), false, 1);
-        reader.feed(bytes({0x00, 0x01, 0x06, 0xff}), true, 2);
+        reader.feed_local(local, false, 1);
         const auto& record = reader.record();
         EXPECT_EQ(record.kind, kind);
-        EXPECT_TRUE(record.messages.empty());
-        EXPECT_EQ(count_issues(record, kIssueL2StreamNotDecoded), 1u) << describe_issues(record);
-        EXPECT_EQ(record.issues.size(), 1u) << describe_issues(record);
-        EXPECT_EQ(record.bytes, 4u);
+        ASSERT_EQ(record.messages.size(), 1u) << describe_issues(record);
+        EXPECT_EQ(record.messages[0].from, LiteOrigin::Runner);
+        EXPECT_EQ(count_issues(record, kIssueL2StreamNotDecoded), 0u) << describe_issues(record);
+        EXPECT_TRUE(record.issues.empty()) << describe_issues(record);
     }
+}
+
+TEST(LiteStreamReader, TrackStreamReplyIsOneTrackInfoThenFin) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kTrackLocal, true, 1);
+    reader.feed(kTrackInfoWire, true, 2);
+    const auto& record = reader.record();
+    EXPECT_TRUE(record.issues.empty()) << describe_issues(record);
+    const auto infos = peer_track_info(record);
+    ASSERT_EQ(infos.size(), 1u);
+    EXPECT_EQ(std::get<TrackInfo>(infos[0]->message), (TrackInfo{60, 30000, 90000}));
+    EXPECT_EQ(infos[0]->at_ns, 2u);
+    EXPECT_TRUE(record.fin_seen);
+    EXPECT_TRUE(record.local_fin);
+}
+
+TEST(LiteStreamReader, SecondTrackInfoIsTrailingAfterResponse) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kTrackLocal, false, 1);
+    reader.feed(concat({kTrackInfoWire, kTrackInfoWire}), false, 2);
+    const auto& record = reader.record();
+    EXPECT_EQ(peer_track_info(record).size(), 1u);
+    ASSERT_EQ(count_issues(record, kIssueTrailingAfterResponse), 1u) << describe_issues(record);
+    EXPECT_EQ(peer_protocol_issues(record).size(), 1u);
+    EXPECT_EQ(classify_issue(kIssueTrailingAfterResponse), LiteIssueClass::PeerProtocol);
+}
+
+TEST(LiteStreamReader, TrackInfoAcrossTwoRequestsIsTwoRecordsNotOne) {
+    // Immutability (draft 7.12) needs two streams; each record keeps its own reply.
+    LiteSession session;
+    session.note_local_write(kRunnerBidi, true, kTrackLocal, true, 1);
+    session.note_local_write(kRunnerBidi + 4, true, kTrackLocal, true, 2);
+    session.on_event(data_event(kRunnerBidi, kTrackInfoWire, true), 3);
+    session.on_event(data_event(kRunnerBidi + 4, bytes({0x03, 0x3c, 0x00, 0x01}), true), 4);
+    ASSERT_EQ(session.streams().size(), 2u);
+    EXPECT_EQ(std::get<TrackInfo>(peer_track_info(session.streams()[0])[0]->message), (TrackInfo{60, 30000, 90000}));
+    EXPECT_EQ(std::get<TrackInfo>(peer_track_info(session.streams()[1])[0]->message), (TrackInfo{60, 0, 1}));
+}
+
+TEST(LiteStreamReader, TrackRequestWrittenTwiceIsARunnerSideAnomalyNotAPeerIssue) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kTrackLocal, false, 1);
+    reader.feed_local(bytes({0x04, 0x01, 0x62, 0x01, 0x74}), false, 2);
+    EXPECT_EQ(count_issues(reader.record(), kIssueTrailingAfterRequest), 1u) << describe_issues(reader.record());
+    EXPECT_TRUE(peer_issues(reader.record()).empty());
+    EXPECT_TRUE(peer_protocol_issues(reader.record()).empty());
+}
+
+TEST(LiteStreamReader, FetchReplyWithZeroOneAndManyFrames) {
+    for (const std::size_t frames : {std::size_t{0}, std::size_t{1}, std::size_t{7}}) {
+        SCOPED_TRACE(frames);
+        LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+        reader.feed_local(kFetchLocal, true, 1);
+        Bytes wire;
+        for (std::size_t i = 0; i < frames; ++i) wire = concat({wire, bytes({0x02, 0x02, 0x61, 0x62})});
+        reader.feed(wire, true, 2);
+        const auto& record = reader.record();
+        EXPECT_TRUE(record.issues.empty()) << describe_issues(record);
+        const auto decoded = peer_fetch_frames(record);
+        ASSERT_EQ(decoded.size(), frames);
+        for (const auto* frame : decoded) EXPECT_EQ(std::get<Frame>(frame->message), (Frame{1, text("ab")}));
+        EXPECT_TRUE(record.fin_seen);
+        EXPECT_FALSE(record.reset_seen);
+    }
+}
+
+TEST(LiteStreamReader, FetchReplyCutByFinIsTruncated) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kFetchLocal, true, 1);
+    reader.feed(concat({bytes({0x02, 0x02, 0x61, 0x62}), bytes({0x02, 0x05, 0x61})}), true, 2);
+    EXPECT_EQ(peer_fetch_frames(reader.record()).size(), 1u);
+    EXPECT_EQ(count_issues(reader.record(), kIssueTruncatedAtFin), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(peer_protocol_issues(reader.record()).size(), 1u);
+}
+
+TEST(LiteStreamReader, FetchReplyResetMidFrameKeepsTheDecodedFrames) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kFetchLocal, true, 1);
+    reader.feed(concat({bytes({0x02, 0x02, 0x61, 0x62}), bytes({0x02, 0x05, 0x61})}), false, 2);
+    reader.reset(0x5);
+    const auto& record = reader.record();
+    EXPECT_EQ(peer_fetch_frames(record).size(), 1u);
+    EXPECT_TRUE(record.reset_seen);
+    EXPECT_EQ(record.reset_code.value_or(0), 0x5u);
+    EXPECT_TRUE(record.issues.empty()) << describe_issues(record);
+}
+
+TEST(LiteStreamReader, FetchFrameAboveTheLimitIsAHarnessIssueNeverAPeerFail) {
+    DecodeLimits tight;
+    tight.max_message_length = 8;
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true, tight);
+    reader.feed_local(kFetchLocal, true, 1);
+    reader.feed(concat({bytes({0x00, 0x40, 0x40}), repeat(0, 64)}), false, 2);  // a 64-byte payload over the 8 limit
+    EXPECT_EQ(count_issues(reader.record(), kIssueLengthExceedsLimit), 1u) << describe_issues(reader.record());
+    EXPECT_TRUE(peer_protocol_issues(reader.record()).empty());
+    EXPECT_FALSE(harness_issues(reader.record()).empty());
+}
+
+TEST(LiteStreamReader, ProbeReportsRunOnAndBadOnesAreProtocolViolations) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kProbeLocal, false, 1);
+    reader.feed(concat({kProbeReportWire, kProbeReportWire, bytes({0x02, 0x00, 0x00})}), false, 2);
+    EXPECT_EQ(peer_probe_reports(reader.record()).size(), 3u);
+    EXPECT_TRUE(reader.record().issues.empty()) << describe_issues(reader.record());
+    reader.feed(bytes({0x03, 0x00, 0x00, 0x00}), false, 3);  // a trailing byte inside the Message Length
+    EXPECT_EQ(peer_probe_reports(reader.record()).size(), 3u);
+    EXPECT_EQ(count_issues(reader.record(), kIssueProtocolViolation), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(peer_protocol_issues(reader.record()).size(), 1u);
+}
+
+TEST(LiteStreamReader, ProbeTargetsFromTheRunnerStayOutOfThePeersReports) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(concat({kProbeLocal, kProbeReportWire}), false, 1);
+    reader.feed(kProbeReportWire, false, 2);
+    EXPECT_EQ(runner_messages(reader.record()).size(), 2u);
+    EXPECT_EQ(peer_probe_reports(reader.record()).size(), 1u);
+}
+
+TEST(LiteStreamReader, GoawayStreamWithNoReplyIsClean) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kGoawayLocal, true, 1);
+    reader.feed({}, true, 2);
+    EXPECT_TRUE(reader.record().issues.empty()) << describe_issues(reader.record());
+    EXPECT_TRUE(peer_messages(reader.record()).empty());
+}
+
+TEST(LiteStreamReader, GoawayStreamReplyBytesAreUnexpected) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kGoawayLocal, false, 1);
+    reader.feed(bytes({0x01, 0x00}), false, 2);
+    EXPECT_EQ(count_issues(reader.record(), kIssueUnexpectedResponse), 1u) << describe_issues(reader.record());
+    EXPECT_EQ(classify_issue(kIssueUnexpectedResponse), LiteIssueClass::PeerProtocol);
+    EXPECT_TRUE(peer_messages(reader.record()).empty());
+}
+
+TEST(LiteStreamReader, GoawayReplyArrivingBeforeTheRunnersTypeIsStillUnexpected) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(bytes({0x40}), false, 1);  // half of a 2-byte STREAM_TYPE
+    reader.feed(bytes({0x00}), false, 2);
+    reader.feed_local(concat({bytes({0x05}), bytes({0x01, 0x00})}), false, 3);
+    EXPECT_EQ(reader.record().kind, LiteStreamKind::Goaway);
+    EXPECT_EQ(count_issues(reader.record(), kIssueUnexpectedResponse), 1u) << describe_issues(reader.record());
+}
+
+TEST(LiteStreamReader, BytesAfterTheFinOfAnL2aStreamAreTheTransportAnomalyIssue) {
+    for (const auto& local : {kTrackLocal, kFetchLocal, kProbeLocal}) {
+        LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+        reader.feed_local(local, false, 1);
+        reader.feed({}, true, 2);
+        reader.feed(bytes({0x01}), false, 3);
+        EXPECT_EQ(count_issues(reader.record(), kIssueTrailingAfterFin), 1u) << describe_issues(reader.record());
+    }
+}
+
+TEST(LiteStreamReader, L2aAccessorsNeverSeeTheRunnersMessages) {
+    LiteStreamReader reader(kRunnerBidi, LiteOrigin::Runner, true);
+    reader.feed_local(kFetchLocal, false, 1);
+    EXPECT_TRUE(peer_fetch_frames(reader.record()).empty());
+    EXPECT_TRUE(peer_track_info(reader.record()).empty());
+    EXPECT_TRUE(peer_probe_reports(reader.record()).empty());
+}
+
+TEST(LiteSessionBudget, AFetchFloodOfTwentyMebibytesIsBoundedByTheBudget) {
+    LiteSession session;
+    session.note_local_write(kRunnerBidi, true, kFetchLocal, true, 1);
+    const LiteSessionLimits defaults;
+    const Bytes frame_wire = concat({bytes({0x00, 0x44, 0x00}), repeat(0xab, 1024)});  // delta 0, 1 KiB payload
+    Bytes chunk;
+    while (chunk.size() < (std::size_t{1} << 20)) chunk.insert(chunk.end(), frame_wire.begin(), frame_wire.end());
+    for (std::size_t sent = 0; sent < (std::size_t{20} << 20) && !session.limit_reached(); sent += chunk.size()) {
+        session.on_event(data_event(kRunnerBidi, chunk), 2);
+    }
+    EXPECT_LE(session.charged_bytes(), defaults.max_bytes);
+    EXPECT_LE(session.message_count(), defaults.max_messages_total);
+    std::size_t messages = 0;
+    for (const auto& record : session.streams()) messages += record.messages.size();
+    EXPECT_EQ(messages, session.message_count());
+    EXPECT_LE(messages * sizeof(LiteDecoded) + session.total_bytes(), defaults.max_bytes);
 }
 
 TEST(LiteStreamReader, UnregisteredBidiTypeWrittenByTheRunner) {
@@ -888,7 +1114,8 @@ TEST(LiteSession, RandomByteSoupNeverThrows) {
     std::uniform_int_distribution<int> action(0, 99);
     std::uniform_int_distribution<std::uint64_t> stream_dist(0, 31);
     const std::vector<Bytes> seeds = {kGroupPreamble, kAnnounceLocal, kSubscribeLocal, bytes({0x01}),
-                                      bytes({0x01, 0x05, 0x01, 0x04}), kAnnounceOkWire};
+                                      bytes({0x01, 0x05, 0x01, 0x04}), kAnnounceOkWire, kTrackLocal, kFetchLocal,
+                                      kProbeLocal, kGoawayLocal, kTrackInfoWire, kProbeReportWire};
     for (int i = 0; i < 20000; ++i) {
         const auto id = stream_dist(rng);
         Bytes data;
@@ -1094,6 +1321,8 @@ TEST(LiteIssueClasses, EveryIssueCodeHasAnExplicitClass) {
         {kIssueKeyValueFormattingError, LiteIssueClass::PeerProtocol},
         {kIssueTrailingAfterSetup, LiteIssueClass::PeerProtocol},
         {kIssueTrailingAfterRequest, LiteIssueClass::PeerProtocol},
+        {kIssueTrailingAfterResponse, LiteIssueClass::PeerProtocol},
+        {kIssueUnexpectedResponse, LiteIssueClass::PeerProtocol},
         {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
         {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
         {kIssueLengthExceedsLimit, LiteIssueClass::Harness},
@@ -1319,6 +1548,11 @@ TEST(LiteNames, KindAndMessageNames) {
     EXPECT_EQ(lite_message_name(LiteMessage{AnnounceOk{}}), "ANNOUNCE_OK");
     EXPECT_EQ(lite_message_name(LiteMessage{Frame{}}), "FRAME");
     EXPECT_EQ(lite_message_name(LiteMessage{SubscribeDrop{}}), "SUBSCRIBE_DROP");
+    EXPECT_EQ(lite_message_name(LiteMessage{TrackRequest{}}), "TRACK");
+    EXPECT_EQ(lite_message_name(LiteMessage{TrackInfo{}}), "TRACK_INFO");
+    EXPECT_EQ(lite_message_name(LiteMessage{FetchRequest{}}), "FETCH");
+    EXPECT_EQ(lite_message_name(LiteMessage{ProbeMessage{}}), "PROBE");
+    EXPECT_EQ(lite_message_name(LiteMessage{GoawayMessage{}}), "GOAWAY");
     EXPECT_EQ(kLiteStreamOpenedKind, "lite_stream_opened");
     EXPECT_EQ(kLiteMessageKind, "lite_message");
     EXPECT_EQ(kLiteDecodeErrorKind, "lite_decode_error");

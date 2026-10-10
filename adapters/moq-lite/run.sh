@@ -7,7 +7,7 @@
 #
 # with ffmpeg's messages in <log_dir>/ffmpeg.log and moq's output in <log_dir>/publisher.log. It
 # describes the CLI's command line only; it never decides what the runner expects. Every one of the
-# 19 executable moq-lite-06 scenarios gets the same command line: the scenarios differ only in what
+# 26 executable moq-lite-06 scenarios gets the same command line: the scenarios differ only in what
 # the runner does (tests/golden/moq-lite-cmdlines.txt).
 #
 # moq's command line (dial flags before the verb):

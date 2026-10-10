@@ -33,15 +33,18 @@ inline constexpr std::string_view kLiteAlpn = "moq-lite-06";
 
 // Bounds on what one context records into LiteTranscript::events. Reaching either sets
 // LiteTranscript::event_limit_reached; recording stops but stepping goes on, and the transcript is never judged.
-// The byte bound counts the stream-data bytes KEPT in the events: the payload of the peer's Group streams is not
-// kept (LiteTranscript::payload_bytes_dropped), so media volume never reaches it; every other stream's bytes
-// (Setup streams, the publisher's answers on runner bidirectional streams, unknown stream types) count in full.
+// The byte bound counts the stream-data bytes KEPT in the events: the payload of the peer's Group streams and of
+// its FETCH responses is not kept (LiteTranscript::payload_bytes_dropped), so media volume never reaches it; every
+// other stream's bytes (Setup streams, the publisher's other answers on runner bidirectional streams, unknown
+// stream types) count in full.
 inline constexpr std::size_t kLiteMaximumEvents = 16384;
 inline constexpr std::size_t kLiteMaximumEvidenceBytes = std::size_t{8} << 20;
 // Steps (static plus dynamically appended) one probe may hold; more is a definition error (harness_failed).
 inline constexpr std::size_t kLiteMaximumSteps = 1024;
 // Events taken from the transport per poll.
 inline constexpr std::size_t kLitePollBatch = 256;
+// How often the dynamic continuation is called at least, with no recorder change (a clock-only wake).
+inline constexpr std::chrono::milliseconds kLiteContinuationTick{100};
 
 // The engine's time source, in nanoseconds on a monotonic scale. The name avoids scenarios::Clock (engine.h), which
 // is a std::chrono clock type rather than an injectable object.
@@ -214,8 +217,9 @@ struct LiteProbeDefinition {
     // Draft 6.3.1: the opener sends one SETUP and immediately FINs. False only for deliberate probes.
     bool runner_setup_fin{true};
     // Optional dynamic continuation, called once after establishment and then whenever the recorder changed: new
-    // decoded messages, new streams, a new peer RESET_STREAM or STOP_SENDING, or the peer's close. The steps it
-    // returns are appended in order. Until it sets LiteProbeContext::finished the continuation counts as pending:
+    // decoded messages, new streams, a new peer FIN, RESET_STREAM or STOP_SENDING, or the peer's close, and at least
+    // every kLiteContinuationTick of the clock (so a decision that only waits for time to pass is made even while the
+    // publisher is silent). The steps it returns are appended in order. Until it sets LiteProbeContext::finished the continuation counts as pending:
     // the deadline then sets timed_out, stimulus_delivered stays false and a peer close is peer_closed_early.
     std::function<std::vector<LiteStep>(const session::LiteSession&, LiteProbeContext&)> next_steps;
     std::vector<LiteStep> steps;
@@ -253,8 +257,9 @@ struct LiteTranscript {
     // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: lite uses no datagrams and the
     // transport bounds each one to the path MTU, so they are bounded by the event count).
     //
-    // A StreamDataEvent on a stream the PEER opened unidirectionally whose STREAM_TYPE is Group (0x0) is kept with
-    // its stream id and FIN but WITHOUT its bytes (data empty); event_data_sizes holds how many bytes it carried.
+    // A StreamDataEvent on a stream the PEER opened unidirectionally whose STREAM_TYPE is Group (0x0), or the PEER's
+    // bytes on a runner-opened stream the runner declared as Fetch (0x3), is kept with its stream id and FIN but
+    // WITHOUT its bytes (data empty); event_data_sizes holds how many bytes it carried.
     // The recorder (streams) decoded those bytes before they were dropped, so GROUP and FRAME messages are intact;
     // only a reader of raw StreamDataEvent bytes would miss them, and the evaluators read raw bytes of the peer's
     // Setup stream only (lite06::peer_setup_message). Setup streams, runner-opened bidirectional streams and every
@@ -264,7 +269,7 @@ struct LiteTranscript {
     // Parallel to events: the stream-data bytes each StreamDataEvent carried as received (kept or not), 0 for every
     // other event.
     std::vector<std::size_t> event_data_sizes;
-    // Group payload bytes received but not kept in events (above), and how many events lost theirs.
+    // Group and FETCH-response bytes received but not kept in events (above), and how many events lost theirs.
     std::size_t payload_bytes_dropped{0};
     std::size_t payload_events_elided{0};
     bool established{false};
@@ -389,7 +394,7 @@ private:
     std::set<transport::StreamId> send_ended_;
     std::set<transport::StreamId> engine_fins_;
     // (decoded messages, streams, peer resets + stop-sendings, peer close) when next_steps was last called.
-    std::optional<std::array<std::size_t, 4>> continuation_seen_;
+    std::optional<std::array<std::size_t, 6>> continuation_seen_;
 };
 
 }  // namespace moq::interop::scenarios
