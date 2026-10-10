@@ -106,7 +106,7 @@ std::vector<std::string_view> all_defect_names() {
 std::string usage() {
     std::string text =
         "usage: moq-interop-lite-ref-publisher --connect URL [--defect NAME] [--datagrams] "
-        "[--probe-level none|report|increase] [--frames-per-group N]\n"
+        "[--probe-level none|report|increase] [--frames-per-group N] [--groups N] [--group-interval-polls N]\n"
         "  URL is moql://HOST:PORT/PATH?QUERY (native QUIC) or https://HOST:PORT/PATH?QUERY (WebTransport).\n"
         "  defects:";
     for (const auto name : all_defect_names()) text += " " + std::string(name);
@@ -145,6 +145,13 @@ ParseResult parse_options(std::span<const std::string_view> args) {
         } else if (flag == "--probe-level") {
             const auto v = value();
             if (!v || !set_probe_level(options.publisher, *v)) return fail("--probe-level must be none, report or increase");
+        } else if (flag == "--groups" || flag == "--group-interval-polls") {
+            const auto v = value();
+            std::size_t count = 0;
+            if (!v || std::from_chars(v->data(), v->data() + v->size(), count).ec != std::errc{} || count == 0)
+                return fail(std::string(flag) + " needs a positive number");
+            if (flag == "--groups") options.publisher.groups_per_subscription = count;
+            else options.publisher.group_period_polls = count;
         } else if (flag == "--frames-per-group") {
             const auto v = value();
             std::size_t count = 0;

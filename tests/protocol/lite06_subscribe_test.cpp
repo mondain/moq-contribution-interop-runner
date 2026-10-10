@@ -825,6 +825,25 @@ TEST(Lite06SubscribeInvalidBounds, ASessionCloseInsteadOfTheResetFails) {
     EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(t), kFail);
 }
 
+// On WebTransport a session close tears every stream down: the stack resets them all with an HTTP error that is no
+// WebTransport application code, so the reset arrives without a code. That is the close's consequence, not the
+// reaction the row asks for; a reset that carries a code is a reaction even when the session ends later.
+TEST(Lite06SubscribeInvalidBounds, AWebTransportCloseThatTearsTheStreamDownIsNotAReset) {
+    auto definition = invalid_probe();
+    definition.binding = scen::LiteBinding::WebTransport;
+    const auto teardown = run(definition, invalid_answer([](auto&, ScriptedLitePeer& peer, auto&, transport::StreamId stream) {
+                                  peer.peer_reset(stream, std::nullopt);
+                                  peer.close_session(0x3);
+                              }));
+    ASSERT_TRUE(teardown.peer_close.has_value());
+    EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(teardown), kFail);
+    const auto reaction = run(definition, invalid_answer([](auto&, ScriptedLitePeer& peer, auto&, transport::StreamId stream) {
+                                  peer.peer_reset(stream, 0x0);
+                                  peer.close_session(0x0);
+                              }));
+    EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(reaction), kPass);
+}
+
 TEST(Lite06SubscribeInvalidBounds, ASubscribeEndOrFinInsteadOfTheResetFails) {
     EXPECT_EQ(evaluate_l06_subscribe_invalid_frame_bounds_reset(
                   run(invalid_probe(), invalid_answer([](auto&, ScriptedLitePeer& peer, auto&,

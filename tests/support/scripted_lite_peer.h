@@ -346,6 +346,9 @@ struct ConformingLitePublisherConfig {
     std::uint64_t hop_id{7};
     std::uint64_t latest_group{5};
     std::size_t groups_per_subscription{2};
+    // A Group stream is opened on every N-th poll (1: on every poll). A live publisher paces its groups (the reference
+    // publisher's --group-interval-polls) so that a rule about streams opened later can be seen to hold or not.
+    std::size_t group_period_polls{1};
     std::size_t frames_per_group{2};
     // 0: each FRAME payload is the text "frame-<group>-<frame>"; otherwise that text padded to this many bytes (a
     // media-sized source for the evidence-cap tests).
@@ -477,7 +480,8 @@ public:
         ++polls_;
         if (!peer.peer_closed()) react_to_runner_endings(peer);
         if (!peer.peer_closed()) serve_probes(peer);
-        if (!peer.peer_closed()) emit_one_group(peer);
+        if (!peer.peer_closed() && polls_ % std::max<std::size_t>(config_.group_period_polls, 1) == 0)
+            emit_one_group(peer);
         if (config_.hooks.on_poll) config_.hooks.on_poll(*this, peer);
     }
 

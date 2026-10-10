@@ -454,6 +454,19 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-adapter-cmdlines.sh")
     add_test(NAME moq-lite-ref-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-matrix-plan.sh")
+    # The live sweeps against the reference publisher take minutes: opt in with -DMOQ_INTEROP_LITE_REF_SWEEPS=ON.
+    option(MOQ_INTEROP_LITE_REF_SWEEPS "Register the live reference-publisher sweeps with ctest" OFF)
+    if(MOQ_INTEROP_LITE_REF_SWEEPS)
+        foreach(sweep IN ITEMS matrix negative)
+            add_test(NAME moq-lite-ref-${sweep}
+                     COMMAND ${CMAKE_COMMAND} -E env
+                             "MOQ_LITE_REF_BIN=$<TARGET_FILE:moq-interop-lite-ref-publisher>"
+                             bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-${sweep}.sh"
+                             "$<TARGET_FILE:moq-interop-runner>")
+            set_tests_properties(moq-lite-ref-${sweep} PROPERTIES TIMEOUT 1800 RESOURCE_LOCK "native-test-ports"
+                                 SKIP_RETURN_CODE 77)
+        endforeach()
+    endif()
     add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
     target_link_libraries(moq-interop-lite-ref-options-tests PRIVATE moq-interop-lite-ref GTest::gtest_main)
     add_test(NAME lite-ref-options COMMAND moq-interop-lite-ref-options-tests)

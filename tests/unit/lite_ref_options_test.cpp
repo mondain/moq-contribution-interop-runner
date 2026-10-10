@@ -68,6 +68,14 @@ TEST(LiteRefOptions, FlagsMapOntoThePublisherConfig) {
     EXPECT_EQ(r.options->defect, "datagram-oversize");
 }
 
+TEST(LiteRefOptions, GroupCountAndPacingMapOntoThePublisherConfig) {
+    const auto r = parse_options(args({"--connect", "moql://h:1/moq", "--groups", "12", "--group-interval-polls", "300"}));
+    ASSERT_TRUE(r.options.has_value()) << r.error;
+    EXPECT_EQ(r.options->publisher.groups_per_subscription, 12u);
+    EXPECT_EQ(r.options->publisher.group_period_polls, 300u);
+    EXPECT_FALSE(parse_options(args({"--connect", "moql://h:1/moq", "--groups", "0"})).options.has_value());
+}
+
 TEST(LiteRefOptions, WebTransportEndpointsSelectTheWebTransportBinding) {
     const auto r = parse_options(args({"--connect", "https://127.0.0.1:4443/moq?token=l1d"}));
     ASSERT_TRUE(r.options.has_value());
