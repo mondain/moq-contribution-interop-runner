@@ -208,9 +208,11 @@ build/moq-interop-audit --draft moq-lite-06 [--format text|json] [--database PAT
 ```
 
 `--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
-(`complete: false`). Thirty evaluators are bound to the 19 scenarios (34 bindings), so the static audit
-reports the coverage of the reviewed required rows by those bindings (26 of 26 required and 4 of 4 optional
-reviewed Applicable and Testable rows) next to the catalog's state, and its verdict is never a pass. Other spellings (`106`, `moq-lite-05`)
+(`complete: false`). Thirty-nine evaluators are bound to the 26 scenarios (43 bindings), so the static audit
+reports the coverage of the reviewed required rows by those bindings (35 of 35 required and 4 of 4 optional
+reviewed Applicable and Testable rows) next to the catalog's state, and its verdict is never a pass. The planned
+scenario and evaluator ids follow `l06-<area>-<name>`, with the areas `session`, `setup`, `announce`, `subscribe`,
+`group`, `frame`, `errors`, `track`, `fetch`, `probe` and `goaway`. Other spellings (`106`, `moq-lite-05`)
 are refused. With `--database PATH` the stored moq-lite-06 runs of that database are also
 audited (the execution audit of the MoQ Transport drafts with the lite bindings: each stored
 score is recomputed with the staged scoring, and every scored row must be bound to a selected
@@ -257,6 +259,10 @@ not offer, so it is `not_run` on both transports; and when a WebTransport client
 closes the session for it (draft 7.3.2, a receiver MUST close) and every other row of that session is `not_run`
 except 111 and 125. Row `L06-4-4-MUST-027` takes its session half from any of its five scenarios and its stream
 half from `l06-errors-code-space`, so it settles only in a run (a group run) that holds all five and is `not_run`
-in a single-scenario run. A Fail by the absence of a close (rows 107, 126 and 131, whose bindings declare
-`peer_close`) is counted as observed on the completeness page for the staged moq-lite-06 catalog; a Pass still
+in a single-scenario run. Rows 075 (a publisher that advertised no Probe capability resets the Probe Stream)
+and 072 (each PROBE target keeps the stream alive) are judged from the publisher's advertised Probe level and
+are mutually exclusive: a run is `not_run` on the one that does not match; rows 077 (no new streams after a
+GOAWAY) and 186 (a second GOAWAY closes the session) are `not_run` when the publisher ends the session on the
+first GOAWAY, which the draft allows. A Fail by the absence of a close (rows 107, 126, 131, 179 and 186, whose
+bindings declare `peer_close`) is counted as observed on the completeness page for the staged moq-lite-06 catalog; a Pass still
 needs the evidence its binding declares.

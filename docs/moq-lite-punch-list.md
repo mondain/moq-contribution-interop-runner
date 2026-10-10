@@ -6,10 +6,12 @@ layer, `rs/moq-net/src/lite/`) so that it conforms to moq-lite-06
 runner in this repository against `moq 0.14.1` built from moq-dev/moq
 `b8b0d235a99bddb9043f453c46c958362d6c9247`, publishing an ffmpeg fMP4 source through the
 bundled `adapters/moq-lite/run.sh` (`moq ... --connect-version moq-lite-06 --broadcast
-interop.hang import fmp4`). The first sweep ran on 2026-10-09 (22:21 to 22:38 -07:00) on
-native QUIC (`moql://`) and WebTransport (`https://`); background, method, counts and the
-full triage are in
-[interop-notes.md](interop-notes.md#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235).
+interop.hang import fmp4`). The first sweep (ML-01 to ML-03, ML-Q1) ran on 2026-10-09
+(22:21 to 22:38 -07:00) on native QUIC (`moql://`) and WebTransport (`https://`); the second
+sweep (L2a: the track, fetch, probe and goaway scenarios, ML-04 and ML-05) ran on 2026-10-10
+on the same two bindings. Background, method, counts and the full triage are in
+[interop-notes.md](interop-notes.md#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235) and
+[interop-notes.md](interop-notes.md#moq-lite-06-second-sweep-l2a-against-the-moq-cli-b8b0d235).
 
 The peer is the CLIENT that dials the runner; the runner is the server and the subscriber.
 So every item is about what the CLI does as a client and as a publisher. Source line numbers
@@ -29,11 +31,16 @@ open; worded as a question).
 | ML-02 a server's SETUP Role is accepted | Confirmed | L06-7-3-3-MUST-131 fail (both transports) |
 | ML-03 a Message Length mismatch resets the stream instead of closing the session | Confirmed (SHOULD) | L06-7-1-SHOULD-107 fail (both transports) |
 | ML-Q1 which stream code answers a protocol violation on one stream? | Question | none (L06-3-6-MUST-023 and L06-7-2-MUST-108 pass with CANCELLED) |
+| ML-04 a subscriber's PROBE target resets the Probe Stream | Confirmed | L06-5-1-5-MUST-072 fail (both transports) |
+| ML-05 an oversize GOAWAY URI resets only the Goaway Stream | Confirmed | L06-7-18-MUST-179 fail (both transports) |
 
-Every other row the 19 scenarios judge passed: in the final sweep 25 of the 30 bound rows pass
-on native QUIC and 24 on WebTransport (row 027 since the runner fix `ffecfed`). The rows that
-stay `not_run` do not apply to this peer or transport; they are listed in the interop notes,
-not here.
+Every other row the 19 first-sweep scenarios judge passed: in the final first sweep 25 of the
+30 bound rows pass on native QUIC and 24 on WebTransport (row 027 since the runner fix
+`ffecfed`). The second sweep adds seven scenarios and nine bound rows: L06-7-12-MUST-NOT-163,
+L06-7-12-MUST-170, L06-7-16-MUST-177 and L06-5-1-3-MUST-066 pass, the two items above fail, and
+L06-5-1-5-MUST-075, L06-5-1-6-MUST-NOT-077 and L06-7-18-MUST-186 stay `not_run` (see the
+observations at the end). The rows that stay `not_run` do not apply to this peer or transport;
+they are listed in the interop notes, not here.
 
 ## Items
 
@@ -112,6 +119,48 @@ not here.
   runner's scripted publisher uses) or a new stream code? Not a defect against the current
   text; a draft clarification would settle it.
 
+### ML-04 A subscriber's PROBE target resets the Probe Stream (confirmed)
+
+- **Row:** L06-5-1-5-MUST-072 (fail on both transports).
+- **Scenario:** `l06-probe-report`.
+- **Draft:** lines 1153-1164 (section 5.1.5): "The subscriber sends a PROBE message with a target
+  bitrate on the bidirectional stream. The subscriber MAY send additional PROBE messages on the
+  same stream to update the target bitrate; the publisher MUST treat each PROBE as a new target
+  to attempt." A publisher that advertised Report but not Increase "ignores the target and only
+  reports"; reset is for a publisher that advertised no Probe capability (lines 1166-1167).
+- **Observed:** the CLI advertises Probe level Report in its SETUP (parameter 1 = 01). The runner
+  opens a Probe Stream with `04 05 80 3d 09 00 00` (target 4 000 000 bit/s, RTT 0). The CLI logs
+  `WARN moq_net::lite::publisher: probe stream error err=short buffer`, resets the stream with
+  MALFORMED_TRACK (0x12) about 1 ms later and sends STOP_SENDING 0, and keeps the session open
+  (`run-18dd35ed00c3a457` native QUIC, `run-18dd360c95f22ca1` WebTransport, and every repeat).
+- **Where:** `publisher.rs` lines 424-436: `ProbeServe::poll_probe` never decodes anything the
+  subscriber writes. It polls `stream.reader.poll_closed`, which only accepts a FIN, so the first
+  byte of a target message is a read error that ends the stream. (`probe.rs` lines 15-40 can
+  decode the message; it is not used on this path.)
+- **Required:** read the PROBE messages the subscriber writes on a Probe Stream as targets (at
+  Report level the value is ignored) and keep reporting; only a FIN or reset from the subscriber
+  ends the stream.
+
+### ML-05 An oversize GOAWAY URI resets only the Goaway Stream (confirmed)
+
+- **Row:** L06-7-18-MUST-179 (fail on both transports).
+- **Scenario:** `l06-goaway-oversize`.
+- **Draft:** lines 2375-2379 (section 7.18): "The URI MUST NOT exceed 8,192 bytes; a receiver
+  MUST treat a longer URI as a protocol violation and MAY reject it based on the length prefix
+  alone." Closing the session with PROTOCOL_VIOLATION is how the draft treats a protocol
+  violation elsewhere in the same section (lines 2386, 2391-2392).
+- **Observed:** the runner opens a Goaway Stream whose message claims a URI of 8193 bytes and
+  carries them (`05 60 03 60 01 61 61 ...`). The CLI resets the Goaway Stream with CANCELLED
+  (0x1) 2 ms later, sends STOP_SENDING 0, and the session stays open for the whole 3 s allowance
+  (`context_complete ... peer_closed_early=false elapsed_ms=3000`; `run-18dd35ee455d81b7` native
+  QUIC, WebTransport the same).
+- **Where:** `goaway.rs` lines 28-31 reject a length above 8192 from the prefix alone
+  (`DecodeError::InvalidValue`), as the draft allows, but `publisher.rs` lines 329-332 say "A
+  decode error propagates to the caller, which logs and continues: a malformed GOAWAY must not
+  tear down the session it is trying to drain", so only the stream ends. The same design as ML-03.
+- **Required:** close the session with PROTOCOL_VIOLATION when a GOAWAY URI exceeds 8,192 bytes
+  (a draining session can still be closed by a protocol violation; the draft does not exempt it).
+
 ## Observations that are not items
 
 - After the runner's STOP_SENDING with an unregistered (0x4d1) or reserved (0x2a) code on a
@@ -124,3 +173,22 @@ not here.
 - The CLI opens no Probe stream: the runner's SETUP has no Probe parameter, so the CLI logs
   `peer does not support probing; skipping probe stream`. Its Role=Publisher Probe behavior
   is therefore not exercised.
+- The CLI ends the session at once on any inbound GOAWAY: an application close with code 0
+  (NO_ERROR, reason `dropped`) within about 1 ms of the GOAWAY, after resetting the Goaway
+  Stream with CANCELLED. With a URI on another host it also logs `GOAWAY redirect refused: the
+  GOAWAY redirect leaves the current host` (the local-policy check of draft lines 2379-2382, rows
+  181 and 182, which are not scored); with a URI on the runner's own host it still ends the
+  session and does not dial it (`--connect-once`). That is the graceful shutdown the draft asks
+  for, not a defect. Because the first GOAWAY ends the session, rows L06-5-1-6-MUST-NOT-077 (no
+  new streams after a GOAWAY) and L06-7-18-MUST-186 (a second GOAWAY closes the session) stay
+  `not_run` against this peer; the scripted publisher exercises both in the runner's tests, and
+  L2b will add the cases that need a publisher the CLI cannot be.
+- `publisher.rs` lines 342-351 close the session with PROTOCOL_VIOLATION on a second GOAWAY
+  stream (the behavior row 186 asks for); it cannot be reached through a live run for the reason
+  above.
+- Row L06-5-1-5-MUST-075 (a publisher that advertised no Probe capability resets the Probe
+  Stream) is `not_run`: this CLI advertises Report, so the level None path is not exercised.
+- The track and fetch rows pass: TRACK_INFO for `0.m4s` is `{priority 60, max age 30000 ms,
+  timescale 15360}` and identical on repeated lookups; a FETCH for a group the subscription just
+  delivered returns exactly the requested frames (whole group, the first two, all but the first)
+  and FINs, and a FETCH for group 4 000 000 000 is reset.

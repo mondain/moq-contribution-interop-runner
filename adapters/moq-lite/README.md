@@ -17,7 +17,7 @@ scenario expects. `adapter.json` is a descriptive manifest; the runner does not 
 | Track name | exactly `302e6d3473` (`0.m4s`); not passed to the CLI (it names its media tracks `<id>.m4s` itself), it only names the track the runner subscribes to |
 | Fixture | ignored: the source is ffmpeg's test pattern |
 | TLS CA | not used by default (`--connect-tls-insecure`, whatever `tls_ca` says); with `MOQ_LITE_TLS_ROOT=1`, `--connect-tls-root <tls_ca>` (below) |
-| Scenario id | any single-line string; all 19 executable scenarios use the same command line |
+| Scenario id | any single-line string; all 26 executable scenarios use the same command line |
 | `scenario_timeout_ms`, `process_timeout_ms` | plain integers (`2500.0` and `1e3` are refused); the scenario timeout from 1 to 3600000 |
 | Publisher | `MOQ_CLI_BIN`, which must name an executable regular file that is the current `moq` CLI; there is no default |
 | Tools | `bash`, `jq`, coreutils `timeout`, `ffmpeg` with libx264 (`MOQ_FFMPEG_BIN` overrides the one on `PATH`) |
@@ -199,7 +199,7 @@ regenerate the golden. `tests/e2e/driven-moq-lite.sh` reads the fixture it posts
 `adapter.json`. Post the matching fixture with the run:
 
 ```json
-{"draft": "moq-lite-06", "transport": "native-quic", "mode": "driven", "timeout_ms": 15000,
+{"draft": "moq-lite-06", "transport": "native-quic", "mode": "driven", "timeout_ms": 30000,
  "scenarios": ["l06-subscribe-latest"],
  "track": {"namespace_hex": ["696e7465726f702e68616e67"], "name_hex": "302e6d3473"}}
 ```
@@ -208,7 +208,7 @@ regenerate the golden. `tests/e2e/driven-moq-lite.sh` reads the fixture it posts
 
 Unlike `adapters/moqxr` (`--forward`, `--paced` per scenario) and `adapters/imquic` (`-X`,
 `-D datagram`), this adapter has no per-scenario table: the CLI has no options that change
-what it emits per scenario. All 19 executable scenarios (`tests/golden/executable-ids-d106.txt`)
+what it emits per scenario. All 26 executable scenarios (`tests/golden/executable-ids-d106.txt`)
 get the same command line on a transport; they differ only in what the runner does
 (which SETUP it sends, what it subscribes to, which streams it resets or closes).
 
@@ -244,8 +244,8 @@ bash tests/e2e/moq-lite-adapter-cmdlines.sh --update   # or MOQ_UPDATE_GOLDEN=1:
 
 `tests/e2e/driven-moq-lite.sh TRANSPORT RUNNER_BIN [SCENARIO...]` starts the runner (a
 temporary database and certificate, the lite catalog from `requirements/`, this adapter as
-`--driver-executable`), posts each scenario (default: all 19) as its own driven run with
-`timeout_ms` 15000 and the fixture above, polls each run to its end, prints the verdict, the
+`--driver-executable`), posts each scenario (default: all 26) as its own driven run with
+`timeout_ms` 30000 and the fixture above, polls each run to its end, prints the verdict, the
 publisher's process status and the judged rows, and then audits the database. It skips
 (exit 77) without `MOQ_CLI_BIN`, ffmpeg, jq, curl, openssl or the runner binary.
 `tests/e2e/moq-lite-matrix.sh RUNNER_BIN` runs the adapter contract and then every scenario
@@ -265,15 +265,16 @@ recomputed with the staged scoring, every scored row bound and evidenced). A SCE
 of comma-joined ids (`l06-setup-stream,l06-setup-server-role`) posts them as one group run.
 In the L1e smoke the CLI connected about 40 ms after its start on both transports, so the
 source (the timeout rounded up plus 3 s) outlasts every probe. The run timeout must exceed
-the longest probe's windows: `l06-subscribe-abutting-frame-start` needs more than 12000 ms
-(two 3 s response allowances plus the 6 s observation window) and is refused with a harness
-error at exactly 12000, hence 15000.
+the longest probe's windows: `l06-fetch-group` needs more than 24000 ms (the announce and
+Track Stream answer allowances of 3 s each, the 15 s wait for a complete group to learn and the
+3 s response allowance) and is refused with a harness error at exactly 24000, hence 30000
+(`l06-subscribe-abutting-frame-start` needs 12000, `l06-goaway-single` 19000).
 
 Row `L06-4-4-MUST-027` (the close code space) settles only in a run that holds all five of its
 scenarios (`l06-errors-code-space`, `l06-setup-duplicate-stream`, `l06-setup-duplicate-parameter`,
-`l06-setup-server-path`, `l06-setup-server-role`); in the 19 single runs it stays `not_run`.
+`l06-setup-server-path`, `l06-setup-server-role`); in the 26 single runs it stays `not_run`.
 `moq-lite-matrix.sh` therefore also posts that five-scenario group run on each transport, and
-the driven script waits 40 s per scenario of a group run. To run it by hand:
+the driven script waits 70 s per scenario of a group run. To run it by hand:
 
 ```sh
 MOQ_CLI_BIN=/path/to/moq bash tests/e2e/driven-moq-lite.sh native_quic build/moq-interop-runner \
@@ -283,7 +284,7 @@ MOQ_CLI_BIN=/path/to/moq bash tests/e2e/driven-moq-lite.sh native_quic build/moq
 To run the matrix manually: build the CLI as above, make sure `ffmpeg` (with libx264), `jq`,
 `curl`, `openssl` and coreutils `timeout` are installed, build the runner (`cmake --build build`),
 export `MOQ_CLI_BIN` (and `MOQ_FFMPEG_BIN` if ffmpeg is not on `PATH`), and run the matrix
-script; the ports above must be free and every run uses `timeout_ms` 15000.
+script; the ports above must be free and every run uses `timeout_ms` 30000.
 
 ## CI
 
