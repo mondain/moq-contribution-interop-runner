@@ -408,6 +408,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-webtransport-listener-tests PRIVATE
                           moq-interop-transport GTest::gtest_main)
     add_test(NAME webtransport-listener COMMAND moq-interop-webtransport-listener-tests)
+    add_executable(moq-interop-webtransport-lite-settings-tests
+                   tests/transport/webtransport_lite_settings_test.cpp)
+    target_compile_definitions(moq-interop-webtransport-lite-settings-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_link_libraries(moq-interop-webtransport-lite-settings-tests PRIVATE
+                          moq-interop-transport GTest::gtest_main)
+    add_test(NAME webtransport-lite-settings COMMAND moq-interop-webtransport-lite-settings-tests)
 
     add_executable(moq-interop-picoquic-link-tests
                    tests/integration/picoquic_link_test.cpp)
