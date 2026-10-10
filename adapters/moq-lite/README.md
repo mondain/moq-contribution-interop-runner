@@ -17,7 +17,7 @@ scenario expects. `adapter.json` is a descriptive manifest; the runner does not 
 | Track name | exactly `302e6d3473` (`0.m4s`); not passed to the CLI (it names its media tracks `<id>.m4s` itself), it only names the track the runner subscribes to |
 | Fixture | ignored: the source is ffmpeg's test pattern |
 | TLS CA | not used by default (`--connect-tls-insecure`, whatever `tls_ca` says); with `MOQ_LITE_TLS_ROOT=1`, `--connect-tls-root <tls_ca>` (below) |
-| Scenario id | any single-line string; all 26 executable scenarios use the same command line |
+| Scenario id | any single-line string; all 27 executable scenarios use the same command line |
 | `scenario_timeout_ms`, `process_timeout_ms` | plain integers (`2500.0` and `1e3` are refused); the scenario timeout from 1 to 3600000 |
 | Publisher | `MOQ_CLI_BIN`, which must name an executable regular file that is the current `moq` CLI; there is no default |
 | Tools | `bash`, `jq`, coreutils `timeout`, `ffmpeg` with libx264 (`MOQ_FFMPEG_BIN` overrides the one on `PATH`) |
@@ -208,7 +208,7 @@ regenerate the golden. `tests/e2e/driven-moq-lite.sh` reads the fixture it posts
 
 Unlike `adapters/moqxr` (`--forward`, `--paced` per scenario) and `adapters/imquic` (`-X`,
 `-D datagram`), this adapter has no per-scenario table: the CLI has no options that change
-what it emits per scenario. All 26 executable scenarios (`tests/golden/executable-ids-d106.txt`)
+what it emits per scenario. All 27 executable scenarios (`tests/golden/executable-ids-d106.txt`)
 get the same command line on a transport; they differ only in what the runner does
 (which SETUP it sends, what it subscribes to, which streams it resets or closes).
 
@@ -244,7 +244,7 @@ bash tests/e2e/moq-lite-adapter-cmdlines.sh --update   # or MOQ_UPDATE_GOLDEN=1:
 
 `tests/e2e/driven-moq-lite.sh TRANSPORT RUNNER_BIN [SCENARIO...]` starts the runner (a
 temporary database and certificate, the lite catalog from `requirements/`, this adapter as
-`--driver-executable`), posts each scenario (default: all 26) as its own driven run with
+`--driver-executable`), posts each scenario (default: all 27) as its own driven run with
 `timeout_ms` 30000 and the fixture above, polls each run to its end, prints the verdict, the
 publisher's process status and the judged rows, and then audits the database. It skips
 (exit 77) without `MOQ_CLI_BIN`, ffmpeg, jq, curl, openssl or the runner binary.
@@ -272,7 +272,7 @@ Track Stream answer allowances of 3 s each, the 15 s wait for a complete group t
 
 Row `L06-4-4-MUST-027` (the close code space) settles only in a run that holds all five of its
 scenarios (`l06-errors-code-space`, `l06-setup-duplicate-stream`, `l06-setup-duplicate-parameter`,
-`l06-setup-server-path`, `l06-setup-server-role`); in the 26 single runs it stays `not_run`.
+`l06-setup-server-path`, `l06-setup-server-role`); in the 27 single runs it stays `not_run`.
 `moq-lite-matrix.sh` therefore also posts that five-scenario group run on each transport, and
 the driven script waits 70 s per scenario of a group run. To run it by hand:
 

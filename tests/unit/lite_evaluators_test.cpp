@@ -65,7 +65,7 @@ std::map<std::string, OutcomeState> by_id(const std::vector<Outcome>& outcomes) 
     return out;
 }
 
-// The conformance transcripts (all 26 scenarios on native QUIC), computed once.
+// The conformance transcripts (all 27 scenarios on native QUIC), computed once.
 const std::vector<LiteTranscript>& conforming() {
     static const auto transcripts = lite::conformance_transcripts(LiteBinding::NativeQuic);
     return transcripts;
@@ -113,7 +113,7 @@ const std::set<std::string> kConformingNotRun{"L06-7-7-MUST-NOT-152", "L06-7-3-2
 TEST(LiteEvaluators, RegistryHoldsExactlyTheCatalogEvaluators) {
     std::set<std::string> expected;
     for (const auto& r : catalog().requirements) expected.insert(r.evaluators.begin(), r.evaluators.end());
-    ASSERT_EQ(expected.size(), 39u);
+    ASSERT_EQ(expected.size(), 40u);
     std::set<std::string> registered;
     for (const auto& [id, evaluator] : lite_evaluator_registry()) {
         registered.insert(id);
@@ -130,8 +130,8 @@ TEST(LiteEvaluators, BindingsAreTheCatalogScenarioEvaluatorProduct) {
         for (const auto& scenario : r.scenarios)
             for (const auto& evaluator : r.evaluators) expected.emplace(r.id, scenario, evaluator);
     }
-    // 29 + 9 single-scenario rows plus row 027 on its five scenarios.
-    EXPECT_EQ(expected.size(), 43u);
+    // 29 + 10 single-scenario rows plus row 027 on its five scenarios.
+    EXPECT_EQ(expected.size(), 44u);
     const auto bindings = lite_executable_bindings();
     std::set<Key> bound;
     const std::set<std::string> allowed{"raw_probe_stimulus", "raw_probe_transport_event", "peer_close",
@@ -154,26 +154,28 @@ TEST(LiteEvaluators, StagedAuditOfTheRealCatalogCoversEveryRequiredRow) {
     const auto report = audit_completeness_staged(catalog(), bindings, app::executable_scenarios(106));
     for (const auto& finding : report.findings)
         EXPECT_FALSE(finding.blocking) << finding.code << " " << finding.requirement_id << " " << finding.detail;
-    EXPECT_EQ(report.required_total, 35u);
-    EXPECT_EQ(report.required_covered, 35u);
+    EXPECT_EQ(report.required_total, 36u);
+    EXPECT_EQ(report.required_covered, 36u);
     EXPECT_EQ(report.optional_total, 4u);
     EXPECT_EQ(report.optional_covered, 4u);
-    EXPECT_EQ(report.unreviewed_total, 39u);
-    EXPECT_FALSE(report.complete());
-    // No row is left uncovered: only the unreviewed-rows finding remains.
-    ASSERT_EQ(report.findings.size(), 1u);
-    EXPECT_EQ(report.findings.front().code, "unreviewed_rows");
+    EXPECT_EQ(report.unreviewed_total, 0u);
+    EXPECT_TRUE(report.complete()) << "every reviewed row is covered and none is unreviewed (the catalog flag, not the audit, keeps it staged)";
+    // No row is left uncovered and none is unreviewed: nothing remains to report except that the catalog is staged.
+    EXPECT_TRUE(report.findings.empty());
 }
 
 TEST(LiteEvaluators, ABindingNamingAnUnreviewedRowStillBlocks) {
-    const auto unreviewed = std::find_if(catalog().requirements.begin(), catalog().requirements.end(),
-                                         [](const Requirement& r) { return !r.reviewed; });
-    ASSERT_NE(unreviewed, catalog().requirements.end());
+    // Every real row is reviewed now, so one is un-reviewed in a copy of the catalog (the way L1 had it).
+    auto copy = catalog();
+    const auto target = std::find_if(copy.requirements.begin(), copy.requirements.end(),
+                                     [](const Requirement& r) { return r.id == "L06-6-4-MUST-103"; });
+    ASSERT_NE(target, copy.requirements.end());
+    target->reviewed = false;
     auto bindings = lite_executable_bindings();
-    bindings.push_back({106, unreviewed->id, "l06-setup-stream", "l06-setup-stream-single-setup", {"lite_message"}});
-    const auto report = audit_completeness_staged(catalog(), bindings, app::executable_scenarios(106));
+    bindings.push_back({106, target->id, "l06-setup-stream", "l06-setup-stream-single-setup", {"lite_message"}});
+    const auto report = audit_completeness_staged(copy, bindings, app::executable_scenarios(106));
     EXPECT_TRUE(std::any_of(report.findings.begin(), report.findings.end(), [&](const CompletenessFinding& f) {
-        return f.blocking && f.code == "mismatched_binding" && f.requirement_id == unreviewed->id;
+        return f.blocking && f.code == "mismatched_binding" && f.requirement_id == target->id;
     }));
 }
 
@@ -185,7 +187,7 @@ TEST(LiteScenarios, TheExecutableListIsTheCatalogsPlannedScenariosWithTheBuilder
     std::set<std::string> listed;
     for (const auto id : app::executable_scenarios(106)) listed.emplace(id);
     EXPECT_EQ(listed, planned);
-    EXPECT_EQ(app::executable_scenarios(106).size(), 26u);
+    EXPECT_EQ(app::executable_scenarios(106).size(), 27u);
     std::size_t with_track = 0;
     for (const auto& definition : lite::conformance_probes(LiteBinding::NativeQuic)) {
         const auto traits = app::lite_executable_scenario(definition.id);
@@ -197,7 +199,7 @@ TEST(LiteScenarios, TheExecutableListIsTheCatalogsPlannedScenariosWithTheBuilder
         for (const unsigned draft : {18u, 21u, 22u}) EXPECT_FALSE(app::executable_scenario(draft, definition.id));
         with_track += definition.requires_track ? 1 : 0;
     }
-    EXPECT_EQ(with_track, 14u);
+    EXPECT_EQ(with_track, 15u);
     EXPECT_FALSE(app::executable_scenario(106, "l06-unknown"));
     EXPECT_FALSE(app::lite_executable_scenario("l06-unknown").has_value());
 }
@@ -225,7 +227,7 @@ TEST(LiteEvaluate, AConformingRunScoresEveryRowKind) {
             ++passed;
         }
     }
-    EXPECT_EQ(passed, 36u);
+    EXPECT_EQ(passed, 37u);
 }
 
 TEST(LiteEvaluate, TheClientPathRowsFollowTheBindingOfTheirRun) {
@@ -590,7 +592,7 @@ TEST(LitePerContext, AFlaggedContextKeepsNoVerdictsAndOnlyItsOwnEvaluators) {
 TEST(LiteScore, AConformingRunIsIncompleteNeverPass) {
     const auto summary = score_staged(catalog(), evaluate_lite(catalog(), conforming()));
     EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
-    // The 39 unreviewed rows count in the denominators and never earn.
+    // Rows nothing judges (not_run in a conforming run) count in the denominators and never earn.
     EXPECT_GT(summary.required.earned, 0u);
     EXPECT_GT(summary.required.possible, summary.required.earned);
 }
@@ -753,7 +755,7 @@ TEST(LiteExecutionAudit, AcceptsAStoredStagedRun) {
     for (const auto& finding : audit.findings)
         ADD_FAILURE() << finding.code << " " << finding.requirement_id << " " << finding.detail;
     EXPECT_TRUE(audit.consistent());
-    EXPECT_EQ(audit.scored_rows, 36u);
+    EXPECT_EQ(audit.scored_rows, 37u);
 }
 
 TEST(LiteExecutionAudit, StillCatchesAWrongScoreAndMissingEvidence) {

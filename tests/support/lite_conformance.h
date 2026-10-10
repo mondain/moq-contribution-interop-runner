@@ -12,6 +12,7 @@
 
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
+#include "moq/interop/scenarios/lite06_datagram.h"
 #include "moq/interop/scenarios/lite06_errors.h"
 #include "moq/interop/scenarios/lite06_fetch.h"
 #include "moq/interop/scenarios/lite06_goaway.h"
@@ -56,7 +57,7 @@ inline ConformingLitePublisherConfig conformance_publisher_config(scenarios::Lit
     return config;
 }
 
-// The 26 scenario definitions with the default allowances and kConformanceDeadline, each carrying `binding`.
+// The 27 scenario definitions with the default allowances and kConformanceDeadline, each carrying `binding`.
 inline std::vector<scenarios::LiteProbeDefinition> conformance_probes(scenarios::LiteBinding binding) {
     namespace s = scenarios;
     const auto d = kConformanceDeadline;
@@ -86,6 +87,7 @@ inline std::vector<scenarios::LiteProbeDefinition> conformance_probes(scenarios:
         s::l06_fetch_group_probe(d, path, track),
         s::l06_fetch_unknown_group_probe(d, path, track),
         s::l06_probe_report_probe(d),
+        s::l06_datagram_size_probe(d, path, track),
         s::l06_goaway_single_probe(d, path, track),
         s::l06_goaway_duplicate_probe(d),
         s::l06_goaway_oversize_probe(d),
@@ -99,6 +101,11 @@ inline scenarios::LiteTranscript run_conforming(
     scenarios::LiteProbeDefinition definition, scenarios::LiteBinding binding,
     const std::function<void(ConformingLitePublisherConfig&)>& tweak = {}) {
     auto config = conformance_publisher_config(binding);
+    // Datagrams (draft 6.4) carry a single-frame group, which the four-frame groups of the other scenarios never are.
+    if (definition.id == scenarios::kL06DatagramSize) {
+        config.datagrams = true;
+        config.frames_per_group = 1;
+    }
     if (tweak) tweak(config);
     ConformingLitePublisher publisher(std::move(config));
     ScriptedLitePeer peer(publisher.reaction());
@@ -106,7 +113,7 @@ inline scenarios::LiteTranscript run_conforming(
     return run_lite_probe(peer, std::move(definition), clock, kConformanceTick);
 }
 
-// One transcript per scenario (26), in conformance_probes order, all on `binding`.
+// One transcript per scenario (27), in conformance_probes order, all on `binding`.
 inline std::vector<scenarios::LiteTranscript> conformance_transcripts(
     scenarios::LiteBinding binding = scenarios::LiteBinding::NativeQuic) {
     std::vector<scenarios::LiteTranscript> out;

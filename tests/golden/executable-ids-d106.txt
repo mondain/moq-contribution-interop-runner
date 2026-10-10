@@ -1,5 +1,6 @@
 l06-announce-lifecycle
 l06-announce-prefix
+l06-datagram-size
 l06-errors-code-space
 l06-errors-reserved-reset-code
 l06-errors-unknown-reset-code

@@ -634,13 +634,13 @@ TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation
 
 // --- every scenario, simulated ---------------------------------------------------------------------------------
 
-// The production builder dispatch (lite_probe_for) for all 26 scenarios at a live-sized timeout, judged against the
+// The production builder dispatch (lite_probe_for) for all 27 scenarios at a live-sized timeout, judged against the
 // conforming publisher on the simulated clock: every row the conformance table passes on native QUIC passes here
 // (with the fixed session URL the native client-path rows 120/124 pass too), and no row fails.
-TEST(LiteRunLive, AllTwentySixProbesBuildAndJudgeOnTheSimulatedClock) {
+TEST(LiteRunLive, AllTwentySevenProbesBuildAndJudgeOnTheSimulatedClock) {
     std::vector<std::string> ids;
     for (const auto& traits : app::kLiteExecutableScenarios) ids.emplace_back(traits.id);
-    ASSERT_EQ(ids.size(), 26u);
+    ASSERT_EQ(ids.size(), 27u);
     // Above every builder's stated sum (the largest, fetch-group: 2 * 3 s + 15 s + 3 s) with a margin.
     auto config = lite_config(ids, 30000ms);
     for (const auto& id : ids) {

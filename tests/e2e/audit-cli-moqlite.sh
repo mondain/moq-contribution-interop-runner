@@ -51,7 +51,9 @@ print(json.dumps({
 }))
 PY
 exp() { jq -r ".$1" "$test_dir/expected.json"; }
-[[ "$(exp rows)" -gt 0 && "$(exp unreviewed)" -gt 0 ]] || { echo "bad expectations" >&2; exit 1; }
+[[ "$(exp rows)" -gt 0 ]] || { echo "bad expectations" >&2; exit 1; }
+# One non-blocking finding names the unreviewed rows while any remain; since L2b none do and the audit has no findings.
+if [[ "$(exp unreviewed)" -gt 0 ]]; then expected_findings=1; else expected_findings=0; fi
 
 set +e
 "$audit_bin" --draft moq-lite-06 "${common[@]}" >"$test_dir/text.out" 2>"$test_dir/text.err"
@@ -70,7 +72,7 @@ check_line "Required coverage (reviewed rows): $(exp required_at) of $(exp requi
 check_line "Optional coverage (reviewed rows): $(exp optional_at) of $(exp optional_at)"
 check_line "STAGED: incomplete catalog (not a pass)"
 grep -q '^Findings: [0-9]' "$test_dir/text.out"
-grep -q 'non-blocking' "$test_dir/text.out"
+if ((expected_findings > 0)); then grep -q 'non-blocking' "$test_dir/text.out"; fi
 if grep -q 'PASS' "$test_dir/text.out"; then echo "staged output must not say PASS" >&2; exit 1; fi
 
 set +e
@@ -78,7 +80,7 @@ set +e
 status=$?
 set -e
 [[ "$status" -eq 0 ]] || { echo "unexpected JSON status $status" >&2; exit 1; }
-jq -e --slurpfile e "$test_dir/expected.json" '
+jq -e --argjson n "$expected_findings" --slurpfile e "$test_dir/expected.json" '
     .draft == "moq-lite-06" and .source_sha256 == $e[0].sha and
     .rows == $e[0].rows and .reviewed == $e[0].reviewed and
     .unreviewed == $e[0].unreviewed and
@@ -90,13 +92,13 @@ jq -e --slurpfile e "$test_dir/expected.json" '
     .source_audit.complete == true and .source_audit.missing_count == 0 and
     .source_audit.multiply_classified_count == 0 and
     ([.findings[] | select(.blocking)] | length) == 0 and
-    ([.findings[] | select(.code == "unreviewed_rows")] | length) == 1 and
+    ([.findings[] | select(.code == "unreviewed_rows")] | length) == $n and
     .required_covered == $e[0].required_at and
     .optional_applicable_testable == $e[0].optional_at and
     .optional_covered == $e[0].optional_at and
     ([.findings[] | select(.code == "missing_required_evaluator")] | length) == 0 and
     ([.findings[] | select(.code == "missing_optional_evaluator")] | length) == 0 and
-    (.findings | length) == 1' \
+    (.findings | length) == $n' \
     "$test_dir/audit.json" >/dev/null || { echo "JSON shape mismatch" >&2; cat "$test_dir/audit.json" >&2; exit 1; }
 
 # Spellings other than moq-lite-06 are refused with the usage message and status 2.

@@ -7,7 +7,7 @@ set -euo pipefail
 #   RUNNER_BIN the built moq-interop-runner. The audit CLI is the moq-interop-audit next to it
 #              (MOQ_INTEROP_AUDIT_BIN overrides).
 #   SCENARIO   moq-lite-06 scenario ids, each posted as its own driven run, in order; default every
-#              executable moq-lite-06 scenario (the 26 of include/moq/interop/app/lite_scenarios.h).
+#              executable moq-lite-06 scenario (the 27 of include/moq/interop/app/lite_scenarios.h).
 #              Ids joined by commas (a,b,c) are posted as ONE run of those scenarios (a group run: one
 #              context, and one publisher, per scenario).
 #   --dry-run  print the plan instead of running it: the runner invocation (`runner:` line, the
@@ -56,7 +56,7 @@ all_scenarios=(
     l06-subscribe-abutting-frame-start l06-errors-unknown-stream-type l06-errors-unknown-reset-code
     l06-errors-reserved-reset-code l06-errors-code-space
     l06-track-info l06-fetch-group l06-fetch-unknown-group l06-probe-report
-    l06-goaway-single l06-goaway-duplicate l06-goaway-oversize
+    l06-datagram-size l06-goaway-single l06-goaway-duplicate l06-goaway-oversize
 )
 if [[ $# -gt 0 ]]; then
     scenarios=("$@")

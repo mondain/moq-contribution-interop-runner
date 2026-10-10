@@ -88,7 +88,7 @@ if [[ -z "$from_header" || "$from_header" != "$from_golden" ]]; then
     exit 1
 fi
 id_count=$(wc -l <<<"$from_golden")
-((id_count == 26)) || { printf 'expected 26 executable moq-lite-06 ids, found %s\n' "$id_count" >&2; exit 1; }
+((id_count == 27)) || { printf 'expected 27 executable moq-lite-06 ids, found %s\n' "$id_count" >&2; exit 1; }
 
 # The two recorded `timeout` command lines for one scenario id and transport, `<ffmpeg> | <moq>`.
 command_line() {
