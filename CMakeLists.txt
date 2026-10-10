@@ -131,6 +131,7 @@ add_library(moq-interop-wire
     src/wire/moqlite06/fetch.cpp
     src/wire/moqlite06/probe.cpp
     src/wire/moqlite06/goaway.cpp
+    src/wire/moqlite06/datagram.cpp
 )
 target_link_libraries(moq-interop-wire PUBLIC moq-interop-app)
 target_compile_options(moq-interop-wire PRIVATE
@@ -1433,6 +1434,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
                           moq-interop-wire GTest::gtest_main)
     add_test(NAME moqlite06-goaway
              COMMAND moq-interop-moqlite06-goaway-tests)
+
+    add_executable(moq-interop-moqlite06-datagram-tests
+                   tests/golden/moqlite06_datagram_test.cpp)
+    target_link_libraries(moq-interop-moqlite06-datagram-tests PRIVATE
+                          moq-interop-wire GTest::gtest_main)
+    add_test(NAME moqlite06-datagram
+             COMMAND moq-interop-moqlite06-datagram-tests)
 
     add_executable(moq-interop-moqlite06-wire-audit-tests
                    tests/golden/moqlite06_wire_audit_test.cpp)
