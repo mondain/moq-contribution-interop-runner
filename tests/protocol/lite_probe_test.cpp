@@ -1704,4 +1704,156 @@ TEST(LiteProbeDuties, NoCloseWithoutPathOffWebTransportOrWithTheDutyOff) {
     }
 }
 
+// --- L2b duties: the catalog promises "the runner must itself comply" for rows 171, 069 and 184 ------------------------
+
+Bytes track_lookup_bytes() { return join({stream_type(0x6), track_request({"demo/live", "video"})}); }
+
+LiteProbeDefinition duty_probe(const char* id) {
+    LiteProbeDefinition definition;
+    definition.id = id;
+    definition.deadline = 2000ms;
+    definition.observation_window = 200ms;
+    return definition;
+}
+
+std::size_t actions_of(const LiteTranscript& t, LiteEngineAction::Kind kind) {
+    return static_cast<std::size_t>(std::count_if(t.engine_actions.begin(), t.engine_actions.end(),
+                                                  [&](const LiteEngineAction& action) { return action.kind == kind; }));
+}
+
+TEST(LiteProbeDuties, TheNewDutiesAreOffByDefault) {
+    const LiteProbeDefinition definition;
+    EXPECT_FALSE(definition.duties.reset_on_zero_timescale);
+    EXPECT_FALSE(definition.duties.reset_on_undecodable_frames);
+    EXPECT_FALSE(definition.duties.close_on_goaway_uri);
+}
+
+// Row 171: a subscriber that receives a Timescale of 0 MUST reset the stream (INTERNAL_ERROR: the stream table has no
+// protocol-violation code).
+TEST(LiteProbeDuties, AZeroTimescaleIsAnsweredWithAResetOfTheTrackStream) {
+    for (const bool duty : {true, false}) {
+        SCOPED_TRACE(duty);
+        ConformingLitePublisherConfig config;
+        config.defect = LiteDefect::TrackInfoZeroTimescale;
+        config.echo_runner_fin = false;
+        ConformingLitePublisher publisher(config);
+        ScriptedLitePeer peer(publisher.reaction());
+        ManualLiteClock clock;
+        auto definition = duty_probe("duty-timescale");
+        definition.steps.push_back(scen::lite_open_bidi(track_lookup_bytes(), false, "track"));
+        definition.duties.reset_on_zero_timescale = duty;
+        const auto t = run_lite_probe(peer, definition, clock);
+        const auto* stream = peer.runner_stream(1);
+        ASSERT_NE(stream, nullptr);
+        EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::ResetZeroTimescale), duty ? 1u : 0u);
+        EXPECT_EQ(stream->stop_sending_code.has_value(), duty);
+        if (duty) EXPECT_EQ(stream->stop_sending_code.value_or(99), 0u);
+        EXPECT_TRUE(t.stimulus_delivered);
+        EXPECT_TRUE(scen::judgeable_with_stimulus(t));
+    }
+}
+
+TEST(LiteProbeDuties, ANonZeroTimescaleIsLeftAlone) {
+    ConformingLitePublisher publisher;
+    ScriptedLitePeer peer(publisher.reaction());
+    ManualLiteClock clock;
+    auto definition = duty_probe("duty-timescale");
+    definition.steps.push_back(scen::lite_open_bidi(track_lookup_bytes(), false, "track"));
+    definition.duties.reset_on_zero_timescale = true;
+    definition.duties.reset_on_undecodable_frames = true;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::ResetZeroTimescale), 0u);
+    EXPECT_FALSE(peer.runner_stream(1)->stop_sending_code.has_value());
+}
+
+// Row 069: frames that do not decode are answered with a reset (a Group stream is receive-only for the runner, so it
+// is a STOP_SENDING there).
+TEST(LiteProbeDuties, UndecodableFramesAreAnsweredWithAStopSending) {
+    for (const bool duty : {true, false}) {
+        SCOPED_TRACE(duty);
+        transport::StreamId group = 0;
+        ScriptedLitePeer peer([&, sent = false](ScriptedLitePeer& p) mutable {
+            if (sent) return;
+            sent = true;
+            group = p.open_peer_uni();
+            // GROUP, then a FRAME claiming 5 payload bytes of which one arrives before the FIN: cut by the FIN.
+            p.data(group, join({stream_type(0x0), group_header({1, 7, 0}), Bytes{std::byte{0}, std::byte{5}, std::byte{0x61}}}),
+                   true);
+        });
+        ManualLiteClock clock;
+        auto definition = duty_probe("duty-frames");
+        definition.steps.push_back(scen::lite_mark("m"));
+        definition.duties.reset_on_undecodable_frames = duty;
+        const auto t = run_lite_probe(peer, definition, clock);
+        const auto* stream = peer.runner_stream(group);
+        EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::ResetUndecodableFrames), duty ? 1u : 0u);
+        ASSERT_NE(find_stream(t, group), nullptr);
+        EXPECT_FALSE(sess::peer_protocol_issues(*find_stream(t, group)).empty());
+        EXPECT_EQ(stream != nullptr && stream->stop_sending_code.has_value(), duty);
+    }
+}
+
+// A limit the harness set is not the peer's fault and triggers nothing.
+TEST(LiteProbeDuties, AHarnessLimitOnAFrameIsNotTheFaultOfThePeer) {
+    transport::StreamId group = 0;
+    ScriptedLitePeer peer([&, sent = false](ScriptedLitePeer& p) mutable {
+        if (sent) return;
+        sent = true;
+        group = p.open_peer_uni();
+        l06::Frame big;
+        big.payload = Bytes(64, std::byte{1});
+        p.data(group, join({stream_type(0x0), group_header({1, 7, 0}), frame(big)}), true);
+    });
+    ManualLiteClock clock;
+    auto definition = duty_probe("duty-frames");
+    definition.steps.push_back(scen::lite_mark("m"));
+    definition.limits.decode.max_message_length = 16;
+    definition.duties.reset_on_undecodable_frames = true;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::ResetUndecodableFrames), 0u);
+    ASSERT_NE(find_stream(t, group), nullptr);
+    EXPECT_TRUE(sess::peer_protocol_issues(*find_stream(t, group)).empty());
+}
+
+// Row 184: a server that receives a non-empty GOAWAY New Session URI MUST close the session with a protocol violation.
+TEST(LiteProbeDuties, ANonEmptyGoawayUriReceivedClosesTheSession) {
+    for (const bool duty : {true, false}) {
+        SCOPED_TRACE(duty);
+        ScriptedLitePeer peer([sent = false](ScriptedLitePeer& p) mutable {
+            if (sent) return;
+            sent = true;
+            p.data(p.open_peer_bidi(), join({stream_type(0x5), goaway_message({"moql://other.example/moq"})}));
+        });
+        ManualLiteClock clock;
+        auto definition = duty_probe("duty-goaway");
+        definition.steps.push_back(scen::lite_wait(500ms, "allowance"));
+        definition.observation_window = 0ms;
+        definition.duties.close_on_goaway_uri = duty;
+        const auto t = run_lite_probe(peer, definition, clock);
+        EXPECT_EQ(peer.runner_close().has_value(), duty);
+        if (duty) {
+            EXPECT_EQ(peer.runner_close()->code, scen::kLiteProtocolViolation);
+            EXPECT_TRUE(t.runner_closed);
+            EXPECT_EQ(actions_of(t, LiteEngineAction::Kind::CloseForGoawayUri), 1u);
+            EXPECT_TRUE(judgeable(t));
+        }
+    }
+}
+
+TEST(LiteProbeDuties, AnEmptyGoawayUriIsNotRefused) {
+    ScriptedLitePeer peer([sent = false](ScriptedLitePeer& p) mutable {
+        if (sent) return;
+        sent = true;
+        p.data(p.open_peer_bidi(), join({stream_type(0x5), goaway_message({""})}));
+    });
+    ManualLiteClock clock;
+    auto definition = duty_probe("duty-goaway");
+    definition.steps.push_back(scen::lite_wait(200ms, "allowance"));
+    definition.observation_window = 0ms;
+    definition.duties.close_on_goaway_uri = true;
+    const auto t = run_lite_probe(peer, definition, clock);
+    EXPECT_FALSE(peer.runner_close().has_value());
+    EXPECT_TRUE(t.engine_actions.empty());
+}
+
 }  // namespace

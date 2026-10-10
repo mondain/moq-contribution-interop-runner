@@ -170,6 +170,20 @@ struct LiteRunnerDuties {
     // the runner close the session with PROTOCOL_VIOLATION (0x3). The transcript then has runner_closed and
     // runner_closed_for_path set and the probe ends.
     bool close_on_webtransport_path{false};
+    // Draft 7.12 (Timescale "MUST be non-zero; a subscriber that receives 0 MUST reset the stream with a protocol
+    // violation", row 171): when a Track Stream the runner opened carries a TRACK_INFO with Timescale 0, the runner
+    // resets its send side (unless it already ended it) and sends STOP_SENDING, both with INTERNAL_ERROR (0x0: the
+    // stream table has no protocol-violation code), once per stream.
+    bool reset_on_zero_timescale{false};
+    // Draft 5.1.4 (frames that cannot be decoded against the cached TRACK_INFO: the subscriber "MUST reset the
+    // affected stream with a protocol violation", row 069): when a Group or Fetch Stream carries bytes that do not
+    // decode as FRAMEs (a PeerProtocol issue; a limit the harness set is Harness-class and never counts), the same
+    // reset and STOP_SENDING (a Group stream is receive-only for the runner, so only STOP_SENDING there).
+    bool reset_on_undecodable_frames{false};
+    // Draft 7.18 ("A server that receives a non-empty New Session URI MUST close the session with a protocol
+    // violation", row 184): the runner is the server. A decoded GOAWAY with a non-empty URI on a Goaway Stream the
+    // publisher opened makes the runner close the session with PROTOCOL_VIOLATION (0x3).
+    bool close_on_goaway_uri{false};
 };
 
 // The skipped_reason of a step that would act on a send direction the engine already FINed.
@@ -183,6 +197,9 @@ struct LiteEngineAction {
     enum class Kind {
         FinSendAfterPeerEnd,       // close_send_after_peer_end: the runner's FIN on `stream_id`
         CloseForWebTransportPath,  // close_on_webtransport_path: the session close (code kLiteProtocolViolation)
+        ResetZeroTimescale,        // reset_on_zero_timescale: the reset and STOP_SENDING of the Track Stream
+        ResetUndecodableFrames,    // reset_on_undecodable_frames: the reset and STOP_SENDING of the Group/Fetch Stream
+        CloseForGoawayUri,         // close_on_goaway_uri: the session close (code kLiteProtocolViolation)
     } kind{Kind::FinSendAfterPeerEnd};
     std::optional<transport::StreamId> stream_id;
     std::uint64_t at_ns{0};
@@ -370,6 +387,9 @@ private:
     // The runner duties (LiteRunnerDuties); false when the probe ended (the Path close) or failed.
     bool run_duties(std::uint64_t now);
     void close_sends_after_peer_end(std::uint64_t now);
+    void reset_streams_for_duties(std::uint64_t now);
+    // The engine's session close for a duty; false when the probe is over (closed, or the transport failed).
+    bool engine_close(LiteEngineAction::Kind kind, std::string_view reason, bool for_path, std::uint64_t now);
     [[nodiscard]] bool send_side_pending(transport::StreamId id) const;
     void note_send_ended(const LiteStep& step, const LiteStepRecord& record);
     [[nodiscard]] bool steps_finished() const noexcept;
@@ -395,6 +415,7 @@ private:
     // Runner send directions ended (by a step's FIN or reset, or by the engine), and those the engine FINed.
     std::set<transport::StreamId> send_ended_;
     std::set<transport::StreamId> engine_fins_;
+    std::set<transport::StreamId> duty_resets_;  // streams a reset duty already acted on
     // (decoded messages, streams, peer resets + stop-sendings, peer close) when next_steps was last called.
     std::optional<std::array<std::size_t, 6>> continuation_seen_;
 };

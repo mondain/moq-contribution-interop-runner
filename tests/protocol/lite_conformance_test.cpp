@@ -294,6 +294,9 @@ TEST(LiteConformanceDuties, EveryProductionBuilderTurnsTheDutiesOn) {
         for (const auto& probe : conformance_probes(binding)) {
             EXPECT_TRUE(probe.duties.close_send_after_peer_end) << probe.id;
             EXPECT_TRUE(probe.duties.close_on_webtransport_path) << probe.id;
+            EXPECT_TRUE(probe.duties.reset_on_zero_timescale) << probe.id;
+            EXPECT_TRUE(probe.duties.reset_on_undecodable_frames) << probe.id;
+            EXPECT_TRUE(probe.duties.close_on_goaway_uri) << probe.id;
         }
     }
 }

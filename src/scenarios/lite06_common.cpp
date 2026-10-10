@@ -78,6 +78,11 @@ LiteProbeDefinition allowance_probe(std::string_view id, std::chrono::millisecon
     // engine outside the steps.
     definition.duties.close_send_after_peer_end = true;
     definition.duties.close_on_webtransport_path = true;
+    // The catalog's "the runner must itself comply" notes for rows 171 (Timescale 0), 069 (undecodable frames) and
+    // 184 (a GOAWAY URI received by a server).
+    definition.duties.reset_on_zero_timescale = true;
+    definition.duties.reset_on_undecodable_frames = true;
+    definition.duties.close_on_goaway_uri = true;
     return definition;
 }
 

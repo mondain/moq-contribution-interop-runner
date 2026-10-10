@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -9,6 +10,7 @@
 
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/moqlite06/framing.h"
+#include "moq/interop/wire/moqlite06/goaway.h"
 #include "moq/interop/wire/moqlite06/setup.h"
 
 namespace moq::interop::scenarios {
@@ -172,6 +174,9 @@ std::string_view to_string(LiteEngineAction::Kind kind) {
     switch (kind) {
         case LiteEngineAction::Kind::FinSendAfterPeerEnd: return "fin_send_after_peer_end";
         case LiteEngineAction::Kind::CloseForWebTransportPath: return "close_for_webtransport_path";
+        case LiteEngineAction::Kind::ResetZeroTimescale: return "reset_zero_timescale";
+        case LiteEngineAction::Kind::ResetUndecodableFrames: return "reset_undecodable_frames";
+        case LiteEngineAction::Kind::CloseForGoawayUri: return "close_for_goaway_uri";
     }
     return "unknown";
 }
@@ -546,6 +551,92 @@ void LiteProbeController::close_sends_after_peer_end(std::uint64_t now) {
     }
 }
 
+bool LiteProbeController::engine_close(LiteEngineAction::Kind kind, std::string_view reason, bool for_path,
+                                       std::uint64_t now) {
+    const auto result = transport_.close(
+        kLiteProtocolViolation,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(reason.data()), reason.size()));
+    if (must_wait(result.status)) return true;  // retried on the next poll
+    LiteEngineAction action;
+    action.kind = kind;
+    action.at_ns = now;
+    action.code = kLiteProtocolViolation;
+    action.status = result.status;
+    transcript_.engine_actions.push_back(action);
+    if (result.status == TransportStatus::Success) {
+        transcript_.runner_closed = true;
+        transcript_.runner_closed_for_path = for_path;
+        transcript_.complete = true;
+        finish(now);
+        return false;
+    }
+    if (!peer_refusal(result.status)) {
+        fail("the transport rejected the engine's session close");
+        finish(now);
+        return false;
+    }
+    // The connection is already closing because of the peer: its close event ends the probe.
+    return true;
+}
+
+// The reset duties (rows 171 and 069): INTERNAL_ERROR (0x0) on the offending stream, once each.
+void LiteProbeController::reset_streams_for_duties(std::uint64_t now) {
+    const auto& duties = definition_.duties;
+    if (!duties.reset_on_zero_timescale && !duties.reset_on_undecodable_frames) return;
+    // Collect first: the transport calls below must not run while iterating the recorder's records.
+    struct Due {
+        transport::StreamId id;
+        LiteEngineAction::Kind kind;
+        bool can_reset;
+    };
+    std::vector<Due> due;
+    for (const auto& record : session_.streams()) {
+        if (duty_resets_.contains(record.stream_id)) continue;
+        std::optional<LiteEngineAction::Kind> kind;
+        if (duties.reset_on_zero_timescale && record.origin == session::LiteOrigin::Runner &&
+            record.kind == session::LiteStreamKind::Track) {
+            for (const auto* info : session::peer_track_info(record)) {
+                const auto* message = std::get_if<l06::TrackInfo>(&info->message);
+                if (message && message->timescale == 0) kind = LiteEngineAction::Kind::ResetZeroTimescale;
+            }
+        }
+        if (!kind && duties.reset_on_undecodable_frames &&
+            (record.kind == session::LiteStreamKind::Group || record.kind == session::LiteStreamKind::Fetch) &&
+            !session::peer_protocol_issues(record).empty())
+            kind = LiteEngineAction::Kind::ResetUndecodableFrames;
+        if (!kind) continue;
+        const bool can_reset = record.origin == session::LiteOrigin::Runner && record.bidirectional &&
+                               !record.local_fin && !send_ended_.contains(record.stream_id);
+        due.push_back({record.stream_id, *kind, can_reset});
+    }
+    for (const auto& item : due) {
+        TransportStatus status = TransportStatus::Success;
+        if (item.can_reset) {
+            const auto reset = transport_.reset(item.id, 0);
+            if (must_wait(reset.status)) continue;  // retried on the next poll
+            status = reset.status;
+            if (status == TransportStatus::Success) send_ended_.insert(item.id);
+        }
+        if (status == TransportStatus::Success || peer_refusal(status)) {
+            const auto stop = transport_.stop_sending(item.id, 0);
+            if (must_wait(stop.status)) continue;
+            if (status == TransportStatus::Success) status = stop.status;
+        }
+        if (status != TransportStatus::Success && !peer_refusal(status)) {
+            fail("the transport rejected the engine's reset of stream " + std::to_string(item.id));
+            return;
+        }
+        duty_resets_.insert(item.id);
+        LiteEngineAction action;
+        action.kind = item.kind;
+        action.stream_id = item.id;
+        action.at_ns = now;
+        action.code = 0;
+        action.status = status;
+        transcript_.engine_actions.push_back(action);
+    }
+}
+
 bool LiteProbeController::run_duties(std::uint64_t now) {
     const auto& duties = definition_.duties;
     const bool path_close_tried = std::any_of(
@@ -563,33 +654,32 @@ bool LiteProbeController::run_duties(std::uint64_t now) {
                 for (const auto& parameter : setup->parameters) path = path || parameter.id == l06::kParamPath;
             }
         }
-        if (path) {
-            const auto reason = std::string(kLiteWebTransportPathCloseReason);
-            const auto result = transport_.close(
-                kLiteProtocolViolation,
-                std::span<const std::byte>(reinterpret_cast<const std::byte*>(reason.data()), reason.size()));
-            if (!must_wait(result.status)) {
-                LiteEngineAction action;
-                action.kind = LiteEngineAction::Kind::CloseForWebTransportPath;
-                action.at_ns = now;
-                action.code = kLiteProtocolViolation;
-                action.status = result.status;
-                transcript_.engine_actions.push_back(action);
-                if (result.status == TransportStatus::Success) {
-                    transcript_.runner_closed = true;
-                    transcript_.runner_closed_for_path = true;
-                    transcript_.complete = true;
-                    finish(now);
-                    return false;
-                }
-                if (!peer_refusal(result.status)) {
-                    fail("the transport rejected the engine's session close");
-                    finish(now);
-                    return false;
-                }
-                // The connection is already closing because of the peer: its close event ends the probe.
+        if (path && !engine_close(LiteEngineAction::Kind::CloseForWebTransportPath, kLiteWebTransportPathCloseReason,
+                                  true, now))
+            return false;
+    }
+    reset_streams_for_duties(now);
+    if (transcript_.harness_failed) {
+        finish(now);
+        return false;
+    }
+    if (duties.close_on_goaway_uri && !transcript_.runner_closed) {
+        const bool tried = std::any_of(transcript_.engine_actions.begin(), transcript_.engine_actions.end(),
+                                       [](const LiteEngineAction& action) {
+                                           return action.kind == LiteEngineAction::Kind::CloseForGoawayUri;
+                                       });
+        bool refused_uri = false;
+        for (const auto& record : session_.streams()) {
+            if (record.origin != session::LiteOrigin::Peer || record.kind != session::LiteStreamKind::Goaway) continue;
+            for (const auto* decoded : session::peer_messages(record)) {
+                const auto* goaway = std::get_if<l06::GoawayMessage>(&decoded->message);
+                refused_uri = refused_uri || (goaway && !goaway->new_session_uri.empty());
             }
         }
+        if (refused_uri && !tried &&
+            !engine_close(LiteEngineAction::Kind::CloseForGoawayUri, "a server received a GOAWAY with a New Session URI",
+                          false, now))
+            return false;
     }
     if (duties.close_send_after_peer_end) {
         close_sends_after_peer_end(now);
