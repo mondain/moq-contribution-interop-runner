@@ -46,6 +46,29 @@ void LiteSession::on_event(const transport::TransportEvent& event, std::uint64_t
                 if (!index) return;
                 decoders_[*index].stop_sending(records_[*index], value.application_error, at_ns, &budget_);
                 after_update(*index);
+            } else if constexpr (std::is_same_v<T, transport::DatagramEvent>) {
+                if (limit_reached_) return;
+                LiteDatagram datagram;
+                datagram.at_ns = at_ns;
+                datagram.size = value.data.size();
+                wire::Cursor cursor(value.data);
+                auto decoded = wire::moqlite06::decode_datagram_body(cursor);
+                if (auto* body = std::get_if<wire::moqlite06::DatagramBody>(&decoded)) {
+                    datagram.body = std::move(*body);
+                } else {
+                    const auto& error = std::get<wire::DecodeError>(decoded);
+                    datagram.issue = std::string(error.code == wire::DecodeErrorCode::LengthExceedsLimit
+                                                     ? kIssueDatagramOverLimit
+                                                     : kIssueDatagramMalformed);
+                }
+                const std::size_t charge = sizeof(LiteDatagram) + (datagram.body ? datagram.body->payload.size() : 0);
+                if (charge > budget_.bytes_left || budget_.messages_left == 0) {
+                    limit_reached_ = true;
+                    return;
+                }
+                budget_.bytes_left -= charge;
+                --budget_.messages_left;
+                datagrams_.push_back(std::move(datagram));
             } else if constexpr (std::is_same_v<T, transport::PeerCloseEvent>) {
                 if (peer_close_) return;  // the first close is the one that counts
                 PeerCloseInfo info;
@@ -111,6 +134,13 @@ bool LiteSession::admit_bytes(std::size_t size) {
 
 void LiteSession::after_update(std::size_t index) {
     if (decoders_[index].message_limit_reached() || budget_.exhausted) limit_reached_ = true;
+}
+
+std::vector<const LiteDatagram*> peer_datagrams(const LiteSession& session) {
+    std::vector<const LiteDatagram*> out;
+    out.reserve(session.datagrams().size());
+    for (const auto& datagram : session.datagrams()) out.push_back(&datagram);
+    return out;
 }
 
 std::vector<const LiteStreamRecord*> peer_streams(const LiteSession& session) {

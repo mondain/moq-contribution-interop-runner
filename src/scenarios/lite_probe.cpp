@@ -784,6 +784,7 @@ const LiteTranscript& LiteProbeController::transcript() const {
     if (stale_) {
         transcript_.streams = session_.streams();
         transcript_.peer_close = session_.peer_close();
+        transcript_.datagrams = session_.datagrams();
         stale_ = false;
     }
     return transcript_;

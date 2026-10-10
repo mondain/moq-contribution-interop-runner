@@ -250,6 +250,8 @@ struct LiteTranscript {
     // Value copies of the recorder's state; evaluators use the session::peer_* accessors on these records.
     std::vector<session::LiteStreamRecord> streams;
     std::optional<session::PeerCloseInfo> peer_close;
+    // The peer's datagrams (draft 6.4), copied from the recorder; evaluators use session::peer_datagrams-style reads.
+    std::vector<session::LiteDatagram> datagrams;
     // The runner's Setup stream (label "runner-setup", kind SendUni; never executed when none was sent).
     LiteStepRecord runner_setup;
     std::vector<LiteStepRecord> steps;

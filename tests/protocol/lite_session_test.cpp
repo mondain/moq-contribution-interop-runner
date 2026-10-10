@@ -1323,6 +1323,8 @@ TEST(LiteIssueClasses, EveryIssueCodeHasAnExplicitClass) {
         {kIssueTrailingAfterRequest, LiteIssueClass::PeerProtocol},
         {kIssueTrailingAfterResponse, LiteIssueClass::PeerProtocol},
         {kIssueUnexpectedResponse, LiteIssueClass::PeerProtocol},
+        {kIssueDatagramOverLimit, LiteIssueClass::PeerProtocol},
+        {kIssueDatagramMalformed, LiteIssueClass::PeerProtocol},
         {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
         {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
         {kIssueLengthExceedsLimit, LiteIssueClass::Harness},
@@ -1540,6 +1542,95 @@ TEST(LiteStreamReader, LargeFrameInSmallChunks) {
     ASSERT_EQ(reader.record().messages.size(), 3u) << describe_issues(reader.record());
     EXPECT_EQ(std::get<Frame>(reader.record().messages[1].message).payload.size(), 0xffff0u);
     EXPECT_TRUE(reader.record().issues.empty());
+}
+
+// ---- datagrams (L2b): recorded and decoded by the session, no stream involved -------------------------------------
+
+transport::DatagramEvent datagram_event(Bytes data) {
+    transport::DatagramEvent event;
+    event.data = std::move(data);
+    return event;
+}
+
+TEST(LiteSessionDatagrams, AValidDatagramIsStoredWholeAndCreatesNoStream) {
+    LiteSession session;
+    session.on_event(datagram_event(bytes({0x01, 0x41, 0x2c, 0x80, 0x01, 0x5f, 0x90, 0x61, 0x62})), 77);
+    ASSERT_EQ(session.datagrams().size(), 1u);
+    const auto& datagram = session.datagrams()[0];
+    EXPECT_EQ(datagram.at_ns, 77u);
+    EXPECT_EQ(datagram.size, 9u);
+    EXPECT_TRUE(datagram.issue.empty());
+    ASSERT_TRUE(datagram.body.has_value());
+    EXPECT_EQ(datagram.body->subscribe_id, 1u);
+    EXPECT_EQ(datagram.body->group_sequence, 300u);
+    EXPECT_EQ(datagram.body->timestamp, 90000u);
+    EXPECT_EQ(datagram.body->payload, text("ab"));
+    EXPECT_TRUE(session.streams().empty());
+    EXPECT_EQ(peer_datagrams(session).size(), 1u);
+    EXPECT_FALSE(session.limit_reached());
+}
+
+TEST(LiteSessionDatagrams, AnUnknownSubscribeIdIsStillRecordedBecauseTheRecorderKnowsNoSubscriptions) {
+    LiteSession session;
+    session.on_event(datagram_event(bytes({0x3f, 0x00, 0x00, 0x01})), 1);
+    ASSERT_EQ(session.datagrams().size(), 1u);
+    EXPECT_TRUE(session.datagrams()[0].issue.empty());
+}
+
+TEST(LiteSessionDatagrams, AnOversizeDatagramIsAPeerProtocolIssueWithoutABody) {
+    LiteSession session;
+    Bytes over = bytes({0x00, 0x00, 0x00});
+    over.resize(1201, std::byte{0x41});
+    session.on_event(datagram_event(over), 1);
+    ASSERT_EQ(session.datagrams().size(), 1u);
+    const auto& datagram = session.datagrams()[0];
+    EXPECT_EQ(datagram.issue, kIssueDatagramOverLimit);
+    EXPECT_EQ(datagram.size, 1201u);
+    EXPECT_FALSE(datagram.body.has_value());
+    EXPECT_EQ(classify_issue(kIssueDatagramOverLimit), LiteIssueClass::PeerProtocol);
+    EXPECT_FALSE(session.limit_reached());
+    // A datagram of exactly 1200 bytes is fine.
+    over.resize(1200);
+    session.on_event(datagram_event(over), 2);
+    EXPECT_TRUE(session.datagrams()[1].issue.empty());
+}
+
+TEST(LiteSessionDatagrams, ACutHeaderIsMalformedNotIncomplete) {
+    LiteSession session;
+    session.on_event(datagram_event(bytes({0x01, 0x41})), 1);
+    session.on_event(datagram_event({}), 2);
+    ASSERT_EQ(session.datagrams().size(), 2u);
+    EXPECT_EQ(session.datagrams()[0].issue, kIssueDatagramMalformed);
+    EXPECT_EQ(session.datagrams()[1].issue, kIssueDatagramMalformed);
+    EXPECT_FALSE(session.datagrams()[0].body.has_value());
+}
+
+TEST(LiteSessionDatagrams, AFloodOfMaximumSizeDatagramsIsBoundedByTheBudget) {
+    LiteSession session;
+    const LiteSessionLimits defaults;
+    Bytes full = bytes({0x00, 0x00, 0x00});
+    full.resize(1200, std::byte{0x41});
+    for (std::size_t i = 0; i < 200000 && !session.limit_reached(); ++i) session.on_event(datagram_event(full), i);
+    EXPECT_TRUE(session.limit_reached());
+    EXPECT_LE(session.charged_bytes(), defaults.max_bytes);
+    EXPECT_LE(session.message_count(), defaults.max_messages_total);
+    std::size_t stored_payload = 0;
+    for (const auto& datagram : session.datagrams()) stored_payload += datagram.body ? datagram.body->payload.size() : 0;
+    EXPECT_LE(stored_payload + session.datagrams().size() * sizeof(LiteDatagram), defaults.max_bytes);
+}
+
+TEST(LiteSessionDatagrams, RandomDatagramsNeverThrow) {
+    std::mt19937_64 rng(0xda7a);
+    LiteSession session;
+    for (int i = 0; i < 20000; ++i) {
+        Bytes data(static_cast<std::size_t>(rng() % 1300));
+        for (auto& byte : data) byte = static_cast<std::byte>(rng() & 0xff);
+        EXPECT_NO_THROW(session.on_event(datagram_event(std::move(data)), static_cast<std::uint64_t>(i)));
+    }
+    for (const auto& datagram : session.datagrams()) {
+        EXPECT_TRUE(datagram.issue.empty() || is_known_issue_code(datagram.issue));
+        EXPECT_EQ(datagram.body.has_value(), datagram.issue.empty());
+    }
 }
 
 TEST(LiteNames, KindAndMessageNames) {

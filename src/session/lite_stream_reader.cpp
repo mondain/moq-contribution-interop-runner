@@ -251,6 +251,10 @@ std::optional<LiteIssueClass> explicit_issue_class(std::string_view code) {
         // sends on a GOAWAY stream (draft 7.18 gives it no response).
         {kIssueTrailingAfterResponse, LiteIssueClass::PeerProtocol},
         {kIssueUnexpectedResponse, LiteIssueClass::PeerProtocol},
+        // L2b: a datagram body above 1200 bytes (draft 6.4: the publisher MUST NOT send one) or one whose header does
+        // not decode. The session records them on the LiteDatagram; the receiver drops them silently (the runner does).
+        {kIssueDatagramOverLimit, LiteIssueClass::PeerProtocol},
+        {kIssueDatagramMalformed, LiteIssueClass::PeerProtocol},
         {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
         // Decision (a): the draft is inconclusive on an unknown ANNOUNCE Type; rows 139, 141, 152 are NotRun.
         {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},

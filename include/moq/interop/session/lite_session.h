@@ -11,6 +11,7 @@
 
 #include "moq/interop/session/lite_stream_reader.h"
 #include "moq/interop/transport/session_transport.h"
+#include "moq/interop/wire/moqlite06/datagram.h"
 #include "moq/interop/wire/moqlite06/framing.h"
 
 namespace moq::interop::session {
@@ -36,6 +37,15 @@ struct LiteSessionLimits {
     std::size_t max_messages_per_stream = 100000;  // per direction of a stream
     std::size_t max_messages_total = 250000;
     wire::moqlite06::DecodeLimits decode = wire::moqlite06::kDefaultLimits;
+};
+
+// One datagram the peer sent (draft 6.4). `body` is set when it decoded; otherwise `issue` names why (an issue code of
+// lite_stream_reader.h) and the payload is not kept. `size` is the datagram length as received.
+struct LiteDatagram {
+    std::uint64_t at_ns = 0;
+    std::size_t size = 0;
+    std::optional<wire::moqlite06::DatagramBody> body;
+    std::string issue;
 };
 
 struct PeerCloseInfo {
@@ -65,6 +75,9 @@ public:
 
     [[nodiscard]] const std::vector<LiteStreamRecord>& streams() const noexcept { return records_; }
     [[nodiscard]] const LiteStreamRecord* find(std::uint64_t stream_id) const;
+    // The peer's datagrams in arrival order. Each is charged against the same budget as a stored message; the first
+    // one the budget cannot hold sets limit_reached().
+    [[nodiscard]] const std::vector<LiteDatagram>& datagrams() const noexcept { return datagrams_; }
     [[nodiscard]] std::optional<PeerCloseInfo> peer_close() const { return peer_close_; }
     [[nodiscard]] std::optional<std::uint64_t> established_ns() const { return established_ns_; }
     [[nodiscard]] bool limit_reached() const noexcept { return limit_reached_; }
@@ -85,6 +98,7 @@ private:
 
     LiteSessionLimits limits_;
     std::vector<LiteStreamRecord> records_;
+    std::vector<LiteDatagram> datagrams_;
     std::vector<detail::LiteStreamDecoder> decoders_;
     std::map<std::uint64_t, std::size_t> index_;
     std::size_t total_bytes_{0};
@@ -93,6 +107,9 @@ private:
     std::optional<PeerCloseInfo> peer_close_;
     std::optional<std::uint64_t> established_ns_;
 };
+
+// The peer's datagrams (all of them are the peer's: the runner sends none).
+std::vector<const LiteDatagram*> peer_datagrams(const LiteSession& session);
 
 // Streams the peer opened / the runner opened, in first-seen order.
 std::vector<const LiteStreamRecord*> peer_streams(const LiteSession& session);

@@ -83,14 +83,19 @@ inline constexpr std::string_view kIssueUndeclaredRunnerStream = "undeclared_run
 inline constexpr std::string_view kIssueMessageLimitReached = "message_limit_reached";
 inline constexpr std::string_view kIssueBufferLimitReached = "buffer_limit_reached";
 inline constexpr std::string_view kIssueLocalBidiMismatch = "local_bidi_mismatch";
+// Datagram issues belong to a LiteDatagram, not to a stream (draft 6.4: a publisher MUST NOT send a body above 1200
+// bytes; a header that does not decode is not a datagram body).
+inline constexpr std::string_view kIssueDatagramOverLimit = "datagram_over_limit";
+inline constexpr std::string_view kIssueDatagramMalformed = "datagram_malformed";
 
 // Every issue code the reader and session emit (the test pins that each has an explicit class).
-inline constexpr std::array<std::string_view, 19> kAllIssueCodes{
+inline constexpr std::array<std::string_view, 21> kAllIssueCodes{
     kIssueUnknownAnnounceType, kIssueProtocolViolation, kIssueInvalidValue, kIssueLengthExceedsLimit,
     kIssueOffsetOverflow, kIssueKeyValueFormattingError, kIssueLengthNotRepresentable, kIssueTrailingAfterFin,
     kIssueTrailingAfterSetup, kIssueTrailingAfterRequest, kIssueTruncatedAtFin, kIssuePublisherOpenedBidi,
     kIssueL2StreamNotDecoded, kIssueUndeclaredRunnerStream, kIssueMessageLimitReached, kIssueBufferLimitReached,
-    kIssueLocalBidiMismatch, kIssueTrailingAfterResponse, kIssueUnexpectedResponse};
+    kIssueLocalBidiMismatch, kIssueTrailingAfterResponse, kIssueUnexpectedResponse, kIssueDatagramOverLimit,
+    kIssueDatagramMalformed};
 
 // How an evaluator may use an issue.
 //   PeerProtocol: the peer's bytes broke the wire format; an evaluator may judge the peer on it (Fail).
