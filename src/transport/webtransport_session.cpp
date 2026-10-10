@@ -31,6 +31,9 @@ std::array<std::uint8_t, 8> encode_varint(std::uint64_t value,
 // EXTENSION) unless both endpoints enabled RESET_STREAM_AT. Only the moq-lite profile admits a client without it
 // (validate_connect requires it of every MoQ Transport client), and there the stream is reset with a plain
 // RESET_STREAM instead. MoQ Transport sessions always negotiate RESET_STREAM_AT, so their path is unchanged.
+// A plain RESET_STREAM does not guarantee delivery of the WebTransport stream header (the reliable size is what
+// RESET_STREAM_AT protects), so a peer that never received it cannot attribute the reset to the session. That is
+// fine for the moq-lite probes, which reset only established streams whose header and first bytes were sent.
 int reset_stream(picoquic_cnx_t* connection, h3zero_stream_ctx_t* stream, std::uint64_t wire_error) {
     if (connection->is_reset_stream_at_enabled) return picowt_reset_stream(connection, stream, wire_error);
     const int result = picoquic_reset_stream(connection, stream->stream_id, wire_error);

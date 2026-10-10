@@ -7,9 +7,11 @@
 #             (MOQ_UPDATE_GOLDEN=1 does the same). Otherwise a mismatch fails with a unified diff.
 #
 # 1. The matrix --dry-run plan (runner invocation, one run request per executable moq-lite-06
-#    scenario, the audit; per transport) equals the golden; the repository root shows as @ROOT@.
-# 2. Every executable moq-lite-06 id (tests/golden/executable-ids-d106.txt) is requested exactly once
-#    on each transport, in driven mode, with draft "moq-lite-06" and the fixture of
+#    scenario, one group run of row L06-4-4-MUST-027's scenarios, the audit; per transport) equals the
+#    golden; the repository root shows as @ROOT@.
+# 2. Every executable moq-lite-06 id (tests/golden/executable-ids-d106.txt) is requested alone exactly
+#    once on each transport, and one last request holds exactly the scenarios of row L06-4-4-MUST-027
+#    (requirements/moq-lite-06.json); all in driven mode, with draft "moq-lite-06" and the fixture of
 #    adapters/moq-lite/adapter.json; the ports are 19231-19234 (the driven default 19235/19236) and
 #    none collides with another script's fixed port.
 # 3. --transport prints exactly that transport's section of the full plan, and the driven script's
@@ -60,12 +62,17 @@ for entry in "native-quic 19231" "webtransport 19233"; do
     read -r api_transport http_port <<<"$entry"
     bodies=$(grep "^request: POST http://127.0.0.1:$http_port/api/v1/runs " "$work/plan.txt" |
         sed -e 's/^request: POST [^ ]* //')
-    [[ $(wc -l <<<"$bodies") -eq $(wc -l <"$ids_d106") ]] || fail "expected one request per id on $api_transport"
-    diff -u "$ids_d106" <(jq -r '.scenarios[]' <<<"$bodies" | LC_ALL=C sort) ||
-        fail "the $api_transport requests are not exactly the executable moq-lite-06 ids"
+    [[ $(wc -l <<<"$bodies") -eq $(($(wc -l <"$ids_d106") + 1)) ]] ||
+        fail "expected one request per id and the row 027 group run on $api_transport"
+    diff -u "$ids_d106" <(jq -r 'select((.scenarios | length) == 1) | .scenarios[]' <<<"$bodies" | LC_ALL=C sort) ||
+        fail "the $api_transport single requests are not exactly the executable moq-lite-06 ids"
+    group=$(tail -n 1 <<<"$bodies" | jq -c '.scenarios | sort')
+    [[ "$group" == "$(jq -c '[.requirements[] | select(.id == "L06-4-4-MUST-027") | .scenarios[]] | sort' \
+        "$root_dir/requirements/moq-lite-06.json")" ]] ||
+        fail "the last $api_transport request is not the row 027 group run: $group"
     jq -e --arg transport "$api_transport" --argjson fixture "$fixture" -s '
         all(.[]; .draft == "moq-lite-06" and .transport == $transport and .mode == "driven" and
-            (.scenarios | length) == 1 and .timeout_ms == 15000 and .track == $fixture)' \
+            .timeout_ms == 15000 and .track == $fixture)' \
         <<<"$bodies" >/dev/null || fail "a $api_transport request has the wrong draft, mode, timeout or fixture"
 done
 grep -qF '<--port> <19231> ' "$work/plan.txt" && grep -qF '<--publisher-port-start> <19232> ' "$work/plan.txt" &&
@@ -91,12 +98,14 @@ for entry in "${pair_ports[@]}"; do
     read -r transport http_port udp_port <<<"$entry"
     section=$(awk -v head="matrix draft=moq-lite-06 transport=$transport" '
         $0 == head {on = 1; print; next} /^matrix / {on = 0} on' "$work/plan.txt")
-    [[ $(wc -l <<<"$section") -eq $(($(wc -l <"$ids_d106") + 3)) ]] || fail "no plan section for $transport"
+    [[ $(wc -l <<<"$section") -eq $(($(wc -l <"$ids_d106") + 4)) ]] || fail "no plan section for $transport"
+    mapfile -t runs < <(grep '^request: ' <<<"$section" | sed -e 's/^request: POST [^ ]* //' |
+        jq -r '.scenarios | join(",")')
     expected=$(head -n 1 "$work/plan.txt"; printf '%s\n' "$section"; tail -n 1 "$work/plan.txt")
     actual=$(MOQ_CLI_BIN=$fake_cli bash "$matrix" --dry-run --transport "$transport" "$fake_runner" | normalize)
     [[ "$actual" == "$expected" ]] || fail "--transport $transport differs from its plan section"
     actual=$(MOQ_CLI_BIN=$fake_cli MOQ_INTEROP_TEST_HTTP_PORT=$http_port MOQ_INTEROP_TEST_UDP_PORT=$udp_port \
-        bash "$driven" --dry-run "$transport" "$fake_runner" | normalize)
+        bash "$driven" --dry-run "$transport" "$fake_runner" "${runs[@]}" | normalize)
     [[ "$actual" == "$(tail -n +2 <<<"$section")" ]] ||
         fail "driven --dry-run $transport differs from its plan section"
 done
@@ -142,9 +151,9 @@ for entry in "native_quic 19231" "webtransport 19233"; do
         grep -qxF "scenario=$scenario transport=$transport run=run-$http_port-$count verdict=incomplete publisher=stopped pass=1 fail=0 not_run=1" \
             "$work/stub-out.txt" || fail "no reported row for $scenario on $transport"
     done < <(grep "^request: POST http://127.0.0.1:$http_port/" "$work/stub-plan.txt" |
-        sed -e 's/^request: POST [^ ]* //' | jq -r '.scenarios[0]')
+        sed -e 's/^request: POST [^ ]* //' | jq -r '.scenarios | join(",")')
 done
-[[ $(grep -cxF '  row L06-STUB-001 pass' "$work/stub-out.txt") -eq $((2 * $(wc -l <"$ids_d106"))) ]] ||
+[[ $(grep -cxF '  row L06-STUB-001 pass' "$work/stub-out.txt") -eq $((2 * ($(wc -l <"$ids_d106") + 1))) ]] ||
     fail 'judged rows are not reported per run'
 [[ $(grep -cxF 'audit status=0' "$work/stub-out.txt") -eq 2 ]] || fail 'audit status not reported per transport'
 [[ $(grep -cxF 'Execution audit: consistent (19 runs, 19 scored rows, 0 findings)' "$work/stub-out.txt") -eq 2 ]] ||

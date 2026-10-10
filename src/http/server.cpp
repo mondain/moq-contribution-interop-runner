@@ -342,6 +342,17 @@ bool has_declared_evidence(const storage::RunRecord& run,
     return false;
 }
 
+// audit_execution's rule for a scored Fail: the row has a binding whose scenario the run selected (a Fail needs no
+// declared evidence there; a Fail by absence, such as no close after a violation probe, has none of the reaction's).
+bool bound_in_run(const storage::RunRecord& run, std::span<const requirements::ExecutableBinding> bindings,
+                  const std::string& requirement_id) {
+    return std::any_of(bindings.begin(), bindings.end(), [&](const requirements::ExecutableBinding& binding) {
+        return binding.requirement_id == requirement_id &&
+               std::find(run.config.scenario_ids.begin(), run.config.scenario_ids.end(), binding.scenario_id) !=
+                   run.config.scenario_ids.end();
+    });
+}
+
 // The executable bindings of a configured catalog's draft (draft 22's are draft 21's translated through the
 // lineage plus its own; moq-lite-06's are the L1d lite evaluators').
 std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersion draft) {
@@ -417,12 +428,18 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                                               {"requirement_id", finding.requirement_id},
                                               {"detail", finding.detail}});
             }
+            // The staged (moq-lite-06) catalog counts a Fail as observed by audit_execution's rule (bound_in_run);
+            // a Pass, and every outcome of the MoQ Transport drafts, still needs its declared evidence.
+            const bool staged = detail::staged_catalog(*catalog);
             std::set<std::string> observed;
             for (const auto& run : runs) {
                 for (const auto& outcome : run.outcomes) {
-                    if ((outcome.state == requirements::OutcomeState::Pass ||
-                         outcome.state == requirements::OutcomeState::Fail) &&
-                        has_declared_evidence(run, bindings, outcome.requirement_id))
+                    const bool scored = outcome.state == requirements::OutcomeState::Pass ||
+                                        outcome.state == requirements::OutcomeState::Fail;
+                    if (!scored) continue;
+                    if (staged && outcome.state == requirements::OutcomeState::Fail
+                            ? bound_in_run(run, bindings, outcome.requirement_id)
+                            : has_declared_evidence(run, bindings, outcome.requirement_id))
                         observed.insert(outcome.requirement_id);
                 }
             }

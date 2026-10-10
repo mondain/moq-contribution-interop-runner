@@ -253,8 +253,8 @@ std::optional<bool> evaluate_l06_errors_code_space(const LiteTranscript& transcr
     const auto halves = l06_code_space_halves(transcript);
     if (halves.stream == std::optional<bool>{false} || halves.session == std::optional<bool>{false}) return false;
     if (transcript.scenario_id == kL06ErrorsCodeSpace)
-        return halves.stream && halves.session ? std::optional<bool>{true} : std::nullopt;
-    return halves.session ? std::optional<bool>{true} : std::nullopt;
+        return halves.stream == true && halves.session == true ? std::optional<bool>{true} : std::nullopt;
+    return halves.session == true ? std::optional<bool>{true} : std::nullopt;
 }
 
 }  // namespace moq::interop::scenarios

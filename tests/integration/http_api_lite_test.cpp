@@ -309,6 +309,64 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     for (const auto& finding : audit.findings) ADD_FAILURE() << finding.code << " " << finding.requirement_id;
 }
 
+// A stored lite run of `scenario` with `row` in `state` (every other catalog row by the catalog alone) and only the
+// events of `kinds` for that scenario.
+app::RunId store_lite_run(storage::SqliteRunStore& store, const requirements::RequirementCatalog& lite,
+                          const std::string& scenario, const std::string& row, requirements::OutcomeState state,
+                          const std::vector<std::string>& kinds) {
+    const auto id = store.create_run(app::RunConfig{app::DraftVersion::MoqLite06, app::TransportKind::NativeQuic,
+                                                    app::RunMode::Observed, {scenario}, 4s});
+    std::vector<storage::EvidenceEvent> events;
+    for (const auto& kind : kinds) {
+        storage::EvidenceEvent event;
+        event.kind = kind;
+        event.detail = "test";
+        event.scenario_id = scenario;
+        events.push_back(event);
+    }
+    store.append_events(id, events);
+    std::vector<requirements::Outcome> outcomes;
+    for (const auto& r : lite.requirements) {
+        auto outcome_state = requirements::OutcomeState::NotRun;
+        if (r.id == row) outcome_state = state;
+        else if (r.reviewed && r.applicability != requirements::Applicability::Applicable)
+            outcome_state = requirements::OutcomeState::NotApplicable;
+        else if (r.reviewed && r.testability == requirements::Testability::NotTestable)
+            outcome_state = requirements::OutcomeState::NotTestable;
+        outcomes.push_back({r.id, outcome_state});
+    }
+    store.finalize(id, requirements::score_staged(lite, outcomes), outcomes);
+    return id;
+}
+
+std::set<std::string> completeness_not_run(const Json& completeness) {
+    std::set<std::string> ids;
+    for (const auto& item : completeness.at("drafts").at(3).at("transports").at(0).at("not_run"))
+        ids.insert(item.at("requirement_id").get<std::string>());
+    return ids;
+}
+
+// A Fail by the absence of a close (no peer_close event: the publisher never reacted) is an observation: the
+// completeness page counts it as observed, as audit_execution counts it as a bound scored row (it requires declared
+// evidence only of a Pass). A Pass still needs every declared evidence kind (peer_close for a close probe).
+TEST_F(LiteHttpApi, CompletenessCountsAFailByAbsenceAsObservedButNotAnUnevidencedPass) {
+    store_lite_run(*store_, *lite_, "l06-setup-server-role", "L06-7-3-3-MUST-131", requirements::OutcomeState::Fail,
+                   {"raw_probe_stimulus", "context_complete"});
+    store_lite_run(*store_, *lite_, "l06-setup-duplicate-parameter", "L06-7-3-MUST-112",
+                   requirements::OutcomeState::Pass, {"raw_probe_stimulus", "context_complete"});
+    const auto completeness = get("/results/completeness.json");
+    const auto& native = completeness.at("drafts").at(3).at("transports").at(0);
+    EXPECT_EQ(native.at("run_count"), 2);
+    // The execution audit agrees: the unevidenced Pass is its only finding, the Fail by absence none.
+    ASSERT_EQ(native.at("execution_findings").size(), 1u) << native.at("execution_findings").dump();
+    EXPECT_EQ(native.at("execution_findings").at(0).at("code"), "missing_evaluator_evidence");
+    EXPECT_EQ(native.at("execution_findings").at(0).at("requirement_id"), "L06-7-3-MUST-112");
+    const auto not_run = completeness_not_run(completeness);
+    EXPECT_FALSE(not_run.contains("L06-7-3-3-MUST-131"));
+    EXPECT_TRUE(not_run.contains("L06-7-3-MUST-112"));
+    EXPECT_EQ(native.at("observed_requirement_count"), 1);
+}
+
 TEST_F(LiteHttpApi, AWebTransportRunReturnsTheSessionUrlAndJudgesRow125) {
     const auto [status, created] = post(lite_request({"l06-setup-client-path"}, "webtransport"));
     ASSERT_EQ(status, 201) << created.dump();

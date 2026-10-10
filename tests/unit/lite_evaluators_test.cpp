@@ -383,7 +383,11 @@ TEST(LiteEvaluate, RefusesAnotherDraftsCatalog) {
 // --- per-context evaluation (L1e Task 1, item I3) ----------------------------------------------------------------
 
 // The L1d evaluate_lite algorithm, copied verbatim as the reference the per-context path must reproduce (the
-// production evaluate_lite is now built on aggregate_lite, so it cannot be its own reference).
+// production evaluate_lite is now built on aggregate_lite, so it cannot be its own reference), plus the one rule
+// added since L1d by design: row 027 (evaluator l06-errors-code-space) settles when all five of its scenarios ran
+// once each unflagged, the code-space transcript has the stream half and any of the five the session half (its
+// catalog rationale). The reference computes that rule from the transcripts with scenarios::l06_code_space_halves,
+// independently of LiteContextVerdicts.
 std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
                                              std::span<const LiteTranscript> transcripts) {
     const auto& registry = lite_evaluator_registry();
@@ -416,10 +420,30 @@ std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
                 }
                 if (all_true) ++passed[transcript.scenario_id];
             }
-            const bool settled = !row.scenarios.empty() &&
+            bool settled = !row.scenarios.empty() &&
                 std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
                     return runs[scenario] == 1 && passed[scenario] == 1;
                 });
+            if (!failed && !settled && row.evaluators == std::vector<std::string>{"l06-errors-code-space"}) {
+                std::map<std::string, std::size_t> seen;
+                bool flagged = false, stream_half = false, session_half = false;
+                for (const auto& transcript : transcripts) {
+                    if (std::find(row.scenarios.begin(), row.scenarios.end(), transcript.scenario_id) ==
+                        row.scenarios.end())
+                        continue;
+                    ++seen[transcript.scenario_id];
+                    if (transcript.harness_failed || transcript.event_limit_reached || transcript.timed_out) {
+                        flagged = true;
+                        continue;
+                    }
+                    const auto halves = scenarios::l06_code_space_halves(transcript);
+                    if (transcript.scenario_id == "l06-errors-code-space" && halves.stream == true) stream_half = true;
+                    if (halves.session == true) session_half = true;
+                }
+                settled = !flagged && stream_half && session_half &&
+                          std::all_of(row.scenarios.begin(), row.scenarios.end(),
+                                      [&](const std::string& scenario) { return seen[scenario] == 1; });
+            }
             if (failed) state = OutcomeState::Fail;
             else if (settled) state = OutcomeState::Pass;
         }
@@ -501,6 +525,24 @@ TEST(LitePerContext, MatchesTheAllTranscriptsEvaluationOverTheConformanceTableAn
     stranger.scenario_id = "not-a-lite-scenario";
     empty.push_back(stranger);
     sets.emplace_back("empty and foreign", empty);
+    // CLI-like (the moq CLI of the first sweep): the stream half on l06-errors-code-space, a session close on one of
+    // the four close probes (duplicate parameter), no close on the others; then the same with one probe context
+    // flagged, and with one 027 scenario run twice.
+    auto cli = replaced(conforming(), tweaked("l06-errors-code-space", reset_malformed_announce));
+    for (const auto* probe : {"l06-setup-server-path", "l06-setup-server-role", "l06-setup-duplicate-stream"})
+        cli = replaced(cli, tweaked(probe, ignore_runner_setup));
+    sets.emplace_back("cli-like", cli);
+    // The flagged probe is one that supplies no half (server role), so only the flag keeps the row from settling.
+    auto cli_flagged_probe = tweaked("l06-setup-server-role", ignore_runner_setup);
+    cli_flagged_probe.timed_out = true;
+    const auto cli_flagged = replaced(cli, cli_flagged_probe);
+    sets.emplace_back("cli-like, a flagged close probe", cli_flagged);
+    auto cli_twice = cli;
+    cli_twice.push_back(tweaked("l06-setup-server-role", ignore_runner_setup));
+    sets.emplace_back("cli-like, a 027 scenario twice", cli_twice);
+    EXPECT_EQ(by_id(per_context(cli)).at("L06-4-4-MUST-027"), OutcomeState::Pass);
+    EXPECT_EQ(by_id(per_context(cli_flagged)).at("L06-4-4-MUST-027"), OutcomeState::NotRun);
+    EXPECT_EQ(by_id(per_context(cli_twice)).at("L06-4-4-MUST-027"), OutcomeState::NotRun);
     std::size_t turned = 0;
     for (const auto& [label, transcripts] : sets) {
         const auto reference = reference_evaluate_lite(catalog(), transcripts);

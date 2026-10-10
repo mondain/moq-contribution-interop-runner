@@ -52,8 +52,10 @@ const std::vector<BindingRow>& binding_rows() {
         {"L06-6-3-1-MUST-092", "l06-setup-duplicate-stream", "l06-setup-duplicate-stream-close", &kClose},
         {"L06-7-3-2-MUST-126", "l06-setup-server-path", "l06-setup-server-path-close", &kClose},
         {"L06-7-3-3-MUST-131", "l06-setup-server-role", "l06-setup-server-role-close", &kClose},
-        // Row 027 on its five scenarios (a session close in the session table on each; on its own scenario the
-        // stream-table reset too, a peer stream ending).
+        // Row 027 on its five scenarios. Its Pass needs all five in the run: the stream-table reset of a peer
+        // stream on l06-errors-code-space, and a session close in the session table on ANY of the five
+        // (aggregate_lite's code_space_settled, per the row's catalog rationale), so a close is declared evidence
+        // of each context that supplied the session half, not of every context.
         {"L06-4-4-MUST-027", "l06-errors-code-space", "l06-errors-code-space",
          &kStreamEndingAndClose},
         {"L06-4-4-MUST-027", "l06-setup-duplicate-stream", "l06-errors-code-space", &kClose},
