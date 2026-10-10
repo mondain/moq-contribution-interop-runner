@@ -46,6 +46,8 @@ public:
         std::uint16_t port = 0;
         std::vector<std::byte> alpn;
         bool enable_datagrams = true;
+        // PING the peer when the connection would otherwise idle out (a quiet but live publisher, the reference one).
+        bool keep_alive = false;
         std::size_t datagram_queue = 16;
         std::uint64_t initial_max_streams_bidi = 64;
         std::uint64_t initial_max_streams_uni = 64;

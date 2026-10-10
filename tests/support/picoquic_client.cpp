@@ -248,7 +248,9 @@ std::unique_ptr<PicoquicTestClient> PicoquicTestClient::create(const Config& inp
         reinterpret_cast<const sockaddr*>(&impl->peer),picoquic_current_time(),0,"localhost",impl->alpn.c_str(),1);
     if (!impl->connection || picoquic_set_local_addr(impl->connection,
         reinterpret_cast<sockaddr*>(&impl->sockets.front().local)) != 0 ||
-        picoquic_start_client_cnx(impl->connection) != 0 || !impl->flush()) return nullptr;
+        picoquic_start_client_cnx(impl->connection) != 0) return nullptr;
+    if (input.keep_alive) picoquic_enable_keep_alive(impl->connection, 0);
+    if (!impl->flush()) return nullptr;
     return std::unique_ptr<PicoquicTestClient>(new PicoquicTestClient(std::move(impl)));
 }
 

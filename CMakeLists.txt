@@ -436,10 +436,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-test-client PUBLIC moq-interop-picoquic)
     # moq-lite-06 reference publisher (L2c): its sources sit in tools/lite-ref and share the scripted publisher of
     # tests/support with the tests.
-    add_library(moq-interop-lite-ref tools/lite-ref/lite_ref_options.cpp)
+    add_library(moq-interop-lite-ref tools/lite-ref/lite_ref_options.cpp tools/lite-ref/lite_ref_session.cpp)
     target_include_directories(moq-interop-lite-ref PUBLIC
         "${PROJECT_SOURCE_DIR}/tools/lite-ref" "${PROJECT_SOURCE_DIR}/tests")
-    target_link_libraries(moq-interop-lite-ref PUBLIC moq-interop-test-client moq-interop-scenarios moq-interop-wire)
+    target_include_directories(moq-interop-lite-ref PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(moq-interop-lite-ref PUBLIC moq-interop-test-client moq-interop-scenarios moq-interop-wire
+                          moq-interop-transport)
     target_compile_options(moq-interop-lite-ref PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
@@ -515,16 +517,24 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-lite-run-live-tests tests/integration/lite_run_live_test.cpp)
     target_include_directories(moq-interop-lite-run-live-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-lite-run-live-tests PRIVATE
-        moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
     target_compile_definitions(moq-interop-lite-run-live-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME lite-run-live COMMAND moq-interop-lite-run-live-tests)
+    add_executable(moq-interop-lite-ref-session-tests tests/integration/lite_ref_session_test.cpp)
+    target_include_directories(moq-interop-lite-ref-session-tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-ref-session-tests PRIVATE
+        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest_main)
+    target_compile_definitions(moq-interop-lite-ref-session-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME lite-ref-session COMMAND moq-interop-lite-ref-session-tests)
     # Writes moq-lite-06 run databases for tests/e2e/audit-cli-moqlite.sh.
     add_executable(moq-interop-lite-audit-fixture tests/support/lite_audit_fixture.cpp)
     target_include_directories(moq-interop-lite-audit-fixture PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-lite-audit-fixture PRIVATE
-        moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest)
+        moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest)
     target_compile_definitions(moq-interop-lite-audit-fixture PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
@@ -533,7 +543,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_include_directories(moq-interop-http-api-lite-tests PRIVATE
         "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src/http")
     target_link_libraries(moq-interop-http-api-lite-tests PRIVATE
-        moq-interop-http moq-interop-runs moq-interop-test-client moq-interop-execution-audit
+        moq-interop-http moq-interop-lite-ref moq-interop-runs moq-interop-test-client moq-interop-execution-audit
         httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
     target_compile_definitions(moq-interop-http-api-lite-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"

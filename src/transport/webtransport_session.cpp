@@ -127,11 +127,15 @@ bool WebTransportSession::ingest_stream(StreamId stream_id,
         finished_read_streams_.contains(stream_id) ||
         payload.size() > limits_.max_event_payload_bytes) return false;
     if (stream_id == connect_stream_id_) return false;
+    // Stream id bits: 0 client bidi, 1 server bidi, 2 client uni, 3 server uni. The peer opens bidi and uni streams of
+    // the other side's kind; a bidi stream of ours is readable only once we opened it.
     const auto direction = stream_id & 3U;
-    if (direction == 3U || (direction == 1U && !readable_streams_.contains(stream_id)))
+    const auto own_uni = limits_.client_role ? 2U : 3U;
+    const auto own_bidi = limits_.client_role ? 0U : 1U;
+    if (direction == own_uni || (direction == own_bidi && !readable_streams_.contains(stream_id)))
         return false;
     readable_streams_.insert(stream_id);
-    if (direction == 0U) writable_streams_.insert(stream_id);
+    if (direction == (limits_.client_role ? 1U : 0U)) writable_streams_.insert(stream_id);
     enqueue(StreamDataEvent{stream_id, {payload.begin(), payload.end()}, fin});
     if (fin) finished_read_streams_.insert(stream_id);
     return true;

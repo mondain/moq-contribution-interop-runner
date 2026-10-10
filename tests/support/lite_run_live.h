@@ -11,6 +11,7 @@
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/storage/run_store.h"
+#include "lite_ref_session.h"
 #include "support/picoquic_client.h"
 #include "support/scripted_lite_peer.h"
 
@@ -173,98 +174,8 @@ inline std::uint16_t free_udp_port() {
 // The conforming publisher over a real native QUIC connection. step() pumps the connection, mirrors what the
 // runner did (stream bytes, FINs, RESET_STREAMs, STOP_SENDINGs) into the ScriptedLitePeer the publisher reacts to,
 // lets it react and writes what it emitted (stream data, resets, stop-sendings, a session close) to the wire.
-class LiteQuicPublisher {
-public:
-    LiteQuicPublisher(std::uint16_t port, ConformingLitePublisherConfig config,
-                      std::string_view alpn = scenarios::kLiteAlpn)
-        : publisher_(std::move(config)), mirror_(publisher_.reaction()) {
-        Client::Config client;
-        client.port = port;
-        client.alpn.assign(reinterpret_cast<const std::byte*>(alpn.data()),
-                           reinterpret_cast<const std::byte*>(alpn.data()) + alpn.size());
-        // moq-lite needs no QUIC DATAGRAM (decision (c)): the lite listener must accept a client without it.
-        client.enable_datagrams = false;
-        client_ = Client::create(client);
-    }
-
-    [[nodiscard]] bool valid() const { return client_ != nullptr; }
-    [[nodiscard]] bool established() const { return client_ && client_->established(); }
-    [[nodiscard]] const ConformingLitePublisher& publisher() const { return publisher_; }
-    [[nodiscard]] Client& client() { return *client_; }
-
-    // False once the connection failed or ended.
-    bool step() {
-        if (!client_ || !client_->pump()) return false;
-        if (!client_->established()) return true;
-        mirror_runner();
-        for (auto& event : mirror_.poll(1024)) outbound_.push_back(std::move(event));
-        flush();
-        return !client_->peer_close().has_value();
-    }
-
-private:
-    static constexpr std::uint64_t kScannedStreams = 64;
-
-    void mirror_runner() {
-        // Runner-opened streams: bidi 1, 5, 9, ... and uni 3, 7, 11, ...
-        for (std::uint64_t index = 0; index < kScannedStreams; ++index) {
-            for (const std::uint64_t base : {1u, 3u}) {
-                const auto id = base + 4 * index;
-                const auto observed = client_->stream(id);
-                if (!observed) continue;
-                auto& done = forwarded_[id];
-                const bool fin = observed->fin && !fin_forwarded_.contains(id);
-                if (observed->data.size() > done || fin) {
-                    const std::span<const std::byte> fresh(observed->data.data() + done, observed->data.size() - done);
-                    (void)mirror_.write(id, fresh, observed->fin);
-                    done = observed->data.size();
-                    if (observed->fin) fin_forwarded_.insert(id);
-                }
-                if (observed->reset_error && !reset_forwarded_.contains(id)) {
-                    reset_forwarded_.insert(id);
-                    (void)mirror_.reset(id, *observed->reset_error);
-                }
-            }
-        }
-        // STOP_SENDING from the runner: on the publisher's streams and on the runner's bidi streams.
-        for (std::uint64_t index = 0; index < kScannedStreams; ++index) {
-            for (const std::uint64_t base : {0u, 1u, 2u}) {
-                const auto id = base + 4 * index;
-                if (stop_forwarded_.contains(id)) continue;
-                if (const auto code = client_->stop_sending_error(id)) {
-                    stop_forwarded_.insert(id);
-                    (void)mirror_.stop_sending(id, *code);
-                }
-            }
-        }
-    }
-
-    void flush() {
-        while (!outbound_.empty()) {
-            const auto& event = outbound_.front();
-            if (const auto* data = std::get_if<transport::StreamDataEvent>(&event)) {
-                const auto sent = client_->try_send_stream(data->stream_id, data->data, data->fin);
-                if (sent.status == transport::test::ClientStreamSendStatus::WouldBlock) return;
-            } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&event)) {
-                (void)client_->reset_stream(reset->stream_id, reset->application_error.value_or(0));
-            } else if (const auto* stop = std::get_if<transport::PeerStopSendingEvent>(&event)) {
-                (void)client_->stop_stream(stop->stream_id, stop->application_error.value_or(0));
-            } else if (const auto* close = std::get_if<transport::PeerCloseEvent>(&event)) {
-                (void)client_->close(close->error_code, close->reason);
-            }
-            outbound_.pop_front();
-        }
-    }
-
-    ConformingLitePublisher publisher_;
-    ScriptedLitePeer mirror_;
-    std::unique_ptr<Client> client_;
-    std::deque<transport::TransportEvent> outbound_;
-    std::map<std::uint64_t, std::size_t> forwarded_;
-    std::set<std::uint64_t> fin_forwarded_;
-    std::set<std::uint64_t> reset_forwarded_;
-    std::set<std::uint64_t> stop_forwarded_;
-};
+// The native QUIC publisher the tests drive is the reference publisher's own driver (tools/lite-ref).
+using LiteQuicPublisher = lite_ref::QuicDriver;
 
 // Plays every context of run `id` that gets a listener with a fresh publisher from `make` (one connection per
 // context, as the runner recreates its listener per context) until the run is finalized. A context the runner
