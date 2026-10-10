@@ -17,6 +17,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "moq/interop/requirements/catalog.h"
@@ -254,6 +256,156 @@ TEST(LiteConformance, AMediaSizedGroupFloodIsStillJudged) {
     for (const auto& entry : evaluators()) {
         if (!entry.scenarios.contains(t.scenario_id)) continue;
         EXPECT_EQ(entry.evaluate(t), Verdict{true}) << entry.id;
+    }
+}
+
+// --- the runner duties (L1e Task 1, item 3) ------------------------------------------------------------------------
+
+// Every evaluator on every transcript, keyed (evaluator, scenario).
+std::map<std::pair<std::string, std::string>, Verdict> verdict_table(const std::vector<LiteTranscript>& transcripts) {
+    std::map<std::pair<std::string, std::string>, Verdict> out;
+    for (const auto& t : transcripts)
+        for (const auto& entry : evaluators()) out[{entry.id, t.scenario_id}] = entry.evaluate(t);
+    return out;
+}
+
+// The 19 scenarios on `binding` with the duties as the builders set them (on) or switched off.
+std::vector<LiteTranscript> table_with_duties(LiteBinding binding, bool duties,
+                                              const std::function<void(ConformingLitePublisherConfig&)>& tweak = {}) {
+    std::vector<LiteTranscript> out;
+    for (auto& probe : conformance_probes(binding)) {
+        if (!duties) probe.duties = {};
+        out.push_back(run_conforming(std::move(probe), binding, tweak));
+    }
+    return out;
+}
+
+std::size_t engine_actions(const std::vector<LiteTranscript>& transcripts) {
+    std::size_t count = 0;
+    for (const auto& t : transcripts) count += t.engine_actions.size();
+    return count;
+}
+
+TEST(LiteConformanceDuties, EveryProductionBuilderTurnsTheDutiesOn) {
+    for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport, LiteBinding::Unknown}) {
+        for (const auto& probe : conformance_probes(binding)) {
+            EXPECT_TRUE(probe.duties.close_send_after_peer_end) << probe.id;
+            EXPECT_TRUE(probe.duties.close_on_webtransport_path) << probe.id;
+        }
+    }
+}
+
+// The table (all 30 evaluators, every scenario, every binding) gives the same verdicts with the duties on and off:
+// against the conforming publisher the duties never even fire (it never ends a runner stream first except with a
+// STOP_SENDING, and sends no Path on WebTransport).
+TEST(LiteConformanceDuties, TheTableIsTheSameWithTheDutiesOnAndOff) {
+    for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport, LiteBinding::Unknown}) {
+        SCOPED_TRACE(static_cast<int>(binding));
+        const auto on = table_with_duties(binding, true);
+        const auto off = table_with_duties(binding, false);
+        EXPECT_EQ(engine_actions(on), 0u);
+        check_table(on, binding);
+        EXPECT_EQ(verdict_table(on), verdict_table(off));
+    }
+}
+
+// A publisher that ends every announce answer (FIN right after ANNOUNCE_OK and its ANNOUNCE_STARTs) and every
+// served subscription (FIN right after SUBSCRIBE_OK) itself: the send-close duty fires, and no verdict of the 30
+// evaluators on the 19 scenarios differs from the duties-off run (the engine's FINs are no step: no stimulus proof,
+// no allowance and no same-poll ordering sees them).
+TEST(LiteConformanceDuties, TheDutiesFiringChangeNoVerdict) {
+    const auto ends_answers = [](ConformingLitePublisherConfig& config) {
+        config.hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                     const LiteRunnerRequest& request) {
+            if (const auto* announce = std::get_if<l06::AnnounceRequest>(&request.message)) {
+                publisher.answer_announce(peer, request.stream, *announce);
+                publisher.fin_answer(peer, request.stream);
+                return true;
+            }
+            if (const auto* subscribe = std::get_if<l06::Subscribe>(&request.message)) {
+                publisher.answer_subscribe(peer, request.stream, *subscribe);
+                publisher.fin_answer(peer, request.stream);
+                return true;
+            }
+            return false;
+        };
+    };
+    for (const auto binding : {LiteBinding::NativeQuic, LiteBinding::WebTransport}) {
+        SCOPED_TRACE(static_cast<int>(binding));
+        const auto on = table_with_duties(binding, true, ends_answers);
+        const auto off = table_with_duties(binding, false, ends_answers);
+        EXPECT_GT(engine_actions(on), 0u) << "the duty fired";
+        for (const auto& t : on) {
+            EXPECT_FALSE(t.harness_failed) << t.scenario_id << ": " << t.harness_failure_reason;
+            for (const auto& action : t.engine_actions)
+                EXPECT_EQ(action.kind, s::LiteEngineAction::Kind::FinSendAfterPeerEnd) << t.scenario_id;
+        }
+        const auto with = verdict_table(on);
+        const auto without = verdict_table(off);
+        for (const auto& [key, verdict] : without)
+            EXPECT_EQ(with.at(key), verdict) << key.first << " on " << key.second << ": on "
+                                             << verdict_name(with.at(key)) << ", off " << verdict_name(verdict);
+    }
+}
+
+// Duty (c): a publisher sending Path on WebTransport. The runner closes the session with PROTOCOL_VIOLATION as soon
+// as it decodes the SETUP; row 125's evaluator still judges the Path it observed (Fail), as it did with the duty off
+// after the allowance. A conforming WebTransport publisher (no Path) is not closed and passes.
+TEST(LiteConformanceDuties, Row125IsStillJudgedWhenTheRunnerClosedForThePath) {
+    const auto binding = LiteBinding::WebTransport;
+    const auto client_path = [&] {
+        for (auto& definition : conformance_probes(binding))
+            if (definition.id == s::kL06SetupClientPath) return definition;
+        throw std::logic_error("no client-path probe");
+    };
+    // The publisher believes it is on native QUIC, so it sends Path.
+    const auto sends_path = [](ConformingLitePublisherConfig& config) { config.binding = LiteBinding::NativeQuic; };
+    const auto closed = run_conforming(client_path(), binding, sends_path);
+    ASSERT_TRUE(closed.runner_closed_for_path);
+    EXPECT_TRUE(closed.runner_closed);
+    EXPECT_FALSE(closed.stimulus_delivered);
+    EXPECT_TRUE(s::judgeable(closed));
+    ASSERT_EQ(closed.engine_actions.size(), 1u);
+    EXPECT_EQ(closed.engine_actions[0].kind, s::LiteEngineAction::Kind::CloseForWebTransportPath);
+    EXPECT_EQ(s::evaluate_l06_setup_path_absent_on_uri_binding(closed), Verdict{false});
+    auto off = client_path();
+    off.duties = {};
+    const auto open = run_conforming(std::move(off), binding, sends_path);
+    EXPECT_FALSE(open.runner_closed);
+    EXPECT_EQ(s::evaluate_l06_setup_path_absent_on_uri_binding(open), Verdict{false});
+    // Rows 120/124 stay native-only (NotRun) either way.
+    EXPECT_EQ(s::evaluate_l06_setup_path_sent(closed), Verdict{});
+    EXPECT_EQ(s::evaluate_l06_setup_path_query_appended(closed), Verdict{});
+    const auto conforming = run_conforming(client_path(), binding);
+    EXPECT_FALSE(conforming.runner_closed);
+    EXPECT_TRUE(conforming.engine_actions.empty());
+    EXPECT_EQ(s::evaluate_l06_setup_path_absent_on_uri_binding(conforming), Verdict{true});
+}
+
+// The Path close in every other scenario: the runner closed before the stimulus ran, so no evaluator that needs
+// the stimulus or the allowance judges (NotRun, never a Pass or a Fail of the publisher for a session the runner
+// ended). The two that read the publisher's SETUP bytes themselves still judge them: row 125 (the Path, Fail) and
+// row 111 (Parameter ID uniqueness of that same SETUP, Pass here; its gate is judgeable() plus the runner's Setup,
+// as with the duty off, where it gives the same Pass after the allowance).
+TEST(LiteConformanceDuties, ThePathCloseLeavesEveryOtherRowNotRun) {
+    const auto binding = LiteBinding::WebTransport;
+    const auto sends_path = [](ConformingLitePublisherConfig& config) { config.binding = LiteBinding::NativeQuic; };
+    const auto on = table_with_duties(binding, true, sends_path);
+    const auto off = verdict_table(table_with_duties(binding, false, sends_path));
+    for (const auto& t : on) {
+        SCOPED_TRACE(t.scenario_id);
+        EXPECT_TRUE(t.runner_closed_for_path);
+        for (const auto& entry : evaluators()) {
+            const auto verdict = entry.evaluate(t);
+            if (entry.id == "l06-setup-path-absent-on-uri-binding" && t.scenario_id == s::kL06SetupClientPath) {
+                EXPECT_EQ(verdict, Verdict{false});
+            } else if (entry.id == "l06-setup-parameters-unique" && t.scenario_id == s::kL06SetupStream) {
+                EXPECT_EQ(verdict, Verdict{true});
+                EXPECT_EQ(off.at({entry.id, t.scenario_id}), Verdict{true});
+            } else {
+                EXPECT_EQ(verdict, Verdict{}) << entry.id;
+            }
+        }
     }
 }
 

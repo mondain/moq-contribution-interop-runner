@@ -22,6 +22,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace moq::interop {
@@ -486,6 +487,65 @@ TEST(LiteRunLive, TheRunHookJudgesEachContextAndKeepsOnlyItsVerdicts) {
     ASSERT_NE(end, run.events.end());
     EXPECT_NE(end->detail.find("group_payload_bytes_dropped="), std::string::npos) << end->detail;
     EXPECT_EQ(end->detail.find("group_payload_bytes_dropped=0 "), std::string::npos) << end->detail;
+}
+
+// A publisher that FINs its announce answer right after ANNOUNCE_OK: over the real native QUIC connection the runner
+// FINs its request side (draft 4.3) as an engine action, with no harness error and the row states the simulated
+// clock gives the same publisher.
+TEST(LiteRunLive, ThePublisherEndingItsAnnounceAnswerIsAnsweredWithTheRunnersFin) {
+    const auto tweak = [](ConformingLitePublisherConfig& settings) {
+        settings.hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                       const test::lite::LiteRunnerRequest& request) {
+            const auto* announce = std::get_if<wire::moqlite06::AnnounceRequest>(&request.message);
+            if (!announce) return false;
+            publisher.answer_announce(peer, request.stream, *announce);
+            publisher.fin_answer(peer, request.stream);
+            return true;
+        };
+    };
+    const auto config = lite_config({"l06-announce-prefix"}, 5000ms);
+    const auto run = run_live(config, tweak);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-announce-prefix";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("engine_actions=fin_send_after_peer_end:stream=1:"), std::string::npos)
+        << end->detail;
+    EXPECT_NE(end->detail.find(":status=0"), std::string::npos) << end->detail;
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config, tweak)));
+    EXPECT_EQ(state_of(run, "L06-7-4-MUST-139"), OutcomeState::Pass);
+}
+
+// A WebTransport publisher whose SETUP carries Path (draft 7.3.2: MUST NOT on this binding): the runner closes the
+// session with PROTOCOL_VIOLATION over the real transport as soon as it decoded that SETUP. Row 014 needs the whole
+// allowance, so it is NotRun; row 111 judges the same SETUP's Parameter IDs (Pass).
+TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config = lite_config({"l06-setup-stream"}, 4000ms, app::TransportKind::WebTransport);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto parameters = publisher_config().setup_parameters;
+    parameters.insert(parameters.begin(), {wire::moqlite06::kParamPath, test::lite::bytes_of("/moq")});
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup);
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-setup-stream";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("runner_closed=true runner_closed_for_path=true"), std::string::npos) << end->detail;
+    EXPECT_NE(end->detail.find("engine_actions=close_for_webtransport_path:stream=none:"), std::string::npos)
+        << end->detail;
+    EXPECT_NE(end->detail.find(":code=3:status=0"), std::string::npos) << end->detail;
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-MUST-NOT-111"), OutcomeState::Pass);
 }
 
 // --- every scenario, simulated ---------------------------------------------------------------------------------

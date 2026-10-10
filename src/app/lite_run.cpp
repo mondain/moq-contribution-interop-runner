@@ -376,12 +376,27 @@ private:
         return std::to_string((*at - std::min(*at, base)) / 1000000);
     }
 
+    // kind:stream=ID:at_ms=N:code=C:status=S entries joined with ',' ("none" without any).
+    std::string engine_actions(const scenarios::LiteTranscript& t, std::uint64_t base) const {
+        if (t.engine_actions.empty()) return "none";
+        std::string out;
+        for (const auto& action : t.engine_actions) {
+            if (!out.empty()) out += ',';
+            out += std::string(scenarios::to_string(action.kind)) + ":stream=" +
+                   (action.stream_id ? std::to_string(*action.stream_id) : "none") +
+                   ":at_ms=" + ms_since(base, action.at_ns) + ":code=" + std::to_string(action.code) +
+                   ":status=" + std::to_string(static_cast<unsigned>(action.status));
+        }
+        return out;
+    }
+
     std::string end_detail(const scenarios::LiteTranscript& t, std::chrono::milliseconds deadline, bool stopped) const {
         const auto base = t.established ? t.established_ns : t.started_ns;
         std::string detail = "complete=" + std::string(yes(t.complete)) + " timed_out=" + yes(t.timed_out) +
             " event_limit=" + yes(t.event_limit_reached) + " harness_failed=" + yes(t.harness_failed) +
             " established=" + yes(t.established) + " stimulus_delivered=" + yes(t.stimulus_delivered) +
             " peer_closed_early=" + yes(t.peer_closed_early) + " runner_closed=" + yes(t.runner_closed) +
+            " runner_closed_for_path=" + yes(t.runner_closed_for_path) +
             " cancelled=" + yes(stopped) +
             // Every lite probe is time-bounded: its allowances end it, the deadline bounds it.
             " time_bounded=true deadline_ms=" + std::to_string(deadline.count()) +
@@ -389,6 +404,8 @@ private:
             " lite_messages_stored=" + std::to_string(stored_messages_) + "/" + std::to_string(total_messages_) +
             // Group payload bytes the transcript kept as length and FIN only (the recorder decoded them).
             " group_payload_bytes_dropped=" + std::to_string(t.payload_bytes_dropped) +
+            // What the engine did for the runner duties (never steps, so never a stimulus).
+            " engine_actions=" + engine_actions(t, base) +
             " lite_decode_errors_stored=" + std::to_string(stored_issues_) + "/" + std::to_string(total_issues_) +
             " steps=";
         for (std::size_t i = 0; i < t.steps.size(); ++i) {

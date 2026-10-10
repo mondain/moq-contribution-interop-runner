@@ -74,6 +74,10 @@ LiteProbeDefinition allowance_probe(std::string_view id, std::chrono::millisecon
     definition.deadline = deadline;
     // The probe ends as soon as its allowance step executed.
     definition.observation_window = std::chrono::milliseconds{0};
+    // The runner's own duties (draft 4.3 send-direction close, draft 7.3.2 Path on WebTransport), carried out by the
+    // engine outside the steps.
+    definition.duties.close_send_after_peer_end = true;
+    definition.duties.close_on_webtransport_path = true;
     return definition;
 }
 

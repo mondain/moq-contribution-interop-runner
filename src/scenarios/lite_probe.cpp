@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <span>
+#include <string>
 #include <utility>
 #include <variant>
 
@@ -162,6 +164,14 @@ std::string_view to_string(LiteStep::Kind kind) {
         case LiteStep::Kind::CloseSession: return "close_session";
         case LiteStep::Kind::Wait: return "wait";
         case LiteStep::Kind::Mark: return "mark";
+    }
+    return "unknown";
+}
+
+std::string_view to_string(LiteEngineAction::Kind kind) {
+    switch (kind) {
+        case LiteEngineAction::Kind::FinSendAfterPeerEnd: return "fin_send_after_peer_end";
+        case LiteEngineAction::Kind::CloseForWebTransportPath: return "close_for_webtransport_path";
     }
     return "unknown";
 }
@@ -433,6 +443,12 @@ LiteProbeController::Progress LiteProbeController::execute(const LiteStep& step,
                 if (transcript_.harness_failed) return Progress::Failed;
                 if (skip) return Progress::Done;
                 if (!id) return Progress::Wait;
+                if (step.kind != Kind::StopSending && engine_fins_.contains(*id)) {
+                    // A write or reset after the engine's FIN would be a transport error: the step cannot run.
+                    record.stream_id = id;
+                    record.skipped_reason = std::string(kLiteSendClosedByEngine);
+                    return Progress::Done;
+                }
                 record.stream_id = id;
                 record.bytes = step.kind == Kind::SendOnStream ? step.bytes : std::vector<std::byte>{};
             }
@@ -462,6 +478,114 @@ LiteProbeController::Progress LiteProbeController::execute(const LiteStep& step,
         }
     }
     return Progress::Done;
+}
+
+bool LiteProbeController::send_side_pending(transport::StreamId id) const {
+    using Kind = LiteStep::Kind;
+    for (std::size_t i = next_step_; i < steps_.size(); ++i) {
+        const auto& step = steps_[i];
+        const auto& record = transcript_.steps[i];
+        // The current step already wrote to it (a partial write in progress).
+        if (record.stream_id == std::optional<transport::StreamId>{id}) return true;
+        if (step.kind != Kind::SendOnStream && step.kind != Kind::FinStream && step.kind != Kind::ResetStream)
+            continue;
+        // A step picking its stream when it runs may pick this one: defer to it.
+        if (!step.stream_ref) return true;
+        if (*step.stream_ref < transcript_.steps.size() &&
+            transcript_.steps[*step.stream_ref].stream_id == std::optional<transport::StreamId>{id})
+            return true;
+    }
+    return false;
+}
+
+void LiteProbeController::note_send_ended(const LiteStep& step, const LiteStepRecord& record) {
+    if (!record.stream_id) return;
+    if (record.fin_accepted || record.refused || (step.kind == LiteStep::Kind::ResetStream && record.executed()))
+        send_ended_.insert(*record.stream_id);
+}
+
+void LiteProbeController::close_sends_after_peer_end(std::uint64_t now) {
+    // Ids first: note_local_write below may grow the recorder's record vector.
+    std::vector<transport::StreamId> due;
+    for (const auto& record : session_.streams()) {
+        if (record.origin != session::LiteOrigin::Runner || !record.bidirectional) continue;
+        if (!(record.fin_seen || record.reset_seen) || record.stop_sending_seen || record.local_fin) continue;
+        if (send_ended_.contains(record.stream_id) || send_side_pending(record.stream_id)) continue;
+        due.push_back(record.stream_id);
+    }
+    for (const auto id : due) {
+        const auto result = transport_.write(id, {}, true);
+        if (must_wait(result.status)) continue;  // retried on the next poll
+        LiteEngineAction action;
+        action.kind = LiteEngineAction::Kind::FinSendAfterPeerEnd;
+        action.stream_id = id;
+        action.at_ns = now;
+        action.status = result.status;
+        if (result.status == TransportStatus::Success) {
+            session_.note_local_write(id, true, {}, true, now);
+            engine_fins_.insert(id);
+        } else if (!peer_refusal(result.status)) {
+            fail("the transport rejected the engine's FIN on stream " + std::to_string(id));
+            return;
+        }
+        send_ended_.insert(id);
+        transcript_.engine_actions.push_back(action);
+    }
+}
+
+bool LiteProbeController::run_duties(std::uint64_t now) {
+    const auto& duties = definition_.duties;
+    const bool path_close_tried = std::any_of(
+        transcript_.engine_actions.begin(), transcript_.engine_actions.end(),
+        [](const LiteEngineAction& action) { return action.kind == LiteEngineAction::Kind::CloseForWebTransportPath; });
+    if (duties.close_on_webtransport_path && definition_.binding == LiteBinding::WebTransport && !path_close_tried) {
+        bool path = false;
+        for (const auto& record : session_.streams()) {
+            if (record.origin != session::LiteOrigin::Peer || record.bidirectional ||
+                record.kind != session::LiteStreamKind::Setup)
+                continue;
+            for (const auto* decoded : session::peer_messages(record)) {
+                const auto* setup = std::get_if<l06::SetupMessage>(&decoded->message);
+                if (!setup) continue;
+                for (const auto& parameter : setup->parameters) path = path || parameter.id == l06::kParamPath;
+            }
+        }
+        if (path) {
+            const auto reason = std::string(kLiteWebTransportPathCloseReason);
+            const auto result = transport_.close(
+                kLiteProtocolViolation,
+                std::span<const std::byte>(reinterpret_cast<const std::byte*>(reason.data()), reason.size()));
+            if (!must_wait(result.status)) {
+                LiteEngineAction action;
+                action.kind = LiteEngineAction::Kind::CloseForWebTransportPath;
+                action.at_ns = now;
+                action.code = kLiteProtocolViolation;
+                action.status = result.status;
+                transcript_.engine_actions.push_back(action);
+                if (result.status == TransportStatus::Success) {
+                    transcript_.runner_closed = true;
+                    transcript_.runner_closed_for_path = true;
+                    transcript_.complete = true;
+                    finish(now);
+                    return false;
+                }
+                if (!peer_refusal(result.status)) {
+                    fail("the transport rejected the engine's session close");
+                    finish(now);
+                    return false;
+                }
+                // The connection is already closing because of the peer: its close event ends the probe.
+            }
+        }
+    }
+    if (duties.close_send_after_peer_end) {
+        close_sends_after_peer_end(now);
+        if (transcript_.harness_failed) {
+            finish(now);
+            return false;
+        }
+    }
+    return true;
 }
 
 void LiteProbeController::continue_steps(std::uint64_t now) {
@@ -510,6 +634,7 @@ void LiteProbeController::run_steps(std::uint64_t now) {
         if (record.skipped_reason.empty()) {
             record.executed_at_ns = now;
             last_step_ns_ = now;
+            note_send_ended(step, record);
         }
         ++next_step_;
         if (step.kind == LiteStep::Kind::CloseSession && record.executed() && !record.refused) {
@@ -607,6 +732,9 @@ bool LiteProbeController::poll() {
             }
         }
         if (setup_ready) {
+            // The runner's own duties come first: they answer the events just handled, before any step of this
+            // poll (and after the runner's Setup stream, which the Path close must not pre-empt).
+            if (!run_duties(now)) return false;
             continue_steps(now);
             run_steps(now);
             if (ended_) return false;

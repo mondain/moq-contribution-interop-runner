@@ -468,6 +468,14 @@ public:
         cancelled_.insert(stream);
         send_ended_.insert(stream);
     }
+    // Ends this publisher's send direction (FIN) of a runner stream it answered, as if the transaction were over: a
+    // served subscription's open Group streams are reset and no further groups follow; the runner's later FIN is
+    // not echoed again.
+    void fin_answer(ScriptedLitePeer& peer, transport::StreamId stream) {
+        send_ended_.insert(stream);
+        end_groups(peer, stream);
+        peer.fin(stream);
+    }
     void close(ScriptedLitePeer& peer, std::uint64_t code, std::string reason = {}) {
         peer.close_session(code, std::move(reason));
     }
