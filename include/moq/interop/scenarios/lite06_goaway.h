@@ -44,8 +44,9 @@ inline constexpr std::string_view kL06GoawayLearnLabel = "goaway-subscribe";  //
 inline constexpr std::string_view kL06GoawayUri = "https://goaway-target.invalid/moq";
 // The Subscribe ID of l06-goaway-single's SUBSCRIBE.
 inline constexpr std::uint64_t kL06GoawaySubscribeId = 0;
-// Group streams the publisher must have opened before the GOAWAY (the cadence proof).
-inline constexpr std::size_t kL06GoawayMinGroups = 2;
+// Group streams the publisher must have opened before the GOAWAY (the cadence proof). Three, because the first is
+// usually the group already in progress when the SUBSCRIBE lands: only the gaps from the second on are whole GOPs.
+inline constexpr std::size_t kL06GoawayMinGroups = 3;
 // The URI length l06-goaway-oversize claims: one above the draft 7.18 limit of 8,192 bytes.
 inline constexpr std::size_t kL06GoawayOversizeLength = 8193;
 // The flight time allowed to a stream the publisher opened before it saw the GOAWAY, in the draft's silence.

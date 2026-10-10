@@ -125,7 +125,7 @@ TEST(Lite06GoawaySingle, AnObservationShorterThanTheCadenceIsNotRun) {
     config.hooks.on_poll = [&](ConformingLitePublisher&, ScriptedLitePeer& peer) {
         // Two Group streams a second apart before the GOAWAY, fed by the hook rather than the default emission.
         ++polls;
-        if (polls == 20 || polls == 120) {
+        if (polls == 20 || polls == 120 || polls == 220) {
             peer.data(peer.open_peer_uni(), join({stream_type(0x0), group_header({0, polls, 0})}), true);
         }
     };
@@ -138,6 +138,33 @@ TEST(Lite06GoawaySingle, AnObservationShorterThanTheCadenceIsNotRun) {
     };
     ConformingLitePublisher publisher(config);
     const auto t = run(publisher, scen::l06_goaway_single_probe(kDeadline, kBroadcast, kTrack, 2200ms));
+    ASSERT_NE(lite06::step_labelled(t, scen::kL06GoawayLabel), nullptr);
+    EXPECT_EQ(evaluate_l06_goaway_no_new_streams(t), kNotRun);
+}
+
+// Final review I1: with a slow GOP the first two Group streams are close together (the first is the group in
+// progress when the SUBSCRIBE lands), so two streams understated the cadence and a publisher that keeps opening
+// streams could pass because its next one fell after the probe. Three streams are needed and only the gaps between
+// whole groups count.
+TEST(Lite06GoawaySingle, ASlowGopPublisherWhoseFirstGroupWasMidGopIsNotRun) {
+    ConformingLitePublisherConfig config;
+    config.groups_per_subscription = 8;
+    config.keep_live_group_open = false;
+    std::size_t polls = 0;
+    config.hooks.on_poll = [&](ConformingLitePublisher&, ScriptedLitePeer& peer) {
+        ++polls;
+        // Groups at 0.2 s, 0.6 s and 8.6 s: an 8 s GOP after a burst.
+        if (polls == 20 || polls == 60 || polls == 860) {
+            peer.data(peer.open_peer_uni(), join({stream_type(0x0), group_header({0, polls, 0})}), true);
+        }
+    };
+    config.hooks.on_request = [](ConformingLitePublisher&, ScriptedLitePeer& peer, const LiteRunnerRequest& request) {
+        if (request.stream_type != 0x2) return false;
+        peer.data(request.stream, subscribe_response(l06::SubscribeOk{5}));
+        return true;  // answered, but the default groups are suppressed
+    };
+    ConformingLitePublisher publisher(config);
+    const auto t = run(publisher, scen::l06_goaway_single_probe(kDeadline, kBroadcast, kTrack));
     ASSERT_NE(lite06::step_labelled(t, scen::kL06GoawayLabel), nullptr);
     EXPECT_EQ(evaluate_l06_goaway_no_new_streams(t), kNotRun);
 }

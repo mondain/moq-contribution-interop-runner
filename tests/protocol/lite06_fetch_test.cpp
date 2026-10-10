@@ -272,6 +272,19 @@ TEST(Lite06FetchUnknownGroup, AnEmptyFinFails) {
     EXPECT_EQ(evaluate_l06_fetch_unknown_group_reset(run_unknown(config)), kFail);
 }
 
+// Final review I3: the session close was documented as a Fail but the evaluator gated on judgeable_with_stimulus,
+// which a peer close during the allowance always defeats.
+TEST(Lite06FetchUnknownGroup, ASessionCloseInsteadOfTheResetFails) {
+    auto config = base_config();
+    config.hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                 const LiteRunnerRequest& request) {
+        if (!is_fetch(request)) return false;
+        publisher.close(peer, 0x0);
+        return true;
+    };
+    EXPECT_EQ(evaluate_l06_fetch_unknown_group_reset(run_unknown(config)), kFail);
+}
+
 TEST(Lite06FetchUnknownGroup, NoAnswerInsideTheWindowIsNotRun) {
     auto config = base_config();
     config.hooks.on_request = [](ConformingLitePublisher&, ScriptedLitePeer&, const LiteRunnerRequest& request) {

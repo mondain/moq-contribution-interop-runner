@@ -156,7 +156,7 @@ std::optional<bool> evaluate_l06_goaway_no_new_streams(const LiteTranscript& tra
     std::sort(before.begin(), before.end());
     if (before.size() < kL06GoawayMinGroups) return std::nullopt;
     std::uint64_t longest_gap = 0;
-    for (std::size_t i = 1; i < before.size(); ++i) longest_gap = std::max(longest_gap, before[i] - before[i - 1]);
+    for (std::size_t i = 2; i < before.size(); ++i) longest_gap = std::max(longest_gap, before[i] - before[i - 1]);
 
     // The publisher must have been watched for longer than it needed to open its next stream, after the flight time
     // the draft leaves to the stream that crossed the GOAWAY.

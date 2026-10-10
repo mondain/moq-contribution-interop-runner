@@ -246,7 +246,9 @@ std::optional<bool> evaluate_l06_fetch_short_run(const LiteTranscript& transcrip
 }
 
 std::optional<bool> evaluate_l06_fetch_unknown_group_reset(const LiteTranscript& transcript) {
-    if (transcript.scenario_id != kL06FetchUnknownGroup || !judgeable_with_stimulus(transcript) ||
+    // The publisher's session close is an observation of this row (a close instead of the stream reset), so plain
+    // judgeable(); the stimuli are proven below.
+    if (transcript.scenario_id != kL06FetchUnknownGroup || !judgeable(transcript) ||
         !fixture_present(transcript) || !prefix_in_order(transcript))
         return std::nullopt;
     const auto* record = fetch_stream(
