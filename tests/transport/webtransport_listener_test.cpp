@@ -18,6 +18,7 @@
 #include <functional>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -90,6 +91,7 @@ struct ClientState {
     bool refused = false;
     std::uint64_t expected_server_stream = 0;
     std::vector<std::uint8_t> server_bytes;
+    std::vector<std::uint64_t> reset_streams;
 };
 
 int client_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
@@ -98,11 +100,16 @@ int client_callback(picoquic_cnx_t*, std::uint8_t* bytes, std::size_t length,
     auto* state = static_cast<ClientState*>(context);
     if (event == picohttp_callback_connect_accepted) state->accepted = true;
     if (event == picohttp_callback_connect_refused) state->refused = true;
+    if (event == picohttp_callback_reset && stream != nullptr)
+        state->reset_streams.push_back(stream->stream_id);
     if (event == picohttp_callback_post_data && stream != nullptr &&
         stream->stream_id == state->expected_server_stream && bytes != nullptr)
         state->server_bytes.insert(state->server_bytes.end(), bytes, bytes + length);
     return 0;
 }
+
+// The client callback state of the session a test body is running in (exercise_connect).
+ClientState* live_state = nullptr;
 
 // What a test body sees once the CONNECT is accepted: the server listener, the
 // client connection, and a step() that moves packets both ways and collects the
@@ -122,7 +129,8 @@ void exercise_connect(const char* token, const char* offered,
                       bool scheme_http = false,
                       bool require_origin = false,
                       const std::function<void(WebTransportListenerConfig&)>& tune = {},
-                      const std::function<void(LiveSession&)>& body = {}) {
+                      const std::function<void(LiveSession&)>& body = {},
+                      const std::function<void(picoquic_cnx_t*)>& tune_client = {}) {
     auto settings = config();
     if (tune) tune(settings);
     settings.application_protocol = application_protocol;
@@ -161,6 +169,7 @@ void exercise_connect(const char* token, const char* offered,
     ASSERT_EQ(picowt_prepare_client_cnx(
         quic, reinterpret_cast<sockaddr*>(&server_address), &cnx, &h3,
         &control, picoquic_current_time(), "runner.test"), 0);
+    if (tune_client) tune_client(cnx);
     ASSERT_EQ(picoquic_start_client_cnx(cnx), 0);
     ClientState state;
     std::array<std::uint8_t, 2048> outgoing{};
@@ -363,6 +372,7 @@ void exercise_connect(const char* token, const char* offered,
         EXPECT_TRUE(reply_received);
     }
     if (expected_accept && state.accepted && body) {
+        live_state = &state;
         LiveSession live;
         live.listener = created.listener.get();
         live.cnx = cnx;
@@ -397,6 +407,7 @@ void exercise_connect(const char* token, const char* offered,
             std::this_thread::sleep_for(std::chrono::milliseconds{1});
         };
         body(live);
+        live_state = nullptr;
     }
     h3zero_callback_delete_context(cnx, h3);
     picoquic_free(quic);
@@ -559,6 +570,77 @@ TEST(WebTransportListener, InboundDropHidesPeerStreamsUntilReenabled) {
             for (int step = 0; step < 300 && !seen(kept); ++step) live.step();
             EXPECT_TRUE(seen(kept));
             EXPECT_FALSE(seen(dropped));
+        });
+}
+
+// A client that does not enable RESET_STREAM_AT (the moq CLI's WebTransport stack does not).
+void without_reset_stream_at(picoquic_cnx_t* cnx) {
+    picoquic_tp_t parameters = *picoquic_get_transport_parameters(cnx, 1);
+    parameters.is_reset_stream_at_enabled = 0;
+    picoquic_set_transport_parameters(cnx, &parameters);
+}
+
+// The moq-lite profile admits a client without RESET_STREAM_AT, so resetting a runner-opened stream must still
+// work there: picowt_reset_stream sends RESET_STREAM_AT (reliable size covers the WebTransport stream header),
+// which picoquic refuses on such a connection; the session falls back to a plain RESET_STREAM.
+TEST(WebTransportListener, MoqLiteResetsARunnerStreamWhenThePeerLacksResetStreamAt) {
+    exercise_connect("webtransport-h3", "\"moq-lite-06\"", "https://publisher.test", true, "moq-lite-06",
+        false, false, {},
+        [](LiveSession& live) {
+            EXPECT_EQ(live.cnx->is_reset_stream_at_enabled, 0u);
+            const auto stream = live.listener->open_bidi();
+            ASSERT_EQ(stream.status, TransportStatus::Success);
+            live_state->expected_server_stream = stream.stream_id;
+            live_state->server_bytes.clear();
+            static constexpr std::array<std::byte, 1> byte{std::byte{'s'}};
+            ASSERT_EQ(live.listener->write(stream.stream_id, byte, false).status, TransportStatus::Success);
+            for (int step = 0; step < 600 && live_state->server_bytes.empty(); ++step) live.step();
+            ASSERT_EQ(live_state->server_bytes, (std::vector<std::uint8_t>{'s'}));
+            EXPECT_EQ(live.listener->reset(stream.stream_id, 0x4d1).status, TransportStatus::Success);
+            const auto reset_seen = [&] {
+                return std::find(live_state->reset_streams.begin(), live_state->reset_streams.end(),
+                                 stream.stream_id) != live_state->reset_streams.end();
+            };
+            for (int step = 0; step < 600 && !reset_seen(); ++step) live.step();
+            EXPECT_TRUE(reset_seen());
+            EXPECT_EQ(picoquic_get_remote_stream_error(live.cnx, stream.stream_id),
+                      0x52e4a40fa8dbULL + 0x4d1 + 0x4d1 / 0x1e);  // the HTTP/3 code of WebTransport error 0x4d1
+            // A second reset of the same stream is refused (the stream is finished), as with RESET_STREAM_AT.
+            EXPECT_EQ(live.listener->reset(stream.stream_id, 0x4d1).status, TransportStatus::InvalidState);
+        },
+        without_reset_stream_at);
+}
+
+// The same client on a MoQ Transport listener is refused at CONNECT (validate_connect requires RESET_STREAM_AT),
+// so the plain RESET_STREAM fallback is unreachable for drafts 18, 21 and 22.
+TEST(WebTransportListener, MoqTransportRefusesAClientWithoutResetStreamAt) {
+    for (const char* draft : {"moqt-18", "moqt-21", "moqt-22"}) {
+        const std::string offered = std::string{"\""} + draft + "\"";
+        exercise_connect("webtransport-h3", offered.c_str(), "https://publisher.test", false, draft,
+                         false, false, {}, {}, without_reset_stream_at);
+    }
+}
+
+// With RESET_STREAM_AT negotiated the reset still goes through picowt_reset_stream (unchanged path).
+TEST(WebTransportListener, MoqLiteResetsARunnerStreamWithResetStreamAt) {
+    exercise_connect("webtransport-h3", "\"moq-lite-06\"", "https://publisher.test", true, "moq-lite-06",
+        false, false, {},
+        [](LiveSession& live) {
+            EXPECT_EQ(live.cnx->is_reset_stream_at_enabled, 1u);
+            const auto stream = live.listener->open_bidi();
+            ASSERT_EQ(stream.status, TransportStatus::Success);
+            live_state->expected_server_stream = stream.stream_id;
+            live_state->server_bytes.clear();
+            static constexpr std::array<std::byte, 1> byte{std::byte{'s'}};
+            ASSERT_EQ(live.listener->write(stream.stream_id, byte, false).status, TransportStatus::Success);
+            for (int step = 0; step < 600 && live_state->server_bytes.empty(); ++step) live.step();
+            EXPECT_EQ(live.listener->reset(stream.stream_id, 7).status, TransportStatus::Success);
+            const auto reset_seen = [&] {
+                return std::find(live_state->reset_streams.begin(), live_state->reset_streams.end(),
+                                 stream.stream_id) != live_state->reset_streams.end();
+            };
+            for (int step = 0; step < 600 && !reset_seen(); ++step) live.step();
+            EXPECT_TRUE(reset_seen());
         });
 }
 

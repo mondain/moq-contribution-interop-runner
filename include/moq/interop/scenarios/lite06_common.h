@@ -38,6 +38,18 @@ inline constexpr std::string_view kL06ErrorsCodeSpace = "l06-errors-code-space";
 //            be observed for a Pass; on the probes the session half alone suffices.
 std::optional<bool> evaluate_l06_errors_code_space(const LiteTranscript& transcript);
 
+// The two halves of row 027 in one transcript, judged as evaluate_l06_errors_code_space judges them: `stream` from
+// the peer's RESET_STREAM / STOP_SENDING codes, `session` from its application close. true: a code of the right
+// space; false: a code registered only in the other table; nullopt: no such code, an unregistered one, or a
+// transcript the evaluator does not judge. The row's aggregation (requirements::aggregate_lite) combines them
+// across its five scenarios: the stream half comes from l06-errors-code-space, the session half from any of them
+// (catalog rationale of L06-4-4-MUST-027).
+struct CodeSpaceHalves {
+    std::optional<bool> stream;
+    std::optional<bool> session;
+};
+CodeSpaceHalves l06_code_space_halves(const LiteTranscript& transcript);
+
 namespace lite06 {
 
 // Draft 4.4.1 Table 2 and 4.4.2 Table 3 (pinned against the draft text in tests/golden/moqlite06_wire_audit_test.cpp).

@@ -21,6 +21,11 @@ struct ServerConfig {
     // server lists draft 22, accepts draft 22 runs and presents stored ones; without it, draft 22
     // runs are refused with 422 draft_not_runnable and stored ones answer 409.
     std::shared_ptr<const requirements::RequirementCatalog> draft22_catalog;
+    // Optional: the moq-lite-06 catalog (draft 106, staged: complete false; the same object the run manager scores
+    // with). When set, the server lists moq-lite-06 (with its staged note), serves its requirements, accepts
+    // "draft": "moq-lite-06" runs and presents stored ones; without it lite runs are refused with 422
+    // draft_not_runnable and stored ones answer 409, as for draft 22.
+    std::shared_ptr<const requirements::RequirementCatalog> moqlite06_catalog;
 };
 
 struct ApiError {

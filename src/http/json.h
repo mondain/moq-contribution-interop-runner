@@ -1,11 +1,13 @@
 #pragma once
 
 #include "moq/interop/app/draft_traits.h"
+#include "moq/interop/requirements/catalog.h"
 
 #include <nlohmann/json.hpp>
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace moq::interop::http::detail {
 
@@ -32,6 +34,23 @@ inline std::string draft_cell(const nlohmann::json& value) {
     if (value.is_string()) return value.get<std::string>();
     if (value.is_number_integer()) return std::to_string(value.get<long long>());
     return {};
+}
+
+// A staged result: a moq-lite-06 run (or catalog) while its catalog is still being classified (complete: false; the
+// MoQ Transport catalogs are always complete). Every staged surface (run record, drafts listing, JSON export, TAP,
+// HTML report, completeness entry) carries this note; nothing is added for the MoQ Transport drafts.
+inline constexpr std::string_view kStagedNote =
+    "Staged catalog: the moq-lite-06 catalog is still being classified (complete: false). Unreviewed rows are "
+    "reported not_run (classification pending) and count in the required, weighted and coverage denominators "
+    "without earning, so a run is fail, incomplete or error and never pass.";
+
+// A moq-lite run is presented as staged (the run record has no catalog; the lite catalog is staged).
+inline bool staged_draft(app::DraftVersion draft) { return !app::is_moqt(draft); }
+
+// A staged catalog: an incomplete moq-lite catalog.
+inline bool staged_catalog(const requirements::RequirementCatalog& catalog) {
+    const auto draft = app::parse_draft(catalog.draft);
+    return !catalog.complete && draft && staged_draft(*draft);
 }
 
 // Accepts the integers 18, 21 and 22 and the string "moq-lite-06"; everything else (floats, negatives,

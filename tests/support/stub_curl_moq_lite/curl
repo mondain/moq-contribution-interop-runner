@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Stand-in for curl, put first on PATH by tests/e2e/moq-lite-matrix-plan.sh.
+#
+# Answers exactly the HTTP calls tests/e2e/driven-moq-lite.sh makes against the runner that
+# tests/support/stub_runner_moq_lite.sh stands in for: the health check (only once the stub runner
+# for that port is ready), POST /api/v1/runs (the body is appended to $MOQ_STUB_DIR/calls.log as
+# `request: POST <url> <compact json>`, the --dry-run plan format; the run id is
+# `run-<http port>-<n>`, n counting the port's runs from 1; the retained request contract is written
+# under the stub runner's --driver-log-root as <run>/1-<scenario>/request.json), the run (finalized,
+# verdict incomplete, one pass and one not_run outcome) and its events (one page: one
+# publisher_process with status "stopped"). Any other call fails like curl --fail would.
+set -euo pipefail
+url=
+data=
+method=GET
+while (($#)); do
+    case "$1" in
+        -X) method=$2; shift ;;
+        -d) data=$2; shift ;;
+        -H|--output) shift ;;
+        http://*) url=$1 ;;
+    esac
+    shift
+done
+port=${url#http://127.0.0.1:}
+port=${port%%/*}
+path=/${url#http://127.0.0.1:"$port"/}
+case "$method $path" in
+    "GET /healthz")
+        [[ -e "$MOQ_STUB_DIR/ready-$port" ]] || exit 7 ;;
+    "POST /api/v1/runs")
+        printf 'request: POST %s %s\n' "$url" "$(jq -c . <<<"$data")" >>"$MOQ_STUB_DIR/calls.log"
+        count_file="$MOQ_STUB_DIR/runs-$port"
+        count=$(($(cat "$count_file" 2>/dev/null || printf 0) + 1))
+        printf '%s\n' "$count" >"$count_file"
+        run=run-$port-$count
+        scenario=$(jq -r '.scenarios[0]' <<<"$data")
+        log_root=$(cat "$MOQ_STUB_DIR/log-root-$port")
+        mkdir -p "$log_root/$run/1-$scenario"
+        printf '{}\n' >"$log_root/$run/1-$scenario/request.json"
+        jq -n --arg id "$run" '{run: {id: $id, state: "created"}}' ;;
+    "GET /api/v1/runs/run-$port-"*/events\?limit=100\&offset=0)
+        jq -n '{items: [{kind: "publisher_process", detail: "{\"status\":\"stopped\"}"}],
+            pagination: {limit: 100, offset: 0, total: 1, next_offset: null}}' ;;
+    "GET /api/v1/runs/run-$port-"*)
+        jq -n --arg id "${path#/api/v1/runs/}" '{run: {id: $id, state: "finalized", verdict: "incomplete",
+            outcomes: [{requirement_id: "L06-STUB-001", state: "pass"},
+                       {requirement_id: "L06-STUB-002", state: "not_run"}]}}' ;;
+    *)
+        printf 'stub curl: unexpected %s %s\n' "$method" "$url" >&2
+        exit 22 ;;
+esac

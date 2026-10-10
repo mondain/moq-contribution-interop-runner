@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -132,6 +133,11 @@ public:
         (void)enabled;
         return {TransportStatus::InvalidState, 0, std::nullopt};
     }
+
+    // The last session request this listener refused, for evidence: a WebTransport listener gives
+    // "status=N reason=... path=<received :path>" for a CONNECT it refused; empty when none was refused or the
+    // transport has no such request (native QUIC).
+    virtual std::string refused_connect() const { return {}; }
 };
 
 }  // namespace moq::interop::transport

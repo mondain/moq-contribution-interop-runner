@@ -15,12 +15,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace moq::interop {
@@ -127,13 +129,16 @@ TEST(LiteRunLive, OneScenarioStoresAFinalizedStagedRunOverEveryRow) {
     EXPECT_FALSE(any_event(run, "harness_error"));
     for (const auto& event : run.events)
         if (event.kind == "lite_stream_opened" || event.kind == "lite_message") EXPECT_TRUE(event.stream_id.has_value());
-    // The session URL the run used (row 120's evidence): native QUIC lite has no request URI.
+    // The session URL the run used (row 120's evidence): the fixed path /moq and query token=l1d (L1e).
     const auto ready = std::find_if(run.events.begin(), run.events.end(),
                                     [](const auto& event) { return event.kind == "context_ready"; });
     ASSERT_NE(ready, run.events.end());
     EXPECT_NE(ready->detail.find("endpoint=moql://127.0.0.1:"), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("/moq?token=l1d "), std::string::npos) << ready->detail;
     EXPECT_NE(ready->detail.find("binding=native_quic"), std::string::npos) << ready->detail;
-    EXPECT_NE(ready->detail.find("session_url_has_path=false"), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("session_url_has_path=true session_url_path=/moq session_url_query=token=l1d"),
+              std::string::npos)
+        << ready->detail;
     expect_audit_clean(run);
 }
 
@@ -398,6 +403,7 @@ TEST(LiteRunLive, WebTransportRunJudgesTheSetupStream) {
     ASSERT_EQ(started.status, app::RunStartStatus::Started);
     EXPECT_EQ(started.protocol, "moq-lite-06");
     EXPECT_EQ(started.path, "/moq");
+    EXPECT_EQ(started.url, "https://127.0.0.1:" + std::to_string(started.endpoint.port) + "/moq?token=l1d");
     const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
     drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
         return std::make_unique<LiteWebTransportPublisher>(port, setup);
@@ -411,17 +417,226 @@ TEST(LiteRunLive, WebTransportRunJudgesTheSetupStream) {
                                     [](const auto& event) { return event.kind == "context_ready"; });
     ASSERT_NE(ready, run.events.end());
     EXPECT_NE(ready->detail.find("endpoint=https://127.0.0.1:"), std::string::npos) << ready->detail;
-    EXPECT_NE(ready->detail.find("binding=webtransport session_url_has_path=true session_url_path=/moq"),
+    EXPECT_NE(ready->detail.find("/moq?token=l1d "), std::string::npos) << ready->detail;
+    EXPECT_NE(ready->detail.find("binding=webtransport session_url_has_path=true session_url_path=/moq "
+                                 "session_url_query=token=l1d"),
               std::string::npos)
         << ready->detail;
     expect_audit_clean(run);
+}
+
+// --- the session URL rows (L1e): 120/124 on native QUIC, 125 on WebTransport ------------------------------------
+
+// The conforming publisher dials moql://127.0.0.1:PORT/moq?token=l1d, so its SETUP Path is "/moq?token=l1d": rows
+// 120 (exact byte match) and 124 (Path sent) pass; 125 is WebTransport only and stays NotRun.
+TEST(LiteRunLive, NativeClientPathRowsAreJudgedAgainstTheFixedSessionUrl) {
+    const auto config = lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::NativeQuic, std::nullopt);
+    const auto run = run_live(config);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::NotRun);
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    expect_audit_clean(run);
+}
+
+// A native publisher that dropped the query from its Path fails row 120 (row 124 still passes: a Path was sent).
+TEST(LiteRunLive, ANativePathWithoutTheQueryFailsRow120) {
+    const auto config = lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::NativeQuic, std::nullopt);
+    const auto tweak = [](ConformingLitePublisherConfig& settings) { settings.session_url_query.clear(); };
+    const auto run = run_live(config, tweak);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::Fail);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
+    EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Fail);
+}
+
+// On WebTransport the URL is the CONNECT :path (/moq?token=l1d) and a conforming SETUP has no Path: row 125 passes;
+// 120 and 124 are native QUIC only.
+TEST(LiteRunLive, WebTransportClientPathRowIsJudgedAgainstTheFixedSessionUrl) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config =
+        lite_config({"l06-setup-client-path"}, 4000ms, app::TransportKind::WebTransport, std::nullopt);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup);
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::NotRun);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    expect_audit_clean(run);
+}
+
+// A WebTransport CONNECT to the path without the query is refused by the listener (the :path must be the session
+// URL exactly), so the publisher never connects and the run ends without a verdict for the rows.
+TEST(LiteRunLive, AWebTransportConnectWithoutTheQueryIsRefused) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config = lite_config({"l06-setup-stream"}, 4000ms, app::TransportKind::WebTransport, std::nullopt);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{publisher_config().setup_parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup, "/moq");
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "transport_established", "l06-setup-stream"));
+    EXPECT_TRUE(any_event(run, "harness_error", "l06-setup-stream"));
+    // The evidence names the refused CONNECT and the :path it carried.
+    const auto refusal = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "harness_error" && event.detail.find("refused CONNECT:") != std::string::npos;
+    });
+    ASSERT_NE(refusal, run.events.end());
+    EXPECT_NE(refusal->detail.find("refused CONNECT: validator_status=404 reason=unknown WebTransport endpoint path=/moq"),
+              std::string::npos)
+        << refusal->detail;
+    EXPECT_EQ(refusal->detail.find("path=/moq?"), std::string::npos) << refusal->detail;  // the received :path
+    EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Error);
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
+}
+
+// --- per-context evaluation and the evidence cap (L1e Task 1) ------------------------------------------------------
+
+// run_lite itself over in-process scripted publishers (ScriptedLitePeer as the listener): the first context's
+// publisher also pushes 20 MiB of Group streams. The run hook judges each context as it ends and keeps only the
+// verdicts (a bounded size reported through on_context_judged), the flood costs no verdict (before L1e it set
+// event_limit_reached and 014/111 were NotRun), and the stored outcomes are what evaluate_lite gives the same
+// scenarios on the simulated clock.
+TEST(LiteRunLive, TheRunHookJudgesEachContextAndKeepsOnlyItsVerdicts) {
+    auto store = memory_store();
+    const auto lite = catalog(106);
+    const auto settings = manager_config();
+    const auto config = lite_config({"l06-setup-stream", "l06-setup-server-role"}, 4000ms);
+    const auto id = store->create_run(config);
+    std::atomic<bool> stop{false};
+    std::vector<std::unique_ptr<ConformingLitePublisher>> publishers;
+    std::size_t flood_bytes = 0;
+    const auto make = [&]() -> std::unique_ptr<transport::SessionTransport> {
+        auto publisher_settings = publisher_config();
+        if (publishers.empty()) {
+            publisher_settings.hooks.on_poll = [&flood_bytes, done = false](ConformingLitePublisher&,
+                                                                            ScriptedLitePeer& peer) mutable {
+                if (done) return;
+                done = true;
+                for (std::uint64_t group = 0; group < 20; ++group) {
+                    Bytes bytes = test::lite::join({test::lite::stream_type(0x0),
+                                                    test::lite::group_header({1, group, 0})});
+                    for (int f = 0; f < 2; ++f) {
+                        wire::moqlite06::Frame value;
+                        value.payload = Bytes(512 * 1024, std::byte{0x2e});
+                        const auto encoded = test::lite::frame(value);
+                        bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+                    }
+                    flood_bytes += bytes.size();
+                    peer.data(peer.open_peer_uni(), std::move(bytes), true);
+                }
+            };
+        }
+        publishers.push_back(std::make_unique<ConformingLitePublisher>(std::move(publisher_settings)));
+        return std::make_unique<ScriptedLitePeer>(publishers.back()->reaction());
+    };
+    std::vector<std::pair<std::size_t, std::size_t>> judged;
+    app::LiteRunEnvironment environment{id, "127.0.0.1:4443", *store, *lite, settings, stop,
+                                        [&]() { return app::LiteRunListener{make(), {}}; },
+                                        [&](std::size_t contexts, std::size_t bytes) {
+                                            judged.emplace_back(contexts, bytes);
+                                        }};
+    app::run_lite(environment, make(), config);
+    const auto run = store->load(id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    ASSERT_GE(flood_bytes, std::size_t{20} << 20);
+    EXPECT_FALSE(any_event(run, "context_event_limit"));
+    EXPECT_EQ(count_events(run, "context_complete"), 2u);
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-MUST-NOT-111"), OutcomeState::Pass);
+    EXPECT_EQ(state_of(run, "L06-7-3-3-MUST-131"), OutcomeState::Pass);
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
+    // One report per context; what the run holds stays a few kilobytes whatever the context carried.
+    ASSERT_EQ(judged.size(), 2u);
+    EXPECT_EQ(judged[0].first, 1u);
+    EXPECT_EQ(judged[1].first, 2u);
+    for (const auto& [contexts, bytes] : judged) EXPECT_LT(bytes, std::size_t{16} << 10) << contexts;
+    // The context end carries the dropped payload count.
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-setup-stream";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("group_payload_bytes_dropped="), std::string::npos) << end->detail;
+    EXPECT_EQ(end->detail.find("group_payload_bytes_dropped=0 "), std::string::npos) << end->detail;
+}
+
+// A publisher that FINs its announce answer right after ANNOUNCE_OK: over the real native QUIC connection the runner
+// FINs its request side (draft 4.3) as an engine action, with no harness error and the row states the simulated
+// clock gives the same publisher.
+TEST(LiteRunLive, ThePublisherEndingItsAnnounceAnswerIsAnsweredWithTheRunnersFin) {
+    const auto tweak = [](ConformingLitePublisherConfig& settings) {
+        settings.hooks.on_request = [](ConformingLitePublisher& publisher, ScriptedLitePeer& peer,
+                                       const test::lite::LiteRunnerRequest& request) {
+            const auto* announce = std::get_if<wire::moqlite06::AnnounceRequest>(&request.message);
+            if (!announce) return false;
+            publisher.answer_announce(peer, request.stream, *announce);
+            publisher.fin_answer(peer, request.stream);
+            return true;
+        };
+    };
+    const auto config = lite_config({"l06-announce-prefix"}, 5000ms);
+    const auto run = run_live(config, tweak);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-announce-prefix";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("engine_actions=fin_send_after_peer_end:stream=1:"), std::string::npos)
+        << end->detail;
+    EXPECT_NE(end->detail.find(":status=Success"), std::string::npos) << end->detail;
+    EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config, tweak)));
+    EXPECT_EQ(state_of(run, "L06-7-4-MUST-139"), OutcomeState::Pass);
+}
+
+// A WebTransport publisher whose SETUP carries Path (draft 7.3.2: MUST NOT on this binding): the runner closes the
+// session with PROTOCOL_VIOLATION over the real transport as soon as it decoded that SETUP. Row 014 needs the whole
+// allowance, so it is NotRun; row 111 judges the same SETUP's Parameter IDs (Pass).
+TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation) {
+    auto store = memory_store();
+    auto manager = lite_manager(store);
+    const auto config = lite_config({"l06-setup-stream"}, 4000ms, app::TransportKind::WebTransport);
+    const auto started = manager.start(config);
+    ASSERT_EQ(started.status, app::RunStartStatus::Started);
+    auto parameters = publisher_config().setup_parameters;
+    parameters.insert(parameters.begin(), {wire::moqlite06::kParamPath, test::lite::bytes_of("/moq")});
+    const auto setup = test::lite::setup_stream(wire::moqlite06::SetupMessage{parameters});
+    drive_contexts(store, started.id, started.endpoint.port, 1, [&](std::uint16_t port, unsigned) {
+        return std::make_unique<LiteWebTransportPublisher>(port, setup);
+    });
+    const auto run = store->load(started.id);
+    ASSERT_EQ(run.state, storage::RunState::Finalized);
+    EXPECT_FALSE(any_event(run, "harness_error"));
+    const auto end = std::find_if(run.events.begin(), run.events.end(), [](const auto& event) {
+        return event.kind == "context_complete" && event.scenario_id == "l06-setup-stream";
+    });
+    ASSERT_NE(end, run.events.end());
+    EXPECT_NE(end->detail.find("runner_closed=true runner_closed_for_path=true"), std::string::npos) << end->detail;
+    EXPECT_NE(end->detail.find("engine_actions=close_for_webtransport_path:stream=none:"), std::string::npos)
+        << end->detail;
+    EXPECT_NE(end->detail.find(":code=3:status=Success"), std::string::npos) << end->detail;
+    EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-MUST-NOT-111"), OutcomeState::Pass);
 }
 
 // --- every scenario, simulated ---------------------------------------------------------------------------------
 
 // The production builder dispatch (lite_probe_for) for all 19 scenarios at a live-sized timeout, judged against the
 // conforming publisher on the simulated clock: every row the conformance table passes on native QUIC passes here
-// (the client-path rows stay NotRun: native QUIC lite gives the publisher no session URL path), and no row fails.
+// (with the fixed session URL the native client-path rows 120/124 pass too), and no row fails.
 TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
     std::vector<std::string> ids;
     for (const auto& traits : app::kLiteExecutableScenarios) ids.emplace_back(traits.id);
@@ -433,7 +648,9 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
         EXPECT_EQ(definition.id, id);
         EXPECT_EQ(definition.requires_track, app::lite_executable_scenario(id)->requires_track) << id;
         EXPECT_EQ(definition.binding, scenarios::LiteBinding::NativeQuic);
-        EXPECT_FALSE(definition.session_url_has_path);
+        EXPECT_TRUE(definition.session_url_has_path);
+        EXPECT_EQ(definition.session_url_path, "/moq");
+        EXPECT_EQ(definition.session_url_query, "token=l1d");
         EXPECT_EQ(definition.connect_deadline, std::optional{std::chrono::milliseconds{15000}});
         // The announce probes name only the broadcast.
         if (definition.requires_track) EXPECT_EQ(definition.broadcast_path, "demo/live") << id;
@@ -444,8 +661,11 @@ TEST(LiteRunLive, AllNineteenProbesBuildAndJudgeOnTheSimulatedClock) {
     for (const auto* row : {"L06-3-1-MUST-014", "L06-7-2-MUST-108", "L06-4-4-MUST-027", "L06-7-13-MUST-172",
                             "L06-3-6-MUST-020", "L06-4-4-MUST-030", "L06-7-4-MUST-139"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
-    for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124", "L06-7-3-2-MUST-NOT-125",
-                            "L06-7-7-MUST-NOT-152"})
+    // The fixed session URL (L1e) makes the native client-path rows judgeable; 125 is WebTransport only and 152
+    // needs a broadcast retraction the conforming publisher never makes.
+    for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124"})
+        EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
+    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152"})
         EXPECT_EQ(states.at(row), OutcomeState::NotRun) << row;
     // Too short a timeout for a builder is an exception lite_probe_for passes on (run_lite stores it).
     config.timeout = 1000ms;

@@ -408,6 +408,13 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_link_libraries(moq-interop-webtransport-listener-tests PRIVATE
                           moq-interop-transport GTest::gtest_main)
     add_test(NAME webtransport-listener COMMAND moq-interop-webtransport-listener-tests)
+    add_executable(moq-interop-webtransport-lite-settings-tests
+                   tests/transport/webtransport_lite_settings_test.cpp)
+    target_compile_definitions(moq-interop-webtransport-lite-settings-tests PRIVATE
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    target_link_libraries(moq-interop-webtransport-lite-settings-tests PRIVATE
+                          moq-interop-transport GTest::gtest_main)
+    add_test(NAME webtransport-lite-settings COMMAND moq-interop-webtransport-lite-settings-tests)
 
     add_executable(moq-interop-picoquic-link-tests
                    tests/integration/picoquic_link_test.cpp)
@@ -492,6 +499,25 @@ if(MOQ_INTEROP_BUILD_TESTS)
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
     add_test(NAME lite-run-live COMMAND moq-interop-lite-run-live-tests)
+    # Writes moq-lite-06 run databases for tests/e2e/audit-cli-moqlite.sh.
+    add_executable(moq-interop-lite-audit-fixture tests/support/lite_audit_fixture.cpp)
+    target_include_directories(moq-interop-lite-audit-fixture PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-audit-fixture PRIVATE
+        moq-interop-runs moq-interop-test-client moq-interop-execution-audit GTest::gtest)
+    target_compile_definitions(moq-interop-lite-audit-fixture PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    # moq-lite-06 runs through the HTTP API with the in-process lite publisher (L1e Task 2).
+    add_executable(moq-interop-http-api-lite-tests tests/integration/http_api_lite_test.cpp)
+    target_include_directories(moq-interop-http-api-lite-tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src/http")
+    target_link_libraries(moq-interop-http-api-lite-tests PRIVATE
+        moq-interop-http moq-interop-runs moq-interop-test-client moq-interop-execution-audit
+        httplib::httplib nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_compile_definitions(moq-interop-http-api-lite-tests PRIVATE
+        MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME http-api-lite COMMAND moq-interop-http-api-lite-tests)
     add_executable(moq-interop-raw-family-driver-peer tests/support/raw_family_driver_peer.cpp)
     target_link_libraries(moq-interop-raw-family-driver-peer PRIVATE
         moq-interop-test-client nlohmann_json::nlohmann_json)
@@ -1130,7 +1156,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
                      "$<TARGET_FILE:moq-interop-draft22-audit-fixture>")
     add_test(NAME audit-cli-moqlite
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-moqlite.sh"
-                     "$<TARGET_FILE:moq-interop-audit>")
+                     "$<TARGET_FILE:moq-interop-audit>"
+                     "$<TARGET_FILE:moq-interop-lite-audit-fixture>")
     set_tests_properties(audit-cli-moqlite PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME release-audit-check-contract
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/release-audit-contract.sh"
@@ -1193,6 +1220,12 @@ if(MOQ_INTEROP_BUILD_TESTS)
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-adapter-cmdlines.sh")
     add_test(NAME imquic-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/imquic-matrix-plan.sh")
+    add_test(NAME moq-lite-adapter-contract
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-adapter-contract.sh")
+    add_test(NAME moq-lite-adapter-cmdlines
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-adapter-cmdlines.sh")
+    add_test(NAME moq-lite-matrix-plan
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-matrix-plan.sh")
     add_executable(moq-interop-executable-ids-golden-tests tests/unit/executable_ids_golden_test.cpp)
     target_compile_definitions(moq-interop-executable-ids-golden-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

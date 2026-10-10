@@ -19,6 +19,9 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -58,6 +61,71 @@ std::vector<std::byte> application_protocol_bytes(const std::string& value) {
     return result;
 }
 
+// SETTINGS_WEBTRANSPORT_MAX_SESSIONS of draft-ietf-webtrans-http3-07 to -12 (h3zero's
+// h3zero_settings_webtransport_max_sessions_old). h3zero advertises SETTINGS_WT_ENABLED (0x2c7cf000) only; the moq
+// CLI's WebTransport stack (web-transport-proto 0.6.2) ignores that identifier and refuses a server without this one
+// (or the pre-07 WEBTRANSPORT_ENABLE pair), so the moq-lite listener adds it with the value 1: one session per
+// connection, as picoquic keeps.
+constexpr std::uint64_t kWebTransportMaxSessionsDraft07 = 0xc671706aull;
+
+// h3zero_protocol_init for the moq-lite profile: the same control stream (h3zero's SETTINGS, same values, plus
+// kWebTransportMaxSessionsDraft07 = 1 when WebTransport is enabled) and the same QPACK encoder/decoder streams.
+int lite_protocol_init(picoquic_cnx_t* cnx) {
+    h3zero_settings_t settings{};
+    settings.enable_connect_protocol = 1;
+    if (cnx->local_parameters.max_datagram_frame_size > 0) {
+        settings.h3_datagram = 1;
+        settings.webtransport_enabled = 1;
+        settings.webtransport_max_sessions = 1;
+    }
+    std::array<std::uint8_t, 256> encoded{};
+    const auto* const encoded_end =
+        h3zero_settings_encode(encoded.data(), encoded.data() + encoded.size(), &settings);
+    if (encoded_end == nullptr) return H3ZERO_INTERNAL_ERROR;
+    // Re-frame: frame type, the new length, h3zero's components, then the added one.
+    std::uint64_t frame_type = 0;
+    std::uint64_t frame_length = 0;
+    const auto* cursor = picoquic_frames_varint_decode(encoded.data(), encoded_end, &frame_type);
+    if (cursor != nullptr) cursor = picoquic_frames_varint_decode(cursor, encoded_end, &frame_length);
+    if (cursor == nullptr || static_cast<std::uint64_t>(encoded_end - cursor) != frame_length)
+        return H3ZERO_INTERNAL_ERROR;
+    std::array<std::uint8_t, 32> added{};
+    auto* added_end = added.data();
+    if (settings.webtransport_enabled != 0) {
+        added_end = picoquic_frames_varint_encode(added_end, added.data() + added.size(),
+                                                  kWebTransportMaxSessionsDraft07);
+        if (added_end != nullptr)
+            added_end = picoquic_frames_varint_encode(added_end, added.data() + added.size(), 1);
+        if (added_end == nullptr) return H3ZERO_INTERNAL_ERROR;
+    }
+    const auto added_length = static_cast<std::size_t>(added_end - added.data());
+    std::array<std::uint8_t, 300> stream{};
+    auto* out = stream.data();
+    const auto* const stream_end = stream.data() + stream.size();
+    *out++ = static_cast<std::uint8_t>(h3zero_stream_type_control);
+    out = picoquic_frames_varint_encode(out, stream_end, frame_type);
+    if (out != nullptr) out = picoquic_frames_varint_encode(out, stream_end, frame_length + added_length);
+    if (out == nullptr || static_cast<std::size_t>(stream_end - out) < frame_length + added_length)
+        return H3ZERO_INTERNAL_ERROR;
+    std::memcpy(out, cursor, frame_length);
+    out += frame_length;
+    if (added_length != 0) std::memcpy(out, added.data(), added_length);
+    out += added_length;
+
+    const auto control_stream = picoquic_get_next_local_stream_id(cnx, 1);
+    int ret = picoquic_add_to_stream(cnx, control_stream, stream.data(),
+                                     static_cast<std::size_t>(out - stream.data()), 0);
+    if (ret == 0) ret = picoquic_set_stream_priority(cnx, control_stream, 0);
+    for (const auto head : {static_cast<std::uint8_t>(h3zero_stream_type_qpack_encoder),
+                            static_cast<std::uint8_t>(h3zero_stream_type_qpack_decoder)}) {
+        if (ret != 0) break;
+        const auto stream_id = picoquic_get_next_local_stream_id(cnx, 1);
+        ret = picoquic_add_to_stream(cnx, stream_id, &head, 1, 0);
+        if (ret == 0) ret = picoquic_set_stream_priority(cnx, stream_id, 1);
+    }
+    return ret;
+}
+
 std::string authority_host(std::string host) {
     if (host.find(':') != std::string::npos &&
         (host.empty() || host.front() != '['))
@@ -88,6 +156,24 @@ struct WebTransportListener::Impl {
     picoquic_quic_t* quic = nullptr;
     picoquic_cnx_t* session_connection = nullptr;
     bool drop_inbound = false;
+    // The HTTP/3 route: config.path up to any '?'. h3zero routes that path with or without a query, so a CONNECT
+    // whose query differs still reaches validate_connect (which compares the whole :path) and is recorded below.
+    // Equal to config.path when it has no query (every MoQ Transport listener).
+    std::string route_path;
+    // The last CONNECT validate_connect refused (refused_connect()).
+    std::string refused_connect;
+    // moq-lite only: per connection, the sniff of the client's control-stream SETTINGS (ClientSettingsSniff).
+    std::map<picoquic_cnx_t*, ClientSettingsSniff> client_settings;
+
+    void sniff_client_settings(picoquic_cnx_t* cnx, std::uint64_t stream_id, const std::uint8_t* bytes,
+                               std::size_t length) {
+        client_settings[cnx].feed(stream_id, {bytes, length});
+    }
+
+    bool client_legacy_webtransport(picoquic_cnx_t* cnx) const {
+        const auto found = client_settings.find(cnx);
+        return found != client_settings.end() && found->second.legacy().value_or(false);
+    }
     std::unique_ptr<WebTransportSession> session;
     picowt_capsule_t capsule{};
     int socket_fd = -1;
@@ -106,6 +192,20 @@ struct WebTransportListener::Impl {
             auto* parameters = static_cast<picohttp_server_parameters_t*>(callback_ctx);
             if (parameters->path_table_nb != 1) return -1;
             self = static_cast<Impl*>(parameters->path_table[0].path_app_ctx);
+            // A new connection. For moq-lite, create the HTTP/3 context here (as h3zero_callback would) and send
+            // the lite SETTINGS; h3zero then sees settings_sent and never sends its own. The MoQ Transport
+            // profiles leave both to h3zero (their SETTINGS stay h3zero's, byte for byte).
+            if (self != nullptr && self->profile == WebTransportProfile::MoqLite06) {
+                auto* h3 = h3zero_callback_create_context(parameters);
+                if (h3 == nullptr) {
+                    picoquic_close(cnx, PICOQUIC_ERROR_MEMORY);
+                    return -1;
+                }
+                picoquic_set_callback(cnx, callback, h3);
+                h3->settings_sent = 1;
+                if (lite_protocol_init(cnx) != 0) return -1;
+                callback_ctx = h3;
+            }
         } else {
             auto* h3 = static_cast<h3zero_callback_ctx_t*>(callback_ctx);
             if (h3->path_table_nb != 1) return -1;
@@ -129,6 +229,12 @@ struct WebTransportListener::Impl {
             }
             self->session->ingest_connection_close(space, error, reason);
             self->session_connection = nullptr;
+        }
+        if (self->profile == WebTransportProfile::MoqLite06) {
+            if ((event == picoquic_callback_stream_data || event == picoquic_callback_stream_fin) &&
+                (stream_id & 3u) == 2u && bytes != nullptr && length != 0)
+                self->sniff_client_settings(cnx, stream_id, bytes, length);
+            if (connection_closing) self->client_settings.erase(cnx);
         }
         const auto result = h3zero_callback(cnx, stream_id, bytes, length, event,
                                             callback_ctx, stream_ctx);
@@ -208,9 +314,14 @@ struct WebTransportListener::Impl {
             h3->settings.webtransport_enabled,
             h3->settings.h3_datagram != 0,
             peer->max_datagram_frame_size > 0,
-            peer->is_reset_stream_at_enabled != 0};
+            peer->is_reset_stream_at_enabled != 0,
+            profile == WebTransportProfile::MoqLite06 && client_legacy_webtransport(cnx)};
         const auto decision = validate_connect(request, caps, run_endpoint, profile);
-        if (!decision.accepted()) return -1;
+        if (!decision.accepted()) {
+            refused_connect = "validator_status=" + std::to_string(decision.http_status) + " reason=" + decision.evidence +
+                              " path=" + request.path;
+            return -1;
+        }
         if (picowt_set_wt_protocol(control, decision.selected_protocol.c_str()) != 0)
             return -1;
         if (h3zero_declare_stream_prefix(h3, control->stream_id,
@@ -374,12 +485,18 @@ WebTransportListenerCreateResult WebTransportListener::create(
                           impl->config.allowed_origins,
                           impl->config.application_protocol,
                           impl->config.require_origin};
-    impl->route.path = impl->config.path.c_str();
-    impl->route.path_length = impl->config.path.size();
+    impl->route_path = impl->config.path.substr(0, impl->config.path.find('?'));
+    impl->route.path = impl->route_path.c_str();
+    impl->route.path_length = impl->route_path.size();
     impl->route.path_callback = Impl::route_callback;
     impl->route.path_app_ctx = impl.get();
-    impl->route.connect_protocol = "webtransport-h3";
-    impl->route.connect_protocol_length = std::strlen("webtransport-h3");
+    // h3zero refuses (connect_error_status) a CONNECT whose :protocol differs from connect_protocol before the
+    // route callback runs. The moq-lite route leaves that check to validate_connect, which also takes the legacy
+    // token "webtransport" on that profile only; the MoQ Transport routes keep h3zero's exact "webtransport-h3".
+    if (impl->profile != WebTransportProfile::MoqLite06) {
+        impl->route.connect_protocol = "webtransport-h3";
+        impl->route.connect_protocol_length = std::strlen("webtransport-h3");
+    }
     impl->route.connect_error_status = 400;
     impl->parameters.path_table = &impl->route;
     impl->parameters.path_table_nb = 1;
@@ -453,6 +570,8 @@ OperationResult WebTransportListener::grant_peer_streams(bool bidirectional,
     return impl_->session ? impl_->session->grant_peer_streams(bidirectional, additional) :
                             OperationResult{TransportStatus::InvalidState, 0, std::nullopt};
 }
+std::string WebTransportListener::refused_connect() const { return impl_->refused_connect; }
+
 OperationResult WebTransportListener::set_inbound_drop(bool enabled) {
     impl_->drop_inbound = enabled;
     return {TransportStatus::Success, 0, std::nullopt};

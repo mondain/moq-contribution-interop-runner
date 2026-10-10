@@ -371,7 +371,13 @@ bool unauthorized_close(const LiteTranscript& transcript) {
 // runner's Setup, a session URL with a path and a query given to the publisher, a known binding, and a complete
 // publisher SETUP (its absence or broken framing is row 014's matter). nullopt otherwise.
 std::optional<std::vector<std::vector<std::byte>>> client_paths(const LiteTranscript& transcript) {
-    if (transcript.scenario_id != kL06SetupClientPath || !judgeable_with_stimulus(transcript)) return std::nullopt;
+    // The engine closing the session for a Path on WebTransport (LiteRunnerDuties::close_on_webtransport_path) ends
+    // the probe before its allowance: the SETUP it closed on is the observation, so that close stands in for the
+    // stimulus (it fires only on a decoded SETUP carrying Path, so it can only confirm a row 125 Fail).
+    const bool closed_for_path =
+        judgeable(transcript) && transcript.runner_closed_for_path && !transcript.peer_closed_early;
+    if (transcript.scenario_id != kL06SetupClientPath || !(judgeable_with_stimulus(transcript) || closed_for_path))
+        return std::nullopt;
     if (!runner_setup_proved(transcript)) return std::nullopt;
     // A non-empty query is required for all three rows (the task brief: the scenario only has meaning with a URL
     // carrying a path AND a query). For 124 and 125 this is stricter than the rationales, which put no condition on

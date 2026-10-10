@@ -1638,11 +1638,14 @@ public:
         const bool ephemeral = config.port_start == 0;
         const auto attempts = ephemeral ? config.maximum_active_runs + 1 :
             static_cast<std::size_t>(config.port_end - config.port_start) + 1;
+        // A WebTransport lite session is CONNECTed at the fixed session target "/moq?token=l1d" (lite_run.h).
+        const auto target = lite_session_target(requested.transport);
+        const Tuning tuning{{}, {}, {}, false, target};
         ListenerResult created;
         for (std::size_t attempt = 0; attempt < attempts && !created.listener; ++attempt) {
             const auto port = ephemeral ? std::uint16_t{0} : static_cast<std::uint16_t>(config.port_start + attempt);
             if (port != 0 && reserved_ports.contains(port)) continue;
-            created = create_listener(requested.transport, DraftVersion::MoqLite06, port);
+            created = create_listener(requested.transport, DraftVersion::MoqLite06, port, tuning);
             if (created.listener && reserved_ports.contains(created.endpoint.port)) {
                 created = {};
             } else if (!created.listener && created.error != transport::NativeQuicListenerError::BindFailed) {
@@ -1666,15 +1669,16 @@ public:
         workers.push_back(std::move(worker));
         reserved_ports.insert(run->endpoint.port);
         try {
-            run->thread = std::thread([this, run, requested, listener = std::move(created.listener)]() mutable {
+            run->thread = std::thread([this, run, requested, target, listener = std::move(created.listener)]() mutable {
                 const auto port = run->endpoint.port;
                 LiteRunEnvironment environment{run->id, authority_of(run), *store, *moqlite06, config,
-                    run->stop_requested, [this, &requested, port]() -> LiteRunListener {
-                        auto replacement = create_listener(requested.transport, DraftVersion::MoqLite06, port);
+                    run->stop_requested, [this, &requested, port, target]() -> LiteRunListener {
+                        const Tuning tuning{{}, {}, {}, false, target};
+                        auto replacement = create_listener(requested.transport, DraftVersion::MoqLite06, port, tuning);
                         if (replacement.listener && replacement.endpoint.port == port)
                             return {std::move(replacement.listener), {}};
                         return {nullptr, describe_listener_failure(replacement, port)};
-                    }};
+                    }, {}};
                 run_lite(environment, std::move(listener), requested);
                 {
                     std::lock_guard released(mutex);

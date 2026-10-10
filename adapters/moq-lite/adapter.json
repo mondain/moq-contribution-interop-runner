@@ -1,0 +1,11 @@
+{
+  "adapter_id": "moq-lite",
+  "driver_contract_version": 1,
+  "entrypoint": "run.sh",
+  "publisher_binary_environment": "MOQ_CLI_BIN",
+  "supported_drafts": ["moq-lite-06"],
+  "supported_transports": ["native_quic", "webtransport"],
+  "supported_namespace_hex": ["696e7465726f702e68616e67"],
+  "supported_track_name_hex": "302e6d3473",
+  "protocol_expectations": "none; logs and exit status are diagnostic only"
+}

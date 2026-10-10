@@ -827,6 +827,105 @@
           "Observed violations are discarded when the publisher later closes the session (152/141 NotRun, missed Fails)"
         ]
       }
+    },
+    "from_L1e": {
+      "files_and_interfaces": [
+        "Runtime hardening (T1, 6a77803 and 5b410e3): include/moq/interop/scenarios/lite_probe.h and src/scenarios/lite_probe.cpp: Group-stream payload bytes elided from transcript.events (length and FIN kept; counter group_payload_bytes_dropped), judge_lite_context / aggregate_lite / LiteVerdicts / LiteContextVerdicts (include/moq/interop/requirements/lite_evaluators.h, src/requirements/lite_evaluators.cpp) so src/app/lite_run.cpp holds verdicts, not transcripts; runner duties opt-in on LiteProbeDefinition (default off, on in lite06::allowance_probe): LiteEngineAction (FinSendAfterPeerEnd, CloseForWebTransportPath) recorded in transcript.engine_actions and in the context_complete detail as engine_actions=kind:stream=..:at_ms=..:code=..:status=NAME.",
+        "API reachability (T2, 059848c and 56b36e1): runnable(MoqLite06) true; ServerConfig.moqlite06_catalog; app::load_lite_catalog_if_available in src/app/main.cpp (missing or bad digest: serve MoQ Transport only with a log line; present but invalid: exit 2); src/http/server.cpp lite run creation, /healthz additive fields supported_lite_drafts and lite_executable_profiles (present only when the lite catalog is loaded), JSON/TAP/HTML staged note, completeness entry; kLiteSessionPath '/moq' and kLiteSessionQuery 'token=l1d' in src/app/lite_run.cpp (include/moq/interop/app/lite_run.h documents them); SessionTransport::refused_connect(); WebTransport route matches config.path up to '?'.",
+        "Adapter (T3, c29ed4d and 0331df2; fixture pinned in c088164): adapters/moq-lite/run.sh, adapter.json, README.md (ffmpeg testsrc2 640x360@30 libx264 ~200 kbps 1 s GOP fMP4 into 'moq --log-level debug --connect-version moq-lite-06 --connect-once --connect-timeout 10s --connect-tls-insecure --connect ENDPOINT --broadcast interop.hang import fmp4'; MOQ_CLI_BIN required, MOQ_FFMPEG_BIN, MOQ_LITE_TLS_ROOT; moq starts after ffmpeg's first output). Tests: tests/e2e/moq-lite-adapter-contract.sh, moq-lite-adapter-cmdlines.sh (golden tests/golden/moq-lite-cmdlines.txt), moq-lite-matrix-plan.sh (golden tests/golden/moq-lite-matrix-plan.txt), tests/support/stub_runner_moq_lite.sh, stub_curl_moq_lite/curl.",
+        "Matrix scripts (T4/T5, c088164, 7352293, 428b151): tests/e2e/driven-moq-lite.sh TRANSPORT RUNNER_BIN [SCENARIO|ID,ID,...] (comma-joined ids are one group run, 40 s wait per scenario), tests/e2e/moq-lite-matrix.sh RUNNER_BIN (19 single runs plus the five-scenario row 027 group run on both transports; ports 19231-19234; MOQ_CLI_BIN required; skip 77 without prerequisites). Not ctests.",
+        "Transport fixes (T4/T5): src/transport/webtransport_listener.cpp and webtransport_connect.{h,cpp}: lite WebTransport SETTINGS add WEBTRANSPORT_MAX_SESSIONS 0xc671706a=1 (fb3f218); legacy WebTransport identifiers 0xc671706a/0x2b603742 and ':protocol webtransport' admitted via a bounded SETTINGS sniff, ClientSettingsSniff (a16e63a, 918a1e2; gated to profile==MoqLite06, MoQ Transport SETTINGS byte-identical); src/transport/webtransport_session.cpp falls back to a plain RESET_STREAM when the peer lacks RESET_STREAM_AT (f526394).",
+        "Audit CLI (T5, 8a26e38): moq-interop-audit --draft moq-lite-06 --database PATH runs audit_execution with the lite bindings (text 'Execution audit:' line, JSON execution_audit; null without --database); MoQ Transport outputs unchanged over 25 cases (tests/e2e/audit-cli-moqlite.sh, tests/support/lite_audit_fixture.cpp).",
+        "Evaluators and completeness (T5, ffecfed and 428b151): row 027 aggregation takes its session half from any of its five scenarios (scenarios::l06_code_space_halves; aggregate_lite passes 027 when all five ran once unflagged); the completeness page counts a staged-catalog Fail by absence as observed (detail::staged_catalog in src/http/server.cpp), Pass and MoQ Transport unchanged.",
+        "Docs (T5/T6): docs/moq-lite-punch-list.md (new), docs/interop-notes.md (moq-lite-06 L1d and first sweep sections), docs/scenario-reference.md (moq-lite-06 session URL, runner duties and evidence; per-transport NOT_RUN row), docs/scoring-and-audit.md (staged audit, not_run meaning), docs/http-api.md, docs/publisher-harness-guide.md (7.1), adapters/moq-lite/README.md (CI, manual matrix, row 027 group run). T6 code cleanups (ce73f45): evidence prints the TransportStatus name (status=Success), the refused CONNECT is reported as validator_status=404, webtransport_lite_settings_test compares the raw control-stream prefix against h3zero's bytes.",
+        "Existing files changed beyond new files (diff against 06b8d01): CMakeLists.txt (new tests), draft_traits.h and tests/unit/draft_traits_test.cpp (runnable), lite_run.h/.cpp, native_run_manager.cpp, main.cpp, server.h/.cpp, json.h/.cpp, report.cpp, result_schema.cpp, tap.cpp (staged note and the lite-only 'unreviewed rows rated error' fix), session_transport.h, webtransport_listener.h/.cpp, webtransport_connect.h/.cpp, webtransport_session.cpp, lite06_common.h/.cpp, lite06_errors.cpp, lite_evaluators.h/.cpp, lite_probe.h/.cpp, audit_main.cpp, and tests that pinned the old refusals or outputs (audit-cli-moqlite.sh, lite_run_live_test, lite_run_live.h, scripted_lite_peer.h, moqlite_start_guard_test, webtransport_*_test). CI: no workflow change; the full ctest in .github/workflows/ci.yml already runs the lite tests. Audit CLI outputs for drafts 18, 21 and 22, goldens, adapter command-line goldens of the other adapters and result pins are unchanged."
+      ],
+      "decisions": [
+        "Ruling: /healthz keeps supported_drafts and executable_profiles MoQ Transport only (byte-identical to a no-lite server); lite is listed in the additive fields supported_lite_drafts and lite_executable_profiles (present only when accepts_runs(MoqLite06)); the CI readiness probe on executable_profiles is not satisfied by lite profiles (intended).",
+        "Ruling: an unknown lite scenario id is 422 unsupported_run_config (same as draft 18), checked against kLiteExecutableScenarios before start(); requires_track without a fixture is 400 invalid_run_config (same body as draft 22's own scenarios); the POST invalid-draft message names moq-lite-06 only when the server serves lite.",
+        "Ruling: adapters/moq-lite defaults to --connect-tls-insecure regardless of tls_ca (the CLI's rustls rejects a CA:TRUE self-signed cert used as a root: CaUsedAsEndEntity); MOQ_LITE_TLS_ROOT=1 opts in to --connect-tls-root <tls_ca> (non-empty readable tls_ca else exit 64); MOQ_LITE_TLS_INSECURE accepted as a no-op and a contradiction with ROOT=1 exits 64; the adapter strips MOQ_* env vars (the CLI reads every flag from MOQ_*), exports NO_COLOR=1 and passes RUST_LOG through.",
+        "Ruling (T1): a WebTransport client's strictly decoded SETUP carrying Path makes the runner close with PROTOCOL_VIOLATION (draft 7.3.2); row 125 still fails, 111 is still judged, every other row of that session is NotRun (014 included). Never observed against the moq CLI.",
+        "Ruling (T1): runner duties are opt-in on LiteProbeDefinition (default off, on in lite06::allowance_probe); the auto-FIN is invisible to stimulus-proof logic; no runner action on a publisher STOP_SENDING.",
+        "Ruling (T1): Group payload bytes are elided from the transcript (length and FIN kept); the recorder's remaining ceilings (kLiteMaximumEvents 16384, about 15-17 Mbps; 64 MiB recorder, about 57 Mbps) are far above the 200 kbps test source.",
+        "Ruling (T2): the fixed session URL is path /moq, query token=l1d on both transports; endpoint forms moql://HOST:PORT/moq?token=l1d (native QUIC) and https://HOST:PORT/moq?token=l1d (WebTransport); the WebTransport listener requires the CONNECT :path exactly '/moq?token=l1d'; adapters dial the create response's url verbatim (the response's path is '/moq').",
+        "Ruling (T2): JSON export 'unreviewed rows rated error' latent bug fixed lite-only; the run record decides staged by draft while catalog-backed routes decide by the catalog (they differ only once the catalog is complete: L2).",
+        "Ruling (T4): the fixture is namespace [hex('interop.hang')] and track hex('302e6d3473') = '0.m4s', unchanged from the provisional value; timeout_ms must exceed 12000 for l06-subscribe-abutting-frame-start (scripts use 15000); the lite WebTransport profile deliberately admits peers without datagrams or RESET_STREAM_AT.",
+        "Ruling (T5): row 027 passes in a run holding all five of its scenarios (aggregate_lite); only UNROUTABLE 0x36 discriminates the code space, so the session half of the Pass rests on codes registered in both tables (accepted by the catalog rationale); 027 is NotRun in a single-scenario run.",
+        "Ruling (T5): the completeness page counts a Fail by absence (107, 126, 131: peer_close declared) as observed for the staged lite catalog only; a Pass still needs the declared evidence; the rule shared with 18/21/22 is unchanged for them.",
+        "Ruling (T6): the refused-connect evidence is labelled validator_status (the validator's 404); the wire response is h3zero's 501. Evidence prints the TransportStatus name."
+      ],
+      "sweep_summary": {
+        "peer": "moq 0.14.1 (rs/moq-cli) from moq-dev/moq at b8b0d235a99bddb9043f453c46c958362d6c9247, built offline from a scratch copy; web-transport-moq 2.0.1 / web-transport-proto 0.6.2; loopback, one machine, 2026-10-10 UTC; runner ffecfed for the final sweep",
+        "native_quic": "21 runs (19 single + the 027 group + the 19-scenario group): 17 incomplete, 4 fail, 0 error; 61 scored rows; bound rows 25 pass / 3 fail (107, 126, 131) / 2 not_run (125, 152); required rows (26): 22 pass / 2 fail (126, 131) / 2 not_run (125, 152)",
+        "webtransport": "21 runs: 18 incomplete, 3 fail, 0 error; 56 scored rows; bound rows 24 pass / 2 fail (107, 131) / 4 not_run (120, 124, 126, 152); required rows 22 pass / 1 fail (131) / 3 not_run (120, 126, 152)",
+        "audit": "execution audit consistent with 0 findings in every database; static audit 26 of 26 required and 4 of 4 optional; no harness errors, skips or timeouts",
+        "punch_list": "docs/moq-lite-punch-list.md: ML-01 (row 126, server SETUP Path '/' not closed, native only), ML-02 (row 131, server SETUP Role 0 not closed), ML-03 (row 107 SHOULD, Message Length mismatch resets the stream CANCELLED instead of closing), ML-Q1 (question: the CLI answers protocol-violating SUBSCRIBE 023 and unknown stream type 108 with CANCELLED; the stream-code table has no PROTOCOL_VIOLATION)",
+        "runner_defects": "5 found and fixed (strict count 6 of cap 6, counting the SETTINGS sniff bound): fb3f218 (lite WebTransport SETTINGS lacked WEBTRANSPORT_MAX_SESSIONS), a16e63a (lite profile admits the CLI's legacy WebTransport identifiers and ':protocol webtransport'), f526394 (WebTransport reset needed RESET_STREAM_AT), ffecfed (row 027 could never settle), 428b151 (completeness page listed Fail-by-absence rows as not_run); related hardening 918a1e2 (sniff 1 KiB bound), 8a26e38 (audit --database)",
+        "not_applicable_rows": "125 native, 120/124 WebTransport, 126 WebTransport, 152 on both (the CLI keeps one broadcast)"
+      },
+      "how_to_rerun": [
+        "Build the CLI offline from a scratch copy: CARGO_TARGET_DIR=<scratch>/target cargo +1.98.1 build -p moq-cli --release --offline --locked (copy the checkout without target/, .git and rust-toolchain.toml; never build inside the peer checkout); export MOQ_CLI_BIN=<scratch>/target/release/moq.",
+        "Prerequisites: ffmpeg with libx264, jq, curl, openssl, coreutils timeout, the built runner (build/moq-interop-runner) and the audit program.",
+        "MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner (both transports, ports 19231-19234, timeout_ms 15000, includes the five-scenario group run for row 027); one transport: tests/e2e/driven-moq-lite.sh native_quic|webtransport build/moq-interop-runner [ids]; MOQ_INTEROP_TEST_KEEP=1 keeps the databases; audit them with build/moq-interop-audit --draft moq-lite-06 --database PATH --format json.",
+        "The CI workflow runs only the stub-based tests (moq-lite-adapter-contract, moq-lite-adapter-cmdlines, moq-lite-matrix-plan) within the full ctest."
+      ],
+      "not_covered": [
+        "The Probe stream (the runner's SETUP has no Probe parameter, so the CLI logs 'skipping probe stream'; Probe under Role=Publisher is unexercised)",
+        "moqt:// endpoints for native QUIC (the adapter accepts them; only moql:// was run)",
+        "Row 152 (retire and reuse of an announce id): needs the adapter to end and restart a broadcast within one session",
+        "The WebTransport Path consequence (a publisher that sends Path on WebTransport makes the session NotRun except 111/125): never observed against the moq CLI",
+        "Other peers: moq-lite has only this publisher; the results say nothing about another CLI revision or implementation",
+        "Loss, reordering, delay (loopback only); one video-only test-pattern source",
+        "The 75 unreviewed catalog rows (the verdict can never be pass)"
+      ],
+      "for_moq_lite_07_or_L2": [
+        "A moq-lite-07 effort needs a new catalog, its wire codecs, and a check of the endpoint constants and the WebTransport SETTINGS shape; the lite family reuses the probe engine, the run manager route (lite_run.cpp), the adapter and the matrix scripts.",
+        "L2: classify the 75 unreviewed rows and bind evaluators; when complete:true the run record's staged-by-draft decision (run_json) and the catalog-backed routes must agree.",
+        "Decide whether a Fail by absence of a close should be observed on the completeness page for the MoQ Transport drafts too (today lite only).",
+        "A driver contract action to end and restart a broadcast would make row 152 testable."
+      ],
+      "open_items": {
+        "T1 minors (deferred)": [
+          "M1 kLiteMaximumEvents (16384) counts elided Group events (ceiling about 15-17 Mbps before event_limit_reached); recorder max_bytes 64 MiB also charges Group wire bytes plus sizeof(LiteDecoded) (about 57 Mbps over 9 s)",
+          "M2 run_duties runs before continue_steps: a next_steps continuation that FINs or resets an existing stream in reaction loses to the engine FIN (no production builder does this)",
+          "M3 judge_lite_context runs inside run_context: an evaluator throw stops the run without context_skipped for later contexts (still finalizes Error)",
+          "M4 status= printed the numeric TransportStatus: FIXED in ce73f45",
+          "M6 no live WebTransport test of the engine FIN",
+          "Carried (parked): a repeated Parameter ID in one SETUP does not trigger the Path close (strict decode), and a repeated Parameter ID itself is a PROTOCOL_VIOLATION (draft 7.3.1) the runner should close on"
+        ],
+        "T2 minors (deferred)": [
+          "M3-a evidence said status=404 while the wire response is h3zero's 501: FIXED (validator_status) in ce73f45 and documented",
+          "run_json decides staged by draft while catalog-backed routes decide by catalog (L2 item, documented)",
+          "Lite driven profiles report configured:true whenever any --driver-executable is set (documented)",
+          "tests/e2e/foundation-smoke.sh (docker) expects 2 drafts, stale since draft 22 (left)",
+          "docs/scoring-and-audit.md staged section said no evaluators were bound: FIXED in b504bf8"
+        ],
+        "T3 minors (deferred)": [
+          "Scenario id is not validated against the lite list in the adapter (harmless, unused)",
+          "A relative tls_ca starting with '-' could be misread by clap (negligible)",
+          "A SIGTERM-ignoring stub ffmpeg/moq can outlive the adapter by up to 2 s unless the runner's group SIGKILL gets them first (documented)"
+        ],
+        "T4 cleanups": [
+          "webtransport_lite_settings_test compared decoded maps not raw bytes (M1): FIXED in ce73f45 (raw control-stream prefix compared for the MoQ Transport profiles)",
+          "SETTINGS sniff entries for streams that never complete (M2): FIXED in 918a1e2",
+          "A wrong token on lite gets h3zero's 501 instead of the early 400 (documented)",
+          "driven-moq-lite.sh header says it runs the execution audit (true since 8a26e38) and omits timeout from the skip prerequisites; the golden 'audit:' line shows --database; the plan test's stub audit never takes the refusal-and-fallback branch (M7)"
+        ],
+        "T5 concerns (carried)": [
+          "/results/completeness.json listed Fail-by-absence rows as not_run: fixed for the staged lite catalog in 428b151; the shared rule for 18/21/22 is unchanged (decision needed if they should follow)",
+          "Row 027 settles only in a group run holding all five scenarios; a plain single-run matrix shows it not_run (the matrix script posts the group run since 428b151)",
+          "Sweeps 1-3 ran before the 027 fix: their stored 027 results use the old rule",
+          "Triage candidates not pursued: 062 case (b) gets 0x33 (no on-demand track creation), 025 both request streams reset 0x1, 141/143 pass (random Hop per process), 023/108 CANCELLED (ML-Q1)"
+        ],
+        "L1d items still open": [
+          "Unknown ANNOUNCE Type decision (an unknown type is Inconclusive, NotRun, today)",
+          "Repeated Parameter ID + Path: the Path close does not fire on a repeated Parameter ID (strict decode), and the runner does not close on a repeated Parameter ID (draft 7.3.1)",
+          "093/097/190 pending-bytes check (rows pass over a stream with an incomplete trailing message; see the L1d interop note)",
+          "run_json decides staged by draft while the catalog-backed routes decide by catalog (L2)",
+          "tests/e2e/foundation-smoke.sh stale draft count",
+          "All L1d open_items under from_L1d remain as listed there unless fixed above (T1-T9 minors, TSan reports in picoquic's RNG, the T9 stop-between-contexts context_skipped gap)"
+        ]
+      }
     }
   },
   "entries": [

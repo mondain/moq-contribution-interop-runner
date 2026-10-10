@@ -45,13 +45,14 @@ constexpr std::string_view alpn(DraftVersion draft) {
 }
 
 // Whether the API accepts runs for the draft (when the server also has its catalog). Draft 22 runs its shared
-// scenarios on draft 21's family by lineage and its own scenarios as raw probes on the draft 22 wire.
+// scenarios on draft 21's family by lineage and its own scenarios as raw probes on the draft 22 wire; moq-lite-06
+// runs the lite probe family against its staged (incomplete) catalog.
 constexpr bool runnable(DraftVersion draft) {
     switch (draft) {
         case DraftVersion::Draft18: return true;
         case DraftVersion::Draft21: return true;
         case DraftVersion::Draft22: return true;
-        case DraftVersion::MoqLite06: return false;  // identification only until a later sub-project
+        case DraftVersion::MoqLite06: return true;  // its own probe family (app/lite_run.h), staged catalog
     }
     throw std::logic_error("unreachable DraftVersion");
 }

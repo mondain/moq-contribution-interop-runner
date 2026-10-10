@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,6 +33,9 @@ inline constexpr std::string_view kLiteAlpn = "moq-lite-06";
 
 // Bounds on what one context records into LiteTranscript::events. Reaching either sets
 // LiteTranscript::event_limit_reached; recording stops but stepping goes on, and the transcript is never judged.
+// The byte bound counts the stream-data bytes KEPT in the events: the payload of the peer's Group streams is not
+// kept (LiteTranscript::payload_bytes_dropped), so media volume never reaches it; every other stream's bytes
+// (Setup streams, the publisher's answers on runner bidirectional streams, unknown stream types) count in full.
 inline constexpr std::size_t kLiteMaximumEvents = 16384;
 inline constexpr std::size_t kLiteMaximumEvidenceBytes = std::size_t{8} << 20;
 // Steps (static plus dynamically appended) one probe may hold; more is a definition error (harness_failed).
@@ -143,6 +147,50 @@ std::vector<std::byte> lite_default_runner_setup();
 // restricted to one binding. Task 9 sets it from the transport.
 enum class LiteBinding { Unknown, NativeQuic, WebTransport };
 
+// Duties the draft puts on the runner itself, carried out by the engine rather than by steps. Off by default so a
+// hand-written definition behaves exactly as its script says; every production builder (lite06::allowance_probe)
+// turns both on. What the engine does for them is recorded in LiteTranscript::engine_actions, never as a step:
+// steps are the stimulus, and the stimulus proofs (lite06::proved_stimulus, stimulus_delivered, the allowance step,
+// the observation window) see only steps.
+struct LiteRunnerDuties {
+    // Draft 4.3 ("If an endpoint closes the send direction of a stream, the peer MUST also close their send
+    // direction"): when the publisher ends (FIN or RESET_STREAM) its send direction of a runner-opened bidirectional
+    // stream, the runner FINs its own there unless it already ended it (FIN or reset). Deferred while a step not yet
+    // executed acts on that stream's send side (SendOnStream, FinStream or ResetStream by stream_ref, or any such
+    // step with a `target`): the script's own ending then comes first. Not done when the publisher also sent
+    // STOP_SENDING on the stream (a FIN can no longer be delivered). A later step that would act on a send
+    // direction the engine already FINed is skipped (skipped_reason kLiteSendClosedByEngine), so the transport never
+    // sees a write after FIN.
+    bool close_send_after_peer_end{false};
+    // Draft 7.3.2 (on bindings 2 and 4 the Path parameter "MUST NOT be sent"; the receiver "MUST close the session
+    // with a PROTOCOL_VIOLATION"): on LiteBinding::WebTransport, a decoded publisher SETUP carrying Path (0x2) makes
+    // the runner close the session with PROTOCOL_VIOLATION (0x3). The transcript then has runner_closed and
+    // runner_closed_for_path set and the probe ends.
+    bool close_on_webtransport_path{false};
+};
+
+// The skipped_reason of a step that would act on a send direction the engine already FINed.
+inline constexpr std::string_view kLiteSendClosedByEngine = "the engine already closed the send direction";
+// The application error code and reason of the engine's close for a Path on WebTransport.
+inline constexpr std::uint64_t kLiteProtocolViolation = 0x3;
+inline constexpr std::string_view kLiteWebTransportPathCloseReason = "setup path on webtransport";
+
+// One action the engine took for a LiteRunnerDuties duty (never a step).
+struct LiteEngineAction {
+    enum class Kind {
+        FinSendAfterPeerEnd,       // close_send_after_peer_end: the runner's FIN on `stream_id`
+        CloseForWebTransportPath,  // close_on_webtransport_path: the session close (code kLiteProtocolViolation)
+    } kind{Kind::FinSendAfterPeerEnd};
+    std::optional<transport::StreamId> stream_id;
+    std::uint64_t at_ns{0};
+    std::uint64_t code{0};
+    // What the transport answered: Success, or a refusal because of the peer (PeerStopped, PeerReset,
+    // ConnectionClosed), which ends the duty without a harness failure.
+    transport::TransportStatus status{transport::TransportStatus::Success};
+};
+
+std::string_view to_string(LiteEngineAction::Kind kind);
+
 struct LiteProbeDefinition {
     std::string id;
     bool requires_track{false};
@@ -183,6 +231,8 @@ struct LiteProbeDefinition {
     // finished), if the deadline has not come first.
     std::optional<std::chrono::milliseconds> observation_window;
     session::LiteSessionLimits limits{};
+    // The runner's own duties (above); off unless a builder turns them on.
+    LiteRunnerDuties duties{};
 };
 
 struct LiteTranscript {
@@ -202,8 +252,21 @@ struct LiteTranscript {
     // Every transport event, bounded by kLiteMaximumEvents; stream data bytes count against
     // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: lite uses no datagrams and the
     // transport bounds each one to the path MTU, so they are bounded by the event count).
+    //
+    // A StreamDataEvent on a stream the PEER opened unidirectionally whose STREAM_TYPE is Group (0x0) is kept with
+    // its stream id and FIN but WITHOUT its bytes (data empty); event_data_sizes holds how many bytes it carried.
+    // The recorder (streams) decoded those bytes before they were dropped, so GROUP and FRAME messages are intact;
+    // only a reader of raw StreamDataEvent bytes would miss them, and the evaluators read raw bytes of the peer's
+    // Setup stream only (lite06::peer_setup_message). Setup streams, runner-opened bidirectional streams and every
+    // other stream keep their bytes.
     std::vector<transport::TransportEvent> events;
     std::vector<std::uint64_t> event_times;
+    // Parallel to events: the stream-data bytes each StreamDataEvent carried as received (kept or not), 0 for every
+    // other event.
+    std::vector<std::size_t> event_data_sizes;
+    // Group payload bytes received but not kept in events (above), and how many events lost theirs.
+    std::size_t payload_bytes_dropped{0};
+    std::size_t payload_events_elided{0};
     bool established{false};
     std::string alpn;
     bool complete{false};
@@ -217,8 +280,14 @@ struct LiteTranscript {
     // The peer closed the session before the runner Setup and every step had executed (or while the next_steps
     // continuation was still open).
     bool peer_closed_early{false};
-    // The runner closed the session (a CloseSession step).
+    // The runner closed the session (a CloseSession step, or the engine for the Path duty below).
     bool runner_closed{false};
+    // The engine closed the session because the publisher sent Path on WebTransport (close_on_webtransport_path);
+    // runner_closed is set too. The steps after the close never ran, so stimulus_delivered is false: an evaluator
+    // that observes the publisher's SETUP itself (row 125) may still judge, others are NotRun.
+    bool runner_closed_for_path{false};
+    // What the engine did for the definition's duties, in order (not steps: invisible to the stimulus proofs).
+    std::vector<LiteEngineAction> engine_actions;
     // The runner Setup (if any) and every step executed and were delivered in full, and the next_steps
     // continuation (if any) finished.
     bool stimulus_delivered{false};
@@ -283,12 +352,19 @@ private:
     void limit(std::string reason);
     void finish(std::uint64_t now);
     void record(const transport::TransportEvent& event, std::uint64_t now);
+    // True for data of a peer unidirectional stream whose STREAM_TYPE is (or, on its first bytes, reads as) Group.
+    [[nodiscard]] bool is_peer_group_data(const transport::StreamDataEvent& data) const;
     bool handle(const transport::TransportEvent& event, std::uint64_t now);
     void run_steps(std::uint64_t now);
     void continue_steps(std::uint64_t now);
     Progress execute(const LiteStep& step, LiteStepRecord& record, std::uint64_t now);
     Progress write_all(LiteStepRecord& record, std::uint64_t now);
     std::optional<transport::StreamId> resolve_stream(const LiteStep& step, LiteStepRecord& record, bool& skip);
+    // The runner duties (LiteRunnerDuties); false when the probe ended (the Path close) or failed.
+    bool run_duties(std::uint64_t now);
+    void close_sends_after_peer_end(std::uint64_t now);
+    [[nodiscard]] bool send_side_pending(transport::StreamId id) const;
+    void note_send_ended(const LiteStep& step, const LiteStepRecord& record);
     [[nodiscard]] bool steps_finished() const noexcept;
     [[nodiscard]] bool continuation_open() const noexcept;
     void on_deadline(std::uint64_t now);
@@ -309,6 +385,9 @@ private:
     bool local_closed_{false};
     bool idle_timeout_{false};
     std::optional<std::uint64_t> last_step_ns_;
+    // Runner send directions ended (by a step's FIN or reset, or by the engine), and those the engine FINed.
+    std::set<transport::StreamId> send_ended_;
+    std::set<transport::StreamId> engine_fins_;
     // (decoded messages, streams, peer resets + stop-sendings, peer close) when next_steps was last called.
     std::optional<std::array<std::size_t, 4>> continuation_seen_;
 };

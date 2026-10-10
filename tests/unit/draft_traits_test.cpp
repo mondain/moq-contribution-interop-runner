@@ -19,7 +19,7 @@ static_assert(runnable(DraftVersion::Draft18) && runnable(DraftVersion::Draft21)
 static_assert(runnable(DraftVersion::Draft22));
 static_assert(draft_number(DraftVersion::MoqLite06) == 106);
 static_assert(alpn(DraftVersion::MoqLite06) == "moq-lite-06");
-static_assert(!runnable(DraftVersion::MoqLite06));
+static_assert(runnable(DraftVersion::MoqLite06));  // L1e: runs reach the API (with its catalog)
 static_assert(parse_draft(106) == DraftVersion::MoqLite06);
 static_assert(!parse_draft(107).has_value() && !parse_draft(100).has_value());
 static_assert(draft_text(DraftVersion::MoqLite06) == "moq-lite-06");
@@ -61,7 +61,7 @@ TEST(DraftTraits, MoqLite06Facts) {
     EXPECT_EQ(draft_number(DraftVersion::MoqLite06), 106u);
     EXPECT_EQ(static_cast<unsigned>(DraftVersion::MoqLite06), 106u);
     EXPECT_EQ(std::string(alpn(DraftVersion::MoqLite06)), "moq-lite-06");
-    EXPECT_FALSE(runnable(DraftVersion::MoqLite06));
+    EXPECT_TRUE(runnable(DraftVersion::MoqLite06));
     ASSERT_TRUE(parse_draft(106).has_value());
     EXPECT_EQ(*parse_draft(106), DraftVersion::MoqLite06);
     EXPECT_FALSE(parse_draft(107).has_value());

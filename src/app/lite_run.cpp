@@ -1,7 +1,9 @@
 #include "moq/interop/app/lite_run.h"
 
+#include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/lite_scenarios.h"
 #include "moq/interop/app/publisher_driver.h"
+#include "moq/interop/requirements/draft_source.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/lite06_announce.h"
@@ -14,7 +16,9 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <filesystem>
 #include <iostream>
+#include <ostream>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -35,8 +39,6 @@ constexpr std::size_t kMaximumSelection = 100;
 // event says how many were left out. The transcript keeps every one for the evaluators.
 constexpr std::size_t kMaximumStoredMessages = 4096;
 constexpr std::size_t kMaximumStoredIssues = 1024;
-// The provisional WebTransport session path (plan decision (e)).
-constexpr std::string_view kWebTransportPath = "/moq";
 
 std::string hex(std::span<const std::byte> bytes) {
     constexpr char digits[] = "0123456789abcdef";
@@ -55,6 +57,23 @@ std::string text(std::span<const std::byte> bytes) {
 }
 
 const char* yes(bool value) { return value ? "true" : "false"; }
+
+const char* status_name(transport::TransportStatus status) {
+    using S = transport::TransportStatus;
+    switch (status) {
+        case S::Success: return "Success";
+        case S::Partial: return "Partial";
+        case S::WouldBlock: return "WouldBlock";
+        case S::PeerStopped: return "PeerStopped";
+        case S::PeerReset: return "PeerReset";
+        case S::StreamLimit: return "StreamLimit";
+        case S::DatagramTooLarge: return "DatagramTooLarge";
+        case S::InvalidState: return "InvalidState";
+        case S::ConnectionClosed: return "ConnectionClosed";
+        case S::InternalError: return "InternalError";
+    }
+    return "Unknown";
+}
 
 std::string broadcast_path_of(const TrackFixture& fixture) {
     std::string path;
@@ -356,15 +375,22 @@ private:
                 ? "harness failure without a recorded reason" : transcript.harness_failure_reason);
         } else if (!transcript.established && !stopped) {
             operational_error_ = true;
+            // A WebTransport CONNECT the listener refused (for example a :path other than the session target)
+            // is named with what was received.
+            const auto refused = listener.refused_connect();
             context_event("harness_error", "the publisher did not establish a moq-lite-06 session within " +
                                                std::to_string(config_.timeout.count()) +
                                                " ms (no connection, or a connection refused by the listener: "
-                                               "for example another ALPN or WebTransport protocol)");
+                                               "for example another ALPN or WebTransport protocol)" +
+                                               (refused.empty() ? std::string{} : "; refused CONNECT: " + refused));
         }
         if (transcript.event_limit_reached) context_event("context_event_limit", transcript.event_limit_reason);
         const bool clean = transcript.complete && !transcript.harness_failed && !transcript.timed_out && transcript.established;
         context_event(clean ? "context_complete" : "context_end", end_detail(transcript, deadline_ms, stopped));
-        transcripts_.push_back(std::move(transcript));
+        // Judged now; only the verdicts stay until finalize (the transcript ends with this context).
+        verdicts_.push_back(requirements::judge_lite_context(env_.catalog, transcript));
+        retained_bytes_ += requirements::lite_retained_bytes(verdicts_.back());
+        if (env_.on_context_judged) env_.on_context_judged(verdicts_.size(), retained_bytes_);
         return connected;
     }
 
@@ -373,17 +399,36 @@ private:
         return std::to_string((*at - std::min(*at, base)) / 1000000);
     }
 
+    // kind:stream=ID:at_ms=N:code=C:status=S entries joined with ',' ("none" without any).
+    std::string engine_actions(const scenarios::LiteTranscript& t, std::uint64_t base) const {
+        if (t.engine_actions.empty()) return "none";
+        std::string out;
+        for (const auto& action : t.engine_actions) {
+            if (!out.empty()) out += ',';
+            out += std::string(scenarios::to_string(action.kind)) + ":stream=" +
+                   (action.stream_id ? std::to_string(*action.stream_id) : "none") +
+                   ":at_ms=" + ms_since(base, action.at_ns) + ":code=" + std::to_string(action.code) +
+                   ":status=" + status_name(action.status);
+        }
+        return out;
+    }
+
     std::string end_detail(const scenarios::LiteTranscript& t, std::chrono::milliseconds deadline, bool stopped) const {
         const auto base = t.established ? t.established_ns : t.started_ns;
         std::string detail = "complete=" + std::string(yes(t.complete)) + " timed_out=" + yes(t.timed_out) +
             " event_limit=" + yes(t.event_limit_reached) + " harness_failed=" + yes(t.harness_failed) +
             " established=" + yes(t.established) + " stimulus_delivered=" + yes(t.stimulus_delivered) +
             " peer_closed_early=" + yes(t.peer_closed_early) + " runner_closed=" + yes(t.runner_closed) +
+            " runner_closed_for_path=" + yes(t.runner_closed_for_path) +
             " cancelled=" + yes(stopped) +
             // Every lite probe is time-bounded: its allowances end it, the deadline bounds it.
             " time_bounded=true deadline_ms=" + std::to_string(deadline.count()) +
             " elapsed_ms=" + ms_since(base, t.ended_ns) +
             " lite_messages_stored=" + std::to_string(stored_messages_) + "/" + std::to_string(total_messages_) +
+            // Group payload bytes the transcript kept as length and FIN only (the recorder decoded them).
+            " group_payload_bytes_dropped=" + std::to_string(t.payload_bytes_dropped) +
+            // What the engine did for the runner duties (never steps, so never a stimulus).
+            " engine_actions=" + engine_actions(t, base) +
             " lite_decode_errors_stored=" + std::to_string(stored_issues_) + "/" + std::to_string(total_issues_) +
             " steps=";
         for (std::size_t i = 0; i < t.steps.size(); ++i) {
@@ -394,7 +439,7 @@ private:
                       ":executed_ms=" + ms_since(base, step.executed_at_ns) +
                       ":gate_expired=" + yes(step.gate_expired);
             if (!step.skipped_reason.empty()) detail += ":skipped=" + step.skipped_reason;
-            if (step.refused) detail += ":refused=" + std::to_string(static_cast<unsigned>(*step.refused));
+            if (step.refused) detail += std::string(":refused=") + status_name(*step.refused);
         }
         return detail;
     }
@@ -412,7 +457,7 @@ private:
             " executed_ms=" + ms_since(base, step.executed_at_ns) + " gate_expired=" + yes(step.gate_expired) +
             " accepted=" + std::to_string(step.accepted) + " fin=" + yes(step.fin_accepted) +
             " code=" + std::to_string(step.code) +
-            (step.refused ? " refused=" + std::to_string(static_cast<unsigned>(*step.refused)) : std::string{}) +
+            (step.refused ? std::string(" refused=") + status_name(*step.refused) : std::string{}) +
             " bytes=" + hex(step.bytes);
         // The SUBSCRIBE a Subscribe-stream stimulus carries (its Position, row 020's evidence).
         if (const auto subscribe = scenarios::l06_decode_subscribe_stimulus(step.bytes)) {
@@ -449,7 +494,9 @@ private:
                 if (!data->fin) continue;
                 event.kind = "raw_probe_transport_event";
                 event.stream_id = std::to_string(data->stream_id);
-                event.detail = "operation=peer-fin bytes=" + std::to_string(data->data.size());
+                // The bytes the event carried as received (a Group stream's are not kept in the transcript).
+                const auto size = index < t.event_data_sizes.size() ? t.event_data_sizes[index] : data->data.size();
+                event.detail = "operation=peer-fin bytes=" + std::to_string(size);
             } else if (const auto* reset = std::get_if<transport::PeerResetEvent>(&source)) {
                 event.kind = "raw_probe_transport_event";
                 event.stream_id = std::to_string(reset->stream_id);
@@ -530,7 +577,7 @@ private:
 
     void finalize() {
         try {
-            auto outcomes = requirements::evaluate_lite(env_.catalog, transcripts_);
+            auto outcomes = requirements::aggregate_lite(env_.catalog, verdicts_);
             auto summary = requirements::score_staged(env_.catalog, outcomes);
             if (operational_error_ || env_.stop_requested) summary.verdict = requirements::RunVerdict::Error;
             if (env_.stop_requested)
@@ -561,7 +608,8 @@ private:
     std::size_t ordinal_{0};
     std::string connection_id_;
     bool operational_error_{false};
-    std::vector<scenarios::LiteTranscript> transcripts_;
+    requirements::LiteVerdicts verdicts_;
+    std::size_t retained_bytes_{0};
     std::size_t stored_messages_{0};
     std::size_t total_messages_{0};
     std::size_t stored_issues_{0};
@@ -570,14 +618,46 @@ private:
 
 }  // namespace
 
-LiteSessionUrl lite_session_url(TransportKind transport) {
-    if (transport == TransportKind::WebTransport) return {true, std::string(kWebTransportPath), {}};
-    return {};
+// The fixed session path and query (L1e decision): unreserved characters only, so row 120's exact byte match of
+// path + "?" + query needs no normalization. The only definition; everything else derives from these two.
+const std::string_view kLiteSessionPath = "/moq";
+const std::string_view kLiteSessionQuery = "token=l1d";
+
+LiteSessionUrl lite_session_url(TransportKind) {
+    // The same URL on both transports: native QUIC carries it in the publisher's SETUP Path (rows 120/124),
+    // WebTransport in the CONNECT :path, where the SETUP must not repeat it (row 125).
+    return {true, std::string(kLiteSessionPath), std::string(kLiteSessionQuery)};
+}
+
+std::string lite_session_target(TransportKind transport) {
+    const auto url = lite_session_url(transport);
+    return url.query.empty() ? url.path : url.path + "?" + url.query;
 }
 
 std::string lite_endpoint_uri(TransportKind transport, std::string_view authority) {
-    if (transport == TransportKind::WebTransport) return "https://" + std::string(authority) + std::string(kWebTransportPath);
-    return "moql://" + std::string(authority);
+    const char* scheme = transport == TransportKind::WebTransport ? "https://" : "moql://";
+    return scheme + std::string(authority) + lite_session_target(transport);
+}
+
+std::shared_ptr<const requirements::RequirementCatalog> load_lite_catalog_if_available(
+    const std::filesystem::path& docs_root, const std::filesystem::path& requirements_root,
+    const std::filesystem::path& digest_file, std::ostream& log) {
+    const auto catalog_path = requirements_root / "moq-lite-06.json";
+    std::error_code error;
+    if (!std::filesystem::exists(catalog_path, error)) {
+        log << "moq-lite-06 is unavailable: " << catalog_path.string() << " not found; serving MoQ Transport only\n";
+        return nullptr;
+    }
+    std::optional<requirements::DraftSource> source;
+    try {
+        source = requirements::load_draft_source(draft_number(DraftVersion::MoqLite06), docs_root, digest_file);
+    } catch (const std::exception& failure) {
+        log << "moq-lite-06 is unavailable: " << failure.what() << "; serving MoQ Transport only\n";
+        return nullptr;
+    }
+    // Present: it must load (staged, so incomplete is allowed); any loader error is the caller's startup error.
+    return std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog::load(*source, catalog_path, requirements::CatalogLoadMode::AllowIncomplete));
 }
 
 std::optional<RunStartStatus> lite_start_refusal(const RunConfig& config) {

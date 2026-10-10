@@ -1,6 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
+#include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,6 +37,38 @@ struct PeerCapabilities {
     bool h3_datagram = false;
     bool quic_datagram = false;
     bool reset_stream_at = false;
+    // The client's SETTINGS enabled WebTransport with an identifier of draft-ietf-webtrans-http3 before
+    // SETTINGS_WT_ENABLED (legacy_webtransport_settings). Honored by the moq-lite profile only, whose draft names
+    // no WebTransport draft: the moq CLI's stack (web-transport-proto 0.6.2) sends only those identifiers.
+    bool legacy_webtransport = false;
+};
+
+// The pre-SETTINGS_WT_ENABLED WebTransport support a client's HTTP/3 control stream announces, from the first bytes
+// of a client-initiated unidirectional stream: nullopt while those bytes hold no complete SETTINGS frame yet; false
+// when the stream is not a control stream (type 0x00), its first frame is not a well-formed SETTINGS frame, or the
+// frame enables WebTransport by no legacy identifier; true when it carries SETTINGS_WEBTRANSPORT_MAX_SESSIONS
+// (0xc671706a) non-zero or SETTINGS_ENABLE_WEBTRANSPORT (0x2b603742) = 1, and H3_DATAGRAM (0x33, or 0xffd277) = 1
+// (the rule of web-transport-proto 0.6.2, which the moq CLI applies to its peer).
+[[nodiscard]] std::optional<bool> legacy_webtransport_settings(std::span<const std::uint8_t> control_stream_prefix);
+
+// moq-lite only: per connection, the first bytes of the client's unidirectional streams until its control stream's
+// SETTINGS frame is complete, then whether it enabled WebTransport with a legacy identifier
+// (PeerCapabilities::legacy_webtransport; h3zero's decoder keeps only SETTINGS_WT_ENABLED). At most kMaximumBytes are
+// kept per stream; a control stream that reaches that bound without a complete SETTINGS frame decides false. Once
+// decided, nothing is tracked any more.
+class ClientSettingsSniff {
+public:
+    static constexpr std::size_t kMaximumBytes = 1024;
+    void feed(std::uint64_t stream_id, std::span<const std::uint8_t> bytes);
+    [[nodiscard]] std::optional<bool> legacy() const noexcept { return legacy_; }
+    // Streams whose bytes or type are still held (zero once decided).
+    [[nodiscard]] std::size_t tracked_streams() const noexcept { return streams_.size() + other_streams_.size(); }
+
+private:
+    void decide(bool legacy);
+    std::map<std::uint64_t, std::vector<std::uint8_t>> streams_;
+    std::set<std::uint64_t> other_streams_;  // streams whose type is not 0x00 (control)
+    std::optional<bool> legacy_;
 };
 
 struct RunEndpoint {

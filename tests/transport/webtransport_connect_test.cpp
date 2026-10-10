@@ -317,4 +317,155 @@ TEST(WebTransportConnectMoqLite, ProtocolMapsToTheProfileBothWays) {
     EXPECT_THROW(profile_for_application_protocol("moq-lite-07"), std::logic_error);
 }
 
+// The moq CLI's WebTransport stack (web-transport-proto 0.6.2) enables WebTransport with the pre-WT_ENABLED
+// identifiers only (L1e Task 4 live smoke).
+PeerCapabilities legacy_only_capabilities() {
+    PeerCapabilities caps{true, 0, true, true, false};
+    caps.legacy_webtransport = true;
+    return caps;
+}
+
+TEST(WebTransportConnectMoqLite, AdmitsALegacyWebTransportClient) {
+    const auto result = validate_connect(lite_request("\"moq-lite-06\""), legacy_only_capabilities(),
+                                         lite_endpoint("moq-lite-06"), WebTransportProfile::MoqLite06);
+    EXPECT_TRUE(result.accepted()) << result.evidence;
+    auto no_settings = legacy_only_capabilities();
+    no_settings.settings_received = false;
+    EXPECT_FALSE(validate_connect(lite_request("\"moq-lite-06\""), no_settings, lite_endpoint("moq-lite-06"),
+                                  WebTransportProfile::MoqLite06).accepted());
+}
+
+TEST(WebTransportConnectMoqLite, MoqTransportProfilesIgnoreLegacyWebTransport) {
+    const struct { WebTransportProfile profile; const char* protocol; } cases[] = {
+        {WebTransportProfile::Draft18Wt15, "moqt-18"},
+        {WebTransportProfile::Draft21Wt16, "moqt-21"},
+        {WebTransportProfile::Draft22Wt16, "moqt-22"}};
+    for (const auto& c : cases) {
+        const auto offer = std::string("\"") + c.protocol + "\"";
+        auto caps = legacy_only_capabilities();
+        caps.reset_stream_at = true;
+        const auto result = validate_connect(lite_request(offer), caps, lite_endpoint(c.protocol), c.profile);
+        EXPECT_FALSE(result.accepted()) << c.protocol;
+        EXPECT_EQ(result.http_status, 400) << c.protocol;
+        // With SETTINGS_WT_ENABLED the flag changes nothing either.
+        auto both = capabilities();
+        both.legacy_webtransport = true;
+        EXPECT_EQ(validate_connect(lite_request(offer), both, lite_endpoint(c.protocol), c.profile).http_status,
+                  validate_connect(lite_request(offer), capabilities(), lite_endpoint(c.protocol), c.profile)
+                      .http_status) << c.protocol;
+    }
+}
+
+TEST(WebTransportConnectMoqLite, AcceptsTheLegacyUpgradeTokenOnLiteOnly) {
+    auto legacy = lite_request("\"moq-lite-06\"");
+    legacy.protocol = "webtransport";
+    const auto lite = validate_connect(legacy, legacy_only_capabilities(), lite_endpoint("moq-lite-06"),
+                                       WebTransportProfile::MoqLite06);
+    EXPECT_TRUE(lite.accepted()) << lite.evidence;
+    for (const char* token : {"webtransport-h4", "WebTransport", "", "connect-udp"}) {
+        auto other = legacy;
+        other.protocol = token;
+        EXPECT_FALSE(validate_connect(other, legacy_only_capabilities(), lite_endpoint("moq-lite-06"),
+                                      WebTransportProfile::MoqLite06).accepted()) << token;
+    }
+    const struct { WebTransportProfile profile; const char* protocol; } cases[] = {
+        {WebTransportProfile::Draft18Wt15, "moqt-18"},
+        {WebTransportProfile::Draft21Wt16, "moqt-21"},
+        {WebTransportProfile::Draft22Wt16, "moqt-22"}};
+    for (const auto& c : cases) {
+        auto request = lite_request(std::string("\"") + c.protocol + "\"");
+        request.protocol = "webtransport";
+        const auto result = validate_connect(request, capabilities(), lite_endpoint(c.protocol), c.profile);
+        EXPECT_FALSE(result.accepted()) << c.protocol;
+        EXPECT_EQ(result.http_status, 400) << c.protocol;
+    }
+}
+
+std::vector<std::uint8_t> control_stream(const std::vector<std::uint8_t>& components) {
+    std::vector<std::uint8_t> bytes{0x00, 0x04, static_cast<std::uint8_t>(components.size())};
+    bytes.insert(bytes.end(), components.begin(), components.end());
+    return bytes;
+}
+
+// Encoded components: 0x33 (H3_DATAGRAM), 0x80ffd277 (deprecated datagram), 0xc0000000c671706a (MAX_SESSIONS),
+// 0xab603742 (ENABLE_WEBTRANSPORT), 0xac7cf000 (WT_ENABLED), 0x08 (ENABLE_CONNECT_PROTOCOL).
+const std::vector<std::uint8_t> kDatagram{0x33, 0x01};
+const std::vector<std::uint8_t> kDatagramDeprecated{0x80, 0xff, 0xd2, 0x77, 0x01};
+const std::vector<std::uint8_t> kMaxSessions1{0xc0, 0x00, 0x00, 0x00, 0xc6, 0x71, 0x70, 0x6a, 0x01};
+const std::vector<std::uint8_t> kMaxSessions0{0xc0, 0x00, 0x00, 0x00, 0xc6, 0x71, 0x70, 0x6a, 0x00};
+const std::vector<std::uint8_t> kEnable1{0xab, 0x60, 0x37, 0x42, 0x01};
+const std::vector<std::uint8_t> kWtEnabled1{0xac, 0x7c, 0xf0, 0x00, 0x01};
+const std::vector<std::uint8_t> kConnect{0x08, 0x01};
+
+std::vector<std::uint8_t> join(std::initializer_list<std::vector<std::uint8_t>> parts) {
+    std::vector<std::uint8_t> out;
+    for (const auto& part : parts) out.insert(out.end(), part.begin(), part.end());
+    return out;
+}
+
+TEST(WebTransportLegacySettings, RecognizesTheMoqCliSettings) {
+    EXPECT_EQ(legacy_webtransport_settings(control_stream(join({kMaxSessions1, kConnect, kDatagramDeprecated,
+                                                                 kDatagram, kEnable1}))),
+              std::optional<bool>{true});
+    EXPECT_EQ(legacy_webtransport_settings(control_stream(join({kDatagramDeprecated, kEnable1}))),
+              std::optional<bool>{true});
+}
+
+TEST(WebTransportLegacySettings, RefusesWithoutDatagramOrWithZeroValues) {
+    EXPECT_EQ(legacy_webtransport_settings(control_stream(join({kMaxSessions1}))), std::optional<bool>{false});
+    // A present MAX_SESSIONS decides, as in web-transport-proto: 0 disables even with ENABLE = 1.
+    EXPECT_EQ(legacy_webtransport_settings(control_stream(join({kDatagram, kMaxSessions0, kEnable1}))),
+              std::optional<bool>{false});
+    // SETTINGS_WT_ENABLED alone is not a legacy identifier (h3zero decodes it).
+    EXPECT_EQ(legacy_webtransport_settings(control_stream(join({kDatagram, kWtEnabled1}))),
+              std::optional<bool>{false});
+}
+
+TEST(WebTransportLegacySettings, IncompleteAndOtherStreams) {
+    const auto full = control_stream(join({kDatagram, kMaxSessions1}));
+    for (std::size_t size = 0; size < full.size(); ++size)
+        EXPECT_EQ(legacy_webtransport_settings(std::span(full).first(size)), std::nullopt) << size;
+    EXPECT_EQ(legacy_webtransport_settings(std::vector<std::uint8_t>{0x02}), std::optional<bool>{false});
+    EXPECT_EQ(legacy_webtransport_settings(std::vector<std::uint8_t>{0x00, 0x07, 0x00}),
+              std::optional<bool>{false});
+    // A component cut by the frame length is malformed.
+    EXPECT_EQ(legacy_webtransport_settings(std::vector<std::uint8_t>{0x00, 0x04, 0x03, 0x33, 0x01, 0x80}),
+              std::optional<bool>{false});
+}
+
+TEST(WebTransportClientSettingsSniff, DecidesFromTheControlStreamAcrossChunks) {
+    const auto full = control_stream(join({kDatagram, kMaxSessions1}));
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::span(full).first(3));
+    EXPECT_EQ(sniff.legacy(), std::nullopt);
+    sniff.feed(6, std::vector<std::uint8_t>{0x02, 0x00});  // a QPACK encoder stream
+    sniff.feed(2, std::span(full).subspan(3));
+    EXPECT_EQ(sniff.legacy(), std::optional<bool>{true});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    sniff.feed(10, std::vector<std::uint8_t>{0x54, 0x00});  // after the decision nothing is kept
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+}
+
+// A control stream whose SETTINGS frame never completes within the bound decides "no legacy WebTransport" and
+// stops tracking every stream (other_streams no longer grows with each new client stream).
+TEST(WebTransportClientSettingsSniff, ACappedIncompleteControlStreamDecidesFalseAndStopsTracking) {
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::vector<std::uint8_t>{0x00, 0x04, 0x44, 0x00});  // SETTINGS of length 0x400: never complete
+    sniff.feed(6, std::vector<std::uint8_t>{0x54});
+    EXPECT_EQ(sniff.tracked_streams(), 2u);
+    const std::vector<std::uint8_t> padding(ClientSettingsSniff::kMaximumBytes, 0x21);
+    sniff.feed(2, padding);
+    EXPECT_EQ(sniff.legacy(), std::optional<bool>{false});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    for (std::uint64_t id = 14; id < 14 + 4 * 64; id += 4) sniff.feed(id, std::vector<std::uint8_t>{0x54});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+}
+
+TEST(WebTransportClientSettingsSniff, IgnoresEmptyChunks) {
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::span<const std::uint8_t>{});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    EXPECT_EQ(sniff.legacy(), std::nullopt);
+}
+
 }  // namespace

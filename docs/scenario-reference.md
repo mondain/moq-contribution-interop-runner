@@ -936,9 +936,11 @@ catalog (`complete: false`, 137 of 212 rows reviewed, 75 unreviewed, 40 of those
 CLIENT that dials the runner; the runner is the server and the subscriber. A moq-lite-06 run is scored with the staged
 scorer: its verdict is Fail when a required reviewed row failed and otherwise Incomplete, never Pass. Every unreviewed row
 is reported as not tested (reason "Unreviewed: classification pending"). The scenarios exist in the registry and the
-audit CLI (`moq-interop-audit --draft moq-lite-06` reports 26 of 26 required reviewed rows covered), but the HTTP API
-refuses moq-lite-06 runs until L1e. They are exercised through the native run manager (library
-level) and the tests.
+audit CLI (`moq-interop-audit --draft moq-lite-06` reports 26 of 26 required reviewed rows covered), and since L1e the
+HTTP API accepts moq-lite-06 runs (`"draft": "moq-lite-06"`, see [http-api.md](http-api.md#moq-lite-06-runs)) and
+`adapters/moq-lite` drives the `moq` CLI as the publisher. The first sweep is in
+[interop-notes.md](interop-notes.md#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235). The session URL is fixed:
+path `/moq`, query `token=l1d`, on both transports (see below).
 
 Scenarios marked "track" need the track fixture (broadcast path = namespace fields joined with `/`, plus the track name).
 Every probe ends with an ungated allowance wait, so a late violation is still seen; a probe whose deadline cannot cover
@@ -964,9 +966,34 @@ its windows is refused as a harness error for that context.
 | `l06-errors-unknown-stream-type` | A bidirectional stream with unregistered STREAM_TYPE 0x3f, then a conforming ANNOUNCE_REQUEST | `l06-errors-unknown-stream-type-reset` (108), `l06-errors-unknown-stream-type-not-fatal` (109) | 108: neither a RESET_STREAM nor a STOP_SENDING of the stream within the allowance. 109: any publisher close, or the follow-up request refused or reset | 108: any publisher close (109 judges it), the allowance did not elapse. 109: the follow-up got no ANNOUNCE_OK (and no close or refusal) |
 | `l06-errors-unknown-reset-code` (track) | Two live SUBSCRIBEs; STOP_SENDING on a Group stream, then RESET_STREAM and STOP_SENDING of one with unregistered code 0x4d1, then a later SUBSCRIBE; about 9 s | `l06-errors-unknown-code-tolerated` (030), `l06-errors-no-assumed-unauthorized` (032) | 030: any close except UNAUTHORIZED, or the other or later subscription refused. 032: a close with UNAUTHORIZED | The subscriptions were not both live, no step carrying the code was delivered, the cancel was not delivered or did not end the cancelled subscription, the later SUBSCRIBE got no SUBSCRIBE_OK, or the live transport refused the Group STOP_SENDING (harness failure); 030 on an UNAUTHORIZED close, 032 on any other close |
 | `l06-errors-reserved-reset-code` (track) | As above with reserved code 0x2a, about 6 s | `l06-errors-reserved-code-tolerated` (033) | Any session close, or the other or later subscription refused | As above |
-| `l06-errors-code-space` | SUBSCRIBE for an unserved broadcast (stream half), then an ANNOUNCE_REQUEST whose Message Length covers extra bytes (session half) | `l06-errors-code-space` (027), `l06-errors-message-length-close` (107) | 027: a stream code used as a session close or the reverse. 107: a close other than PROTOCOL_VIOLATION, or no close by the end of the allowance | 027: either half missing (it needs a stream code and a session code), an unregistered code; 107: the Message Length stimulus was not delivered |
+| `l06-errors-code-space` | SUBSCRIBE for an unserved broadcast (stream half), then an ANNOUNCE_REQUEST whose Message Length covers extra bytes (session half) | `l06-errors-code-space` (027), `l06-errors-message-length-close` (107) | 027: a stream code used as a session close or the reverse. 107: a close other than PROTOCOL_VIOLATION, or no close by the end of the allowance | 027: the run does not hold all five of its scenarios (each once), no stream code on this scenario, or no session close of the right space on any of the five (one close suffices: the catalog rationale), or an unregistered code; 107: the Message Length stimulus was not delivered |
 
 In every row the transcript must be judgeable: the publisher connected, the session was not cut short by a harness failure, the event limit or the deadline, and the runner's SETUP was delivered. Otherwise all its rows are not run. Rows 014, 111, 110, 109, 112, 092, 126, 131, 107, 027, 025, 139, 062, 023 and 030 to 033 treat a publisher close as part of the observation and prove their own stimulus; rows 141, 143, 152, 093, 097, 190, 159, 172, 020 and 120, 124, 125 instead require that all stimuli were delivered and the publisher had not closed early. Row 108 is not run on any publisher close. A transcript flagged as harness-failed, event-limit reached or timed out drops all its verdicts to not run.
+
+### moq-lite-06 session URL, runner duties and evidence
+
+- **Session URL.** The path and query are the fixed constants `/moq` and `token=l1d` (`kLiteSessionPath` and
+  `kLiteSessionQuery`, unreserved characters only, because row 120 is an exact byte match of path + "?" + query) on
+  both transports. Endpoint forms: native QUIC `moql://HOST:PORT/moq?token=l1d`, WebTransport
+  `https://HOST:PORT/moq?token=l1d`; the WebTransport listener requires the CONNECT `:path` to be exactly
+  `/moq?token=l1d`. The probe is told the session has a path and a query on both transports, so rows 120 and 124 are
+  judged on native QUIC and row 125 on WebTransport.
+- **Runner duties** (opt-in on the probe definition, on for every lite scenario): when the publisher ends (FIN) a
+  bidirectional stream the runner opened, the engine FINs the runner's send side itself, as a conforming moq-lite
+  endpoint does; the action is recorded as an engine action in the context evidence and is invisible to the
+  stimulus-proof logic. The runner does not answer a publisher STOP_SENDING. When a WebTransport client's strictly
+  decoded SETUP carries a Path parameter the runner closes the session with PROTOCOL_VIOLATION (draft 7.3.2: a receiver
+  of a Path over WebTransport MUST close): row 125 still fails, row 111 is still judged, and every other row of that
+  session is `not_run`, row 014 included. This was never observed against the `moq` CLI, which sends no Path on
+  WebTransport. A SETUP with a repeated Parameter ID is not closed on by the runner today (open item).
+- **Group payload evidence rule.** The payload bytes of FRAME messages on Group streams are not stored in the
+  transcript (length and FIN are kept; the counter `group_payload_bytes_dropped` records the elision), so a
+  publisher streaming media does not exhaust the recorder; the evaluators of the Group-stream rows use the stream
+  structure (headers, sequences, lengths, FIN), never the payload.
+- **Evidence status names.** Engine actions and refused steps in the `context_complete` evidence name the transport
+  status (`status=Success`, `refused=WouldBlock`). A refused WebTransport CONNECT is reported as `refused CONNECT:
+  validator_status=404 reason=... path=...`; `validator_status` is the validator's decision, while the status on the
+  wire is the HTTP/3 stack's own (h3zero answered 501 when the L1e tests refused a CONNECT), so the two numbers differ.
 
 ## What NOT_RUN means for each family
 
@@ -983,5 +1010,6 @@ In every row the transcript must be judgeable: the publisher connected, the sess
 | Authorization tokens | The credential flag was not set, `MAX_AUTH_TOKEN_CACHE_SIZE` was too small, or the error code mapping is unassigned |
 | Publisher-initiated flows | The publisher never produced the request the scenario waits for |
 | WebTransport-only or native-only rows | The run used the other transport |
+| moq-lite-06 per-transport rows | 125 on native QUIC; 120 and 124 on WebTransport; 126 on WebTransport (a Path there is a URI-binding violation); 152 on both (needs an adapter that ends and restarts a broadcast; the `moq` CLI keeps one); every row but 111 and 125 of a WebTransport session whose SETUP carried a Path; 027 outside a run holding its five scenarios |
 
 `NOT_RUN` is not a failure and never counts as a pass.

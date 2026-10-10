@@ -31,6 +31,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/lite_probe.h"
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -53,10 +54,40 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
 // One Outcome per catalog row, in catalog order. Unreviewed rows NotRun; not Applicable NotApplicable; NotTestable
 // NotTestable. A scored row is Fail when any of its evaluators returned false on a transcript of one of its
 // scenarios; Pass only when every scenario it names ran exactly once and every one of its evaluators returned true
-// on each of them (row 027: all five scenarios); otherwise NotRun. A transcript that is harness_failed,
+// on each of them; otherwise NotRun. Row 027 (evaluator l06-errors-code-space) is the exception its catalog
+// rationale states: it also needs all five scenarios run once each (none flagged), but passes when the
+// l06-errors-code-space context saw a stream code of the right space and ANY of the five saw a session close of the
+// right space (scenarios::l06_code_space_halves), so it does not depend on the SHOULD-level close of 107 or on
+// every probe closing. A transcript that is harness_failed,
 // event_limit_reached or timed_out is never judged (NotRun). Throws std::invalid_argument for a catalog that is not
 // draft 106.
 std::vector<Outcome> evaluate_lite(const RequirementCatalog& catalog,
                                    std::span<const scenarios::LiteTranscript> transcripts);
+
+// Per-context evaluation (L1e, item I3): what evaluate_lite needs of one transcript, so a run can judge each
+// context as it ends and keep this instead of the transcript. evaluate_lite(catalog, transcripts) is
+// aggregate_lite(catalog, {judge_lite_context(catalog, t) for each t}), so both give identical outcomes.
+struct LiteContextVerdicts {
+    // The scenario the context ran: every context counts as one run of it (judged or not).
+    std::string scenario_id;
+    // harness_failed, event_limit_reached or timed_out: no evaluator was consulted and `verdicts` is empty.
+    bool flagged{false};
+    // Evaluator id -> verdict (nullopt: NotRun) for every evaluator of every scored row naming scenario_id; an
+    // evaluator id the registry does not hold is recorded as nullopt.
+    std::map<std::string, std::optional<bool>> verdicts;
+    // Row 027's halves (scenarios::l06_code_space_halves) when the evaluator l06-errors-code-space was consulted.
+    std::optional<bool> code_space_stream_half;
+    std::optional<bool> code_space_session_half;
+};
+using LiteVerdicts = std::vector<LiteContextVerdicts>;
+
+// Judges one context. Throws std::invalid_argument for a catalog that is not draft 106.
+LiteContextVerdicts judge_lite_context(const RequirementCatalog& catalog, const scenarios::LiteTranscript& transcript);
+// The outcomes of the contexts judged above, by the rules of evaluate_lite. Throws std::invalid_argument for a
+// catalog that is not draft 106.
+std::vector<Outcome> aggregate_lite(const RequirementCatalog& catalog, std::span<const LiteContextVerdicts> contexts);
+// An upper estimate of the memory one judged context holds (its strings, map nodes and verdicts), for the run
+// hook's retention bound.
+std::size_t lite_retained_bytes(const LiteContextVerdicts& context);
 
 }  // namespace moq::interop::requirements

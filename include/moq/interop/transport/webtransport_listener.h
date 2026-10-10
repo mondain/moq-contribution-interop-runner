@@ -55,6 +55,7 @@ public:
     OperationResult grant_peer_streams(bool bidirectional,
                                        std::uint64_t additional) override;
     OperationResult set_inbound_drop(bool enabled) override;
+    std::string refused_connect() const override;
 
 private:
     explicit WebTransportListener(std::unique_ptr<Impl> impl);
