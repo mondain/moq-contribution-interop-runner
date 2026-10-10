@@ -162,38 +162,17 @@ struct WebTransportListener::Impl {
     std::string route_path;
     // The last CONNECT validate_connect refused (refused_connect()).
     std::string refused_connect;
-    // moq-lite only: per connection, the first bytes of the client's unidirectional streams until its control
-    // stream's SETTINGS frame is complete, then whether it enabled WebTransport with a legacy identifier
-    // (PeerCapabilities::legacy_webtransport). h3zero's decoder keeps only SETTINGS_WT_ENABLED.
-    struct ClientSettingsSniff {
-        std::map<std::uint64_t, std::vector<std::uint8_t>> streams;
-        std::set<std::uint64_t> other_streams;  // streams whose type is not 0x00 (control)
-        std::optional<bool> legacy;
-    };
+    // moq-lite only: per connection, the sniff of the client's control-stream SETTINGS (ClientSettingsSniff).
     std::map<picoquic_cnx_t*, ClientSettingsSniff> client_settings;
-    static constexpr std::size_t kMaximumSniffedBytes = 1024;
 
     void sniff_client_settings(picoquic_cnx_t* cnx, std::uint64_t stream_id, const std::uint8_t* bytes,
                                std::size_t length) {
-        auto& sniff = client_settings[cnx];
-        if (sniff.legacy.has_value() || sniff.other_streams.contains(stream_id)) return;
-        auto& seen = sniff.streams[stream_id];
-        if (seen.size() >= kMaximumSniffedBytes) return;
-        seen.insert(seen.end(), bytes, bytes + std::min(length, kMaximumSniffedBytes - seen.size()));
-        if (seen.front() != 0x00) {  // a QPACK or other stream, not the control stream
-            sniff.streams.erase(stream_id);
-            sniff.other_streams.insert(stream_id);
-            return;
-        }
-        if (const auto legacy = legacy_webtransport_settings(seen)) {
-            sniff.legacy = *legacy;
-            sniff.streams.clear();
-        }
+        client_settings[cnx].feed(stream_id, {bytes, length});
     }
 
     bool client_legacy_webtransport(picoquic_cnx_t* cnx) const {
         const auto found = client_settings.find(cnx);
-        return found != client_settings.end() && found->second.legacy.value_or(false);
+        return found != client_settings.end() && found->second.legacy().value_or(false);
     }
     std::unique_ptr<WebTransportSession> session;
     picowt_capsule_t capsule{};

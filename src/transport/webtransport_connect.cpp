@@ -258,4 +258,26 @@ std::optional<bool> legacy_webtransport_settings(std::span<const std::uint8_t> p
     return enable == std::optional<std::uint64_t>{1};
 }
 
+void ClientSettingsSniff::feed(std::uint64_t stream_id, std::span<const std::uint8_t> bytes) {
+    if (legacy_.has_value() || bytes.empty() || other_streams_.contains(stream_id)) return;
+    auto& seen = streams_[stream_id];
+    seen.insert(seen.end(), bytes.begin(), bytes.begin() +
+                static_cast<std::ptrdiff_t>(std::min(bytes.size(), kMaximumBytes - seen.size())));
+    if (seen.front() != 0x00) {  // a QPACK or other stream, not the control stream
+        streams_.erase(stream_id);
+        other_streams_.insert(stream_id);
+        return;
+    }
+    if (const auto legacy = legacy_webtransport_settings(seen))
+        decide(*legacy);
+    else if (seen.size() >= kMaximumBytes)
+        decide(false);
+}
+
+void ClientSettingsSniff::decide(bool legacy) {
+    legacy_ = legacy;
+    streams_.clear();
+    other_streams_.clear();
+}
+
 }  // namespace moq::interop::transport

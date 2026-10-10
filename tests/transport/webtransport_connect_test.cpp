@@ -433,4 +433,39 @@ TEST(WebTransportLegacySettings, IncompleteAndOtherStreams) {
               std::optional<bool>{false});
 }
 
+TEST(WebTransportClientSettingsSniff, DecidesFromTheControlStreamAcrossChunks) {
+    const auto full = control_stream(join({kDatagram, kMaxSessions1}));
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::span(full).first(3));
+    EXPECT_EQ(sniff.legacy(), std::nullopt);
+    sniff.feed(6, std::vector<std::uint8_t>{0x02, 0x00});  // a QPACK encoder stream
+    sniff.feed(2, std::span(full).subspan(3));
+    EXPECT_EQ(sniff.legacy(), std::optional<bool>{true});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    sniff.feed(10, std::vector<std::uint8_t>{0x54, 0x00});  // after the decision nothing is kept
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+}
+
+// A control stream whose SETTINGS frame never completes within the bound decides "no legacy WebTransport" and
+// stops tracking every stream (other_streams no longer grows with each new client stream).
+TEST(WebTransportClientSettingsSniff, ACappedIncompleteControlStreamDecidesFalseAndStopsTracking) {
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::vector<std::uint8_t>{0x00, 0x04, 0x44, 0x00});  // SETTINGS of length 0x400: never complete
+    sniff.feed(6, std::vector<std::uint8_t>{0x54});
+    EXPECT_EQ(sniff.tracked_streams(), 2u);
+    const std::vector<std::uint8_t> padding(ClientSettingsSniff::kMaximumBytes, 0x21);
+    sniff.feed(2, padding);
+    EXPECT_EQ(sniff.legacy(), std::optional<bool>{false});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    for (std::uint64_t id = 14; id < 14 + 4 * 64; id += 4) sniff.feed(id, std::vector<std::uint8_t>{0x54});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+}
+
+TEST(WebTransportClientSettingsSniff, IgnoresEmptyChunks) {
+    ClientSettingsSniff sniff;
+    sniff.feed(2, std::span<const std::uint8_t>{});
+    EXPECT_EQ(sniff.tracked_streams(), 0u);
+    EXPECT_EQ(sniff.legacy(), std::nullopt);
+}
+
 }  // namespace
