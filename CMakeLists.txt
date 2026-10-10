@@ -452,6 +452,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
              "$<TARGET_FILE:moq-interop-lite-ref-publisher>")
     add_test(NAME moq-lite-ref-adapter-cmdlines
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-adapter-cmdlines.sh")
+    add_test(NAME moq-lite-ref-matrix-plan
+             COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moq-lite-ref-matrix-plan.sh")
     add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
     target_link_libraries(moq-interop-lite-ref-options-tests PRIVATE moq-interop-lite-ref GTest::gtest_main)
     add_test(NAME lite-ref-options COMMAND moq-interop-lite-ref-options-tests)
