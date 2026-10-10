@@ -805,12 +805,38 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   group run. These scripts are not ctests and skip (exit 77) without the prerequisites. CI runs only the stub-based
   adapter tests (`moq-lite-adapter-contract`, `moq-lite-adapter-cmdlines`, `moq-lite-matrix-plan`) as part of the
   full `ctest`.
-- **Meaning of `not_run` per transport.** Row 125 is judged only on WebTransport; rows 120 and 124 only on native
-  QUIC; row 126 only on native QUIC; row 152 on neither (it needs the adapter to end and restart the broadcast, which
-  the driver contract does not offer). A publisher that sends a Path on WebTransport makes the runner close the
-  session, which leaves every row of that session `not_run` except 111 and 125 (the `moq` CLI does not do this).
-- **Results are staged.** A moq-lite-06 run covers 30 testable rows of a catalog with 75 still-unreviewed rows, so its
-  verdict is `incomplete` or `fail`, never `pass`; unreviewed rows are listed as not tested.
+- **Meaning of `not_applicable` and `not_run` per transport.** Row 125 is judged only on WebTransport; rows 120, 124
+  and 126 only on native QUIC. On the other transport they are `not_applicable`: they leave the score instead of holding
+  it back. Rows 075, 105, 077 and 186 are `not_applicable` to a publisher that advertised a Probe capability (075), sent
+  no datagram (105) or ended the session on the first GOAWAY (077, 186). Row 152 needs a publisher that retracts the
+  broadcast inside the window, which the `moq` CLI does not (the reference publisher does); until it is judged a run is
+  `incomplete`. A publisher that sends a Path on WebTransport makes the runner close the session, which leaves every row
+  of that session `not_run` except 111 and 125 (the `moq` CLI does not do this).
+- **Results are scored like the drafts'.** The moq-lite-06 catalog is complete (all 212 rows reviewed, since L2c): a run
+  is `pass` when every scored row is judged or not applicable and none failed, `fail` when a required row failed, and
+  `incomplete` while a scored row is unjudged. A single-scenario run is `incomplete` by construction; one run of all 27
+  scenarios is the Pass test. The reference publisher (`moq-interop-lite-ref-publisher`, adapter `adapters/moq-lite-ref`)
+  is that test's known-good publisher: its all-scenarios run is `pass` on both transports, and each of its `--defect`
+  modes fails exactly the row named in the table below (`tests/e2e/moq-lite-ref-negative.sh`,
+  `tests/golden/moq-lite-ref-defects.txt`).
+
+  | `--defect` | scenario | row that fails |
+  |---|---|---|
+  | `no-setup-stream` | `l06-setup-stream` | `L06-3-1-MUST-014` |
+  | `silent-on-announce` | `l06-announce-prefix` | `L06-7-4-MUST-139` |
+  | `ignore-unknown-streams` | `l06-errors-unknown-stream-type` | `L06-7-2-MUST-108` |
+  | `close-on-invalid-subscribe` | `l06-subscribe-invalid-frame-bounds` | `L06-3-6-MUST-023` |
+  | `fetch-truncates-on-short-range` | `l06-fetch-group` | `L06-7-16-MUST-177` |
+  | `fetch-ignores-unknown-group` | `l06-fetch-unknown-group` | `L06-5-1-3-MUST-066` |
+  | `track-info-changes-between-requests` | `l06-track-info` | `L06-7-12-MUST-NOT-163` |
+  | `track-info-zero-timescale` | `l06-track-info` | `L06-7-12-MUST-170` |
+  | `probe-resets-on-target` | `l06-probe-report` | `L06-5-1-5-MUST-072` |
+  | `probe-none-not-reset` (with `--probe-level none`) | `l06-probe-report` | `L06-5-1-5-MUST-075` |
+  | `goaway-oversize-logged` | `l06-goaway-oversize` | `L06-7-18-MUST-179` |
+  | `goaway-duplicate-ignored` | `l06-goaway-duplicate` | `L06-7-18-MUST-186` |
+  | `opens-streams-after-goaway` (with `--groups 14 --group-interval-polls 300`) | `l06-goaway-single` | `L06-5-1-6-MUST-NOT-077` |
+  | `datagram-oversize` | `l06-datagram-size` | `L06-6-4-MUST-NOT-105` |
+  | `offset-group-start`, `goaway-closes-session-on-first`, `datagram-unknown-subscribe-id`, `datagram-differs-from-stream`, `datagram-only` | | none: no evaluator judges the defect (the scripted tests do) |
 
 ## 8. Interpreting results
 

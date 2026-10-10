@@ -15,7 +15,7 @@ The examples below assume the runner listens on `127.0.0.1:8080`.
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | Database readiness and the list of executable profiles |
-| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as a third entry (`complete: true`, `runnable: true`) when the service loaded its catalog, and moq-lite-06 as the last entry (`"draft": "moq-lite-06"`, `complete: false`, `runnable: true`, `staged: true` and a `staged_note`) when it loaded the lite catalog |
+| `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as a third entry (`complete: true`, `runnable: true`) when the service loaded its catalog, and moq-lite-06 as the last entry (`"draft": "moq-lite-06"`, `complete: true`, `runnable: true`) when it loaded the lite catalog |
 | `GET /api/v1/requirements?draft=18\|21\|22\|moq-lite-06` | Requirement catalog rows with draft line citations (paginated) |
 | `POST /api/v1/runs` | Create a run |
 | `GET /api/v1/runs` | List runs, newest first (paginated) |
@@ -78,7 +78,7 @@ request) uses the draft 22 IDs, and its outcomes are `D22-` rows.
 
 ### moq-lite-06 runs
 
-The runner loads `requirements/moq-lite-06.json` at startup (staged: `complete: false`), checked against the
+The runner loads `requirements/moq-lite-06.json` at startup (complete since L2c: `complete: true`), checked against the
 digest of `docs/draft-lcurley-moq-lite-06.txt` in `requirements/draft-digests.json`. When the catalog file, the
 draft text or its digest entry is missing, or the digest does not match, the runner still starts, serves the MoQ
 Transport drafts only and logs `moq-lite-06 is unavailable: ...`; a catalog file that is present but does not load
@@ -128,15 +128,13 @@ Every `context_ready` event repeats the endpoint URI and the session URL fields.
 native QUIC the publisher's SETUP Path must be `/moq?token=l1d` (rows L06-7-3-2-MUST-120 and
 L06-7-3-2-SHOULD-124), and on WebTransport its SETUP must carry no Path (L06-7-3-2-MUST-NOT-125).
 
-A lite run's results are staged. The run record (`/api/v1/runs/{id}`), the JSON export, the TAP export, the HTML
-report and the lite completeness entry carry `staged: true` and a `staged_note` (TAP: a `# staged catalog:` comment
-after the plan; HTML: a "Staged catalog" paragraph). The verdict is `fail`, `incomplete` or `error`, never `pass`:
-the catalog's unreviewed rows (classification pending) are each `not_run` with the reason in their rationale
-(`Unreviewed: classification pending.`) and count in the denominators without earning. See
-[scoring-and-audit.md](scoring-and-audit.md#staged-moq-lite-06-audit). The run record decides `staged` by the
-run's draft (every moq-lite run, since it has no catalog), while the catalog-backed routes (`/results/{id}`,
-`.json`, `.tap`, the completeness entry) decide it by the catalog (`complete: false`); the two differ only once the
-lite catalog is complete (L2). Run summaries in `GET /api/v1/runs` carry no `staged` field.
+A lite run's results are scored as the drafts' are (the catalog is complete since L2c): `pass` when every scored row is
+judged or not applicable and none failed, `fail` when a required row failed, `incomplete` while a scored row is `not_run`,
+`error` for a harness error. A scored row whose rule is out of the publisher's reach (a capability it did not use, a
+binding the row is not judged on) is `not_applicable`; see
+[scoring-and-audit.md](scoring-and-audit.md#moq-lite-06-audit). No lite result carries `staged` or `staged_note` any more
+(a copy of the catalog with `complete: false` would, and is presented as staged: a "Staged catalog" paragraph, a `# staged
+catalog:` TAP comment). Run summaries in `GET /api/v1/runs` carry no `staged` field.
 
 A WebTransport lite CONNECT the listener refuses (for example a `:path` without the query) is named in the
 context's `harness_error` detail as `refused CONNECT: validator_status=404 reason=unknown WebTransport endpoint path=<the
@@ -271,7 +269,6 @@ runner started with a driver executable; otherwise the request is rejected.
 | `error_reasons` | `{scenario_id, kind, detail}` for every `harness_error`, `run_aborted` and `run_stopped` event of the run |
 | `truncated_contexts` | `{scenario_id, detail}` for every context whose evidence hit a recording limit (`context_event_limit`). Such a context is not scored and does not make the verdict `error` |
 | `outcomes` | `{requirement_id, state}` per observation; states are `pass`, `fail`, `not_run`, `not_testable`, `not_applicable` |
-| `staged`, `staged_note` | moq-lite runs only: `true` and the sentence saying the catalog is staged and the verdict is never `pass`; absent for MoQ Transport runs |
 | `events` | `{total, href}` for the event log |
 
 `GET /api/v1/runs` returns summaries (`id`, `config`, `state`, timestamps,
@@ -319,9 +316,8 @@ lists them per requirement in `evidence_sequences`.
   run that recorded `unscored_probe_verdict` events (a draft 22 run that selected
   an unscored probe) also has `unscored_probes`, one `{scenario_id, verdict,
   reason}` per event; they are not part of the score, and the field is absent
-  otherwise. A moq-lite result also has `staged: true` and `staged_note`, and
-  each unreviewed row has `reviewed: false` and the outcome `not_run` (its
-  `rationale` starts with `Unreviewed:`); MoQ Transport results have neither.
+  otherwise. A moq-lite result has no `staged` fields (its catalog is complete and
+  every row is reviewed); a scored row that is out of the publisher's reach has the outcome `not_applicable`.
 - `GET /results/{id}.tap` is TAP 14, one test point per selected scenario. A
   point is `ok` only when every applicable row bound to that scenario passed
   (or the scenario has none and is marked `# SKIP`). Failed, incomplete and
@@ -359,10 +355,8 @@ and `rationale`. The line numbers refer to `docs/draft-ietf-moq-transport-18.txt
 `required_covered`/`required_total`, `optional_covered`/`optional_total`,
 `evaluator_complete`, static `findings`, `classified_residuals` (rows that are
 `not_testable`, `not_applicable` or informative, with reasons and citations), and
-`transports`. The moq-lite-06 entry (last, when the lite catalog is loaded) adds
-`staged: true` and `staged_note`, and lists each unreviewed row in
-`classified_residuals` as `not_run` with its `Unreviewed: classification pending.`
-reason (not as `not_testable`: its classification is pending). Each transport entry (`native-quic`, `webtransport`) reports
+`transports`. The moq-lite-06 entry (last, when the lite catalog is loaded) has the same shape as the others (no `staged`
+fields since the catalog is complete). Each transport entry (`native-quic`, `webtransport`) reports
 `run_count`, `scored_rows`, `observed_requirement_count` (requirements with an
 evidence-backed pass or fail), `not_run_count` with the `not_run` rows,
 `execution_consistent` and `execution_findings`. It reflects only the runs

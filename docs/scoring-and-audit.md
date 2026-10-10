@@ -201,24 +201,23 @@ address and undefined-behavior sanitizers. `fuzz-smoke.sh` builds the cursor,
 draft-18 message, draft-18 object and WebTransport stream fuzz targets and runs
 each for 500 executions with a 30 second limit. Both need Clang.
 
-### Staged moq-lite-06 audit
+### moq-lite-06 audit
 
 ```sh
 build/moq-interop-audit --draft moq-lite-06 [--format text|json] [--database PATH]
 ```
 
-`--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
-(`complete: false`). Forty evaluators are bound to the 27 scenarios (44 bindings), so the static audit
-reports the coverage of the reviewed required rows by those bindings (36 of 36 required and 4 of 4 optional
-reviewed Applicable and Testable rows) next to the catalog's state, and its verdict is never a pass. The planned
-scenario and evaluator ids follow `l06-<area>-<name>`, with the areas `session`, `setup`, `announce`, `subscribe`,
-`group`, `frame`, `errors`, `track`, `fetch`, `probe`, `goaway` and `datagram`. Other spellings (`106`, `moq-lite-05`)
-are refused. With `--database PATH` the stored moq-lite-06 runs of that database are also
-audited (the execution audit of the MoQ Transport drafts with the lite bindings: each stored
-score is recomputed with the staged scoring, and every scored row must be bound to a selected
-scenario and, when it passed, carry that binding's declared evidence); the text output adds an
-`Execution audit: consistent|findings (N runs, M scored rows, K findings)` line before the
-verdict and JSON an `execution_audit` object (`null` without `--database`).
+`--draft moq-lite-06` audits the moq-lite-06 catalog, which is complete since L2c (`complete: true`, all 212 rows
+reviewed). Forty evaluators are bound to the 27 scenarios (44 bindings), so the static audit checks the coverage of the
+required rows by those bindings (36 of 36 required and 4 of 4 optional Applicable and Testable rows) as it does for the
+other drafts, and its verdict line reads `COMPLETE: catalog complete`. The planned scenario and evaluator ids follow
+`l06-<area>-<name>`, with the areas `session`, `setup`, `announce`, `subscribe`, `group`, `frame`, `errors`, `track`,
+`fetch`, `probe`, `goaway` and `datagram`. Other spellings (`106`, `moq-lite-05`) are refused. With `--database PATH` the
+stored moq-lite-06 runs of that database are also audited (the execution audit of the MoQ Transport drafts with the lite
+bindings: each stored score is recomputed with `score()`, and every scored row must be bound to a selected scenario and,
+when it passed, carry that binding's declared evidence); the text output adds an
+`Execution audit: consistent|findings (N runs, M scored rows, K findings)` line before the verdict and JSON an
+`execution_audit` object (`null` without `--database`).
 
 ```text
 Draft moq-lite-06 source <sha256>
@@ -230,39 +229,40 @@ Required applicable testable (reviewed rows): <n>
 Planned scenarios: <n>
 Source-keyword audit: complete
 Findings: <n>
-  [non-blocking] <code> <requirement_id>: <detail>
-STAGED: incomplete catalog (not a pass)
+  [blocking] <code> <requirement_id>: <detail>
+COMPLETE: catalog complete
 ```
 
-Unreviewed rows are counted separately and are not part of the applicable testable total; the
-planned scenarios are the distinct scenario ids named by any row. JSON output carries the same
-fields (`schema_version`, `draft`, `source_sha256`, `rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
-`planned_scenarios`, `staged`, `complete`, `verdict`, `source_audit`, `findings`, `execution_audit`). It is a separate
-shape from the other drafts: there is no `source_revision`, `static_complete` or
-`executable_coverage`. Exit status is 0 unless the source-keyword audit fails or a finding is
-blocking or the execution audit has findings, 1 in that case, and 2 for an argument or loader
-error (including a `--database` path that does not exist).
+The planned scenarios are the distinct scenario ids named by any row. JSON output carries the fields `schema_version`,
+`draft`, `source_sha256`, `rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
+`planned_scenarios`, `staged` (false), `complete` (true), `verdict`, `source_audit`, `findings`, `execution_audit`. It is
+a separate shape from the other drafts: there is no `source_revision`, `static_complete` or `executable_coverage`. Exit
+status is 0 unless the source-keyword audit fails or a finding is blocking or the execution audit has findings, 1 in
+that case, and 2 for an argument or loader error (including a `--database` path that does not exist). A copy of the
+catalog with `complete: false` is audited with the staged rules as before (`STAGED: incomplete catalog (not a pass)`).
 
-The same staged semantics apply to moq-lite-06 runs made through the HTTP API: a run is scored with
-the staged score (`fail` if a required reviewed row failed, otherwise `incomplete`, never `pass`;
-`error` for a harness error), every unreviewed row is `not_run` with its `Unreviewed:` rationale and
-counts in the required, weighted and coverage denominators without earning, and the run record, the
-exports and the completeness entry carry `staged: true` with a `staged_note`. See
-[http-api.md](http-api.md#moq-lite-06-runs).
+Runs made through the HTTP API are scored as the drafts' are: `score()` gives `fail` when a required row failed,
+`incomplete` while a scored row stays `not_run`, `error` for a harness error, and `pass` when every scored row is
+judged or not applicable and none failed. The run record, the exports and the completeness entry carry no `staged` field.
+See [http-api.md](http-api.md#moq-lite-06-runs).
 
-What `not_run` means for a bound moq-lite-06 row (the run is still `fail` or `incomplete`; none of these is a
-failure): row 125 (no Path on a WebTransport session) is judged only on WebTransport and rows 120 and 124 (the
-Path equals `/moq?token=l1d`, a Path is sent) only on native QUIC, so each is `not_run` on the other transport;
-row 126 (a server's SETUP Path closes the session) is judged only on native QUIC; row 152 (a retired announce id is
-not reused) needs the adapter to end and restart a broadcast inside one session, which the driver contract does
-not offer, so it is `not_run` on both transports; and when a WebTransport client's SETUP carries Path the runner
-closes the session for it (draft 7.3.2, a receiver MUST close) and every other row of that session is `not_run`
-except 111 and 125. Row `L06-4-4-MUST-027` takes its session half from any of its five scenarios and its stream
-half from `l06-errors-code-space`, so it settles only in a run (a group run) that holds all five and is `not_run`
-in a single-scenario run. Rows 075 (a publisher that advertised no Probe capability resets the Probe Stream)
-and 072 (each PROBE target keeps the stream alive) are judged from the publisher's advertised Probe level and
-are mutually exclusive: a run is `not_run` on the one that does not match; rows 077 (no new streams after a
-GOAWAY) and 186 (a second GOAWAY closes the session) are `not_run` when the publisher ends the session on the
-first GOAWAY, which the draft allows. A Fail by the absence of a close (rows 107, 126, 131, 179 and 186, whose
-bindings declare `peer_close`) is counted as observed on the completeness page for the staged moq-lite-06 catalog; a Pass still
-needs the evidence its binding declares.
+**Not applicable for this peer (L2c).** A scored row whose rule is out of the publisher's reach is `not_applicable` and
+leaves the required, weighted and coverage denominators, so it does not keep a run from passing. Eight evaluators carry a
+predicate (`lite_applicability_registry`): the evaluator found nothing to judge and the transcript shows why it is
+not the publisher's defect. Row 075 (a publisher that advertised no Probe capability resets the Probe Stream) is not
+applicable to a publisher that advertised Report or Increase (row 072 judges that one); row 105 (a datagram body of at most
+1200 bytes) to a publisher that sent no datagram (datagrams are a permission); rows 077 (no new streams after a GOAWAY)
+and 186 (a second GOAWAY closes the session) to a publisher that ends the session on the first GOAWAY, which the draft
+allows; rows 120 and 124 (the Path equals `/moq?token=l1d`, a Path is sent) and 126 (a server's SETUP Path closes the
+session) to a WebTransport run, and row 125 (no Path on a WebTransport session) to a native QUIC run. A verdict of true
+or false is never replaced, a run that was cut short (harness failure, event limit, timeout) is never marked, and a row
+with any failing context is `fail` whatever its other contexts were.
+
+What `not_run` still means for a bound row (the run is then `incomplete` unless a required row failed): row 152 (a retired
+announce id is not reused) needs a publisher that retracts the broadcast inside the observation window, which the moq CLI
+does not (the reference publisher does with `--retract-after-polls`); row `L06-4-4-MUST-027` takes its session half from
+any of its five scenarios and its stream half from `l06-errors-code-space`, so it settles only in a run that holds all five
+and is `not_run` in a single-scenario run; when a WebTransport client's SETUP carries Path the runner closes the session
+for it (draft 7.3.2, a receiver MUST close) and every other row of that session is `not_run` except 111 and 125. A Fail by
+the absence of a close (rows 107, 126, 131, 179 and 186, whose bindings declare `peer_close`) is counted as observed on the
+completeness page for the moq-lite-06 catalog; a Pass still needs the evidence its binding declares.

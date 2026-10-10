@@ -267,14 +267,16 @@ struct LiteTranscript {
     // Value copies of the recorder's state; evaluators use the session::peer_* accessors on these records.
     std::vector<session::LiteStreamRecord> streams;
     std::optional<session::PeerCloseInfo> peer_close;
-    // The peer's datagrams (draft 6.4), copied from the recorder; evaluators use session::peer_datagrams-style reads.
+    // The peer's datagrams (draft 6.4), copied from the recorder; the runner sends none, so every entry is the peer's and
+    // evaluators read this vector directly (session::peer_datagrams reads the same from a LiteSession).
     std::vector<session::LiteDatagram> datagrams;
     // The runner's Setup stream (label "runner-setup", kind SendUni; never executed when none was sent).
     LiteStepRecord runner_setup;
     std::vector<LiteStepRecord> steps;
     // Every transport event, bounded by kLiteMaximumEvents; stream data bytes count against
-    // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: lite uses no datagrams and the
-    // transport bounds each one to the path MTU, so they are bounded by the event count).
+    // kLiteMaximumEvidenceBytes (datagram payloads are recorded but not counted: the transport bounds each one to the path MTU, so they are
+    // bounded by the event count; a publisher that sends datagrams, the reference one, keeps them whole in both this
+    // list and `datagrams` until the count is reached).
     //
     // A StreamDataEvent on a stream the PEER opened unidirectionally whose STREAM_TYPE is Group (0x0), or the PEER's
     // bytes on a runner-opened stream the runner declared as Fetch (0x3), is kept with its stream id and FIN but
