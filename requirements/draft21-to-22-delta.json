@@ -967,6 +967,20 @@
       "open_items": [
         "Known runner gaps recorded in docs/interop-notes.md: the runner does not reset a stream whose frames do not decode against the TRACK_INFO (rows 069, 171) and does not close the session on a non-empty GOAWAY URI it receives (row 184); no catalog scenario depends on either."
       ]
+    },
+    "from_L2b": {
+      "files_and_interfaces": [
+        "Wire: include/moq/interop/wire/moqlite06/datagram.h + src/wire/moqlite06/datagram.cpp (DatagramBody {subscribe_id, group_sequence, timestamp, payload}; kMaxDatagramBody 1200; decode_datagram_body returns LengthExceedsLimit above 1200 before anything else and ProtocolViolation for a short header; a datagram is whole or malformed, never NeedMore; encode_datagram_body writes nothing on failure). Golden: tests/golden/moqlite06_datagram_test.cpp.",
+        "Session: LiteDatagram {at_ns, size, body, issue}, LiteSession::datagrams() and peer_datagrams(session); a DatagramEvent charges the budget and sets limit_reached_ when exhausted; issue codes datagram_over_limit and datagram_malformed (PeerProtocol; kAllIssueCodes has 21); a peer-opened bidirectional stream of type 0x5 is decoded as one GOAWAY.",
+        "Probe engine (src/scenarios/lite_probe.cpp): LiteTranscript::datagrams, DatagramEvent forwarded to the session; duties reset_on_zero_timescale (row 069), reset_on_undecodable_frames (171), close_on_goaway_uri (184), all on in allowance_probe (lite06_common.cpp); new LiteEngineAction kinds and engine_close.",
+        "Scenario: l06-datagram-size (include/moq/interop/scenarios/lite06_datagram.h, src/scenarios/lite06_datagram.cpp), evaluator l06-datagram-size-limit bound to L06-6-4-MUST-NOT-105 (kStreamEnding: raw_probe_stimulus + raw_probe_transport_event; lite_run stores a DatagramEvent as raw_probe_transport_event 'operation=peer-datagram bytes=N'). Counts now 27 scenarios, 40 evaluators, 44 bindings.",
+        "Fixture: tests/support/scripted_lite_peer.h datagram config, four datagram defects and send_group_datagram; lite_conformance.h forces datagrams=true, frames_per_group=1 for l06-datagram-size.",
+        "Catalog: requirements/moq-lite-06.json has all 212 rows reviewed (0 unreviewed); L2b classified the last 39 (1 Applicable/Testable, 19 Applicable/NotTestable, 16 NotApplicable, 3 Informative). complete stays false."
+      ],
+      "rows_judged_only_in_process": "075, 077 and 186 (the CLI advertises Probe level Report and ends the session on any inbound GOAWAY), 105 (the CLI sends no datagram) and, by measurement, 083/086/090 (groups ~0.95 s apart never overlap, so no backlog to order or expire) can be judged only against the scripted publisher until a reference publisher exists.",
+      "b0_findings": "The CLI answers TRACK_INFO for 0.m4s with priority 60, max age 30000 ms, timescale 15360; serves FETCH only for a just-delivered group; advertises Probe level Report; closes at once on GOAWAY (code 0, reason 'dropped'); sends no datagrams.",
+      "live_sweep": "native 28 runs (23 incomplete, 5 fail, 39 scored rows), WebTransport 28 runs (24 incomplete, 4 fail, 36 scored rows); execution audits consistent; fail rows unchanged (107, 126, 131, 072, 179); l06-datagram-size not_run on both.",
+      "for_L2c": "Build the reference lite publisher (promote the test-side QUIC/WebTransport publisher, sending datagrams, accepting GOAWAY, advertising Probe None/Increase), adapters/moq-lite-ref and a negative e2e sweep over its defect modes, then flip requirements/moq-lite-06.json to complete:true with the scoring/audit/HTTP/export paths following (drafts 18/21/22 outputs and goldens byte-identical). The punch list (ML-01..ML-05) is sent upstream only after L2c's final review."
     }
   },
   "entries": [

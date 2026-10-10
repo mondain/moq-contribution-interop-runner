@@ -192,3 +192,9 @@ they are listed in the interop notes, not here.
   timescale 15360}` and identical on repeated lookups; a FETCH for a group the subscription just
   delivered returns exactly the requested frames (whole group, the first two, all but the first)
   and FINs, and a FETCH for group 4 000 000 000 is reset.
+- L2b: the CLI sends no QUIC datagram (datagrams are a permission it never uses), so row
+  L06-6-4-MUST-NOT-105 (datagram body at most 1200 bytes) is `not_run` against it. Groups arrive
+  about 0.95 s apart and never overlap, even with a 1 ms Subscriber Max Age, so the priority and
+  expiry rows 083, 086 and 090 cannot be provoked on loopback and are classified NotTestable.
+  Nothing new for upstream; the list stays local until the reference publisher (L2c) and the
+  final review are done.
