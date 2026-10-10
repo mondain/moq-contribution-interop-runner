@@ -434,6 +434,17 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_library(moq-interop-test-client tests/support/picoquic_client.cpp)
     target_include_directories(moq-interop-test-client PUBLIC "${PROJECT_SOURCE_DIR}/tests")
     target_link_libraries(moq-interop-test-client PUBLIC moq-interop-picoquic)
+    # moq-lite-06 reference publisher (L2c): its sources sit in tools/lite-ref and share the scripted publisher of
+    # tests/support with the tests.
+    add_library(moq-interop-lite-ref tools/lite-ref/lite_ref_options.cpp)
+    target_include_directories(moq-interop-lite-ref PUBLIC
+        "${PROJECT_SOURCE_DIR}/tools/lite-ref" "${PROJECT_SOURCE_DIR}/tests")
+    target_link_libraries(moq-interop-lite-ref PUBLIC moq-interop-test-client moq-interop-scenarios moq-interop-wire)
+    target_compile_options(moq-interop-lite-ref PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
+    add_executable(moq-interop-lite-ref-options-tests tests/unit/lite_ref_options_test.cpp)
+    target_link_libraries(moq-interop-lite-ref-options-tests PRIVATE moq-interop-lite-ref GTest::gtest_main)
+    add_test(NAME lite-ref-options COMMAND moq-interop-lite-ref-options-tests)
     target_compile_options(moq-interop-test-client PRIVATE
         $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>)
     add_executable(moq-interop-picoquic-peer tests/support/picoquic_peer_main.cpp)
