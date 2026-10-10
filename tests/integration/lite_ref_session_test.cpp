@@ -74,6 +74,19 @@ TEST(LiteRefSession, TheConformingPublisherPassesTheSubscribeRowOnBothTransports
     }
 }
 
+// The runner's STOP_SENDING or RESET_STREAM with a code the publisher does not know is answered by the publisher with
+// a reset of its own stream (draft 4.4); on WebTransport that reset follows the peer's STOP_SENDING, which the session
+// must not treat as the end of the stream's send side.
+TEST(LiteRefSession, AWebTransportPublisherAnswersAStopSendingWithAReset) {
+    for (const auto transport : {app::TransportKind::NativeQuic, app::TransportKind::WebTransport}) {
+        SCOPED_TRACE(transport == app::TransportKind::WebTransport ? "webtransport" : "native_quic");
+        const auto run = run_reference(transport, "l06-errors-unknown-reset-code");
+        ASSERT_EQ(run.state, storage::RunState::Finalized);
+        EXPECT_EQ(state_of(run, "L06-4-4-MUST-030"), OutcomeState::Pass);
+        EXPECT_EQ(state_of(run, "L06-4-4-MUST-NOT-032"), OutcomeState::Pass);
+    }
+}
+
 // A reference publisher run as the shipped binary: a child process whose standard output is read when it ends.
 class ChildPublisher {
 public:

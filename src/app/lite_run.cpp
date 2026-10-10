@@ -600,7 +600,9 @@ private:
     void finalize() {
         try {
             auto outcomes = requirements::aggregate_lite(env_.catalog, verdicts_);
-            auto summary = requirements::score_staged(env_.catalog, outcomes);
+            // A complete catalog (L2c) is scored as the drafts are, so a run can Pass; a staged one never does.
+            auto summary = env_.catalog.complete ? requirements::score(env_.catalog, outcomes)
+                                                 : requirements::score_staged(env_.catalog, outcomes);
             if (operational_error_ || env_.stop_requested) summary.verdict = requirements::RunVerdict::Error;
             if (env_.stop_requested)
                 context_event("run_stopped", "the run was stopped before every selected context finished");

@@ -6,8 +6,8 @@
 #
 # The endpoint is passed unchanged. MOQ_LITE_REF_ARGS (word-split) are the operator's flags (--defect NAME,
 # --datagrams, --probe-level, --frames-per-group); they are never taken from the request, so the runner does not decide
-# what the publisher does. Every one of the 27 executable scenarios gets the same command line unless the operator
-# sets the flags (tests/golden/moq-lite-ref-cmdlines.txt).
+# what the publisher does. Every one of the 27 executable scenarios gets the same command line but two, which need a
+# capability or an event (below), unless the operator sets flags (tests/golden/moq-lite-ref-cmdlines.txt).
 set -euo pipefail
 
 readonly fixture_namespace_hex='["696e7465726f702e68616e67"]'
@@ -25,7 +25,7 @@ request_file=${MOQ_INTEROP_DRIVER_REQUEST_FILE:-}
 ref_bin=${MOQ_LITE_REF_BIN:-}
 [[ -n "$ref_bin" && -f "$ref_bin" && -x "$ref_bin" ]] ||
     fail 'MOQ_LITE_REF_BIN must name the executable moq-interop-lite-ref-publisher'
-read -r -a extra_args <<<"${MOQ_LITE_REF_ARGS:-}"
+operator_args=${MOQ_LITE_REF_ARGS:-}
 command -v timeout >/dev/null || fail 'coreutils timeout is required'
 for name in $(compgen -e); do
     if [[ "$name" == MOQ_* ]]; then
@@ -63,6 +63,7 @@ require '.process_timeout_ms | type == "number" and (tostring | test("^[0-9]+$")
 require '.namespace_hex == $namespace' "namespace_hex must be $fixture_namespace_hex (interop.hang)"
 require '.track_name_hex == $track' "track_name_hex must be $fixture_track_name_hex (0.m4s)"
 
+scenario_id=$(jq -r '.scenario_id' "$request_file")
 transport=$(jq -r '.transport' "$request_file")
 endpoint=$(jq -r '.endpoint' "$request_file")
 log_dir=$(jq -r '.log_dir' "$request_file")
@@ -74,6 +75,17 @@ else
 fi
 require '.endpoint | test("^[!-~]+$")' 'endpoint contains whitespace, control or non-ASCII characters'
 [[ -d "$log_dir" && -w "$log_dir" ]] || fail 'log_dir is not a writable directory'
+
+# What a conforming publisher does differently for a scenario that is about a capability or an event, so that one run of
+# all 27 scenarios can be judged: a datagram scenario needs a publisher that sends datagrams (one frame per group), the
+# announce lifecycle one that retracts its broadcast. The operator's flags (MOQ_LITE_REF_ARGS, for example --defect)
+# come last and win.
+case "$scenario_id" in
+    l06-datagram-size) scenario_args='--datagrams --frames-per-group 1' ;;
+    l06-announce-lifecycle) scenario_args='--retract-after-polls 200' ;;
+    *) scenario_args= ;;
+esac
+read -r -a extra_args <<<"$scenario_args $operator_args"
 
 # The publisher ends when the runner closes the session; the timeout is a backstop 3 s past the scenario's.
 timeout_seconds=$(((timeout_ms + 999) / 1000))

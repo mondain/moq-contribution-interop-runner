@@ -44,13 +44,14 @@ inline constexpr std::string_view kStagedNote =
     "reported not_run (classification pending) and count in the required, weighted and coverage denominators "
     "without earning, so a run is fail, incomplete or error and never pass.";
 
-// A moq-lite run is presented as staged (the run record has no catalog; the lite catalog is staged).
-inline bool staged_draft(app::DraftVersion draft) { return !app::is_moqt(draft); }
+// A run record has no catalog, so a run is presented as staged by its draft alone. Since L2c the moq-lite-06 catalog is
+// complete and its runs are scored by score() as the drafts' are: no draft is staged any more.
+inline bool staged_draft(app::DraftVersion) { return false; }
 
-// A staged catalog: an incomplete moq-lite catalog.
+// A staged catalog: an incomplete moq-lite catalog (none is checked in; a copy with unreviewed rows still reads so).
 inline bool staged_catalog(const requirements::RequirementCatalog& catalog) {
     const auto draft = app::parse_draft(catalog.draft);
-    return !catalog.complete && draft && staged_draft(*draft);
+    return !catalog.complete && draft && !app::is_moqt(*draft);
 }
 
 // Accepts the integers 18, 21 and 22 and the string "moq-lite-06"; everything else (floats, negatives,

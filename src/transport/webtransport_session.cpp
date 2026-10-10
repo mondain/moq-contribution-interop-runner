@@ -164,7 +164,9 @@ void WebTransportSession::ingest_stop_sending(StreamId stream_id,
     if (detached_) return;
     const auto app_error = webtransport_from_http_error(wire_error);
     enqueue(PeerStopSendingEvent{stream_id, app_error});
-    finished_streams_.insert(stream_id);
+    // The peer no longer reads this stream: writing is pointless, but the endpoint still answers with a RESET_STREAM
+    // (RFC 9000 section 3.5), so the stream is not finished for reset().
+    stopped_streams_.insert(stream_id);
 }
 
 void WebTransportSession::ingest_peer_close(
@@ -194,7 +196,7 @@ void WebTransportSession::terminate_streams() {
     if (connection_ == nullptr || h3_ == nullptr) return;
     constexpr std::uint64_t session_gone = 0x170d7b68ULL;
     for (const auto stream_id : writable_streams_) {
-        if (finished_streams_.contains(stream_id)) continue;
+        if (finished_streams_.contains(stream_id) || stopped_streams_.contains(stream_id)) continue;
         auto* stream = h3zero_find_stream(h3_, stream_id);
         if (stream != nullptr) (void)reset_stream(connection_, stream, session_gone);
     }
@@ -248,7 +250,7 @@ OperationResult WebTransportSession::write(StreamId stream_id,
                                            std::span<const std::byte> data,
                                            bool fin) {
     if (detached_ || connection_ == nullptr || !writable_streams_.contains(stream_id) ||
-        finished_streams_.contains(stream_id)) return unavailable();
+        finished_streams_.contains(stream_id) || stopped_streams_.contains(stream_id)) return unavailable();
     if (data.size() > limits_.max_queued_send_bytes - queued_stream_bytes())
         return {TransportStatus::WouldBlock, 0, std::nullopt};
     auto* stream = h3zero_find_stream(h3_, stream_id);

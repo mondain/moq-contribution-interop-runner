@@ -1,9 +1,9 @@
-l06-announce-lifecycle native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d>
-l06-announce-lifecycle webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d>
+l06-announce-lifecycle native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d> <--retract-after-polls> <200>
+l06-announce-lifecycle webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d> <--retract-after-polls> <200>
 l06-announce-prefix native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d>
 l06-announce-prefix webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d>
-l06-datagram-size native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d>
-l06-datagram-size webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d>
+l06-datagram-size native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d> <--datagrams> <--frames-per-group> <1>
+l06-datagram-size webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d> <--datagrams> <--frames-per-group> <1>
 l06-errors-code-space native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d>
 l06-errors-code-space webtransport <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <https://127.0.0.1:4443/moq?token=l1d>
 l06-errors-reserved-reset-code native_quic <--foreground> <--preserve-status> <-k> <2> <-s> <TERM> <6> <@TMP@/bin/lite-ref> <--connect> <moql://127.0.0.1:4443/moq?token=l1d>

@@ -1,7 +1,7 @@
 {
   "draft": 106,
   "source_sha256": "63fc96b187b7016fb8aba3e8bac80b161ab5905500bdd6b71727d449271f2055",
-  "complete": false,
+  "complete": true,
   "requirements": [
     {
       "id": "L06-1-MUST-001",

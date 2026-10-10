@@ -7,7 +7,7 @@ set -euo pipefail
 # run of the five scenarios of row L06-4-4-MUST-027 and l06-probe-report again with --probe-level none (the run that
 # judges row 075, which a Report-advertising publisher makes not applicable). Expectations, per transport:
 #   - no judged row fails and no run errors;
-#   - the rows 075, 077, 105 and 186 the moq CLI cannot reach all pass (in the runs named above);
+#   - the rows 075, 077, 105, 186 and 152 the moq CLI cannot reach all pass (in the runs named above);
 #   - the audit of the run database reports status 0.
 # Ports: native_quic 19241/19242, webtransport 19243/19244. Without MOQ_LITE_REF_BIN, jq, curl, openssl, timeout or
 # the runner the sweep skips (exit 77). --dry-run prints the plan and starts nothing.
@@ -26,7 +26,7 @@ done
 runner_bin=$1
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# "scenario|operator flags": the flags the reference publisher needs for the scenario.
+# "scenario|operator flags": the adapter adds what a scenario needs (datagrams, a retraction); these are the operator's.
 plan=(
     'l06-setup-stream|' 'l06-setup-unknown-parameter|' 'l06-setup-duplicate-parameter|'
     'l06-setup-duplicate-stream|' 'l06-setup-server-path|' 'l06-setup-server-role|' 'l06-setup-client-path|'
@@ -36,7 +36,7 @@ plan=(
     'l06-errors-reserved-reset-code|' 'l06-errors-code-space|'
     'l06-track-info|' 'l06-fetch-group|' 'l06-fetch-unknown-group|' 'l06-probe-report|'
     'l06-probe-report|--probe-level none'
-    'l06-datagram-size|--datagrams --frames-per-group 1'
+    'l06-datagram-size|'
     'l06-goaway-single|' 'l06-goaway-duplicate|' 'l06-goaway-oversize|'
     'l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role|'
 )
@@ -81,12 +81,26 @@ for transport in native_quic webtransport; do
         while read -r _ row state; do [[ "$state" == pass ]] && judged[$row]=1; done < <(grep -E '^  row ' <<<"$out")
     done
     if ((!dry_run)); then
-        for row in L06-5-1-5-MUST-075 L06-5-1-6-MUST-NOT-077 L06-6-4-MUST-NOT-105 L06-7-18-MUST-186; do
+        for row in L06-5-1-5-MUST-075 L06-5-1-6-MUST-NOT-077 L06-6-4-MUST-NOT-105 L06-7-18-MUST-186 L06-7-7-MUST-NOT-152; do
             [[ -n "${judged[$row]:-}" ]] || { printf 'FAIL: %s did not pass on %s\n' "$row" "$transport" >&2; failures=$((failures + 1)); }
         done
+    fi
+    if ((!dry_run)); then
+        # One run of all 27 scenarios: the conforming reference publisher is a Pass (every scored row judged or not applicable).
+        all=$(sort "$script_dir/../golden/executable-ids-d106.txt" | grep -v '^$' | paste -sd, -)
+        out=$(MOQ_LITE_ADAPTER=moq-lite-ref MOQ_LITE_REF_ARGS="" MOQ_INTEROP_TEST_HTTP_PORT="$http_port" \
+            MOQ_INTEROP_TEST_UDP_PORT="$udp_port" bash "$script_dir/driven-moq-lite.sh" "$transport" "$runner_bin" "$all" 2>&1) ||
+            { printf '%s\n' "$out" | tail -20; printf 'FAIL: the all-scenarios run %s exited non-zero\n' "$transport" >&2; failures=$((failures + 1)); out=; }
+        if [[ -n "$out" ]]; then
+            printf '%s\n' "$out" | grep -E '^scenario=' | sed -E 's/^scenario=[^ ]+ /all-scenarios /'
+            grep -qE '^scenario=.* verdict=pass ' <<<"$out" ||
+                { printf 'FAIL: the all-scenarios run on %s is not a Pass\n' "$transport" >&2; failures=$((failures + 1)); }
+        fi
+    else
+        printf 'run: all 27 scenarios as one run flags=<> expect=pass\n'
     fi
     unset judged
 done
 if ((dry_run)); then printf 'ref matrix dry run completed; nothing was started\n'; exit 0; fi
 ((failures == 0)) || { printf 'ref matrix: %s failure(s)\n' "$failures" >&2; exit 1; }
-printf 'ref matrix completed: no failing row, rows 075 077 105 186 pass, audits clean\n'
+printf 'ref matrix completed: no failing row, rows 075 077 105 186 152 pass, the all-scenarios run is a Pass, audits clean\n'

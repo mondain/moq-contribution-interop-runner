@@ -514,4 +514,14 @@ std::optional<bool> evaluate_l06_setup_path_absent_on_uri_binding(const LiteTran
     return paths->empty();
 }
 
+bool l06_setup_path_native_rows_inapplicable(const LiteTranscript& transcript) {
+    return transcript.scenario_id == kL06SetupClientPath && judgeable(transcript) &&
+           transcript.binding == LiteBinding::WebTransport;
+}
+
+bool l06_setup_path_absent_inapplicable(const LiteTranscript& transcript) {
+    return transcript.scenario_id == kL06SetupClientPath && judgeable(transcript) &&
+           transcript.binding == LiteBinding::NativeQuic;
+}
+
 }  // namespace moq::interop::scenarios

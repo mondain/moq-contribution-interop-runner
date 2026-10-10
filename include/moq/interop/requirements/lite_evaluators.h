@@ -54,8 +54,9 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry();
 
 // Evaluator id -> "this peer cannot be judged by the row" (L2c). True when the peer's own behavior leaves the rule
 // vacuous or out of reach, not when it broke the rule: it advertised a Probe capability (row 075), sent no datagram
-// (105), or ended the session on the first GOAWAY (077, 186). Consulted only for an evaluator that gave no verdict
-// (nullopt); a verdict of true or false is never replaced. Four evaluators have one (pinned by the unit tests).
+// (105), ended the session on the first GOAWAY (077, 186), or ran on the other binding than a path row is judged on
+// (120, 124, 126 native QUIC; 125 WebTransport). Consulted only for an evaluator that gave no verdict (nullopt); a
+// verdict of true or false is never replaced. Eight evaluators have one (pinned by the unit tests).
 using LiteApplicability = std::function<bool(const scenarios::LiteTranscript&)>;
 const std::map<std::string, LiteApplicability>& lite_applicability_registry();
 

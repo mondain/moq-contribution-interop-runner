@@ -88,6 +88,7 @@ private:
     std::unordered_set<StreamId> writable_streams_;
     std::unordered_set<StreamId> readable_streams_;
     std::unordered_set<StreamId> finished_streams_;
+    std::unordered_set<StreamId> stopped_streams_;  // the peer sent STOP_SENDING: no more writes, a reset is still due
     std::unordered_set<StreamId> finished_read_streams_;
     bool detached_ = false;
     bool overflowed_ = false;

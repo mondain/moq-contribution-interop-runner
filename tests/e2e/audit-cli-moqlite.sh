@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The staged moq-lite-06 audit: `moq-interop-audit --draft moq-lite-06` reports the incomplete
+# The moq-lite-06 audit (complete since L2c): `moq-interop-audit --draft moq-lite-06` reports the incomplete
 # catalog (rows, reviewed, unreviewed, planned scenarios) and the coverage of its reviewed rows by the
 # L1d executable bindings (every Applicable + Testable row covered, no blocking finding), and is never a
 # pass. The expected counts are computed independently from requirements/moq-lite-06.json.
@@ -70,10 +70,10 @@ check_line "Required applicable testable (reviewed rows): $(exp required_at)"
 check_line "Planned scenarios: $(exp scenarios)"
 check_line "Required coverage (reviewed rows): $(exp required_at) of $(exp required_at)"
 check_line "Optional coverage (reviewed rows): $(exp optional_at) of $(exp optional_at)"
-check_line "STAGED: incomplete catalog (not a pass)"
+check_line "COMPLETE: catalog complete"
 grep -q '^Findings: [0-9]' "$test_dir/text.out"
 if ((expected_findings > 0)); then grep -q 'non-blocking' "$test_dir/text.out"; fi
-if grep -q 'PASS' "$test_dir/text.out"; then echo "staged output must not say PASS" >&2; exit 1; fi
+if grep -q 'PASS' "$test_dir/text.out"; then echo "lite audit output must not say PASS" >&2; exit 1; fi
 
 set +e
 "$audit_bin" --draft moq-lite-06 --format json "${common[@]}" >"$test_dir/audit.json"
@@ -87,8 +87,8 @@ jq -e --argjson n "$expected_findings" --slurpfile e "$test_dir/expected.json" '
     .unreviewed_required == $e[0].unreviewed_required and
     .required_applicable_testable == $e[0].required_at and
     .planned_scenarios == $e[0].scenarios and
-    .staged == true and .complete == false and
-    .verdict == "STAGED: incomplete catalog (not a pass)" and
+    .staged == false and .complete == true and
+    .verdict == "COMPLETE: catalog complete" and
     .source_audit.complete == true and .source_audit.missing_count == 0 and
     .source_audit.multiply_classified_count == 0 and
     ([.findings[] | select(.blocking)] | length) == 0 and
@@ -125,13 +125,13 @@ if [[ -n "$fixture_bin" ]]; then
         { echo "no consistent execution audit line" >&2; cat "$test_dir/db.out" >&2; exit 1; }
     check_db_line() { grep -qxF -- "$1" "$test_dir/db.out" || { echo "missing --database line: $1" >&2; exit 1; }; }
     check_db_line "Rows: $(exp rows)"
-    check_db_line "STAGED: incomplete catalog (not a pass)"
-    if grep -q 'PASS' "$test_dir/db.out"; then echo "staged output must not say PASS" >&2; exit 1; fi
+    check_db_line "COMPLETE: catalog complete"
+    if grep -q 'PASS' "$test_dir/db.out"; then echo "lite audit output must not say PASS" >&2; exit 1; fi
     "$audit_bin" --draft moq-lite-06 --database "$test_dir/runs.sqlite3" --format json "${common[@]}" \
         >"$test_dir/db.json"
     read -r clean_one clean_two < <(sed -n 's/^clean //p' "$test_dir/fixture.out")
     jq -e --arg one "$clean_one" --arg two "$clean_two" '
-        .staged == true and .complete == false and
+        .staged == false and .complete == true and
         .execution_audit.consistent == true and .execution_audit.run_count == 2 and
         .execution_audit.scored_rows > 0 and (.execution_audit.findings | length) == 0 and
         ([.execution_audit.runs[].run_id] == ([$one, $two] | sort)) and

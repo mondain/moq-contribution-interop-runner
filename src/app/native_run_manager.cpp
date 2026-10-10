@@ -457,7 +457,7 @@ public:
         if (!draft18 || !store || draft18->draft != 18 || !draft18->complete ||
             (draft21 && (draft21->draft != 21 || !draft21->complete)) ||
             (draft22 && (draft22->draft != 22 || !draft22->complete)) ||
-            // The lite catalog is staged (score_staged): it need not be complete.
+            // The lite catalog may be staged (score_staged) or complete (score): either loads.
             (moqlite06 && moqlite06->draft != 106) ||
             config.maximum_active_runs == 0 ||
             config.port_start > config.port_end ||

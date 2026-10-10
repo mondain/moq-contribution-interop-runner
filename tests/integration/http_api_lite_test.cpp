@@ -123,7 +123,7 @@ std::unique_ptr<LiteQuicPublisher> conforming(std::uint16_t port, unsigned) {
 
 // ---- listing ------------------------------------------------------------------------------------------------------
 
-TEST_F(LiteHttpApi, TheDraftsListingNamesMoqLiteAsRunnableAndStaged) {
+TEST_F(LiteHttpApi, TheDraftsListingNamesMoqLiteAsRunnableAndComplete) {
     const auto drafts = get("/api/v1/drafts").at("drafts");
     ASSERT_EQ(drafts.size(), 4u);
     for (std::size_t index = 0; index < 3; ++index) {
@@ -131,12 +131,12 @@ TEST_F(LiteHttpApi, TheDraftsListingNamesMoqLiteAsRunnableAndStaged) {
         EXPECT_FALSE(drafts.at(index).contains("staged")) << drafts.at(index).dump();
         EXPECT_FALSE(drafts.at(index).contains("staged_note"));
     }
+    EXPECT_FALSE(drafts.at(3).contains("staged")) << drafts.at(3).dump();  // complete since L2c
+    EXPECT_FALSE(drafts.at(3).contains("staged_note"));
     const auto& lite = drafts.at(3);
     EXPECT_EQ(lite.at("draft"), "moq-lite-06");
     EXPECT_TRUE(lite.at("runnable"));
-    EXPECT_FALSE(lite.at("complete"));
-    EXPECT_TRUE(lite.at("staged"));
-    EXPECT_NE(lite.at("staged_note").get<std::string>().find("never pass"), std::string::npos);
+    EXPECT_TRUE(lite.at("complete"));
     EXPECT_EQ(lite.at("requirement_count"), 212);
     EXPECT_EQ(lite.at("source_sha256"), lite_->source_sha256);
     EXPECT_EQ(lite.dump().find("\"draft\":106"), std::string::npos) << lite.dump();
@@ -219,8 +219,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     EXPECT_EQ(run.at("state"), "finalized");
     EXPECT_EQ(run.at("config").at("draft"), "moq-lite-06");
     EXPECT_EQ(run.at("verdict"), "incomplete");
-    EXPECT_TRUE(run.at("staged"));
-    EXPECT_FALSE(run.at("staged_note").get<std::string>().empty());
+    EXPECT_FALSE(run.contains("staged"));  // complete since L2c: the run is scored as the drafts are
     EXPECT_EQ(run.at("outcomes").size(), 212u);
     std::map<std::string, std::string> states;
     for (const auto& outcome : run.at("outcomes"))
@@ -228,7 +227,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     EXPECT_EQ(states.at("L06-3-1-MUST-014"), "pass");
     EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), "pass");
     EXPECT_EQ(states.at("L06-7-3-2-SHOULD-124"), "pass");
-    EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), "not_run");
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), "not_applicable");  // WebTransport only
     // The session URL the publisher was given, in the evidence.
     const auto events = get("/api/v1/runs/" + id + "/events?limit=100").at("items");
     const auto ready = std::find_if(events.begin(), events.end(),
@@ -241,10 +240,10 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     const auto list = get("/api/v1/runs");
     EXPECT_EQ(list.at("items").at(0).at("config").at("draft"), "moq-lite-06");
 
-    // The JSON export: every row. Since L2b none is unreviewed; the staged note remains (complete: false).
+    // The JSON export: every row; none is unreviewed and the catalog is complete (L2c).
     const auto document = get("/results/" + id + ".json");
     EXPECT_EQ(document.at("run").at("config").at("draft"), "moq-lite-06");
-    EXPECT_TRUE(document.at("staged"));
+    EXPECT_FALSE(document.contains("staged"));
     EXPECT_EQ(document.at("draft_source_sha256"), lite_->source_sha256);
     ASSERT_EQ(document.at("requirements").size(), 212u);
     std::size_t unreviewed = 0;
@@ -261,14 +260,15 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
 
     // TAP.
     const auto tap = get_text("/results/" + id + ".tap");
-    EXPECT_TRUE(tap.starts_with("TAP version 14\n1..2\n# staged catalog:")) << tap;
+    EXPECT_TRUE(tap.starts_with("TAP version 14\n1..2\n")) << tap;
+    EXPECT_EQ(tap.find("# staged catalog:"), std::string::npos) << tap;
     EXPECT_NE(tap.find("\"draft\":\"moq-lite-06\""), std::string::npos) << tap;
     EXPECT_NE(tap.find(" - l06-setup-client-path"), std::string::npos) << tap;
 
     // The HTML report (with and without a filter) and the run list.
     const auto page = get_text("/results/" + id);
     EXPECT_NE(page.find("Draft moq-lite-06;"), std::string::npos);
-    EXPECT_NE(page.find("Staged catalog:"), std::string::npos);
+    EXPECT_EQ(page.find("Staged catalog:"), std::string::npos);
     EXPECT_NE(page.find("incomplete"), std::string::npos);
     const auto filtered = get_text("/results/" + id + "?outcome=not_run&section=10");
     EXPECT_EQ(filtered.find("Unreviewed: classification pending."), std::string::npos);
@@ -280,8 +280,8 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     ASSERT_EQ(completeness.at("drafts").size(), 4u);
     const auto& entry = completeness.at("drafts").at(3);
     EXPECT_EQ(entry.at("draft"), "moq-lite-06");
-    EXPECT_TRUE(entry.at("staged"));
-    EXPECT_TRUE(entry.at("evaluator_complete")) << "every reviewed row is bound since L2b; the catalog flag keeps it staged";
+    EXPECT_FALSE(entry.contains("staged"));  // complete since L2c
+    EXPECT_TRUE(entry.at("evaluator_complete")) << "every reviewed row is bound since L2b";
     std::size_t pending = 0;
     for (const auto& residual : entry.at("classified_residuals")) {
         const auto reason = residual.at("reason").get<std::string>();
@@ -335,7 +335,7 @@ app::RunId store_lite_run(storage::SqliteRunStore& store, const requirements::Re
             outcome_state = requirements::OutcomeState::NotTestable;
         outcomes.push_back({r.id, outcome_state});
     }
-    store.finalize(id, requirements::score_staged(lite, outcomes), outcomes);
+    store.finalize(id, requirements::score(lite, outcomes), outcomes);
     return id;
 }
 
@@ -387,7 +387,7 @@ TEST_F(LiteHttpApi, AWebTransportRunReturnsTheSessionUrlAndJudgesRow125) {
     for (const auto& outcome : run.at("outcomes"))
         states[outcome.at("requirement_id").get<std::string>()] = outcome.at("state").get<std::string>();
     EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), "pass");
-    EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), "not_run");
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), "not_applicable");  // native QUIC only
     (void)get_text("/results/" + id);
     (void)get("/results/" + id + ".json");
     (void)get_text("/results/" + id + ".tap");
@@ -559,7 +559,7 @@ TEST(LiteStartup, TheCheckedInCatalogLoads) {
     const auto loaded = tree.load(log);
     ASSERT_TRUE(loaded);
     EXPECT_EQ(loaded->draft, 106u);
-    EXPECT_FALSE(loaded->complete);
+    EXPECT_TRUE(loaded->complete);
     EXPECT_EQ(loaded->requirements.size(), 212u);
     EXPECT_TRUE(log.empty()) << log;
 }

@@ -86,6 +86,10 @@ std::optional<bool> evaluate_l06_setup_duplicate_parameter_close(const LiteTrans
 std::optional<bool> evaluate_l06_setup_duplicate_stream_close(const LiteTranscript& transcript);
 // L06-7-3-2-MUST-126 (scenario l06-setup-server-path).
 std::optional<bool> evaluate_l06_setup_server_path_close(const LiteTranscript& transcript);
+
+// L2c. Row 126 is judged on native QUIC only (draft 7.3.2): on WebTransport a Path is also a URI-binding violation,
+// so the rule is out of reach there, not unjudged.
+bool l06_setup_server_path_inapplicable(const LiteTranscript& transcript);
 // L06-7-3-3-MUST-131 (scenario l06-setup-server-role).
 std::optional<bool> evaluate_l06_setup_server_role_close(const LiteTranscript& transcript);
 

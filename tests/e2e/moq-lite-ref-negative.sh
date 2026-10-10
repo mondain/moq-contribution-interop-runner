@@ -42,10 +42,10 @@ plan=(
     'goaway-duplicate-ignored|l06-goaway-duplicate||L06-7-18-MUST-186'
     'goaway-closes-session-on-first|l06-goaway-single||none'
     'opens-streams-after-goaway|l06-goaway-single|--groups 14 --group-interval-polls 300|L06-5-1-6-MUST-NOT-077'
-    'datagram-oversize|l06-datagram-size|--datagrams --frames-per-group 1|L06-6-4-MUST-NOT-105'
-    'datagram-unknown-subscribe-id|l06-datagram-size|--datagrams --frames-per-group 1|none'
-    'datagram-differs-from-stream|l06-datagram-size|--datagrams --frames-per-group 1|none'
-    'datagram-only|l06-datagram-size|--datagrams --frames-per-group 1|none'
+    'datagram-oversize|l06-datagram-size||L06-6-4-MUST-NOT-105'
+    'datagram-unknown-subscribe-id|l06-datagram-size||none'
+    'datagram-differs-from-stream|l06-datagram-size||none'
+    'datagram-only|l06-datagram-size||none'
 )
 
 if ((!dry_run)); then

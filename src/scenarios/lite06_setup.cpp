@@ -184,6 +184,11 @@ std::optional<bool> evaluate_l06_setup_duplicate_stream_close(const LiteTranscri
     return lite06::judge_close_probe(transcript, kL06SetupDuplicateStream, stimulus);
 }
 
+bool l06_setup_server_path_inapplicable(const LiteTranscript& transcript) {
+    return transcript.scenario_id == kL06SetupServerPath && judgeable(transcript) &&
+           transcript.binding == LiteBinding::WebTransport;
+}
+
 std::optional<bool> evaluate_l06_setup_server_path_close(const LiteTranscript& transcript) {
     // Row 126 tests the "only the client sends Path" half on binding 1 only; on WebTransport a Path is also a
     // URI-binding violation, so the reaction cannot be attributed to this half. Unknown is judged.

@@ -349,6 +349,9 @@ struct ConformingLitePublisherConfig {
     // A Group stream is opened on every N-th poll (1: on every poll). A live publisher paces its groups (the reference
     // publisher's --group-interval-polls) so that a rule about streams opened later can be seen to hold or not.
     std::size_t group_period_polls{1};
+    // 0: never. Otherwise the broadcast announced on an ANNOUNCE stream is retracted (ANNOUNCE_END for its Announce ID)
+    // this many polls after the ANNOUNCE_START, the way a publisher whose source ended retracts it.
+    std::size_t retract_after_polls{0};
     std::size_t frames_per_group{2};
     // 0: each FRAME payload is the text "frame-<group>-<frame>"; otherwise that text padded to this many bytes (a
     // media-sized source for the evidence-cap tests).
@@ -482,7 +485,19 @@ public:
         if (!peer.peer_closed()) serve_probes(peer);
         if (!peer.peer_closed() && polls_ % std::max<std::size_t>(config_.group_period_polls, 1) == 0)
             emit_one_group(peer);
+        send_due_retractions(peer);
         if (config_.hooks.on_poll) config_.hooks.on_poll(*this, peer);
+    }
+
+    void send_due_retractions(ScriptedLitePeer& peer) {
+        for (auto it = retractions_.begin(); it != retractions_.end();) {
+            if (polls_ < it->due_poll || peer.peer_closed()) {
+                ++it;
+                continue;
+            }
+            peer.data(it->stream, announce_message(l06::AnnounceEnd{0}));
+            it = retractions_.erase(it);
+        }
     }
 
     // Default behaviors, public so hooks can reuse them.
@@ -509,6 +524,8 @@ public:
         }
         peer.data(stream, std::move(reply));
         answered_.insert(stream);
+        if (covered && config_.retract_after_polls > 0)
+            retractions_.push_back({stream, polls_ + config_.retract_after_polls});
     }
     void answer_subscribe(ScriptedLitePeer& peer, transport::StreamId stream, const l06::Subscribe& subscribe) {
         if (subscribe.broadcast_path != config_.broadcast || subscribe.track_name != config_.track) {
@@ -965,6 +982,11 @@ private:
     std::set<transport::StreamId> answered_;    // runner bidi streams this publisher answered itself
     std::set<transport::StreamId> send_ended_;  // runner bidi streams whose send direction this publisher ended
     std::map<transport::StreamId, Served> subscriptions_;
+    struct Retraction {
+        transport::StreamId stream;
+        std::size_t due_poll;
+    };
+    std::vector<Retraction> retractions_;
     std::deque<PendingGroup> pending_groups_;
     std::vector<LiteRunnerRequest> requests_;
     std::size_t runner_setups_{0};

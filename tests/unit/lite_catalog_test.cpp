@@ -31,11 +31,13 @@ std::string section_group(std::string_view section) {
     return std::string(section.substr(0, section.find('.')));
 }
 
-TEST(LiteCatalog, LoadsAsAnIncompleteDraft106Catalog) {
+TEST(LiteCatalog, LoadsAsACompleteDraft106Catalog) {
     const auto source = lite_source();
     const auto catalog = lite_catalog(source);
     EXPECT_EQ(catalog.draft, 106u);
-    EXPECT_FALSE(catalog.complete);
+    EXPECT_TRUE(catalog.complete);  // flipped by L2c; every row is reviewed
+    EXPECT_NO_THROW((void)RequirementCatalog::load(source, kRoot / "requirements/moq-lite-06.json",
+                                                    CatalogLoadMode::RequireComplete));
     EXPECT_EQ(catalog.source_sha256, source.sha256);
     EXPECT_EQ(catalog.requirements.size(), scan_normative_occurrences(source).size());
 }

@@ -6,8 +6,9 @@
 #
 # A stub `timeout` records its arguments and runs the command; a stub publisher records its own. One line per pair:
 #   `<scenario_id> <transport> <timeout argv>`
-# with temporary paths normalized to @TMP@. Needs only bash and jq; no network. The command line must not depend on the
-# scenario, and must change with MOQ_LITE_REF_ARGS only.
+# with temporary paths normalized to @TMP@. Needs only bash and jq; no network. The command line is the same for every
+# scenario but l06-datagram-size and l06-announce-lifecycle (which need a capability or an event), and the operator's
+# MOQ_LITE_REF_ARGS come last.
 set -euo pipefail
 shopt -s inherit_errexit
 export LC_ALL=C
@@ -75,13 +76,17 @@ for transport in native_quic webtransport; do
         [[ -n "$id" ]] || continue
         line=$(command_line "$id" "$transport" "")
         lines+=("$id $transport $line")
-        if [[ -z "$first" ]]; then first=$line
-        elif [[ "$line" != "$first" ]]; then printf 'the command line depends on the scenario (%s %s)\n' "$id" "$transport" >&2; exit 1; fi
+        case "$id" in
+            l06-datagram-size) [[ "$line" == *"<--datagrams> <--frames-per-group> <1>" ]] || { printf 'datagram scenario flags missing (%s)\n' "$line" >&2; exit 1; } ;;
+            l06-announce-lifecycle) [[ "$line" == *"<--retract-after-polls> <200>" ]] || { printf 'lifecycle scenario flags missing (%s)\n' "$line" >&2; exit 1; } ;;
+            *) if [[ -z "$first" ]]; then first=$line
+               elif [[ "$line" != "$first" ]]; then printf 'the command line depends on the scenario (%s %s)\n' "$id" "$transport" >&2; exit 1; fi ;;
+        esac
     done < <(sort "$ids_file")
 done
 # The operator's flags reach the publisher, in order, and nothing else changes.
 with_flags=$(command_line l06-datagram-size native_quic "--datagrams --frames-per-group 1 --defect datagram-oversize")
-[[ "$with_flags" == *"<--datagrams> <--frames-per-group> <1> <--defect> <datagram-oversize>" ]] ||
+[[ "$with_flags" == *"<--datagrams> <--frames-per-group> <1> <--datagrams> <--frames-per-group> <1> <--defect> <datagram-oversize>" ]] ||
     { printf 'operator flags are not passed through: %s\n' "$with_flags" >&2; exit 1; }
 # A request the adapter must refuse runs nothing.
 if env MOQ_LITE_REF_BIN="$work/bin/lite-ref" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=2 \

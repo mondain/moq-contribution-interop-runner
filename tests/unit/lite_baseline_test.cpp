@@ -150,6 +150,10 @@ TEST_F(LiteBaselineTest, CommittedCatalogEqualsGeneratorOutputByteForByte) {
     // Raw formatting check: classification edits keep the generator's serialization.
     EXPECT_EQ(committed_text, document.dump(2) + "\n");
     ASSERT_EQ(document["requirements"].size(), generated["requirements"].size());
+    // The one deliberate difference from the generator since L2c: every row is reviewed, so the catalog is complete.
+    EXPECT_TRUE(document["complete"].get<bool>());
+    EXPECT_FALSE(generated["complete"].get<bool>());
+    document["complete"] = generated["complete"];
     for (std::size_t i = 0; i < generated["requirements"].size(); ++i) {
         auto& row = document["requirements"][i];
         const auto& baseline = generated["requirements"][i];
@@ -164,7 +168,7 @@ TEST_F(LiteBaselineTest, CommittedCatalogEqualsGeneratorOutputByteForByte) {
     }
     EXPECT_EQ(document.dump(2) + "\n", generated_text);
     const auto catalog = RequirementCatalog::load(source, committed, CatalogLoadMode::AllowIncomplete);
-    EXPECT_FALSE(catalog.complete);
+    EXPECT_TRUE(catalog.complete);
     EXPECT_EQ(catalog.draft, 106u);
     EXPECT_EQ(catalog.source_sha256, source.sha256);
     EXPECT_EQ(catalog.requirements.size(), scan_normative_occurrences(source).size());
@@ -206,12 +210,15 @@ TEST_F(LiteBaselineTest, StagedAuditPassesTheBaselineAndFailsWhenARowIsRemoved) 
     EXPECT_TRUE(staged.missing.empty());
     EXPECT_TRUE(staged.multiply_classified.empty());
     EXPECT_TRUE(staged.errors.empty());
-    EXPECT_FALSE(audit_normative_occurrences(source, catalog).ok());
+    // Complete since L2c: the complete audit accepts the catalog too (it refused the staged one).
+    EXPECT_TRUE(catalog.complete);
+    EXPECT_TRUE(audit_normative_occurrences(source, catalog).ok());
 
     catalog.requirements.erase(catalog.requirements.begin() + 5);
     const auto broken = audit_normative_occurrences_staged(source, catalog);
     EXPECT_FALSE(broken.ok());
     EXPECT_EQ(broken.missing.size(), 1u);
+    EXPECT_FALSE(audit_normative_occurrences(source, catalog).ok());
 }
 
 }  // namespace

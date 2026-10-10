@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # requirements/schema.json: the moq-lite-06 baseline validates, the optional boolean "reviewed" flag is accepted,
-# and a non-boolean flag is rejected. Existing catalogs without the flag still validate.
+# and a non-boolean flag is rejected. The catalog is complete since L2c. Existing catalogs without the flag still validate.
 set -euo pipefail
 
 python3 -c 'import jsonschema' 2>/dev/null || { echo "SKIP: python3 jsonschema module required"; exit 77; }
@@ -15,7 +15,7 @@ validator = jsonschema.Draft202012Validator(schema)
 
 lite = json.load(open(os.path.join(base, "moq-lite-06.json")))
 validator.validate(lite)
-assert lite["draft"] == 106 and lite["complete"] is False
+assert lite["draft"] == 106 and lite["complete"] is True  # flipped by L2c
 assert lite["requirements"], "baseline must have rows"
 # Hand-classified rows drop the flag (absent means reviewed); since L2b every row is classified, so the baseline
 # holds no flag at all and the schema is exercised on a copy that sets one.

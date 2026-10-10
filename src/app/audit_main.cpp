@@ -155,10 +155,15 @@ int audit_lite(const Options& options) {
     const auto catalog = requirements::RequirementCatalog::load(
         source, options.requirements / (name + ".json"),
         requirements::CatalogLoadMode::AllowIncomplete);
-    const auto source_audit = requirements::audit_normative_occurrences_staged(source, catalog);
+    // A catalog flipped to complete (L2c) is audited as the complete drafts are; a staged copy still is as before.
+    const bool complete = catalog.complete;
+    const auto source_audit = complete ? requirements::audit_normative_occurrences(source, catalog)
+                                       : requirements::audit_normative_occurrences_staged(source, catalog);
     const auto bindings = requirements::lite_executable_bindings();
-    const auto report = requirements::audit_completeness_staged(
-        catalog, bindings, app::executable_scenarios(options.draft));
+    const auto report = complete ? requirements::audit_completeness(
+                                       catalog, bindings, app::executable_scenarios(options.draft))
+                                 : requirements::audit_completeness_staged(
+                                       catalog, bindings, app::executable_scenarios(options.draft));
     const auto counts = requirements::staged_counts(catalog);
     std::set<std::string> planned;
     for (const auto& row : catalog.requirements)
@@ -172,7 +177,8 @@ int audit_lite(const Options& options) {
         execution = requirements::audit_execution(catalog, bindings, runs);
     }
     const bool ok = source_audit.ok() && !blocking && (!execution || execution->consistent());
-    const std::string verdict = "STAGED: incomplete catalog (not a pass)";
+    const std::string verdict =
+        complete ? "COMPLETE: catalog complete" : "STAGED: incomplete catalog (not a pass)";
     if (options.format == "text") {
         std::cout << "Draft " << name << " source " << source.sha256 << '\n'
                   << "Rows: " << counts.rows << '\n'
@@ -218,7 +224,7 @@ int audit_lite(const Options& options) {
             {"optional_applicable_testable", report.optional_total},
             {"optional_covered", report.optional_covered},
             {"planned_scenarios", planned.size()},
-            {"staged", true}, {"complete", false}, {"verdict", verdict},
+            {"staged", !complete}, {"complete", complete}, {"verdict", verdict},
             {"findings", std::move(findings)},
             {"execution_audit", execution ? execution_json(*execution, runs) : Json(nullptr)}};
         std::cout << output.dump(2) << '\n';

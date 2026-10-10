@@ -428,9 +428,9 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                                               {"requirement_id", finding.requirement_id},
                                               {"detail", finding.detail}});
             }
-            // The staged (moq-lite-06) catalog counts a Fail as observed by audit_execution's rule (bound_in_run);
-            // a Pass, and every outcome of the MoQ Transport drafts, still needs its declared evidence.
-            const bool staged = detail::staged_catalog(*catalog);
+            // The moq-lite-06 catalog counts a Fail as observed by audit_execution's rule (bound_in_run), complete or
+            // staged; a Pass, and every outcome of the MoQ Transport drafts, still needs its declared evidence.
+            const bool staged = catalog->draft == 106;
             std::set<std::string> observed;
             for (const auto& run : runs) {
                 for (const auto& outcome : run.outcomes) {

@@ -186,6 +186,10 @@ const std::map<std::string, LiteApplicability>& lite_applicability_registry() {
         {"l06-datagram-size-limit", s::l06_datagram_size_inapplicable},
         {"l06-goaway-no-new-streams", s::l06_goaway_single_inapplicable},
         {"l06-goaway-second-closes", s::l06_goaway_duplicate_inapplicable},
+        {"l06-setup-server-path-close", s::l06_setup_server_path_inapplicable},
+        {"l06-setup-path-sent", s::l06_setup_path_native_rows_inapplicable},
+        {"l06-setup-path-query-appended", s::l06_setup_path_native_rows_inapplicable},
+        {"l06-setup-path-absent-on-uri-binding", s::l06_setup_path_absent_inapplicable},
     };
     return registry;
 }
