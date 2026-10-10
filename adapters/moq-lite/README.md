@@ -259,8 +259,10 @@ MOQ_CLI_BIN=/path/to/moq bash tests/e2e/moq-lite-matrix.sh build/moq-interop-run
 MOQ_CLI_BIN=/path/to/moq bash tests/e2e/driven-moq-lite.sh webtransport build/moq-interop-runner l06-setup-stream
 ```
 
-`moq-interop-audit --draft moq-lite-06` has no execution audit yet (it refuses `--database`
-for moq-lite-06), so the driven script reports that and runs the static staged audit.
+The driven script ends with `moq-interop-audit --draft moq-lite-06 --database` over its run
+database: the static staged audit plus the execution audit of the stored runs (stored score
+recomputed with the staged scoring, every scored row bound and evidenced). A SCENARIO argument
+of comma-joined ids (`l06-setup-stream,l06-setup-server-role`) posts them as one group run.
 In the L1e smoke the CLI connected about 40 ms after its start on both transports, so the
 source (the timeout rounded up plus 3 s) outlasts every probe. The run timeout must exceed
 the longest probe's windows: `l06-subscribe-abutting-frame-start` needs more than 12000 ms

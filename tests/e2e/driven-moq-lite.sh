@@ -8,6 +8,8 @@ set -euo pipefail
 #              (MOQ_INTEROP_AUDIT_BIN overrides).
 #   SCENARIO   moq-lite-06 scenario ids, each posted as its own driven run, in order; default every
 #              executable moq-lite-06 scenario (the 19 of include/moq/interop/app/lite_scenarios.h).
+#              Ids joined by commas (a,b,c) are posted as ONE run of those scenarios (a group run: one
+#              context, and one publisher, per scenario).
 #   --dry-run  print the plan instead of running it: the runner invocation (`runner:` line, the
 #              environment and arguments the runner would be started with), each run request
 #              (`request:` line, the POST /api/v1/runs body as compact JSON) and the audit (`audit:`
@@ -16,7 +18,8 @@ set -euo pipefail
 # The publisher is the moq CLI of moq-dev/moq (binary `moq`) named by MOQ_CLI_BIN, through the
 # bundled adapters/moq-lite/run.sh, which also needs ffmpeg (or MOQ_FFMPEG_BIN). The track fixture
 # posted with every run is the one the adapter accepts (adapters/moq-lite/adapter.json).
-# Without MOQ_CLI_BIN, ffmpeg, jq, curl, openssl or the runner binary the script skips (exit 77).
+# Without MOQ_CLI_BIN, ffmpeg, jq, curl, openssl, timeout or the runner binary the script skips
+# (exit 77).
 # MOQ_INTEROP_TEST_HTTP_PORT and MOQ_INTEROP_TEST_UDP_PORT choose the ports (default 19235/19236).
 # MOQ_INTEROP_TEST_KEEP=1 keeps the temporary directory (database, runner log, adapter logs) and
 # prints its path on standard error.
@@ -24,8 +27,9 @@ set -euo pipefail
 # Output: one line per run (`scenario=... transport=... run=... verdict=... publisher=...`), one
 # indented `row REQUIREMENT STATE` line per stored outcome, then `audit status=N` and the audit
 # report of the run database (moq-interop-audit --draft moq-lite-06 --database: the static staged
-# audit and the execution audit). The script exits 0 when every run finalized and the audit could
-# read the database, whatever the verdicts (a lite run is never Pass: the catalog is staged).
+# audit and the execution audit of the stored runs). The script exits 0 when every run finalized and
+# the audit could read the database (audit status 0, or 1 for findings, which are reported), whatever
+# the verdicts (a lite run is never Pass: the catalog is staged).
 dry_run=0
 if [[ "${1:-}" == --dry-run ]]; then
     dry_run=1
@@ -58,9 +62,13 @@ else
     scenarios=("${all_scenarios[@]}")
 fi
 for scenario in "${scenarios[@]}"; do
-    known=0
-    for id in "${all_scenarios[@]}"; do [[ "$scenario" == "$id" ]] && known=1; done
-    ((known)) || { printf 'unknown moq-lite-06 scenario: %s\n' "$scenario" >&2; exit 2; }
+    IFS=, read -r -a group <<<"$scenario"
+    [[ ${#group[@]} -gt 0 && "$scenario" != *, ]] || { printf 'empty moq-lite-06 scenario group: %s\n' "$scenario" >&2; exit 2; }
+    for member in "${group[@]}"; do
+        known=0
+        for id in "${all_scenarios[@]}"; do [[ "$member" == "$id" ]] && known=1; done
+        ((known)) || { printf 'unknown moq-lite-06 scenario: %s\n' "$member" >&2; exit 2; }
+    done
 done
 
 if ((!dry_run)); then
@@ -109,7 +117,7 @@ if [[ "$transport" == native_quic ]]; then api_transport=native-quic; fi
 request_for() {
     jq -cn --arg transport "$api_transport" --arg scenario "$1" \
         --argjson namespace "$namespace_hex" --argjson name "$track_name_hex" \
-        '{draft: "moq-lite-06", transport: $transport, mode: "driven", scenarios: [$scenario],
+        '{draft: "moq-lite-06", transport: $transport, mode: "driven", scenarios: ($scenario | split(",")),
           timeout_ms: 15000, track: {namespace_hex: $namespace, name_hex: $name}}'
 }
 
@@ -198,7 +206,7 @@ for scenario in "${scenarios[@]}"; do
     # whose windows do not fit the timeout) has no driver evidence; it is reported below.
     if [[ $(jq '[.items[] | select(.kind == "harness_error")] | length' <<<"$events") -eq 0 &&
         ($(jq '[.items[] | select(.kind == "publisher_process")] | length' <<<"$events") -lt 1 ||
-        ! -f "$test_dir/logs/$run_id/1-$scenario/request.json") ]]; then
+        ! -f "$test_dir/logs/$run_id/1-${scenario%%,*}/request.json") ]]; then
         printf 'missing driver evidence or retained contract for %s\n' "$scenario" >&2
         sed -n '1,120p' "$test_dir/runner.log" >&2
         exit 1
@@ -219,17 +227,9 @@ for scenario in "${scenarios[@]}"; do
 done
 stop_runner
 
-# The audit of the run database. moq-interop-audit refuses --database for moq-lite-06 (it has no
-# execution audit for the staged catalog yet): the static staged audit is run then, and the refusal
-# is reported.
+# The audit of the run database: the static staged audit and the execution audit of the stored runs.
 audit_status=0
 "$audit_bin" "${audit_args[@]}" >"$test_dir/audit.txt" 2>&1 || audit_status=$?
-if ((audit_status == 2)) && grep -qF -- '--database does not apply to moq-lite-06' "$test_dir/audit.txt"; then
-    printf 'execution audit: unavailable (moq-interop-audit: --database does not apply to moq-lite-06)\n'
-    audit_status=0
-    "$audit_bin" "${audit_args[@]:0:2}" "${audit_args[@]:4}" >"$test_dir/audit.txt" 2>&1 ||
-        audit_status=$?
-fi
 printf 'audit status=%s\n' "$audit_status"
 cat "$test_dir/audit.txt"
 # 0: clean; 1: findings (reported above). Anything else means the audit could not run.

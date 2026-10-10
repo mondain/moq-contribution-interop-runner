@@ -81,6 +81,61 @@ Options parse(int argc, char* argv[]) {
     return result;
 }
 
+// The runs of `draft` stored in `database`, in run id order.
+std::vector<moq::interop::storage::RunRecord> stored_runs(const std::filesystem::path& database, unsigned draft) {
+    if (!std::filesystem::is_regular_file(database))
+        throw std::invalid_argument("run database does not exist");
+    moq::interop::storage::SqliteRunStore store(database, moq::interop::app::build_info());
+    std::vector<moq::interop::storage::RunRecord> runs;
+    for (std::size_t offset = 0;; offset += 100) {
+        const auto page = store.list({100, offset});
+        for (const auto& summary : page.items) {
+            if (static_cast<unsigned>(summary.config.draft) == draft)
+                runs.push_back(store.load(summary.id));
+        }
+        if (!page.next_offset) break;
+    }
+    std::sort(runs.begin(), runs.end(),
+        [](const auto& left, const auto& right) {
+            return left.id < right.id;
+        });
+    return runs;
+}
+
+// The execution audit as JSON (the "execution_audit" member of both audit outputs).
+Json execution_json(const moq::interop::requirements::ExecutionAudit& execution,
+                    const std::vector<moq::interop::storage::RunRecord>& runs) {
+    Json dynamic_findings = Json::array();
+    for (const auto& finding : execution.findings) {
+        dynamic_findings.push_back({{"code", finding.code},
+            {"run_id", finding.run_id},
+            {"requirement_id", finding.requirement_id},
+            {"detail", finding.detail}});
+    }
+    Json run_digests = Json::array();
+    for (const auto& run : runs) {
+        run_digests.push_back({{"run_id", run.id},
+            {"transport", run.config.transport ==
+                 moq::interop::app::TransportKind::WebTransport
+                 ? "webtransport" : "native-quic"},
+            {"canonical_sha256",
+             moq::interop::requirements::canonical_result_sha256(run)}});
+    }
+    return {{"consistent", execution.consistent()},
+        {"run_count", execution.run_count},
+        {"scored_rows", execution.scored_rows},
+        {"findings", std::move(dynamic_findings)},
+        {"runs", std::move(run_digests)}};
+}
+
+void print_execution_line(const moq::interop::requirements::ExecutionAudit& execution) {
+    std::cout << "Execution audit: "
+              << (execution.consistent() ? "consistent" : "findings")
+              << " (" << execution.run_count << " runs, "
+              << execution.scored_rows << " scored rows, "
+              << execution.findings.size() << " findings)\n";
+}
+
 bool is_lite(unsigned draft) {
     const auto parsed = moq::interop::app::parse_draft(draft);
     return parsed && !moq::interop::app::is_moqt(*parsed);
@@ -89,11 +144,11 @@ bool is_lite(unsigned draft) {
 // The staged audit of the moq-lite-06 catalog: incomplete by design, never a pass. The L1d executable
 // bindings (lite_executable_bindings) cover the reviewed Applicable+Testable rows over the executable lite
 // scenarios; an uncovered reviewed row would be a non-blocking "missing evaluator" finding, and the exit status
-// reflects only real catalog errors and blocking binding findings.
+// reflects only real catalog errors and blocking binding findings. With --database, the execution audit of the
+// stored moq-lite-06 runs (requirements::audit_execution with the lite bindings, staged scoring) is added; its
+// findings make the status 1, as for the MoQ Transport drafts.
 int audit_lite(const Options& options) {
     using namespace moq::interop;
-    if (options.database)
-        throw std::invalid_argument("--database does not apply to moq-lite-06");
     const std::string name(app::draft_text(app::DraftVersion::MoqLite06));
     const auto source = requirements::load_draft_source(
         options.draft, options.docs, options.requirements / "draft-digests.json");
@@ -110,7 +165,13 @@ int audit_lite(const Options& options) {
         planned.insert(row.scenarios.begin(), row.scenarios.end());
     const bool blocking = std::any_of(report.findings.begin(), report.findings.end(),
         [](const auto& finding) { return finding.blocking; });
-    const bool ok = source_audit.ok() && !blocking;
+    std::optional<requirements::ExecutionAudit> execution;
+    std::vector<storage::RunRecord> runs;
+    if (options.database) {
+        runs = stored_runs(*options.database, options.draft);
+        execution = requirements::audit_execution(catalog, bindings, runs);
+    }
+    const bool ok = source_audit.ok() && !blocking && (!execution || execution->consistent());
     const std::string verdict = "STAGED: incomplete catalog (not a pass)";
     if (options.format == "text") {
         std::cout << "Draft " << name << " source " << source.sha256 << '\n'
@@ -132,6 +193,7 @@ int audit_lite(const Options& options) {
             if (!finding.requirement_id.empty()) std::cout << ' ' << finding.requirement_id;
             std::cout << ": " << finding.detail << '\n';
         }
+        if (execution) print_execution_line(*execution);
         std::cout << verdict << '\n';
     } else {
         Json findings = Json::array();
@@ -157,7 +219,8 @@ int audit_lite(const Options& options) {
             {"optional_covered", report.optional_covered},
             {"planned_scenarios", planned.size()},
             {"staged", true}, {"complete", false}, {"verdict", verdict},
-            {"findings", std::move(findings)}};
+            {"findings", std::move(findings)},
+            {"execution_audit", execution ? execution_json(*execution, runs) : Json(nullptr)}};
         std::cout << output.dump(2) << '\n';
     }
     return ok ? 0 : 1;
@@ -202,22 +265,7 @@ int main(int argc, char* argv[]) {
         std::optional<moq::interop::requirements::ExecutionAudit> execution;
         std::vector<moq::interop::storage::RunRecord> runs;
         if (options.database) {
-            if (!std::filesystem::is_regular_file(*options.database))
-                throw std::invalid_argument("run database does not exist");
-            moq::interop::storage::SqliteRunStore store(
-                *options.database, moq::interop::app::build_info());
-            for (std::size_t offset = 0;; offset += 100) {
-                const auto page = store.list({100, offset});
-                for (const auto& summary : page.items) {
-                    if (static_cast<unsigned>(summary.config.draft) == options.draft)
-                        runs.push_back(store.load(summary.id));
-                }
-                if (!page.next_offset) break;
-            }
-            std::sort(runs.begin(), runs.end(),
-                [](const auto& left, const auto& right) {
-                    return left.id < right.id;
-                });
+            runs = stored_runs(*options.database, options.draft);
             execution = moq::interop::requirements::audit_execution(
                 catalog, bindings, runs);
         }
@@ -231,13 +279,7 @@ int main(int argc, char* argv[]) {
                       << (source_audit.ok() ? "complete" : "failed") << '\n'
                       << "Static gate: " << (static_complete ? "PASS" : "FAIL")
                       << " (" << report.findings.size() << " findings)\n";
-            if (execution) {
-                std::cout << "Execution audit: "
-                          << (execution->consistent() ? "consistent" : "findings")
-                          << " (" << execution->run_count << " runs, "
-                          << execution->scored_rows << " scored rows, "
-                          << execution->findings.size() << " findings)\n";
-            }
+            if (execution) print_execution_line(*execution);
         } else {
             Json findings = Json::array();
             for (const auto& finding : report.findings) {
@@ -257,30 +299,6 @@ int main(int argc, char* argv[]) {
                                     {"first_line", row.source.first_line}});
             }
             const auto build = moq::interop::app::build_info();
-            Json execution_json = nullptr;
-            if (execution) {
-                Json dynamic_findings = Json::array();
-                for (const auto& finding : execution->findings) {
-                    dynamic_findings.push_back({{"code", finding.code},
-                        {"run_id", finding.run_id},
-                        {"requirement_id", finding.requirement_id},
-                        {"detail", finding.detail}});
-                }
-                Json run_digests = Json::array();
-                for (const auto& run : runs) {
-                    run_digests.push_back({{"run_id", run.id},
-                        {"transport", run.config.transport ==
-                             moq::interop::app::TransportKind::WebTransport
-                             ? "webtransport" : "native-quic"},
-                        {"canonical_sha256",
-                         moq::interop::requirements::canonical_result_sha256(run)}});
-                }
-                execution_json = {{"consistent", execution->consistent()},
-                    {"run_count", execution->run_count},
-                    {"scored_rows", execution->scored_rows},
-                    {"findings", std::move(dynamic_findings)},
-                    {"runs", std::move(run_digests)}};
-            }
             const Json output = {
                 {"schema_version", 1}, {"draft", options.draft},
                 {"source_sha256", source.sha256},
@@ -297,7 +315,7 @@ int main(int argc, char* argv[]) {
                                          {"optional_total", report.optional_total}}},
                 {"findings", std::move(findings)},
                 {"classified_residuals", std::move(residual)},
-                {"execution_audit", std::move(execution_json)}};
+                {"execution_audit", execution ? execution_json(*execution, runs) : Json(nullptr)}};
             std::cout << output.dump(2) << '\n';
         }
         return static_complete && (!execution || execution->consistent()) ? 0 : 1;

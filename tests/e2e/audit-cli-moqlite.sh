@@ -3,13 +3,18 @@
 # catalog (rows, reviewed, unreviewed, planned scenarios) and the coverage of its reviewed rows by the
 # L1d executable bindings (every Applicable + Testable row covered, no blocking finding), and is never a
 # pass. The expected counts are computed independently from requirements/moq-lite-06.json.
+# With FIXTURE_BIN (moq-interop-lite-audit-fixture), the execution audit of stored moq-lite-06 runs
+# (`--database PATH`): a clean database is consistent, a run whose passed row lost its declared evidence
+# is a finding (status 1), a missing database is refused (status 2), and the MoQ Transport audits see no
+# lite run in the same database.
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    printf 'Usage: %s AUDIT_BIN\n' "$0" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    printf 'Usage: %s AUDIT_BIN [FIXTURE_BIN]\n' "$0" >&2
     exit 2
 fi
 audit_bin=$1
+fixture_bin=${2:-}
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 if ! command -v python3 >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     printf 'SKIP: python3 and jq are required\n' >&2
@@ -104,4 +109,67 @@ for bad in 106 moq-lite-05 moq-lite-6 22.0 MOQ-LITE-06; do
     grep -q '^Usage: moq-interop-audit --draft' "$test_dir/bad.err" ||
         { echo "--draft $bad: no usage message" >&2; exit 1; }
 done
+# The execution audit of stored moq-lite-06 runs.
+if [[ -n "$fixture_bin" ]]; then
+    "$fixture_bin" "$test_dir/runs.sqlite3" "$test_dir/tampered.sqlite3" >"$test_dir/fixture.out" ||
+        { echo "fixture failed" >&2; exit 1; }
+    set +e
+    "$audit_bin" --draft moq-lite-06 --database "$test_dir/runs.sqlite3" "${common[@]}" \
+        >"$test_dir/db.out" 2>"$test_dir/db.err"
+    status=$?
+    set -e
+    [[ "$status" -eq 0 ]] || { echo "unexpected --database status $status" >&2; cat "$test_dir/db.out" "$test_dir/db.err" >&2; exit 1; }
+    grep -Eqx 'Execution audit: consistent \(2 runs, [1-9][0-9]* scored rows, 0 findings\)' "$test_dir/db.out" ||
+        { echo "no consistent execution audit line" >&2; cat "$test_dir/db.out" >&2; exit 1; }
+    check_db_line() { grep -qxF -- "$1" "$test_dir/db.out" || { echo "missing --database line: $1" >&2; exit 1; }; }
+    check_db_line "Rows: $(exp rows)"
+    check_db_line "STAGED: incomplete catalog (not a pass)"
+    if grep -q 'PASS' "$test_dir/db.out"; then echo "staged output must not say PASS" >&2; exit 1; fi
+    "$audit_bin" --draft moq-lite-06 --database "$test_dir/runs.sqlite3" --format json "${common[@]}" \
+        >"$test_dir/db.json"
+    read -r clean_one clean_two < <(sed -n 's/^clean //p' "$test_dir/fixture.out")
+    jq -e --arg one "$clean_one" --arg two "$clean_two" '
+        .staged == true and .complete == false and
+        .execution_audit.consistent == true and .execution_audit.run_count == 2 and
+        .execution_audit.scored_rows > 0 and (.execution_audit.findings | length) == 0 and
+        ([.execution_audit.runs[].run_id] == ([$one, $two] | sort)) and
+        ([.execution_audit.runs[].transport] == ["native-quic", "native-quic"]) and
+        ([.execution_audit.runs[].canonical_sha256 | length] == [64, 64])' "$test_dir/db.json" >/dev/null ||
+        { echo "--database JSON shape mismatch" >&2; cat "$test_dir/db.json" >&2; exit 1; }
+    # Without --database the JSON says there is no execution audit.
+    jq -e '.execution_audit == null' "$test_dir/audit.json" >/dev/null ||
+        { echo "execution_audit must be null without --database" >&2; exit 1; }
+    # A passed row without its declared evidence is a finding: status 1.
+    set +e
+    "$audit_bin" --draft moq-lite-06 --database "$test_dir/tampered.sqlite3" --format json "${common[@]}" \
+        >"$test_dir/tampered.json"
+    status=$?
+    set -e
+    [[ "$status" -eq 1 ]] || { echo "tampered database: unexpected status $status" >&2; exit 1; }
+    jq -e '.execution_audit.consistent == false and .execution_audit.run_count == 1 and
+        ([.execution_audit.findings[] | select(.code == "missing_evaluator_evidence" and
+            .requirement_id == "L06-3-1-MUST-014")] | length) == 1' "$test_dir/tampered.json" >/dev/null ||
+        { echo "tampered finding missing" >&2; cat "$test_dir/tampered.json" >&2; exit 1; }
+    set +e
+    "$audit_bin" --draft moq-lite-06 --database "$test_dir/tampered.sqlite3" "${common[@]}" >"$test_dir/tampered.out"
+    status=$?
+    set -e
+    [[ "$status" -eq 1 ]] || { echo "tampered text: unexpected status $status" >&2; exit 1; }
+    grep -Eqx 'Execution audit: findings \(1 runs, [1-9][0-9]* scored rows, [1-9][0-9]* findings\)' \
+        "$test_dir/tampered.out" || { echo "no findings line" >&2; cat "$test_dir/tampered.out" >&2; exit 1; }
+    # A database path that does not exist is refused with the usage message.
+    set +e
+    "$audit_bin" --draft moq-lite-06 --database "$test_dir/absent.sqlite3" "${common[@]}" \
+        >"$test_dir/absent.out" 2>"$test_dir/absent.err"
+    status=$?
+    set -e
+    [[ "$status" -eq 2 ]] || { echo "absent database: unexpected status $status" >&2; exit 1; }
+    grep -q 'run database does not exist' "$test_dir/absent.err" || { echo "absent database: no reason" >&2; exit 1; }
+    [[ ! -e "$test_dir/absent.sqlite3" ]] || { echo "the audit created a database" >&2; exit 1; }
+    # The draft 22 audit of the same database holds no draft 22 run.
+    "$audit_bin" --draft 22 --database "$test_dir/runs.sqlite3" "${common[@]}" --format json \
+        >"$test_dir/db22.json" || true
+    jq -e '.execution_audit.run_count == 0' "$test_dir/db22.json" >/dev/null ||
+        { echo "the draft 22 audit counted lite runs" >&2; exit 1; }
+fi
 printf 'audit CLI moq-lite-06 passed\n'

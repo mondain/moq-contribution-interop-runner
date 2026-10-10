@@ -204,13 +204,18 @@ each for 500 executions with a 30 second limit. Both need Clang.
 ### Staged moq-lite-06 audit
 
 ```sh
-build/moq-interop-audit --draft moq-lite-06 [--format text|json]
+build/moq-interop-audit --draft moq-lite-06 [--format text|json] [--database PATH]
 ```
 
 `--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
 (`complete: false`). No evaluators are bound yet, so the audit reports the catalog's state
 instead of coverage, and its verdict is never a pass. Other spellings (`106`, `moq-lite-05`)
-are refused. `--database` does not apply.
+are refused. With `--database PATH` the stored moq-lite-06 runs of that database are also
+audited (the execution audit of the MoQ Transport drafts with the lite bindings: each stored
+score is recomputed with the staged scoring, and every scored row must be bound to a selected
+scenario and, when it passed, carry that binding's declared evidence); the text output adds an
+`Execution audit: consistent|findings (N runs, M scored rows, K findings)` line before the
+verdict and JSON an `execution_audit` object (`null` without `--database`).
 
 ```text
 Draft moq-lite-06 source <sha256>
@@ -229,10 +234,11 @@ STAGED: incomplete catalog (not a pass)
 Unreviewed rows are counted separately and are not part of the applicable testable total; the
 planned scenarios are the distinct scenario ids named by any row. JSON output carries the same
 fields (`schema_version`, `draft`, `source_sha256`, `rows`, `reviewed`, `unreviewed`, `unreviewed_required`, `required_applicable_testable`,
-`planned_scenarios`, `staged`, `complete`, `verdict`, `source_audit`, `findings`). It is a separate
+`planned_scenarios`, `staged`, `complete`, `verdict`, `source_audit`, `findings`, `execution_audit`). It is a separate
 shape from the other drafts: there is no `source_revision`, `static_complete` or
 `executable_coverage`. Exit status is 0 unless the source-keyword audit fails or a finding is
-blocking (none can be without bindings), 1 in that case, and 2 for an argument or loader error.
+blocking or the execution audit has findings, 1 in that case, and 2 for an argument or loader
+error (including a `--database` path that does not exist).
 
 The same staged semantics apply to moq-lite-06 runs made through the HTTP API: a run is scored with
 the staged score (`fail` if a required reviewed row failed, otherwise `incomplete`, never `pass`;

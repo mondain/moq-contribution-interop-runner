@@ -116,6 +116,9 @@ cat >"$work/bin/moq-interop-audit" <<'STUB'
     printf ' <%s>' "$@"
     printf '\n'
 } >>"$MOQ_STUB_DIR/calls.log"
+# The audit of a run database (--database): the staged audit and the execution audit of the runs.
+[[ " $* " == *' --database '* ]] || { printf 'stub audit: no --database\n' >&2; exit 2; }
+printf 'Execution audit: consistent (19 runs, 19 scored rows, 0 findings)\n'
 printf 'STAGED: incomplete catalog (not a pass)\n'
 STUB
 # The stub publisher binaries only have to exist and be executable: the matrix's adapter contract
@@ -144,6 +147,22 @@ done
 [[ $(grep -cxF '  row L06-STUB-001 pass' "$work/stub-out.txt") -eq $((2 * $(wc -l <"$ids_d106"))) ]] ||
     fail 'judged rows are not reported per run'
 [[ $(grep -cxF 'audit status=0' "$work/stub-out.txt") -eq 2 ]] || fail 'audit status not reported per transport'
+[[ $(grep -cxF 'Execution audit: consistent (19 runs, 19 scored rows, 0 findings)' "$work/stub-out.txt") -eq 2 ]] ||
+    fail 'the execution audit of each run database is not reported'
+grep -q 'execution audit: unavailable' "$work/stub-out.txt" && fail 'the script still reports the old execution audit fallback'
+# A comma-joined SCENARIO is one group run of those scenarios, in order.
+group=$(MOQ_CLI_BIN=$fake_cli bash "$driven" --dry-run native_quic "$fake_runner" \
+    l06-setup-stream,l06-setup-server-role l06-subscribe-latest | grep '^request: ' |
+    sed -e 's/^request: POST [^ ]* //' | jq -c '.scenarios')
+[[ "$group" == $'["l06-setup-stream","l06-setup-server-role"]\n["l06-subscribe-latest"]' ]] || fail "group run: $group"
+expect_group_refusal() {
+    local status=0
+    MOQ_CLI_BIN=$fake_cli bash "$driven" --dry-run native_quic "$fake_runner" "$1" >/dev/null 2>&1 || status=$?
+    [[ $status -eq 2 ]] || fail "group '$1' not refused (status $status)"
+}
+expect_group_refusal l06-setup-stream,l06-nope
+expect_group_refusal l06-setup-stream,
+expect_group_refusal ,
 [[ $(tail -n 1 "$work/stub-out.txt") == \
     'matrix harness completed; publisher exits, judged rows and the audit are reported above' ]] ||
     fail 'matrix did not report completion'
