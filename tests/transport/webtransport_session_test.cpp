@@ -64,6 +64,19 @@ TEST(WebTransportSession, ReceivesDatagramsUpToTheAdvertisedSizeNotThePeersSendC
     EXPECT_FALSE(session.ingest_datagram(4, bytes({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})));
 }
 
+// A WebTransport CLIENT (the reference publisher) receives the streams the server opens: bidi 1 (once it opened
+// them) and uni 3; the streams it opens itself (0, 2) are not the peer's to send on.
+TEST(WebTransportSession, AClientSessionTakesServerOpenedUniStreamsAndRefusesItsOwn) {
+    WebTransportSession client(0, {.max_events = 4, .max_event_payload_bytes = 16, .client_role = true});
+    EXPECT_TRUE(client.ingest_stream(3, 0, bytes({1}), false));
+    EXPECT_FALSE(client.ingest_stream(2, 0, bytes({1}), false));
+    EXPECT_TRUE(client.ingest_stream(1, 0, bytes({1}), false));    // a bidi stream the server opened
+    EXPECT_FALSE(client.ingest_stream(0, 0, bytes({1}), false));   // a bidi stream of ours the peer cannot have opened
+    WebTransportSession server(4, {.max_events = 4, .max_event_payload_bytes = 16});
+    EXPECT_TRUE(server.ingest_stream(2, 4, bytes({1}), false));
+    EXPECT_FALSE(server.ingest_stream(3, 4, bytes({1}), false));
+}
+
 TEST(WebTransportSession, BoundsIncomingPayloadAndDatagrams) {
     WebTransportSession session(4, {.max_events = 2, .max_event_payload_bytes = 4,
                                     .max_datagram_payload = 3});

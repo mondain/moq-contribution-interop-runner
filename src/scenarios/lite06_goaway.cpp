@@ -184,4 +184,45 @@ std::optional<bool> evaluate_l06_goaway_oversize_violation(const LiteTranscript&
     return lite06::judge_close_probe(transcript, kL06GoawayOversize, stimulus);
 }
 
+namespace {
+
+// The graceful shutdown the draft allows after a GOAWAY: an application close with NO_ERROR. Any other close is the
+// publisher's reaction to something (row 186 and the close rows judge those), not a shutdown that leaves the rules
+// with nothing to observe.
+bool graceful_close(const LiteTranscript& transcript) {
+    return transcript.peer_close && transcript.peer_close->space == transport::CloseErrorSpace::Application &&
+           transcript.peer_close->code == 0;
+}
+
+}  // namespace
+
+bool l06_goaway_single_inapplicable(const LiteTranscript& transcript) {
+    if (transcript.scenario_id != kL06GoawaySingle || !judgeable(transcript) || !fixture_present(transcript) ||
+        !graceful_close(transcript) || transcript.runner_closed)
+        return false;
+    if (!proved_stimulus(transcript, kL06SubAnnounceLabel, l06_announce_all_bytes())) return false;
+    if (!proved_stimulus(transcript, kL06GoawayLearnLabel,
+                         l06_learning_subscribe_bytes(transcript.broadcast_path, transcript.track_name)))
+        return false;
+    const auto* goaway = proved_stimulus(transcript, kL06GoawayLabel, l06_goaway_bytes(kL06GoawayUri));
+    if (!goaway || !goaway->executed_at_ns) return false;
+    // A publisher that went on opening streams past the allowance broke row 077 before it closed: the evaluator gives
+    // no verdict on a close, so the predicate must not excuse those streams.
+    const auto settled = *goaway->executed_at_ns + to_ns(kL06GoawayNewStreamAllowance);
+    for (const auto* record : lite06::peer_streams(transcript))
+        if (record->opened_ns > settled) return false;
+    return true;
+}
+
+bool l06_goaway_duplicate_inapplicable(const LiteTranscript& transcript) {
+    if (transcript.scenario_id != kL06GoawayDuplicate || !judgeable(transcript) || !graceful_close(transcript) ||
+        transcript.runner_closed)
+        return false;
+    const auto* first = proved_stimulus(transcript, kL06GoawayFirstLabel, l06_goaway_bytes(kL06GoawayUri));
+    if (!first || !first->executed_at_ns) return false;
+    // The peer ended the session before the second GOAWAY went out.
+    const auto* second = proved_stimulus(transcript, kL06GoawaySecondLabel, l06_goaway_bytes(kL06GoawayUri));
+    return second == nullptr;
+}
+
 }  // namespace moq::interop::scenarios

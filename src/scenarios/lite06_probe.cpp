@@ -132,6 +132,12 @@ std::optional<bool> evaluate_l06_probe_target_continues(const LiteTranscript& tr
     return std::nullopt;
 }
 
+bool l06_probe_none_inapplicable(const LiteTranscript& transcript) {
+    if (!probe_run(transcript)) return false;
+    const auto level = l06_publisher_probe_level(transcript);
+    return level && *level != 0;
+}
+
 std::optional<bool> evaluate_l06_probe_none_reset(const LiteTranscript& transcript) {
     const auto run = probe_run(transcript);
     if (!run) return std::nullopt;

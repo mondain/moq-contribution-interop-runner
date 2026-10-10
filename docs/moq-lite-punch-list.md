@@ -198,3 +198,8 @@ they are listed in the interop notes, not here.
   expiry rows 083, 086 and 090 cannot be provoked on loopback and are classified NotTestable.
   Nothing new for upstream; the list stays local until the reference publisher (L2c) and the
   final review are done.
+- L2c: the reference publisher (a conforming lite publisher) was swept against the same runner on both transports and does
+  not contradict any item here: the rows ML-01..ML-05 concern are judged on it exactly as the draft reads, and it passes them
+  (a defect mode reproduces each failing behavior, for example `probe-resets-on-target` for ML-04 and
+  `goaway-oversize-logged` for ML-05). Nothing new for upstream; the list stays local until the final review is done and
+  the user decides to send it.

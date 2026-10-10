@@ -1,7 +1,7 @@
 {
   "draft": 106,
   "source_sha256": "63fc96b187b7016fb8aba3e8bac80b161ab5905500bdd6b71727d449271f2055",
-  "complete": false,
+  "complete": true,
   "requirements": [
     {
       "id": "L06-1-MUST-001",
@@ -1963,7 +1963,7 @@
       "evaluators": [
         "l06-datagram-size-limit"
       ],
-      "rationale": "The runner subscribes to the track (announce exchange, then the default SUBSCRIBE) and watches the whole window. Every datagram the publisher sends is decoded by the recorder; one whose body exceeds 1200 bytes (datagram_over_limit) is a Fail. At least one datagram within the limit and none over it is a Pass. A publisher that sends no datagram at all (the moq CLI sends none; a datagram is only a permission, L06-6-4-MAY-100) is NotRun, never a Pass. A datagram whose header does not decode is not this row (it is recorded as datagram_malformed). A QUIC stack that refuses to send a datagram above the path limit leaves nothing to observe, so the Fail is mainly reachable against a non-conforming publisher or stack."
+      "rationale": "The runner subscribes to the track (announce exchange, then the default SUBSCRIBE) and watches the whole window. Every datagram the publisher sends is decoded by the recorder; one whose body exceeds 1200 bytes (datagram_over_limit) is a Fail. At least one datagram within the limit and none over it is a Pass. Any decoded datagram counts toward a Pass, including one for a Subscribe ID the runner never used or sent before the SUBSCRIBE: this is a size rule only. A publisher that sends no datagram at all (the moq CLI sends none; a datagram is only a permission, L06-6-4-MAY-100) has nothing for the rule to judge: the evaluator gives no verdict, and since L2c the run records the row as not applicable to that publisher, never a Pass. A datagram whose header does not decode is not this row (it is recorded as datagram_malformed). A QUIC stack that refuses to send a datagram above the path limit leaves nothing to observe, so the Fail is mainly reachable against a non-conforming publisher or stack."
     },
     {
       "id": "L06-6-4-MUST-106",

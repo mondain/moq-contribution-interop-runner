@@ -45,6 +45,28 @@ LiteProbeDefinition l06_datagram_size_probe(std::chrono::milliseconds deadline, 
     return definition;
 }
 
+namespace {
+
+// The gate both functions share: the right scenario, a judgeable transcript, the fixture, and both stimuli delivered
+// exactly as built.
+bool datagram_stimuli_proved(const LiteTranscript& transcript) {
+    if (transcript.scenario_id != kL06DatagramSize || !judgeable_with_stimulus(transcript) ||
+        !fixture_present(transcript))
+        return false;
+    if (!proved_stimulus(transcript, kL06SubAnnounceLabel, l06_announce_all_bytes())) return false;
+    return proved_stimulus(transcript, kL06DatagramSubscribeLabel,
+                           l06_subscribe_bytes(l06_subscribe(kSubscribeId, transcript.broadcast_path,
+                                                             transcript.track_name))) != nullptr;
+}
+
+}  // namespace
+
+bool l06_datagram_size_inapplicable(const LiteTranscript& transcript) {
+    if (!datagram_stimuli_proved(transcript)) return false;
+    return std::none_of(transcript.datagrams.begin(), transcript.datagrams.end(),
+                        [](const session::LiteDatagram& d) { return d.body || !d.issue.empty(); });
+}
+
 std::optional<bool> evaluate_l06_datagram_size_limit(const LiteTranscript& transcript) {
     if (transcript.scenario_id != kL06DatagramSize || !judgeable_with_stimulus(transcript) ||
         !fixture_present(transcript))

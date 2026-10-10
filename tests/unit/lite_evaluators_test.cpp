@@ -104,9 +104,9 @@ LiteTranscript ignoring_unknown_streams() {
 }
 
 // The rows a conforming native QUIC run leaves NotRun (justified in tests/protocol/lite_conformance_test.cpp):
-// 152 (no retraction within the window), 125 (judged on WebTransport only) and 075 (judged only for a publisher that
-// advertised no Probe capability; the conforming one advertises Report).
-const std::set<std::string> kConformingNotRun{"L06-7-7-MUST-NOT-152", "L06-7-3-2-MUST-NOT-125", "L06-5-1-5-MUST-075"};
+// 152 (no retraction within the window). Rows 075 (judged only for a publisher that advertised no Probe capability;
+// the conforming one advertises Report) and 125 (WebTransport only) are NotApplicable to a native QUIC run since L2c.
+const std::set<std::string> kConformingNotRun{"L06-7-7-MUST-NOT-152"};
 
 // --- registry and bindings ---------------------------------------------------------------------------------------
 
@@ -222,6 +222,8 @@ TEST(LiteEvaluate, AConformingRunScoresEveryRowKind) {
             EXPECT_EQ(state, OutcomeState::NotTestable) << r.id;
         } else if (kConformingNotRun.contains(r.id)) {
             EXPECT_EQ(state, OutcomeState::NotRun) << r.id;
+        } else if (r.id == "L06-5-1-5-MUST-075" || r.id == "L06-7-3-2-MUST-NOT-125") {
+            EXPECT_EQ(state, OutcomeState::NotApplicable) << r.id;
         } else {
             EXPECT_EQ(state, OutcomeState::Pass) << r.id;
             ++passed;
@@ -234,9 +236,10 @@ TEST(LiteEvaluate, TheClientPathRowsFollowTheBindingOfTheirRun) {
     const auto web = lite::conformance_transcripts(LiteBinding::WebTransport);
     const auto states = by_id(evaluate_lite(catalog(), web));
     EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), OutcomeState::Pass);
-    EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), OutcomeState::NotRun);
-    EXPECT_EQ(states.at("L06-7-3-2-SHOULD-124"), OutcomeState::NotRun);
-    EXPECT_EQ(states.at("L06-7-3-2-MUST-126"), OutcomeState::NotRun);  // native QUIC only
+    // Judged on native QUIC only: not applicable to a WebTransport run (L2c), not merely unjudged.
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-120"), OutcomeState::NotApplicable);
+    EXPECT_EQ(states.at("L06-7-3-2-SHOULD-124"), OutcomeState::NotApplicable);
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-126"), OutcomeState::NotApplicable);
 }
 
 TEST(LiteEvaluate, OneFailingEvaluatorFailsItsRowOnly) {
@@ -406,6 +409,7 @@ std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
         } else {
             std::map<std::string, std::size_t> runs;
             std::map<std::string, std::size_t> passed;
+            std::map<std::string, std::size_t> outside;
             bool failed = false;
             for (const auto& transcript : transcripts) {
                 if (std::find(row.scenarios.begin(), row.scenarios.end(), transcript.scenario_id) ==
@@ -414,14 +418,19 @@ std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
                 ++runs[transcript.scenario_id];
                 if (transcript.harness_failed || transcript.event_limit_reached || transcript.timed_out) continue;
                 bool all_true = !row.evaluators.empty();
+                bool all_outside = !row.evaluators.empty();
                 for (const auto& evaluator : row.evaluators) {
                     const auto found = registry.find(evaluator);
                     const auto verdict =
                         found == registry.end() ? std::optional<bool>{} : found->second(transcript);
                     if (verdict == std::optional<bool>{false}) failed = true;
                     if (verdict != std::optional<bool>{true}) all_true = false;
+                    const auto gate = lite_applicability_registry().find(evaluator);
+                    if (verdict || gate == lite_applicability_registry().end() || !gate->second(transcript))
+                        all_outside = false;
                 }
                 if (all_true) ++passed[transcript.scenario_id];
+                if (all_outside) ++outside[transcript.scenario_id];
             }
             bool settled = !row.scenarios.empty() &&
                 std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
@@ -447,8 +456,13 @@ std::vector<Outcome> reference_evaluate_lite(const RequirementCatalog& catalog,
                           std::all_of(row.scenarios.begin(), row.scenarios.end(),
                                       [&](const std::string& scenario) { return seen[scenario] == 1; });
             }
+            const bool outside_reach = !row.scenarios.empty() &&
+                std::all_of(row.scenarios.begin(), row.scenarios.end(), [&](const std::string& scenario) {
+                    return runs[scenario] == 1 && outside[scenario] == 1;
+                });
             if (failed) state = OutcomeState::Fail;
             else if (settled) state = OutcomeState::Pass;
+            else if (outside_reach) state = OutcomeState::NotApplicable;
         }
         outcomes.push_back({row.id, state});
     }
@@ -587,14 +601,33 @@ TEST(LitePerContext, AFlaggedContextKeepsNoVerdictsAndOnlyItsOwnEvaluators) {
                  std::invalid_argument);
 }
 
-// --- staged score ------------------------------------------------------------------------------------------------
+// --- score (the catalog is complete since L2c) -----------------------------------------------------------------
 
-TEST(LiteScore, AConformingRunIsIncompleteNeverPass) {
-    const auto summary = score_staged(catalog(), evaluate_lite(catalog(), conforming()));
+TEST(LiteScore, AConformingRunWithRowsNothingJudgedIsIncomplete) {
+    const auto summary = score(catalog(), evaluate_lite(catalog(), conforming()));
     EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
     // Rows nothing judges (not_run in a conforming run) count in the denominators and never earn.
     EXPECT_GT(summary.required.earned, 0u);
     EXPECT_GT(summary.required.possible, summary.required.earned);
+}
+
+TEST(LiteScore, AConformingRunThatJudgedEveryScoredRowPasses) {
+    // The scripted table leaves row 152 (a retraction) unjudged; with a publisher that retracts the broadcast every
+    // scored row is judged or not applicable (075 to a Report publisher, 125 to a native run) and the run is a Pass.
+    const auto retracting = tweaked("l06-announce-lifecycle", [](auto& config) { config.retract_after_polls = 5; });
+    const auto outcomes = evaluate_lite(catalog(), replaced(conforming(), retracting));
+    for (const auto& outcome : outcomes) EXPECT_NE(outcome.state, OutcomeState::NotRun) << outcome.requirement_id;
+    const auto summary = score(catalog(), outcomes);
+    EXPECT_EQ(summary.verdict, RunVerdict::Pass);
+    EXPECT_EQ(summary.required.earned, summary.required.possible);
+    const auto states = by_id(outcomes);
+    EXPECT_EQ(states.at("L06-5-1-5-MUST-075"), OutcomeState::NotApplicable);
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), OutcomeState::NotApplicable);
+    EXPECT_EQ(states.at("L06-7-7-MUST-NOT-152"), OutcomeState::Pass);
+}
+
+TEST(LiteScore, TheStagedScorerRefusesTheCompleteCatalog) {
+    EXPECT_EQ(score_staged(catalog(), evaluate_lite(catalog(), conforming())).verdict, RunVerdict::Error);
 }
 
 TEST(LiteScore, OneFailedRequiredRowFailsTheRun) {
@@ -602,7 +635,7 @@ TEST(LiteScore, OneFailedRequiredRowFailsTheRun) {
                                [](auto& config) { config.defect = test::lite::LiteDefect::CloseOnInvalidSubscribe; });
     const auto outcomes = evaluate_lite(catalog(), replaced(conforming(), wrong));
     EXPECT_EQ(by_id(outcomes).at("L06-3-6-MUST-023"), OutcomeState::Fail);
-    EXPECT_EQ(score_staged(catalog(), outcomes).verdict, RunVerdict::Fail);
+    EXPECT_EQ(score(catalog(), outcomes).verdict, RunVerdict::Fail);
 }
 
 // --- declared evidence vs what a Pass really observes --------------------------------------------------------------
@@ -732,7 +765,7 @@ storage::RunRecord stored_lite_run(const std::vector<Outcome>& outcomes) {
     run.created_at_unix_ns = 1;
     run.finalized_at_unix_ns = 2;
     run.outcomes = outcomes;
-    run.score = score_staged(catalog(), outcomes);
+    run.score = score(catalog(), outcomes);
     // What the run hook records: every declared kind of every binding, under the binding's scenario.
     std::set<std::pair<std::string, std::string>> recorded;
     for (const auto& binding : lite_executable_bindings())
@@ -756,6 +789,12 @@ TEST(LiteExecutionAudit, AcceptsAStoredStagedRun) {
         ADD_FAILURE() << finding.code << " " << finding.requirement_id << " " << finding.detail;
     EXPECT_TRUE(audit.consistent());
     EXPECT_EQ(audit.scored_rows, 37u);
+    // Row 075 is stored as NotApplicable (the conforming publisher advertises Report): a scored row the audit accepts
+    // without evidence and leaves out of the scored count (L2c).
+    const auto stored = std::find_if(run.outcomes.begin(), run.outcomes.end(),
+                                     [](const auto& o) { return o.requirement_id == "L06-5-1-5-MUST-075"; });
+    ASSERT_NE(stored, run.outcomes.end());
+    EXPECT_EQ(stored->state, OutcomeState::NotApplicable);
 }
 
 TEST(LiteExecutionAudit, StillCatchesAWrongScoreAndMissingEvidence) {
@@ -771,6 +810,106 @@ TEST(LiteExecutionAudit, StillCatchesAWrongScoreAndMissingEvidence) {
     EXPECT_TRUE(std::any_of(audit.findings.begin(), audit.findings.end(), [](const auto& f) {
         return f.code == "missing_evaluator_evidence" && f.requirement_id == "L06-3-1-MUST-014";
     }));
+}
+
+}  // namespace
+}  // namespace moq::interop::requirements
+
+// --- L2c: the lite-only inapplicable verdict for capability-gated rows ---------------------------------------------
+
+namespace moq::interop::requirements {
+namespace {
+
+TEST(LiteApplicability, AReportAdvertisingPublisherMakesRow075Inapplicable) {
+    const auto context = judge_lite_context(catalog(), transcript_of("l06-probe-report"));
+    EXPECT_TRUE(context.inapplicable.contains("l06-probe-none-reset"));
+    const auto outcomes = by_id(aggregate_lite(catalog(), std::vector{context}));
+    EXPECT_EQ(outcomes.at("L06-5-1-5-MUST-075"), OutcomeState::NotApplicable);
+}
+
+TEST(LiteApplicability, ANoneAdvertisingPublisherIsJudgedNotInapplicable) {
+    const auto t = tweaked("l06-probe-report", [](auto& config) { config.setup_parameters.pop_back(); });
+    const auto context = judge_lite_context(catalog(), t);
+    EXPECT_FALSE(context.inapplicable.contains("l06-probe-none-reset"));
+    EXPECT_EQ(context.verdicts.at("l06-probe-none-reset"), std::optional<bool>{true});
+}
+
+TEST(LiteApplicability, AFailBeatsInapplicable) {
+    LiteContextVerdicts na;
+    na.scenario_id = "l06-probe-report";
+    na.inapplicable = {"l06-probe-none-reset"};
+    LiteContextVerdicts bad;
+    bad.scenario_id = "l06-probe-report";
+    bad.verdicts["l06-probe-none-reset"] = false;
+    EXPECT_EQ(by_id(aggregate_lite(catalog(), std::vector{na, bad})).at("L06-5-1-5-MUST-075"), OutcomeState::Fail);
+    // One context alone is the only way to be inapplicable: a scenario run twice is not.
+    EXPECT_EQ(by_id(aggregate_lite(catalog(), std::vector{na, na})).at("L06-5-1-5-MUST-075"), OutcomeState::NotRun);
+}
+
+TEST(LiteApplicability, TheBindingRestrictedPathRowsAreInapplicableOnTheOtherBinding) {
+    const auto native = judge_lite_context(catalog(), transcript_of("l06-setup-client-path"));
+    EXPECT_TRUE(native.inapplicable.contains("l06-setup-path-absent-on-uri-binding"));
+    EXPECT_FALSE(native.inapplicable.contains("l06-setup-path-sent"));
+    EXPECT_FALSE(native.inapplicable.contains("l06-setup-path-query-appended"));
+    const auto wt_transcripts = lite::conformance_transcripts(LiteBinding::WebTransport);
+    const auto wt = std::find_if(wt_transcripts.begin(), wt_transcripts.end(),
+                                 [](const auto& t) { return t.scenario_id == "l06-setup-client-path"; });
+    ASSERT_NE(wt, wt_transcripts.end());
+    const auto context = judge_lite_context(catalog(), *wt);
+    EXPECT_TRUE(context.inapplicable.contains("l06-setup-path-sent"));
+    EXPECT_TRUE(context.inapplicable.contains("l06-setup-path-query-appended"));
+    EXPECT_FALSE(context.inapplicable.contains("l06-setup-path-absent-on-uri-binding"));
+}
+
+// Row 152 needs a publisher that retracts the broadcast: with one, the conforming scenario judges the row.
+TEST(LiteEvaluate, ARetractingPublisherPassesRow152) {
+    const auto t = tweaked("l06-announce-lifecycle", [](auto& config) { config.retract_after_polls = 5; });
+    const auto outcomes = by_id(aggregate_lite(catalog(), std::vector{judge_lite_context(catalog(), t)}));
+    EXPECT_EQ(outcomes.at("L06-7-7-MUST-NOT-152"), OutcomeState::Pass);
+    // Without the knob the row stays unjudged.
+    const auto quiet = by_id(aggregate_lite(
+        catalog(), std::vector{judge_lite_context(catalog(), transcript_of("l06-announce-lifecycle"))}));
+    EXPECT_EQ(quiet.at("L06-7-7-MUST-NOT-152"), OutcomeState::NotRun);
+}
+
+TEST(LiteApplicability, OnlyTheEightGatedEvaluatorsHavePredicates) {
+    std::set<std::string> ids;
+    for (const auto& [id, predicate] : lite_applicability_registry()) ids.insert(id);
+    EXPECT_EQ(ids, (std::set<std::string>{"l06-probe-none-reset", "l06-datagram-size-limit",
+                                          "l06-goaway-no-new-streams", "l06-goaway-second-closes",
+                                          "l06-setup-server-path-close", "l06-setup-path-sent",
+                                          "l06-setup-path-query-appended",
+                                          "l06-setup-path-absent-on-uri-binding"}));
+}
+
+TEST(LiteApplicability, ADatagramlessPublisherMakesRow105InapplicableAndADatagramSenderDoesNot) {
+    const auto none = tweaked("l06-datagram-size", [](auto& config) { config.datagrams = false; });
+    EXPECT_TRUE(judge_lite_context(catalog(), none).inapplicable.contains("l06-datagram-size-limit"));
+    const auto sender = judge_lite_context(catalog(), transcript_of("l06-datagram-size"));
+    EXPECT_FALSE(sender.inapplicable.contains("l06-datagram-size-limit"));
+    EXPECT_EQ(sender.verdicts.at("l06-datagram-size-limit"), std::optional<bool>{true});
+}
+
+TEST(LiteApplicability, APublisherThatEndsTheSessionOnTheFirstGoawayMakesRows077And186Inapplicable) {
+    const auto close = [](auto& config) { config.defect = test::lite::LiteDefect::GoawayClosesSessionOnFirst; };
+    EXPECT_TRUE(judge_lite_context(catalog(), tweaked("l06-goaway-single", close))
+                    .inapplicable.contains("l06-goaway-no-new-streams"));
+    EXPECT_TRUE(judge_lite_context(catalog(), tweaked("l06-goaway-duplicate", close))
+                    .inapplicable.contains("l06-goaway-second-closes"));
+    // A publisher that carries on is judged.
+    EXPECT_FALSE(judge_lite_context(catalog(), transcript_of("l06-goaway-single"))
+                     .inapplicable.contains("l06-goaway-no-new-streams"));
+    EXPECT_FALSE(judge_lite_context(catalog(), transcript_of("l06-goaway-duplicate"))
+                     .inapplicable.contains("l06-goaway-second-closes"));
+}
+
+TEST(LiteApplicability, AVerdictIsNeverMarkedInapplicable) {
+    // An inapplicable id only ever stands for a nullopt verdict.
+    for (const auto& t : conforming()) {
+        const auto context = judge_lite_context(catalog(), t);
+        for (const auto& id : context.inapplicable)
+            EXPECT_EQ(context.verdicts.at(id), std::nullopt) << t.scenario_id << " " << id;
+    }
 }
 
 }  // namespace

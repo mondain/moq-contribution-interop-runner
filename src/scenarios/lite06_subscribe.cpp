@@ -650,7 +650,13 @@ std::optional<bool> evaluate_l06_subscribe_invalid_frame_bounds_reset(const Lite
     if (!session::peer_protocol_issues(*record).empty()) return std::nullopt;  // the answer is unreadable
     // The row's disqualifiers are SUBSCRIBE_OK and Group streams only: a SUBSCRIBE_END before the reset is
     // information (a RESET_STREAM may discard it in flight). Without a reset it is no substitute (below).
-    if (record->reset_seen) return true;           // any stream code
+    if (record->reset_seen) {
+        // On WebTransport a session close resets every stream with an HTTP error that is no application code: a reset
+        // without a code beside a session close is that teardown, not the reaction the row asks for.
+        if (!record->reset_code && transcript.peer_close && transcript.binding == LiteBinding::WebTransport)
+            return false;
+        return true;  // any stream code
+    }
     if (record->fin_seen) return false;            // FIN (after a SUBSCRIBE_END or not) instead of the reset
     if (transcript.peer_close) return false;       // a session close instead of the stream reset
     if (lite06::allowance_elapsed(transcript)) return false;  // no reaction within the allowance (time-bounded)

@@ -149,4 +149,10 @@ std::optional<bool> evaluate_l06_setup_path_query_appended(const LiteTranscript&
 // L06-7-3-2-MUST-NOT-125 (scenario l06-setup-client-path).
 std::optional<bool> evaluate_l06_setup_path_absent_on_uri_binding(const LiteTranscript& transcript);
 
+// L2c. Rows 120 and 124 are judged on native QUIC only and row 125 on WebTransport only (draft 7.3.2): on the other
+// binding the rule is out of reach, not unjudged. False unless the scenario ran on a known binding in a judgeable
+// transcript.
+bool l06_setup_path_native_rows_inapplicable(const LiteTranscript& transcript);   // 120, 124: ran on WebTransport
+bool l06_setup_path_absent_inapplicable(const LiteTranscript& transcript);         // 125: ran on native QUIC
+
 }  // namespace moq::interop::scenarios

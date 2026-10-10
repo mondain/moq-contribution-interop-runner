@@ -21,6 +21,8 @@ struct WebTransportSessionLimits {
     // What a received datagram may carry (the size this endpoint advertised); 0 means max_datagram_payload.
     std::size_t max_received_datagram_payload = 0;
     std::size_t max_queued_send_bytes = 1u << 20;
+    // The endpoint dialed the session (a client): the streams the peer opens are bidi 1 and uni 3, not 0 and 2.
+    bool client_role = false;
 };
 
 [[nodiscard]] std::uint64_t webtransport_to_http_error(std::uint32_t code);
@@ -86,6 +88,7 @@ private:
     std::unordered_set<StreamId> writable_streams_;
     std::unordered_set<StreamId> readable_streams_;
     std::unordered_set<StreamId> finished_streams_;
+    std::unordered_set<StreamId> stopped_streams_;  // the peer sent STOP_SENDING: no more writes, a reset is still due
     std::unordered_set<StreamId> finished_read_streams_;
     bool detached_ = false;
     bool overflowed_ = false;

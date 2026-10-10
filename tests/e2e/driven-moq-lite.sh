@@ -18,6 +18,8 @@ set -euo pipefail
 # The publisher is the moq CLI of moq-dev/moq (binary `moq`) named by MOQ_CLI_BIN, through the
 # bundled adapters/moq-lite/run.sh, which also needs ffmpeg (or MOQ_FFMPEG_BIN). The track fixture
 # posted with every run is the one the adapter accepts (adapters/moq-lite/adapter.json).
+# MOQ_LITE_ADAPTER=moq-lite-ref runs the reference publisher instead (adapters/moq-lite-ref, MOQ_LITE_REF_BIN and the
+# operator flags MOQ_LITE_REF_ARGS; no ffmpeg needed).
 # Without MOQ_CLI_BIN, ffmpeg, jq, curl, openssl, timeout or the runner binary the script skips
 # (exit 77).
 # MOQ_INTEROP_TEST_HTTP_PORT and MOQ_INTEROP_TEST_UDP_PORT choose the ports (default 19235/19236).
@@ -73,13 +75,18 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
+adapter_name=${MOQ_LITE_ADAPTER:-moq-lite}
+[[ "$adapter_name" == moq-lite || "$adapter_name" == moq-lite-ref ]] || { printf 'unknown MOQ_LITE_ADAPTER: %s\n' "$adapter_name" >&2; exit 2; }
+if [[ "$adapter_name" == moq-lite-ref ]]; then publisher_var=MOQ_LITE_REF_BIN; else publisher_var=MOQ_CLI_BIN; fi
 if ((!dry_run)); then
     missing=
-    [[ -n "${MOQ_CLI_BIN:-}" && -x "${MOQ_CLI_BIN:-}" ]] || missing+=' MOQ_CLI_BIN'
-    if [[ -n "${MOQ_FFMPEG_BIN:-}" ]]; then
-        [[ -x "$MOQ_FFMPEG_BIN" ]] || missing+=' ffmpeg'
-    else
-        command -v ffmpeg >/dev/null 2>&1 || missing+=' ffmpeg'
+    [[ -n "${!publisher_var:-}" && -x "${!publisher_var:-}" ]] || missing+=" $publisher_var"
+    if [[ "$adapter_name" == moq-lite ]]; then
+        if [[ -n "${MOQ_FFMPEG_BIN:-}" ]]; then
+            [[ -x "$MOQ_FFMPEG_BIN" ]] || missing+=' ffmpeg'
+        else
+            command -v ffmpeg >/dev/null 2>&1 || missing+=' ffmpeg'
+        fi
     fi
     for tool in jq curl openssl timeout; do command -v "$tool" >/dev/null 2>&1 || missing+=" $tool"; done
     [[ -x "$runner_bin" ]] || missing+=' runner'
@@ -88,8 +95,8 @@ if ((!dry_run)); then
         exit 77
     fi
 fi
-publisher_bin=$(realpath "${realpath_args[@]}" "${MOQ_CLI_BIN:-moq}")
-adapter_json="$root_dir/adapters/moq-lite/adapter.json"
+publisher_bin=$(realpath "${realpath_args[@]}" "${!publisher_var:-moq}")
+adapter_json="$root_dir/adapters/$adapter_name/adapter.json"
 namespace_hex=$(jq -c '.supported_namespace_hex' "$adapter_json")
 track_name_hex=$(jq -c '.supported_track_name_hex' "$adapter_json")
 
@@ -107,7 +114,7 @@ runner_args=(--bind 127.0.0.1 --port "$http_port"
     --publisher-bind 127.0.0.1 --publisher-advertise 127.0.0.1
     --publisher-port-start "$udp_port" --publisher-port-end "$udp_port"
     --tls-cert "$test_dir/cert.pem" --tls-key "$test_dir/key.pem"
-    --driver-executable "$root_dir/adapters/moq-lite/run.sh"
+    --driver-executable "$root_dir/adapters/$adapter_name/run.sh"
     --driver-log-root "$test_dir/logs")
 audit_args=(--draft moq-lite-06 --database "$test_dir/runs.sqlite3"
     --docs "$root_dir/docs" --requirements "$root_dir/requirements")
@@ -124,7 +131,7 @@ request_for() {
 }
 
 if ((dry_run)); then
-    printf 'runner: MOQ_CLI_BIN=<%s> <%s>' "$publisher_bin" "$runner_bin"
+    printf 'runner: %s=<%s> <%s>' "$publisher_var" "$publisher_bin" "$runner_bin"
     printf ' <%s>' "${runner_args[@]}"
     printf '\n'
     for scenario in "${scenarios[@]}"; do
@@ -159,7 +166,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$test_dir/key.pem" -out "$test_dir/cert.pem" \
     -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
     -days 1 >/dev/null 2>&1
-MOQ_CLI_BIN="$publisher_bin" "$runner_bin" "${runner_args[@]}" \
+env "$publisher_var=$publisher_bin" "$runner_bin" "${runner_args[@]}" \
     >"$test_dir/runner.log" 2>&1 &
 runner_pid=$!
 for attempt in {1..60}; do

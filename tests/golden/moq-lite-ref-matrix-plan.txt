@@ -1,0 +1,66 @@
+ref matrix draft=moq-lite-06 transport=native_quic
+run: l06-setup-stream flags=<>
+run: l06-setup-unknown-parameter flags=<>
+run: l06-setup-duplicate-parameter flags=<>
+run: l06-setup-duplicate-stream flags=<>
+run: l06-setup-server-path flags=<>
+run: l06-setup-server-role flags=<>
+run: l06-setup-client-path flags=<>
+run: l06-announce-prefix flags=<>
+run: l06-announce-lifecycle flags=<>
+run: l06-session-stream-close flags=<>
+run: l06-subscribe-latest flags=<>
+run: l06-subscribe-refused flags=<>
+run: l06-subscribe-invalid-frame-bounds flags=<>
+run: l06-subscribe-group-floor flags=<>
+run: l06-subscribe-abutting-frame-start flags=<>
+run: l06-errors-unknown-stream-type flags=<>
+run: l06-errors-unknown-reset-code flags=<>
+run: l06-errors-reserved-reset-code flags=<>
+run: l06-errors-code-space flags=<>
+run: l06-track-info flags=<>
+run: l06-fetch-group flags=<>
+run: l06-fetch-unknown-group flags=<>
+run: l06-probe-report flags=<>
+run: l06-probe-report flags=<--probe-level none>
+run: l06-datagram-size flags=<>
+run: l06-goaway-single flags=<>
+run: l06-goaway-duplicate flags=<>
+run: l06-goaway-oversize flags=<>
+run: l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role flags=<>
+run: all 27 scenarios as one run flags=<> expect=pass
+ref matrix draft=moq-lite-06 transport=webtransport
+run: l06-setup-stream flags=<>
+run: l06-setup-unknown-parameter flags=<>
+run: l06-setup-duplicate-parameter flags=<>
+run: l06-setup-duplicate-stream flags=<>
+run: l06-setup-server-path flags=<>
+run: l06-setup-server-role flags=<>
+run: l06-setup-client-path flags=<>
+run: l06-announce-prefix flags=<>
+run: l06-announce-lifecycle flags=<>
+run: l06-session-stream-close flags=<>
+run: l06-subscribe-latest flags=<>
+run: l06-subscribe-refused flags=<>
+run: l06-subscribe-invalid-frame-bounds flags=<>
+run: l06-subscribe-group-floor flags=<>
+run: l06-subscribe-abutting-frame-start flags=<>
+run: l06-errors-unknown-stream-type flags=<>
+run: l06-errors-unknown-reset-code flags=<>
+run: l06-errors-reserved-reset-code flags=<>
+run: l06-errors-code-space flags=<>
+run: l06-track-info flags=<>
+run: l06-fetch-group flags=<>
+run: l06-fetch-unknown-group flags=<>
+run: l06-probe-report flags=<>
+run: l06-probe-report flags=<--probe-level none>
+run: l06-datagram-size flags=<>
+run: l06-goaway-single flags=<>
+run: l06-goaway-duplicate flags=<>
+run: l06-goaway-oversize flags=<>
+run: l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role flags=<>
+run: all 27 scenarios as one run flags=<> expect=pass
+ref matrix dry run completed; nothing was started
+runner: MOQ_LITE_REF_BIN=</nonexistent/ref> </nonexistent/moq-interop-runner> <--bind> <127.0.0.1> <--port> <19235> <--database> <@TMP@/runs.sqlite3> <--docs> <@ROOT@/docs> <--requirements> <@ROOT@/requirements> <--publisher-bind> <127.0.0.1> <--publisher-advertise> <127.0.0.1> <--publisher-port-start> <19236> <--publisher-port-end> <19236> <--tls-cert> <@TMP@/cert.pem> <--tls-key> <@TMP@/key.pem> <--driver-executable> <@ROOT@/adapters/moq-lite-ref/run.sh> <--driver-log-root> <@TMP@/logs>
+request: POST http://127.0.0.1:19235/api/v1/runs {"draft":"moq-lite-06","transport":"native-quic","mode":"driven","scenarios":["l06-setup-stream"],"timeout_ms":30000,"track":{"namespace_hex":["696e7465726f702e68616e67"],"name_hex":"302e6d3473"}}
+audit: </nonexistent/moq-interop-audit> <--draft> <moq-lite-06> <--database> <@TMP@/runs.sqlite3> <--docs> <@ROOT@/docs> <--requirements> <@ROOT@/requirements>

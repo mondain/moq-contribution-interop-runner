@@ -844,8 +844,10 @@ L1d implements the moq-lite-06 session layer and its 19 scenarios (see
 engine, 30 evaluators bound to catalog rows, and a lite family in the native run manager. The expected behavior is
 `docs/draft-lcurley-moq-lite-06.txt` through `requirements/moq-lite-06.json`.
 
-- **Staged results.** The catalog is `complete: false` (75 of 212 rows unreviewed), so a run is scored with the staged
-  scorer: Fail when a required reviewed row fails, otherwise Incomplete. It is never Pass. `moq-interop-audit --draft
+- **Staged results (superseded: every row is reviewed since L2b and the catalog is `complete: true` since L2c, so a run
+  is scored with `score()` and can be Pass; see the fourth sweep below).** At the time of L1d the catalog was
+  `complete: false` (75 of 212 rows unreviewed), so a run was scored with the staged
+  scorer: Fail when a required reviewed row fails, otherwise Incomplete. It was never Pass. `moq-interop-audit --draft
   moq-lite-06` reports 26 of 26 required reviewed rows covered and exits 0 while saying the catalog is staged.
 - **Evidence.** A passing row records exactly the evidence kinds its binding declares; a transcript that is
   harness-failed, hit the event limit or timed out contributes no verdicts.
@@ -1207,6 +1209,67 @@ compliance is pinned by the duty and recorder tests) and 3 Informative.
 
 Known limits: as before; datagram rows can only be exercised against a publisher that sends datagrams (the scripted publisher does;
 the L2c reference publisher will), and `complete: true` is L2c's flip.
+
+## moq-lite-06 fourth sweep (L2c): the reference publisher, and the moq CLI b8b0d235 again
+
+L2c shipped a conforming reference publisher (`moq-interop-lite-ref-publisher`, adapter `adapters/moq-lite-ref`), swept it
+over both transports, and flipped the moq-lite-06 catalog to `complete: true`. Same caveats as the earlier sweeps: one
+revision of each peer on one date, loopback, a `pass` row is wire evidence in one run.
+
+| Item | Value |
+|---|---|
+| Date | 2026-10-10, loopback, one machine |
+| Catalog | 212 rows, 212 reviewed, `complete: true`; 27 scenarios, 40 evaluators, 44 bindings, 8 applicability predicates |
+| Scoring | `score()` as the drafts': `pass` when every scored row is judged or not applicable and none failed |
+| Reference publisher | `tests/e2e/moq-lite-ref-matrix.sh`: 27 single runs, `l06-probe-report --probe-level none`, the row 027 group run, and one run of all 27 scenarios, per transport |
+| moq CLI | `tests/e2e/moq-lite-matrix.sh`, `timeout_ms` 30000, plus one run of all 27 scenarios per transport |
+
+### The reference publisher
+
+| Sweep | native QUIC | WebTransport |
+|---|---|---|
+| Conforming: single and group runs | no failing row, audits status 0 | no failing row, audits status 0 |
+| Conforming: rows 075 (with `--probe-level none`), 077, 105, 186, 152 | pass | pass |
+| Conforming: one run of all 27 scenarios | verdict `pass` | verdict `pass` |
+| Negative: 19 `--defect` modes | the 14 with an evaluator fail exactly their row; the 5 without fail none | the same |
+
+The negative table is `tests/golden/moq-lite-ref-defects.txt`. Defects without an evaluator (`offset-group-start`,
+`goaway-closes-session-on-first`, `datagram-unknown-subscribe-id`, `datagram-differs-from-stream`, `datagram-only`) fail
+no row on the wire, by design: `goaway-closes-session-on-first` is a conforming shutdown, and no evaluator judges the
+datagram routing defects.
+
+### The moq CLI
+
+| Sweep | transport | runs | incomplete | fail | scored rows | execution audit |
+|---|---|---:|---:|---:|---:|---|
+| L2c matrix | native QUIC | 28 | 23 | 5 | 39 | consistent, 0 findings |
+| L2c matrix | WebTransport | 28 | 24 | 4 | 36 | consistent, 0 findings |
+
+The failing rows are the earlier sweeps' again: 072, 107, 131, 179 on both transports and 126 on native QUIC (row 126 is
+not applicable on WebTransport since L2c). One run of all 27 scenarios against the CLI has the same failing rows
+(072, 107, 126, 131, 179 on native QUIC; the same without 126 on WebTransport), so the scorer gives it `fail`, never
+`pass`: the CLI's real defects (ML-04, ML-05 and the SETUP rows of ML-01..ML-03) are what keeps it from a Pass. Nothing
+new fails.
+
+### Triage
+
+- **(a) Runner defects: 2 of the stage's cap of 6.** (1) `evaluate_l06_subscribe_invalid_frame_bounds_reset` passed a
+  publisher that closed the WebTransport session instead of resetting the stream, because a WebTransport session close
+  resets every stream without an application code; a reset without a code beside a session close is now that teardown,
+  not the reaction (found by the negative sweep of `close-on-invalid-subscribe`). (2) `WebTransportSession` refused a
+  reset after the peer's STOP_SENDING, so a WebTransport publisher could not answer a runner STOP_SENDING and rows 030
+  and 032 stayed `not_run` (found by the conforming WebTransport sweep). Both have a test that failed first. Smaller
+  fixes on the way: the WebTransport session had only a server role (a client now sets `client_role`), and a quiet live
+  publisher needed QUIC keep-alive.
+- **(b) Peer defects:** none new. ML-01..ML-05 stand; the reference publisher does not contradict them.
+- **(c) Questions:** why row 126 is judged on native QUIC only is the draft's (a Path from a server is also a URI-binding
+  violation on WebTransport), now expressed as `not_applicable` instead of `not_run`.
+- **(d) Not observable against the CLI:** rows 075, 077, 105 and 186 (it advertises Report, ends the session on the first
+  GOAWAY, sends no datagram) are `not_applicable` for it; row 152 stays `not_run` (it never retracts), so a
+  single-scenario run is `incomplete` and the CLI's all-scenarios run is `fail`.
+
+The two things a user sees change: a run can now be `pass` (the reference publisher's all-scenarios run is), and a rule
+that is out of the publisher's reach is `not_applicable` and no longer holds a run back.
 
 ## Other publishers
 

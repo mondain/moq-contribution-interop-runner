@@ -932,10 +932,11 @@ sees it.
 
 Counts: 27 scenarios (19 from L1d, 7 from L2a, 1 from L2b), 40 evaluators, 44 evaluator bindings (39 single-scenario rows and row
 `L06-4-4-MUST-027`, which is bound once per scenario on five scenarios). They are defined by `requirements/moq-lite-06.json`,
-a staged catalog (`complete: false`; all 212 rows are reviewed since L2b, but the staged scorer and the never-Pass rule stay until the catalog is flipped to complete). The publisher under test is the
-CLIENT that dials the runner; the runner is the server and the subscriber. A moq-lite-06 run is scored with the staged
-scorer: its verdict is Fail when a required reviewed row failed and otherwise Incomplete, never Pass. Every unreviewed row
-is reported as not tested (reason "Unreviewed: classification pending"). The scenarios exist in the registry and the
+a complete catalog (`complete: true` since L2c; all 212 rows are reviewed). The publisher under test is the
+CLIENT that dials the runner; the runner is the server and the subscriber. A moq-lite-06 run is scored as the drafts' are:
+its verdict is Fail when a required row failed, Incomplete while a scored row is unjudged, and Pass when every scored row
+is judged or not applicable (a rule out of the publisher's reach is `not_applicable`, see
+[scoring-and-audit.md](scoring-and-audit.md#moq-lite-06-audit)). The scenarios exist in the registry and the
 audit CLI (`moq-interop-audit --draft moq-lite-06` reports 36 of 36 required reviewed rows covered), and since L1e the
 HTTP API accepts moq-lite-06 runs (`"draft": "moq-lite-06"`, see [http-api.md](http-api.md#moq-lite-06-runs)) and
 `adapters/moq-lite` drives the `moq` CLI as the publisher. The sweeps are in

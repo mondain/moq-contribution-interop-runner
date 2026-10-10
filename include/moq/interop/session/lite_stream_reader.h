@@ -25,8 +25,8 @@ namespace moq::interop::session {
 
 // The kind of a moq-lite-06 stream, from its STREAM_TYPE (draft 7.2). Unknown: the type has not been read, the
 // stream is a peer-opened bidirectional stream (unexpected for L1) or a runner stream the runner never declared.
-// Every peer-opened bidirectional stream is Unknown with a publisher_opened_bidi issue whatever its type, a
-// GOAWAY (0x5) included: evaluators that care read the raw stream_type.
+// Every peer-opened bidirectional stream carries a publisher_opened_bidi issue; one of type GOAWAY (0x5) is decoded as
+// Goaway (since L2b) and every other type is Unknown: evaluators that care read the raw stream_type.
 enum class LiteStreamKind { Unknown, Setup, Group, Announce, Subscribe, Fetch, Probe, Goaway, Track, UnregisteredBidi, UnregisteredUni };
 enum class LiteOrigin { Peer, Runner };
 

@@ -44,6 +44,10 @@ std::vector<std::byte> l06_probe_message_bytes(std::uint64_t target_bps);
 // Increase; nullopt without a decoded SETUP or with a malformed Probe parameter (the level is then unknown).
 std::optional<std::uint64_t> l06_publisher_probe_level(const LiteTranscript& transcript);
 
+// L2c. The l06-probe-none-reset evaluator (row 075) has nothing to judge when the publisher advertised a Probe
+// capability: that path is row 072's. Not a defect of the peer.
+bool l06_probe_none_inapplicable(const LiteTranscript& transcript);
+
 // l06-probe-report: the Probe Stream and first target, the continuation above, then the `allowance`. Needs
 // deadline > answer_allowance + allowance.
 LiteProbeDefinition l06_probe_report_probe(std::chrono::milliseconds deadline,

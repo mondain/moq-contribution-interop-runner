@@ -96,7 +96,7 @@ void expect_audit_clean(const storage::RunRecord& run) {
 
 // --- one scenario ----------------------------------------------------------------------------------------------
 
-TEST(LiteRunLive, OneScenarioStoresAFinalizedStagedRunOverEveryRow) {
+TEST(LiteRunLive, OneScenarioStoresAFinalizedRunOverEveryRow) {
     const auto config = lite_config({"l06-setup-stream"}, 4000ms);
     const auto run = run_live(config);
     ASSERT_EQ(run.state, storage::RunState::Finalized);
@@ -116,9 +116,10 @@ TEST(LiteRunLive, OneScenarioStoresAFinalizedStagedRunOverEveryRow) {
     EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
     ASSERT_TRUE(run.score.has_value());
     EXPECT_EQ(run.score->verdict, requirements::RunVerdict::Incomplete);
-    const auto staged = requirements::score_staged(*lite, run.outcomes);
-    EXPECT_EQ(run.score->verdict, staged.verdict);
-    EXPECT_EQ(run.score->required.earned, staged.required.earned);
+    // The catalog is complete (L2c): the stored score is score()'s, and a run that judged one scenario is Incomplete.
+    const auto scored = requirements::score(*lite, run.outcomes);
+    EXPECT_EQ(run.score->verdict, scored.verdict);
+    EXPECT_EQ(run.score->required.earned, scored.required.earned);
     // The context lifecycle and the declared evidence kinds.
     EXPECT_TRUE(any_event(run, "context_ready", "l06-setup-stream"));
     EXPECT_TRUE(any_event(run, "context_complete", "l06-setup-stream"));
@@ -435,7 +436,7 @@ TEST(LiteRunLive, NativeClientPathRowsAreJudgedAgainstTheFixedSessionUrl) {
     ASSERT_EQ(run.state, storage::RunState::Finalized);
     EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::Pass);
     EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::Pass);
-    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::NotApplicable);  // WebTransport only (L2c)
     EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config)));
     EXPECT_FALSE(any_event(run, "harness_error"));
     expect_audit_clean(run);
@@ -468,8 +469,8 @@ TEST(LiteRunLive, WebTransportClientPathRowIsJudgedAgainstTheFixedSessionUrl) {
     const auto run = store->load(started.id);
     ASSERT_EQ(run.state, storage::RunState::Finalized);
     EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-NOT-125"), OutcomeState::Pass);
-    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::NotRun);
-    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::NotRun);
+    EXPECT_EQ(state_of(run, "L06-7-3-2-MUST-120"), OutcomeState::NotApplicable);  // native QUIC only (L2c)
+    EXPECT_EQ(state_of(run, "L06-7-3-2-SHOULD-124"), OutcomeState::NotApplicable);
     EXPECT_FALSE(any_event(run, "harness_error"));
     expect_audit_clean(run);
 }
@@ -669,9 +670,11 @@ TEST(LiteRunLive, AllTwentySevenProbesBuildAndJudgeOnTheSimulatedClock) {
     // needs a broadcast retraction the conforming publisher never makes.
     for (const auto* row : {"L06-7-3-2-MUST-120", "L06-7-3-2-SHOULD-124"})
         EXPECT_EQ(states.at(row), OutcomeState::Pass) << row;
-    // 075 is judged only for a publisher without a Probe capability; the conforming one advertises Report.
-    for (const auto* row : {"L06-7-3-2-MUST-NOT-125", "L06-7-7-MUST-NOT-152", "L06-5-1-5-MUST-075"})
-        EXPECT_EQ(states.at(row), OutcomeState::NotRun) << row;
+    EXPECT_EQ(states.at("L06-7-7-MUST-NOT-152"), OutcomeState::NotRun);
+    EXPECT_EQ(states.at("L06-7-3-2-MUST-NOT-125"), OutcomeState::NotApplicable);  // WebTransport only (L2c)
+    // 075 is judged only for a publisher without a Probe capability; the conforming one advertises Report, so the
+    // row is not applicable to it (L2c).
+    EXPECT_EQ(states.at("L06-5-1-5-MUST-075"), OutcomeState::NotApplicable);
     // Too short a timeout for a builder is an exception lite_probe_for passes on (run_lite stores it).
     config.timeout = 1000ms;
     EXPECT_THROW((void)app::lite_probe_for(config, "l06-errors-unknown-reset-code"), std::invalid_argument);
