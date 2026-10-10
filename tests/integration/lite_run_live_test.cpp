@@ -495,7 +495,7 @@ TEST(LiteRunLive, AWebTransportConnectWithoutTheQueryIsRefused) {
         return event.kind == "harness_error" && event.detail.find("refused CONNECT:") != std::string::npos;
     });
     ASSERT_NE(refusal, run.events.end());
-    EXPECT_NE(refusal->detail.find("refused CONNECT: status=404 reason=unknown WebTransport endpoint path=/moq"),
+    EXPECT_NE(refusal->detail.find("refused CONNECT: validator_status=404 reason=unknown WebTransport endpoint path=/moq"),
               std::string::npos)
         << refusal->detail;
     EXPECT_EQ(refusal->detail.find("path=/moq?"), std::string::npos) << refusal->detail;  // the received :path
@@ -597,7 +597,7 @@ TEST(LiteRunLive, ThePublisherEndingItsAnnounceAnswerIsAnsweredWithTheRunnersFin
     ASSERT_NE(end, run.events.end());
     EXPECT_NE(end->detail.find("engine_actions=fin_send_after_peer_end:stream=1:"), std::string::npos)
         << end->detail;
-    EXPECT_NE(end->detail.find(":status=0"), std::string::npos) << end->detail;
+    EXPECT_NE(end->detail.find(":status=Success"), std::string::npos) << end->detail;
     EXPECT_EQ(by_row(run.outcomes), by_row(simulated(config, tweak)));
     EXPECT_EQ(state_of(run, "L06-7-4-MUST-139"), OutcomeState::Pass);
 }
@@ -627,7 +627,7 @@ TEST(LiteRunLive, AWebTransportPublisherSendingPathIsClosedWithProtocolViolation
     EXPECT_NE(end->detail.find("runner_closed=true runner_closed_for_path=true"), std::string::npos) << end->detail;
     EXPECT_NE(end->detail.find("engine_actions=close_for_webtransport_path:stream=none:"), std::string::npos)
         << end->detail;
-    EXPECT_NE(end->detail.find(":code=3:status=0"), std::string::npos) << end->detail;
+    EXPECT_NE(end->detail.find(":code=3:status=Success"), std::string::npos) << end->detail;
     EXPECT_EQ(state_of(run, "L06-3-1-MUST-014"), OutcomeState::NotRun);
     EXPECT_EQ(state_of(run, "L06-7-3-MUST-NOT-111"), OutcomeState::Pass);
 }

@@ -318,7 +318,7 @@ struct WebTransportListener::Impl {
             profile == WebTransportProfile::MoqLite06 && client_legacy_webtransport(cnx)};
         const auto decision = validate_connect(request, caps, run_endpoint, profile);
         if (!decision.accepted()) {
-            refused_connect = "status=" + std::to_string(decision.http_status) + " reason=" + decision.evidence +
+            refused_connect = "validator_status=" + std::to_string(decision.http_status) + " reason=" + decision.evidence +
                               " path=" + request.path;
             return -1;
         }

@@ -58,6 +58,23 @@ std::string text(std::span<const std::byte> bytes) {
 
 const char* yes(bool value) { return value ? "true" : "false"; }
 
+const char* status_name(transport::TransportStatus status) {
+    using S = transport::TransportStatus;
+    switch (status) {
+        case S::Success: return "Success";
+        case S::Partial: return "Partial";
+        case S::WouldBlock: return "WouldBlock";
+        case S::PeerStopped: return "PeerStopped";
+        case S::PeerReset: return "PeerReset";
+        case S::StreamLimit: return "StreamLimit";
+        case S::DatagramTooLarge: return "DatagramTooLarge";
+        case S::InvalidState: return "InvalidState";
+        case S::ConnectionClosed: return "ConnectionClosed";
+        case S::InternalError: return "InternalError";
+    }
+    return "Unknown";
+}
+
 std::string broadcast_path_of(const TrackFixture& fixture) {
     std::string path;
     for (const auto& field : fixture.namespace_fields) {
@@ -391,7 +408,7 @@ private:
             out += std::string(scenarios::to_string(action.kind)) + ":stream=" +
                    (action.stream_id ? std::to_string(*action.stream_id) : "none") +
                    ":at_ms=" + ms_since(base, action.at_ns) + ":code=" + std::to_string(action.code) +
-                   ":status=" + std::to_string(static_cast<unsigned>(action.status));
+                   ":status=" + status_name(action.status);
         }
         return out;
     }
@@ -422,7 +439,7 @@ private:
                       ":executed_ms=" + ms_since(base, step.executed_at_ns) +
                       ":gate_expired=" + yes(step.gate_expired);
             if (!step.skipped_reason.empty()) detail += ":skipped=" + step.skipped_reason;
-            if (step.refused) detail += ":refused=" + std::to_string(static_cast<unsigned>(*step.refused));
+            if (step.refused) detail += std::string(":refused=") + status_name(*step.refused);
         }
         return detail;
     }
@@ -440,7 +457,7 @@ private:
             " executed_ms=" + ms_since(base, step.executed_at_ns) + " gate_expired=" + yes(step.gate_expired) +
             " accepted=" + std::to_string(step.accepted) + " fin=" + yes(step.fin_accepted) +
             " code=" + std::to_string(step.code) +
-            (step.refused ? " refused=" + std::to_string(static_cast<unsigned>(*step.refused)) : std::string{}) +
+            (step.refused ? std::string(" refused=") + status_name(*step.refused) : std::string{}) +
             " bytes=" + hex(step.bytes);
         // The SUBSCRIBE a Subscribe-stream stimulus carries (its Position, row 020's evidence).
         if (const auto subscribe = scenarios::l06_decode_subscribe_stimulus(step.bytes)) {

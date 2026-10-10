@@ -24,6 +24,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -120,6 +121,7 @@ struct Client {
     bool accepted = false;
     bool refused = false;
     std::string refused_connect;  // the listener's account of a refused CONNECT
+    std::vector<std::uint8_t> server_control_raw;  // the server's control stream bytes as received (SETTINGS prefix)
 };
 
 int connect_callback(picoquic_cnx_t*, std::uint8_t*, std::size_t, picohttp_call_back_event_t event,
@@ -266,7 +268,10 @@ std::optional<std::map<std::uint64_t, std::uint64_t>> exchange(const char* appli
     client.refused_connect = created.listener->refused_connect();
     std::optional<std::map<std::uint64_t, std::uint64_t>> server_settings;
     for (const auto& [id, bytes] : client.server_uni) {
-        if (auto decoded = control_settings(bytes)) server_settings = std::move(decoded);
+        if (auto decoded = control_settings(bytes)) {
+            server_settings = std::move(decoded);
+            client.server_control_raw = bytes;
+        }
     }
     h3zero_callback_delete_context(cnx, client.h3);
     picoquic_free(quic);
@@ -276,7 +281,7 @@ std::optional<std::map<std::uint64_t, std::uint64_t>> exchange(const char* appli
 }
 
 // What h3zero_protocol_init sends with datagrams enabled: the SETTINGS every MoQ Transport listener keeps.
-std::map<std::uint64_t, std::uint64_t> h3zero_server_settings() {
+std::vector<std::uint8_t> h3zero_server_control_bytes() {
     h3zero_settings_t settings{};
     settings.enable_connect_protocol = 1;
     settings.h3_datagram = 1;
@@ -286,7 +291,11 @@ std::map<std::uint64_t, std::uint64_t> h3zero_server_settings() {
     buffer[0] = 0x00;
     auto* end = h3zero_settings_encode(buffer.data() + 1, buffer.data() + buffer.size(), &settings);
     EXPECT_NE(end, nullptr);
-    return control_settings(std::vector<std::uint8_t>(buffer.data(), end)).value();
+    return std::vector<std::uint8_t>(buffer.data(), end);
+}
+
+std::map<std::uint64_t, std::uint64_t> h3zero_server_settings() {
+    return control_settings(h3zero_server_control_bytes()).value();
 }
 
 TEST(WebTransportLiteSettings, LiteServerSettingsSatisfyTheMoqCliWebTransportStack) {
@@ -308,6 +317,10 @@ TEST(WebTransportLiteSettings, MoqTransportServerSettingsStayH3zeros) {
         ASSERT_TRUE(settings.has_value()) << protocol;
         EXPECT_TRUE(client.accepted) << protocol;
         EXPECT_EQ(*settings, h3zero_server_settings()) << protocol;
+        // The raw control-stream prefix (stream type and SETTINGS frame) is h3zero's own, byte for byte.
+        const auto expected = h3zero_server_control_bytes();
+        ASSERT_GE(client.server_control_raw.size(), expected.size()) << protocol;
+        EXPECT_TRUE(std::equal(expected.begin(), expected.end(), client.server_control_raw.begin())) << protocol;
         EXPECT_EQ(settings->count(kWtMaxSessions), 0u) << protocol;
         EXPECT_EQ(deployed_client_view(*settings), 0u) << protocol;
     }

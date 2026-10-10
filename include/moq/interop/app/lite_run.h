@@ -16,6 +16,11 @@
 // path + "?" + query), defined once in src/app/lite_run.cpp. They are the driver endpoint, the WebTransport CONNECT
 // :path ("/moq?token=l1d", which the listener matches exactly) and the probe's session_url_has_path/path/query on
 // both transports, so on native QUIC rows 120/124 are judged and on WebTransport row 125.
+//
+// A refused WebTransport CONNECT is named in the context's harness_error as 'refused CONNECT: validator_status=N ...'
+// (the validator's decision; the wire status is the HTTP/3 stack's). The probe engine's runner duties (FIN of the
+// runner's send side after the publisher's end, PROTOCOL_VIOLATION close for a Path on WebTransport) and the
+// Group-payload elision are described in docs/scenario-reference.md (moq-lite-06 session URL, runner duties).
 
 #include "moq/interop/app/native_run_manager.h"
 #include "moq/interop/app/types.h"
