@@ -27,6 +27,8 @@
 set -euo pipefail
 # A refused request must stop the script, also inside command_line's command substitution.
 shopt -s inherit_errexit
+# sort order must not depend on the caller's locale: the goldens are pinned in the C locale.
+export LC_ALL=C
 
 draft=${1:-}
 [[ "$draft" == 18 || "$draft" == 21 || "$draft" == 22 ]] ||
