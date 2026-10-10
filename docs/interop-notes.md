@@ -852,8 +852,207 @@ engine, 30 evaluators bound to catalog rows, and a lite family in the native run
 - **Not reachable yet.** The HTTP API and the server refuse moq-lite-06 runs, `runnable(MoqLite06)` is false, and no
   adapter ships; L1e flips these and runs the 19 scenarios against the real moq CLI. Until then the family runs only
   through the native run manager in tests, against a scripted conforming publisher. No sweep against a real
-  publisher has been done, so there are no observed results to record here.
+  publisher has been done, so there are no observed results to record here. (That was the L1d state; L1e makes
+  moq-lite-06 runnable through the API, and its first sweep against a real publisher is
+  [below](#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235).)
 - **Incomplete trailing messages.** An incomplete message still buffered on an announce response stream when the window ends (for example a second ANNOUNCE_OK, which reads as a message waiting for bytes) leaves rows 139, 141 and 152 not run instead of passing.
+
+## moq-lite-06 first sweep against the moq CLI b8b0d235
+
+This is one peer at one revision on one date. It says nothing about another revision of the
+CLI or another moq-lite publisher, and a `pass` row is an observation of wire evidence in one
+run, not a conformance claim. Expected behavior comes from
+`docs/draft-lcurley-moq-lite-06.txt` through `requirements/moq-lite-06.json` (the standing
+rule above applies to moq-lite the same way). The catalog is staged, so no run is ever `pass`:
+a run is `fail` when a required reviewed row fails and `incomplete` otherwise. The upstream
+work list is [moq-lite-punch-list.md](moq-lite-punch-list.md).
+
+| Item | Value |
+|---|---|
+| Peer | `moq 0.14.1` (`rs/moq-cli`) from moq-dev/moq at `b8b0d235a99bddb9043f453c46c958362d6c9247`; its WebTransport stack is web-transport-moq 2.0.1 / web-transport-proto 0.6.2 |
+| Build | a scratch copy of the read-only checkout without `target/`, `.git` and `rust-toolchain.toml`: `CARGO_TARGET_DIR=<scratch>/target cargo +1.98.1 build -p moq-cli --release --offline --locked`; the binary was copied to a stable path and passed as `MOQ_CLI_BIN` |
+| Payload | `adapters/moq-lite/run.sh`: ffmpeg `testsrc2` 640x360 at 30 fps, libx264 baseline about 200 kbps, 1 s GOP, fragmented MP4 piped into `moq --log-level debug --connect-version moq-lite-06 --connect-once --connect-timeout 10s --connect-tls-insecure --connect <endpoint> --broadcast interop.hang import fmp4`; one Group per GOP (about 0.95 s), one FRAME per video frame |
+| Fixture | broadcast `interop.hang` (namespace `["696e7465726f702e68616e67"]`), track `0.m4s` (`302e6d3473`), as pinned in L1e Task 4 |
+| Endpoints | native QUIC `moql://127.0.0.1:PORT/moq?token=l1d`; WebTransport `https://127.0.0.1:PORT/moq?token=l1d` |
+| Runner | this repository at `8a26e38` for sweeps 1 to 3 and at `ffecfed` for the final sweep, `tests/e2e/driven-moq-lite.sh` as in `7352293` |
+| Date | 2026-10-09, 22:21 to 22:38 -07:00 (2026-10-10 05:21 to 05:38 UTC), loopback, one machine |
+
+Method: as for the moqxr and imquic sweeps above. Every one of the 19 scenarios ran as its own
+driven run with `"timeout_ms": 15000` on each transport, the two transports in parallel on
+separate ports; then six group runs per transport (the five scenarios of row 027 together;
+setup; announce and subscribe; floor and abutting start; the three error-code scenarios; all
+19 in one run) to check that contexts do not leak into each other; then the whole single-run
+sweep again to look for flakiness; then, after the row 027 fix below, a final sweep of the 19
+single runs plus the five-scenario and the 19-scenario group runs. The commands, from the
+repository root:
+
+```sh
+export MOQ_CLI_BIN=/path/to/moq   # the scratch build above
+MOQ_INTEROP_TEST_HTTP_PORT=29435 MOQ_INTEROP_TEST_UDP_PORT=29436 MOQ_INTEROP_TEST_KEEP=1 \
+    bash tests/e2e/driven-moq-lite.sh native_quic build/moq-interop-runner
+MOQ_INTEROP_TEST_HTTP_PORT=29437 MOQ_INTEROP_TEST_UDP_PORT=29438 MOQ_INTEROP_TEST_KEEP=1 \
+    bash tests/e2e/driven-moq-lite.sh webtransport build/moq-interop-runner
+# group runs: one comma-joined argument per run, for example
+bash tests/e2e/driven-moq-lite.sh native_quic build/moq-interop-runner \
+    l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role
+build/moq-interop-audit --draft moq-lite-06 --database /tmp/moq-interop-driven.XXXXXX/runs.sqlite3 --format json
+```
+
+Each driven script run ends with `moq-interop-audit --draft moq-lite-06 --database` over its
+run database; the static audit (`--draft moq-lite-06` alone) and the server's
+`/results/completeness.json` moq-lite-06 entry (a runner started on a copy of each final
+database) were read as well. `tests/e2e/moq-lite-matrix.sh` runs the single-run part of this
+for both transports in one command.
+
+Runs (every run finalized; verdicts of the stored runs):
+
+| Sweep | transport | runs | incomplete | fail | error | scored rows | execution audit |
+|---|---|---:|---:|---:|---:|---:|---|
+| 1, single runs | native QUIC | 19 | 17 | 2 | 0 | 27 | consistent, 0 findings |
+| 1, single runs | WebTransport | 19 | 18 | 1 | 0 | 25 | consistent, 0 findings |
+| 2, group runs | native QUIC | 6 | 4 | 2 | 0 | 54 | consistent, 0 findings |
+| 2, group runs | WebTransport | 6 | 4 | 2 | 0 | 50 | consistent, 0 findings |
+| 3, single runs repeated | native QUIC | 19 | 17 | 2 | 0 | 27 | consistent, 0 findings |
+| 3, single runs repeated | WebTransport | 19 | 18 | 1 | 0 | 25 | consistent, 0 findings |
+| final, 19 single + 2 group runs | native QUIC | 21 | 17 | 4 | 0 | 61 | consistent, 0 findings |
+| final, 19 single + 2 group runs | WebTransport | 21 | 18 | 3 | 0 | 56 | consistent, 0 findings |
+
+The `fail` runs are the runs holding `l06-setup-server-path` (native QUIC) or
+`l06-setup-server-role`, whose MUST rows fail; row 107 is a SHOULD and leaves its run
+`incomplete`. The static audit reports 26 of 26 required and 4 of 4 optional reviewed
+Applicable and Testable rows covered by bindings, the source-keyword audit complete, one
+non-blocking finding (75 unreviewed rows, 40 of them required) and `STAGED: incomplete
+catalog (not a pass)`, status 0; every `--database` audit has status 0.
+
+Bound rows (the 30 rows the 19 scenarios judge; best state over the runs of the final sweep's
+database: `fail` if any run failed it, else `pass` if any run passed it):
+
+| Transport | pass | fail | not_run | fail rows | not_run rows |
+|---|---:|---:|---:|---|---|
+| native QUIC | 25 | 3 | 2 | 107, 126, 131 | 125, 152 |
+| WebTransport | 24 | 2 | 4 | 107, 131 | 120, 124, 126, 152 |
+
+Required coverage: of the 26 required (MUST / MUST NOT) bound rows, 22 pass, 2 fail (126, 131)
+and 2 are `not_run` (125, 152) on native QUIC; on WebTransport 22 pass, 1 fails (131) and 3 are
+`not_run` (120, 126, 152). Of the 4 SHOULD rows, 3 pass (124, 143, 190) and 1 fails (107) on
+native QUIC; 2 pass (143, 190), 1 fails (107) and 1 is `not_run` (124) on WebTransport. Before
+the row 027 fix, sweeps 1 to 3 gave 24 / 3 / 3 (native QUIC) and 23 / 2 / 5 (WebTransport),
+with 027 the extra `not_run` row. The 182 rows outside the bindings are `not_run` (unreviewed,
+or reviewed but judged by no scenario), `not_testable` or `not_applicable` in every run, by the
+catalog.
+
+Per scenario (final sweep, single runs; the same in sweeps 1 and 3 and in every group run,
+except 027):
+
+| Scenario | native QUIC | WebTransport |
+|---|---|---|
+| `l06-setup-stream` | 014 pass, 111 pass | 014 pass, 111 pass |
+| `l06-setup-unknown-parameter` | 110 pass | 110 pass |
+| `l06-setup-duplicate-parameter` | 112 pass (close 0x3) | 112 pass (close 0x3) |
+| `l06-setup-duplicate-stream` | 092 pass (close 0x3) | 092 pass (close 0x3) |
+| `l06-setup-server-path` | 126 fail (ML-01) | 126 not_run (not judged on WebTransport) |
+| `l06-setup-server-role` | 131 fail (ML-02) | 131 fail (ML-02) |
+| `l06-setup-client-path` | 120 pass, 124 pass, 125 not_run (WebTransport row) | 125 pass, 120 and 124 not_run (native rows) |
+| `l06-announce-prefix` | 139, 141, 143 pass | 139, 141, 143 pass |
+| `l06-announce-lifecycle` | 152 not_run | 152 not_run |
+| `l06-session-stream-close` | 025 pass | 025 pass |
+| `l06-subscribe-latest` | 093, 097, 190 pass | 093, 097, 190 pass |
+| `l06-subscribe-refused` | 062 pass | 062 pass |
+| `l06-subscribe-invalid-frame-bounds` | 023 pass | 023 pass |
+| `l06-subscribe-group-floor` | 159, 172 pass | 159, 172 pass |
+| `l06-subscribe-abutting-frame-start` | 020 pass | 020 pass |
+| `l06-errors-unknown-stream-type` | 108, 109 pass | 108, 109 pass |
+| `l06-errors-unknown-reset-code` | 030, 032 pass | 030, 032 pass |
+| `l06-errors-reserved-reset-code` | 033 pass | 033 pass |
+| `l06-errors-code-space` | 107 fail (ML-03) | 107 fail (ML-03) |
+| row 027 (five-scenario group run) | pass (not_run before `ffecfed`) | pass (not_run before `ffecfed`) |
+
+Run ids of the final sweep: native QUIC `run-18dd144b8126aacd` to `run-18dd145b01c12772`
+(single runs), `run-18dd145bd0fefc86` (027 group), `run-18dd145e44ec7d11` (19 scenarios);
+WebTransport `run-18dd144b90600c45` to `run-18dd145b01c15bb5`, `run-18dd145bd0fefc7c`,
+`run-18dd145e44ec7d18`.
+
+### Triage of the moq-lite-06 non-pass rows
+
+- **(a) Runner defects, fixed (each with a failing test first, moq-lite only):**
+  - `f526394`: on WebTransport the reset-code scenarios ended `error` ("the transport rejected
+    step 'cancel-reset'") in the L1e Task 4 matrix: `WebTransportSession::reset` always used
+    `picowt_reset_stream`, which sends RESET_STREAM_AT and is refused unless both ends enabled
+    RESET_STREAM_AT; the CLI does not. The session now falls back to a plain RESET_STREAM on
+    such a connection (MoQ Transport clients must enable RESET_STREAM_AT to be admitted, so
+    their path is unchanged). Rows 030, 032 and 033 pass on WebTransport since.
+  - `ffecfed`: row 027 could never settle against this CLI. Its catalog rationale takes the
+    session half from the closes of the four MUST-level setup probes "so it is not tied to the
+    SHOULD-level reaction of L06-7-1-SHOULD-107; any one close code from those scenarios
+    suffices", but the aggregation needed a close in every one of its five contexts, the
+    code-space context included. The CLI closes 0x3 on 092 and 112 (right space; draft lines
+    579-582) and refuses the unserved SUBSCRIBE with UNROUTABLE 0x36 (stream space), so the row
+    passes in a run holding all five scenarios. Before the fix it was `not_run` in every run.
+  - Also in this task, not counted as defects: `918a1e2` (the lite SETTINGS sniff stops
+    tracking streams at its 1 KiB bound), `8a26e38` (`moq-interop-audit --draft moq-lite-06
+    --database`), `7352293` (the driven script waits for group runs).
+- **(b) Peer defects (the punch list):** ML-01 (126, a server's SETUP Path accepted), ML-02
+  (131, a server's SETUP Role accepted), ML-03 (107, SHOULD: a Message Length mismatch resets
+  the Announce stream with CANCELLED instead of closing the session). 3 rows on native QUIC, 2
+  on WebTransport.
+- **(c) Expectation questions:** ML-Q1 (which stream code answers a protocol violation on one
+  stream; no row affected). And one runner reporting question, not a peer matter: the
+  completeness entry (`/results/completeness.json`) counts a scored row as observed only when
+  every evidence kind its binding declares is present. The close probes declare `peer_close`,
+  so a Fail by the absence of a close (107, 126, 131) is listed under `not_run` there ("No
+  evidence-backed scored observation") while the run, its outcomes and the execution audit say
+  `fail`. The rule is shared with the MoQ Transport drafts, so it is left unchanged here and
+  recorded for the L1e hand-off.
+- **(d) Not applicable to this peer or transport:** 125 on native QUIC and 120, 124 on
+  WebTransport (each is judged on the other binding only); 126 on WebTransport (not judged
+  there by design: a Path there is also a URI-binding violation); 152 on both (it needs the
+  adapter to end and restart the broadcast within one session, which the driver contract does
+  not offer; the CLI keeps its one broadcast for the whole session, so no ANNOUNCE_END is seen).
+
+Other checks of the sweep:
+
+- No context ended with a harness error, a skip, a timeout or the event limit; every publisher
+  process ended `stopped` with exit 0 (the adapter's SIGTERM at context end; ffmpeg's log then
+  says "Immediate exit requested", which is that stop). The longest context took 6 s of probe
+  time, far inside the 18 s source (15 s timeout rounded up plus 3 s).
+- No NOT_FOUND (0x33) reset on `0.m4s`: the only 0x33 resets are case (b) of
+  `l06-subscribe-refused` (an unknown track of the announced broadcast; no on-demand track
+  creation), so the announce-before-moov race fixed in Task 4 did not return. Case (a), an
+  uncovered broadcast, is reset with UNROUTABLE (0x36).
+- WebTransport Path consequence (a WebTransport client whose SETUP carries Path makes the
+  runner close, leaving every row of the session `not_run` except 111 and 125): not observed;
+  the CLI sends no Path on WebTransport (row 125 passes), and no context closed for a Path.
+- The CLI's SETUP: native QUIC `1:01,2:2f6d6f713f746f6b656e3d6c3164,3:01,5:<random hop>`
+  (Probe 1, Path `/moq?token=l1d`, Role Publisher, Hop), WebTransport the same without Path.
+  Its Hop ID changes per process, which rows 141 and 143 tolerate (both pass). It opens no
+  Probe stream: the runner's SETUP has no Probe parameter, so the CLI logs "peer does not
+  support probing; skipping probe stream", and the Probe behavior under Role=Publisher is not
+  exercised.
+- After the runner's STOP_SENDING with 0x4d1 or 0x2a on a Group stream the stream is reset
+  with the same code: the QUIC stack copying the code (RFC 9000 section 3.5), not a moq-lite
+  meaning given to it (030, 032, 033 pass).
+- Repeats: sweep 3 reproduced sweep 1 row for row on both transports, and the group runs gave
+  the single-run states for every row (027 apart, which only a group run can settle), so no
+  result was flaky and contexts did not interfere.
+
+Reconciliation: the counts above were taken from the stored runs (each sweep's
+`runs.sqlite3`, read directly and through `moq-interop-audit --database`), not from the
+script output alone. The scored-row totals reconcile with the per-run tables (final native
+QUIC: 27 in the single runs + 6 in the 027 group + 28 in the 19-scenario group = 61;
+WebTransport: 25 + 5 + 26 = 56), and the server's completeness entry for the final databases
+lists the same observed passing rows (25 and 24; the three `fail`-by-absence rows appear under
+its `not_run`, as explained in (c)).
+
+To re-run: build the CLI from a scratch copy as above, then run the commands of this section
+(or `MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner`). The live
+scripts are not ctests; they need the CLI, ffmpeg, jq, curl, openssl and timeout and skip
+(exit 77) without them.
+
+Known limits: one machine on the loopback, so no loss, reordering or delay; one source (an
+ffmpeg test pattern, video only); `moqt://` was not tried (the adapter dials `moql://`); the
+catalog is staged (75 rows unreviewed), so the 19 scenarios judge 30 rows and a run can never
+pass; row 152 needs an adapter action the contract lacks; row 027 is judged only in a run that
+holds all five of its scenarios, which the single-run matrix script never posts.
 
 ## Other publishers
 
