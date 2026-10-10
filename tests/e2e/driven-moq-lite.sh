@@ -190,8 +190,11 @@ for scenario in "${scenarios[@]}"; do
         { printf 'run %s refused: %s\n' "$scenario" "$created" >&2; exit 1; }
     run_id=$(jq -er '.run.id' <<<"$created")
     result=
-    # A context waits up to the timeout for the publisher, then runs its probe up to the timeout.
-    for attempt in {1..400}; do
+    # A context waits up to the timeout for the publisher, then runs its probe up to the timeout:
+    # 40 s per scenario of the run (a group run has one context per scenario).
+    IFS=, read -r -a group <<<"$scenario"
+    attempts=$((400 * ${#group[@]}))
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
         result=$(curl --fail --silent --show-error \
             "http://127.0.0.1:$http_port/api/v1/runs/$run_id")
         if [[ $(jq -r '.run.state' <<<"$result") == finalized ]]; then break; fi
