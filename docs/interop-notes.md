@@ -901,8 +901,8 @@ build/moq-interop-audit --draft moq-lite-06 --database /tmp/moq-interop-driven.X
 Each driven script run ends with `moq-interop-audit --draft moq-lite-06 --database` over its
 run database; the static audit (`--draft moq-lite-06` alone) and the server's
 `/results/completeness.json` moq-lite-06 entry (a runner started on a copy of each final
-database) were read as well. `tests/e2e/moq-lite-matrix.sh` runs the single-run part of this
-for both transports in one command.
+database) were read as well. `tests/e2e/moq-lite-matrix.sh` runs the 19 single runs and the
+five-scenario row 027 group run for both transports in one command (since `428b151`).
 
 Runs (every run finalized; verdicts of the stored runs):
 
@@ -985,9 +985,23 @@ WebTransport `run-18dd144b90600c45` to `run-18dd145b01c15bb5`, `run-18dd145bd0fe
     session half from the closes of the four MUST-level setup probes "so it is not tied to the
     SHOULD-level reaction of L06-7-1-SHOULD-107; any one close code from those scenarios
     suffices", but the aggregation needed a close in every one of its five contexts, the
-    code-space context included. The CLI closes 0x3 on 092 and 112 (right space; draft lines
-    579-582) and refuses the unserved SUBSCRIBE with UNROUTABLE 0x36 (stream space), so the row
-    passes in a run holding all five scenarios. Before the fix it was `not_run` in every run.
+    code-space context included. In a run holding all five scenarios the row now passes on the
+    CLI's application close 0x3 on 092 and 112 and its UNROUTABLE (0x36) refusal of the unserved
+    SUBSCRIBE (draft lines 579-582). Only 0x36 discriminates the space (it is in the stream table
+    alone, Table 3); 0x3 is PROTOCOL_VIOLATION in the session table (Table 2) and SESSION_CLOSED in
+    the stream table, and the CANCELLED (0x1) stream resets are INTERNAL_ERROR in the session table,
+    so the session half of this Pass rests on codes registered in both tables, which the catalog
+    rationale accepts as unable to show the space. Before the fix the row was `not_run` in every
+    run.
+  - `428b151` (from the review): the completeness entry (`/results/completeness.json`) counted a
+    scored row as observed only when every evidence kind its binding declares was present, for a
+    Fail as for a Pass, so a Fail by the absence of a close (107, 126, 131: the close probes
+    declare `peer_close`) was listed under `not_run` there while the run and the execution audit
+    said `fail`. For the staged moq-lite-06 catalog a Fail now counts as observed by
+    `audit_execution`'s own rule (a binding of the row whose scenario the run selected); a Pass
+    still needs its declared evidence; the MoQ Transport entries are unchanged. On a copy of the
+    final native database the entry went from 25 observed (not_run 107, 125, 126, 131, 152) to 28
+    (not_run 125, 152); on WebTransport from 24 to 26 (not_run 120, 124, 126, 152).
   - Also in this task, not counted as defects: `918a1e2` (the lite SETTINGS sniff stops
     tracking streams at its 1 KiB bound), `8a26e38` (`moq-interop-audit --draft moq-lite-06
     --database`), `7352293` (the driven script waits for group runs).
@@ -996,13 +1010,8 @@ WebTransport `run-18dd144b90600c45` to `run-18dd145b01c15bb5`, `run-18dd145bd0fe
   the Announce stream with CANCELLED instead of closing the session). 3 rows on native QUIC, 2
   on WebTransport.
 - **(c) Expectation questions:** ML-Q1 (which stream code answers a protocol violation on one
-  stream; no row affected). And one runner reporting question, not a peer matter: the
-  completeness entry (`/results/completeness.json`) counts a scored row as observed only when
-  every evidence kind its binding declares is present. The close probes declare `peer_close`,
-  so a Fail by the absence of a close (107, 126, 131) is listed under `not_run` there ("No
-  evidence-backed scored observation") while the run, its outcomes and the execution audit say
-  `fail`. The rule is shared with the MoQ Transport drafts, so it is left unchanged here and
-  recorded for the L1e hand-off.
+  stream; no row affected). The runner reporting question first recorded here (the
+  completeness entry listing Fail-by-absence rows as `not_run`) was fixed in `428b151`, above.
 - **(d) Not applicable to this peer or transport:** 125 on native QUIC and 120, 124 on
   WebTransport (each is judged on the other binding only); 126 on WebTransport (not judged
   there by design: a Path there is also a URI-binding violation); 152 on both (it needs the
@@ -1040,8 +1049,9 @@ Reconciliation: the counts above were taken from the stored runs (each sweep's
 script output alone. The scored-row totals reconcile with the per-run tables (final native
 QUIC: 27 in the single runs + 6 in the 027 group + 28 in the 19-scenario group = 61;
 WebTransport: 25 + 5 + 26 = 56), and the server's completeness entry for the final databases
-lists the same observed passing rows (25 and 24; the three `fail`-by-absence rows appear under
-its `not_run`, as explained in (c)).
+(with `428b151`) lists the same observed rows: 28 on native QUIC (25 pass, 3 fail) and 26 on
+WebTransport (24 pass, 2 fail), and as `not_run` exactly the `not_run` rows of the bound-row
+table.
 
 To re-run: build the CLI from a scratch copy as above, then run the commands of this section
 (or `MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner`). The live
@@ -1052,7 +1062,7 @@ Known limits: one machine on the loopback, so no loss, reordering or delay; one 
 ffmpeg test pattern, video only); `moqt://` was not tried (the adapter dials `moql://`); the
 catalog is staged (75 rows unreviewed), so the 19 scenarios judge 30 rows and a run can never
 pass; row 152 needs an adapter action the contract lacks; row 027 is judged only in a run that
-holds all five of its scenarios, which the single-run matrix script never posts.
+holds all five of its scenarios (the matrix script posts that group run since `428b151`).
 
 ## Other publishers
 

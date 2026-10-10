@@ -15,7 +15,7 @@ The peer is the CLIENT that dials the runner; the runner is the server and the s
 So every item is about what the CLI does as a client and as a publisher. Source line numbers
 are from the read-only checkout at `b8b0d235` (`rs/moq-net/src/lite/`); draft line numbers are
 in `docs/draft-lcurley-moq-lite-06.txt`. All three items reproduced identically in the three
-single-run sweeps and in every group run (eight per transport).
+single-run sweeps and in every group run holding the scenario.
 
 Confidence labels: **confirmed** (wire evidence in every sweep and the source agrees),
 **observed** (wire or log evidence, no scored row), **question** (the reading of the draft is
