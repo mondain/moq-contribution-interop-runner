@@ -256,7 +256,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
         EXPECT_EQ(row.at("outcome"), "not_run") << row.at("id");
         EXPECT_TRUE(row.at("rationale").get<std::string>().starts_with(kUnreviewedPrefix)) << row.at("id");
     }
-    EXPECT_EQ(unreviewed, 75u);
+    EXPECT_EQ(unreviewed, 39u);
     EXPECT_EQ(document.dump().find("\"draft\":106"), std::string::npos);
 
     // TAP.
@@ -292,7 +292,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
         ++pending;
         EXPECT_EQ(residual.at("classification"), "not_run") << residual.dump();
     }
-    EXPECT_EQ(pending, 75u);
+    EXPECT_EQ(pending, 39u);
     const auto& native = entry.at("transports").at(0);
     EXPECT_EQ(native.at("transport"), "native-quic");
     EXPECT_EQ(native.at("run_count"), 1);

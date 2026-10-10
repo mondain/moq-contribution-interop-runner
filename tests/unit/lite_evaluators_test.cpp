@@ -157,7 +157,7 @@ TEST(LiteEvaluators, StagedAuditOfTheRealCatalogCoversEveryRequiredRow) {
     EXPECT_EQ(report.required_covered, 26u);
     EXPECT_EQ(report.optional_total, 4u);
     EXPECT_EQ(report.optional_covered, 4u);
-    EXPECT_EQ(report.unreviewed_total, 75u);
+    EXPECT_EQ(report.unreviewed_total, 39u);
     EXPECT_FALSE(report.complete());
     // No row is left uncovered: only the unreviewed-rows finding remains.
     ASSERT_EQ(report.findings.size(), 1u);
@@ -589,7 +589,7 @@ TEST(LitePerContext, AFlaggedContextKeepsNoVerdictsAndOnlyItsOwnEvaluators) {
 TEST(LiteScore, AConformingRunIsIncompleteNeverPass) {
     const auto summary = score_staged(catalog(), evaluate_lite(catalog(), conforming()));
     EXPECT_EQ(summary.verdict, RunVerdict::Incomplete);
-    // The 75 unreviewed rows count in the denominators and never earn.
+    // The 39 unreviewed rows count in the denominators and never earn.
     EXPECT_GT(summary.required.earned, 0u);
     EXPECT_GT(summary.required.possible, summary.required.earned);
 }

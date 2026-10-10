@@ -1223,14 +1223,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Because there is no response header, a publisher that cannot serve the requested frame range in full MUST reset the stream rather than return a shorter run; the",
+      "actor": "publisher",
+      "summary": "A publisher that cannot serve the requested frame range in full resets the Fetch Stream rather than return a shorter run.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-fetch-unknown-group"
+      ],
+      "evaluators": [
+        "l06-fetch-unknown-group-reset"
+      ],
+      "rationale": "The publisher half of the reset-not-truncate rule is judged on the one request it can never serve: a FETCH for a group sequence far beyond anything the track has produced. The reply has no header, so the only conforming outcome is a RESET_STREAM on the Fetch Stream; any stream code is accepted because the draft names none for this case (NOT_FOUND 0x33 is the natural one). A FIN, with or without frames, is a Fail: an empty or short run is exactly the truncation the draft forbids. A publisher that did not reply before the observation window ended is NotRun, never a Pass. The rule is judged on this unservable request alone; L06-7-16-MUST-177 is judged on requests for groups the publisher does hold, so one defect never fails both rows."
     },
     {
       "id": "L06-5-1-3-MUST-067",
@@ -1242,14 +1245,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "As with a subscription, the subscriber MUST already have the track's TRACK_INFO (Section 7.12) to parse the returned frames; because the properties are immutabl",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "The subscriber must already have the track's TRACK_INFO to parse the frames a FETCH returns.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber. The runner opens a Track Stream for the track and keeps the TRACK_INFO before it FETCHes or reads frames on that track. Its FETCH scenarios send TRACK first and read the response only against that TRACK_INFO. The same duty is restated in section 7.16 (L06-7-16-MUST-176)."
     },
     {
       "id": "L06-5-1-4-SHOULD-068",
@@ -1261,14 +1263,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The returned properties are fixed for the lifetime of the track, so the subscriber SHOULD cache TRACK_INFO keyed by broadcast path and track name, and reuse it ",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber should cache TRACK_INFO by broadcast path and track name and reuse it across SUBSCRIBE and FETCH.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber. Each scenario context opens one Track Stream per track and reuses its TRACK_INFO for every later SUBSCRIBE and FETCH on that track within the context. The publisher side of the same paragraph (immutability) is L06-7-12-MUST-NOT-163."
     },
     {
       "id": "L06-5-1-4-MUST-069",
@@ -1280,14 +1281,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If FRAME messages cannot be decoded against the cached TRACK_INFO, the subscriber MUST reset the affected stream with a protocol violation and re-request it.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber that cannot decode FRAMEs against the cached TRACK_INFO resets the affected stream with a protocol violation and re-requests it.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber for probing only. It is a passive recorder: bytes that do not decode are kept as decode issues on the stream record and judged by the evaluators, and the runner does not run a subscriber's recovery (reset and re-request). No planned scenario depends on it. Recorded as a known runner gap in docs/interop-notes.md."
     },
     {
       "id": "L06-5-1-4-SHOULD-070",
@@ -1299,14 +1299,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Because a subscriber cannot parse buffered group frames until TRACK_INFO arrives, the publisher SHOULD prioritize TRACK_INFO ahead of group data on the connecti",
+      "actor": "publisher",
+      "summary": "A publisher should prioritize TRACK_INFO ahead of group data on the connection.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A transmission-order preference inside the publisher's QUIC send scheduler. The runner sees the order bytes arrive on different streams, which also reflects network reordering and its own read order, so any verdict would rest on a timing guess. No scenario is planned."
     },
     {
       "id": "L06-5-1-5-MAY-071",
@@ -1318,14 +1317,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber MAY send additional PROBE messages on the same stream to update the target bitrate; the publisher MUST treat each PROBE as a new target to attemp",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "The subscriber may send additional PROBE messages on the same stream to update the target bitrate.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The permission is the subscriber's: the runner may send several targets on one Probe Stream and the l06-probe-report scenario does. The publisher's duty to treat each one as a new target is L06-5-1-5-MUST-072."
     },
     {
       "id": "L06-5-1-5-MUST-072",
@@ -1337,14 +1335,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber MAY send additional PROBE messages on the same stream to update the target bitrate; the publisher MUST treat each PROBE as a new target to attemp",
+      "actor": "publisher",
+      "summary": "The publisher treats each PROBE message from the subscriber as a new target to attempt and keeps the stream open.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-probe-report"
+      ],
+      "evaluators": [
+        "l06-probe-target-continues"
+      ],
+      "rationale": "Judged only for a publisher that advertised Probe level Report or Increase in its SETUP (draft 7.3.1; the evaluator reads the level from the publisher's decoded SETUP). The runner opens a Probe Stream, sends one target, waits for a report, then sends a second, different target. Treating a target as a new target to attempt means the stream stays usable: a Report-level publisher ignores the value and keeps reporting, an Increase-level publisher pads. The observable is therefore that neither target resets the stream or closes the session and that the publisher's reports continue after the second target. A RESET_STREAM of the Probe Stream after a target is a Fail (the moq CLI resets with MALFORMED_TRACK on any runner target message, candidate defect P1). A publisher that never reported before the second target, or advertised level None (the stream reset is then L06-5-1-5-MUST-075), is NotRun. The padding itself is not observed (L06-5-1-5-SHOULD-073)."
     },
     {
       "id": "L06-5-1-5-SHOULD-073",
@@ -1356,14 +1357,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the publisher advertised the Increase capability, it SHOULD pad the connection (or send redundant data) to achieve the most recent target bitrate, without ex",
+      "actor": "publisher",
+      "summary": "A publisher that advertised Increase should pad the connection to reach the most recent target bitrate without exceeding the congestion window.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Padding is only visible as sustained throughput above the publisher's media rate, which depends on the congestion controller, the path and the media source; a SHOULD about reaching a target cannot be failed from the stream layer. The moq CLI also advertises no Increase level to pad with. No scenario is planned."
     },
     {
       "id": "L06-5-1-5-MUST-NOT-074",
@@ -1375,14 +1375,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher that advertised Report but not Increase ignores the target and only reports; it MUST NOT pad above its current sending rate.",
+      "actor": "publisher",
+      "summary": "A publisher that advertised Report but not Increase must not pad above its current sending rate.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Needs a measurement of the publisher's sending rate against the target over time, separated from its media rate and from congestion control. The runner has no calibrated throughput meter, so a Pass would be a guess and a Fail unreliable. No scenario is planned."
     },
     {
       "id": "L06-5-1-5-MUST-075",
@@ -1394,14 +1393,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the publisher advertised no Probe capability (e.g., the congestion controller is not exposed), it MUST reset the stream.",
+      "actor": "publisher",
+      "summary": "A publisher that advertised no Probe capability resets the Probe Stream.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-probe-report"
+      ],
+      "evaluators": [
+        "l06-probe-none-reset"
+      ],
+      "rationale": "Judged only for a publisher whose decoded SETUP carries no Probe parameter or Level 0 (the draft makes the two equivalent, 7.3.1). The runner opens a Probe Stream and sends a target; the publisher must RESET_STREAM it (any code: the draft names none). A PROBE report answered instead of a reset is a Fail (the moq CLI answers at level None, candidate defect P2). A publisher that advertised Report or Increase is NotRun for this row (its stream is judged by L06-5-1-5-MUST-072), as is one that neither answered nor reset inside the observation window. The runner never reads a missing SETUP as level None: with no decoded SETUP the row is NotRun."
     },
     {
       "id": "L06-5-1-6-SHOULD-076",
@@ -1413,14 +1415,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If the URI is non-empty, the peer SHOULD establish a new session at the provided URI and migrate any active subscriptions.",
+      "actor": "publisher",
+      "summary": "The peer that receives a GOAWAY with a non-empty URI should establish a new session at that URI and migrate its active subscriptions.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Whether a publisher application reconnects is an application policy and needs a second listener the runner can recognize as the redirect target, plus an observation window of several seconds; a SHOULD that an application may reasonably decline cannot be failed. The runner's GOAWAY URI in l06-goaway-single is a non-routable name on purpose, so no peer dials it. Left for L2b."
     },
     {
       "id": "L06-5-1-6-MUST-NOT-077",
@@ -1432,14 +1433,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The peer MUST NOT open new streams on the current session after receiving a GOAWAY.",
+      "actor": "publisher",
+      "summary": "The peer that receives a GOAWAY must not open new streams on the current session.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-goaway-single"
+      ],
+      "evaluators": [
+        "l06-goaway-no-new-streams"
+      ],
+      "rationale": "The runner subscribes, waits until the publisher has opened at least two Group streams of its own accord (the proof that it opens streams on a regular cadence), then sends a GOAWAY and watches. The rule binds the receiver of the GOAWAY, and a stream the publisher opened before it saw the GOAWAY may still arrive, so a stated allowance of 2000 ms after the GOAWAY was written covers that flight time: a publisher-opened stream whose first byte arrives after the allowance is a Fail; streams that existed before the GOAWAY keep being served and are not judged (the draft lets the sender close the stream when it is ready). Without the pre-GOAWAY cadence proof, with a publisher that closed the session, or with the GOAWAY not delivered, the row is NotRun: no new stream after a GOAWAY proves nothing for a publisher that was not opening streams anyway."
     },
     {
       "id": "L06-5-1-6-SHOULD-078",
@@ -1451,14 +1455,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The peer SHOULD close all streams and the session after migrating or when it no longer needs the session.",
+      "actor": "publisher",
+      "summary": "The peer should close all streams and the session after migrating or when it no longer needs the session.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Depends on when the application decides it no longer needs the session, which the draft gives no time for; an absent close inside any window the runner picks proves nothing. No scenario is planned."
     },
     {
       "id": "L06-6-1-SHOULD-079",
@@ -3077,14 +3080,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Every field is *fixed for the lifetime of the Track* and MUST NOT change; a change requires a new Track.",
+      "actor": "publisher",
+      "summary": "Every TRACK_INFO field is fixed for the lifetime of the Track and must not change.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-track-info"
+      ],
+      "evaluators": [
+        "l06-track-info-immutable"
+      ],
+      "rationale": "The runner opens two Track Streams for the same track, the second after a short pause, and the evaluator compares every TRACK_INFO the publisher sent for the track in the context. Every field of every reply must be identical: Publisher Priority, Publisher Max Age and Timescale. Any difference is a Fail. Fewer than two TRACK_INFO replies for the track make the row NotRun. A track that was not announced or does not exist is answered with a reset (draft 5.1.4), which is not a reply. The unlimited maximum age the moq CLI sends as 2^53-1 is a number like any other here (candidate divergence P6 is recorded in the punch list, not scored)."
     },
     {
       "id": "L06-7-12-MAY-164",
@@ -3096,14 +3102,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "Publisher properties fan _out_ at a relay (one upstream subscription serving many downstreams), so a change would have to propagate everywhere; subscriber prope",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "Subscriber properties fan in at a relay and may change freely through SUBSCRIBE_UPDATE.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Rationale for why only publisher properties are immutable. The permission is the subscriber's to change its own properties with SUBSCRIBE_UPDATE; the runner may send SUBSCRIBE_UPDATE (L1d does) and nothing in the publisher is constrained by it."
     },
     {
       "id": "L06-7-12-MAY-165",
@@ -3115,14 +3120,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* A subscriber MAY issue a SUBSCRIBE or FETCH with an older Group Start, but the publisher MAY have already dropped any group whose age exceeds Publisher Max Ag",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber may issue a SUBSCRIBE or FETCH with an older Group Start.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The permission is the subscriber's: the runner may ask for an older group. The consequence for the publisher (it may already have dropped it) is L06-7-12-MAY-166, and the runner's FETCH scenarios accept a reset for a group the publisher no longer holds."
     },
     {
       "id": "L06-7-12-MAY-166",
@@ -3134,14 +3138,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* A subscriber MAY issue a SUBSCRIBE or FETCH with an older Group Start, but the publisher MAY have already dropped any group whose age exceeds Publisher Max Ag",
+      "actor": "publisher",
+      "summary": "A publisher may have already dropped any group whose age exceeds Publisher Max Age.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission: a publisher that still holds an old group is conforming, so there is nothing to fail. l06-fetch-group therefore asks only for the groups a subscription has just delivered, and l06-fetch-unknown-group accepts only a reset, never a served group, for a group that never existed."
     },
     {
       "id": "L06-7-12-MAY-167",
@@ -3153,14 +3156,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* The publisher MAY drop groups sooner than Publisher Max Age under resource pressure; subscribers MUST NOT assume older groups within the bound are still avail",
+      "actor": "publisher",
+      "summary": "A publisher may drop groups sooner than Publisher Max Age under resource pressure.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission; a publisher that never drops early is conforming. See L06-7-12-MUST-NOT-168 for the subscriber side."
     },
     {
       "id": "L06-7-12-MUST-NOT-168",
@@ -3172,14 +3174,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "* The publisher MAY drop groups sooner than Publisher Max Age under resource pressure; subscribers MUST NOT assume older groups within the bound are still avail",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "Subscribers must not assume that older groups within the Publisher Max Age bound are still available.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber. It never turns a reset or an absent older group into a Fail of the publisher when the group is older than the newest one received: l06-fetch-group asks for a group just delivered (and treats a reset as NotRun, not as a Fail), and the only reset it requires is for a group that never existed (L06-5-1-3-MUST-066)."
     },
     {
       "id": "L06-7-12-MAY-169",
@@ -3191,14 +3192,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A value of 0 means the publisher caches only the latest group (older groups MAY be dropped as soon as a newer group arrives).",
+      "actor": "publisher",
+      "summary": "A Publisher Max Age of 0 means the publisher caches only the latest group, and older groups may be dropped as soon as a newer one arrives.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission attached to the value 0; a publisher that keeps more is conforming. The runner reads the value as data and never expects a reset for an older group because of it."
     },
     {
       "id": "L06-7-12-MUST-170",
@@ -3210,14 +3210,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MUST be non-zero; a subscriber that receives 0 MUST reset the stream with a protocol violation.",
+      "actor": "publisher",
+      "summary": "The Timescale in TRACK_INFO must be non-zero.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-track-info"
+      ],
+      "evaluators": [
+        "l06-track-info-timescale-nonzero"
+      ],
+      "rationale": "Judged on every TRACK_INFO the publisher sent in the context: a Timescale of 0 is a Fail. The codec decodes the value as sent and the evaluator judges it (the reader raises no issue for it). No TRACK_INFO reply makes the row NotRun. This is the publisher's half of the sentence; the subscriber's reaction to 0 is L06-7-12-MUST-171."
     },
     {
       "id": "L06-7-12-MUST-171",
@@ -3229,14 +3232,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "It MUST be non-zero; a subscriber that receives 0 MUST reset the stream with a protocol violation.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "A subscriber that receives a Timescale of 0 resets the stream with a protocol violation.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber for probing only and is a passive recorder (see L06-5-1-4-MUST-069). When l06-track-info meets a zero Timescale it is a Fail of the publisher for L06-7-12-MUST-170 and the runner leaves the Track Stream as the publisher closed it. Recorded as a known runner gap in docs/interop-notes.md."
     },
     {
       "id": "L06-7-13-MUST-172",
@@ -3324,14 +3326,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The subscriber parses them using the track's TRACK_INFO (Section 7.12), which it MUST already have (see the Track Stream (Section 5.1.4)); the group sequence an",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "subscriber",
+      "summary": "The subscriber must already have the track's TRACK_INFO to parse the FETCH response frames.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A subscriber duty: the runner plays the subscriber. The runner opens a Track Stream for the track and keeps the TRACK_INFO before it FETCHes or reads frames on that track. The same duty is L06-5-1-3-MUST-067 in section 5.1.3."
     },
     {
       "id": "L06-7-16-MUST-177",
@@ -3343,14 +3344,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A publisher holding fewer frames than requested MUST reset rather than truncate, since a short response is indistinguishable from one that started elsewhere.",
+      "actor": "publisher",
+      "summary": "A publisher holding fewer frames than requested resets the Fetch Stream rather than truncating the response.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-fetch-group"
+      ],
+      "evaluators": [
+        "l06-fetch-short-run"
+      ],
+      "rationale": "The runner subscribes to the track and records one Group stream that completed (FIN, no reset) with N frames, so the publisher demonstrably held at least those N frames. It then FETCHes that group three ways on separate Fetch Streams: whole group (Frame Start 0, Frame End 0), a leading range (Frame Start 0, Frame End 2, i.e. frames 0 and 1), and a trailing range (Frame Start 1, Frame End 0). Each reply must be exactly the requested frames then FIN, or a RESET_STREAM (the publisher may have dropped the group, 7.12). A FIN after fewer frames than the reference group holds for that range is a Fail (the truncation), and so is any FIN with more frames than requested. The frames are compared by count and payload bytes against the reference. A reference group that did not complete, or a fetch the publisher left unanswered inside the window, makes the row NotRun. A group that really ends before Frame End is not a truncation (7.16), so the ranges never ask beyond N (a range that does not fit a reference group of fewer than 3 frames is not sent). Judged on groups the publisher holds, so it never shares evidence with L06-5-1-3-MUST-066."
     },
     {
       "id": "L06-7-18-MUST-NOT-178",
@@ -3362,14 +3366,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The URI MUST NOT exceed 8,192 bytes; a receiver MUST treat a longer URI as a protocol violation and MAY reject it based on the length prefix alone.",
+      "actor": "publisher",
+      "summary": "A GOAWAY New Session URI must not exceed 8,192 bytes.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The sender's duty. The publisher under test would only send a GOAWAY on its own initiative, and the moq CLI never sends one (source survey), so a runner cannot provoke the observation; a scripted publisher exercises it in L2b. The runner itself never sends a URI above the limit except in the named violation probe l06-goaway-oversize, which exists to judge the receiver (L06-7-18-MUST-179)."
     },
     {
       "id": "L06-7-18-MUST-179",
@@ -3381,14 +3384,17 @@
         "occurrence": 2,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The URI MUST NOT exceed 8,192 bytes; a receiver MUST treat a longer URI as a protocol violation and MAY reject it based on the length prefix alone.",
+      "actor": "publisher",
+      "summary": "A receiver treats a GOAWAY URI longer than 8,192 bytes as a protocol violation.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-goaway-oversize"
+      ],
+      "evaluators": [
+        "l06-goaway-oversize-violation"
+      ],
+      "rationale": "The runner opens a Goaway Stream whose message carries a New Session URI length prefix of 8193 followed by 8193 URI bytes (a named deliberate violation; the draft lets the receiver reject on the prefix alone, L06-7-18-MAY-180, so both the prefix and the body are sent). The wording is a protocol violation, which is a session error: the publisher must close the session with PROTOCOL_VIOLATION (0x3). A close with another code, no close, or a reset of only the Goaway Stream is a Fail (the moq CLI only logs an oversize URI, candidate defect P8). A close that precedes the oversize GOAWAY is not its reaction and is NotRun, as is a transport failure."
     },
     {
       "id": "L06-7-18-MAY-180",
@@ -3400,14 +3406,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The URI MUST NOT exceed 8,192 bytes; a receiver MUST treat a longer URI as a protocol violation and MAY reject it based on the length prefix alone.",
+      "actor": "publisher",
+      "summary": "A receiver may reject an oversize GOAWAY URI based on the length prefix alone.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A permission about when to reject; a receiver that reads the whole URI first is conforming. l06-goaway-oversize sends the whole URI so both kinds of receiver are judged by their reaction only."
     },
     {
       "id": "L06-7-18-MUST-181",
@@ -3419,14 +3424,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A recipient MUST validate the URI against local policy before reconnecting, including verifying the scheme, authority, and port are permitted.",
+      "actor": "publisher",
+      "summary": "A recipient must validate the GOAWAY URI against local policy before reconnecting, verifying scheme, authority and port.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Reconnect policy of the application; observing it needs a redirect target the runner controls and a publisher that follows redirects. The moq CLI logs the URI and keeps the session (source survey), so there is nothing to observe. The runner itself never reconnects to a GOAWAY URI. L2b, with a scripted publisher."
     },
     {
       "id": "L06-7-18-MUST-182",
@@ -3438,14 +3442,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "If validation fails, the recipient MUST close the session without reconnecting.",
+      "actor": "publisher",
+      "summary": "If URI validation fails the recipient must close the session without reconnecting.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Depends on L06-7-18-MUST-181 and on a publisher that validates and reconnects; the moq CLI does neither. L2b, with a scripted publisher."
     },
     {
       "id": "L06-7-18-MUST-183",
@@ -3457,14 +3460,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A client MUST send an empty New Session URI, as it cannot instruct a server to establish connections.",
+      "actor": "client",
+      "summary": "A client must send an empty GOAWAY New Session URI.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The publisher is the QUIC client. It would have to send a GOAWAY first, which the moq CLI never does (source survey), so a runner cannot provoke the observation; a scripted publisher exercises it in L2b. The runner is the server, which is allowed a non-empty URI."
     },
     {
       "id": "L06-7-18-MUST-184",
@@ -3476,14 +3478,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A server that receives a non-empty New Session URI MUST close the session with a protocol violation.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "server",
+      "summary": "A server that receives a non-empty GOAWAY New Session URI must close the session with a protocol violation.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A server duty and the runner is the server. A publisher client never sends a GOAWAY (see L06-7-18-MUST-183), so the runner never receives a URI to refuse. Known runner gap, recorded in docs/interop-notes.md: if a publisher did send one the runner would record it as a decoded message and not close."
     },
     {
       "id": "L06-7-18-SHOULD-185",
@@ -3495,14 +3496,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The new session URI SHOULD use the same scheme as the current session's URI.",
+      "actor": "publisher",
+      "summary": "The new session URI should use the same scheme as the current session's URI.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "The sender's preference. The publisher never sends a GOAWAY here, so it cannot be observed; the runner's own GOAWAY URI keeps the scheme of the session URL it was given."
     },
     {
       "id": "L06-7-18-MUST-186",
@@ -3514,14 +3514,17 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "An endpoint MUST close the session with a protocol violation if it receives more than one GOAWAY.",
+      "actor": "publisher",
+      "summary": "An endpoint must close the session with a protocol violation if it receives more than one GOAWAY.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "l06-goaway-duplicate"
+      ],
+      "evaluators": [
+        "l06-goaway-second-closes"
+      ],
+      "rationale": "The runner opens a Goaway Stream with a valid GOAWAY (empty URI, so the first message is legitimate), waits for a settle interval, then opens a second Goaway Stream with another GOAWAY. The publisher must close the session with PROTOCOL_VIOLATION (0x3), as the sentence says (a session close, not a stream reset). A close before the second GOAWAY was written is not the reaction to it and is NotRun. That includes a publisher that closes the session on the first GOAWAY: a graceful shutdown on a GOAWAY is allowed (5.1.6), so it cannot be told apart from a reaction to the second. A second GOAWAY left unanswered through the window is a Fail. The wording says nothing about two messages on one stream, so the runner uses two streams."
     },
     {
       "id": "L06-7-18-SHOULD-187",
@@ -3533,14 +3536,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A peer that reconnects to a provided URI SHOULD keep using that URI for subsequent reconnects rather than reverting to the original.",
+      "actor": "publisher",
+      "summary": "A peer that reconnects to a provided URI should keep using that URI for later reconnects.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "Reconnect behaviour across sessions; the runner would need a publisher that reconnects (the moq CLI does not follow redirects) and several connections to observe. L2b."
     },
     {
       "id": "L06-7-18-SHOULD-188",
@@ -3552,14 +3554,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "A relay that receives a GOAWAY SHOULD treat the announcements that arrived on that session as the most expensive routes available, so a subscription it can serv",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A relay that receives a GOAWAY should treat that session's announcements as the most expensive routes.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A relay duty. The publisher under test is an origin and the runner is not a relay."
     },
     {
       "id": "L06-7-18-MUST-189",
@@ -3571,14 +3572,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "endpoint",
-      "summary": "The routes stay usable: a broadcast reachable only over the draining session MUST keep being served until the session ends, which is what makes the sender's dea",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "actor": "relay",
+      "summary": "A broadcast reachable only over a draining session must keep being served until the session ends.",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Unreviewed: classification pending.",
-      "reviewed": false
+      "rationale": "A relay duty (routes are the relay's). The publisher under test is an origin; the runner is not a relay. The origin publisher's own side, to keep serving existing streams after a GOAWAY, is not required by this sentence and is observed only as the absence of new streams (L06-5-1-6-MUST-NOT-077)."
     },
     {
       "id": "L06-7-19-SHOULD-190",
