@@ -8,6 +8,7 @@
 #include "moq/interop/requirements/scoring.h"
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
+#include "moq/interop/scenarios/lite06_datagram.h"
 #include "moq/interop/scenarios/lite06_errors.h"
 #include "moq/interop/scenarios/lite06_fetch.h"
 #include "moq/interop/scenarios/lite06_goaway.h"
@@ -143,6 +144,7 @@ scenarios::LiteProbeDefinition build(std::string_view id, std::chrono::milliseco
     if (id == "l06-fetch-group") return s::l06_fetch_group_probe(deadline, path, track);
     if (id == "l06-fetch-unknown-group") return s::l06_fetch_unknown_group_probe(deadline, path, track);
     if (id == "l06-probe-report") return s::l06_probe_report_probe(deadline);
+    if (id == "l06-datagram-size") return s::l06_datagram_size_probe(deadline, path, track);
     if (id == "l06-goaway-single") return s::l06_goaway_single_probe(deadline, path, track);
     if (id == "l06-goaway-duplicate") return s::l06_goaway_duplicate_probe(deadline);
     if (id == "l06-goaway-oversize") return s::l06_goaway_oversize_probe(deadline);
@@ -523,6 +525,10 @@ private:
                 event.stream_id = std::to_string(stop->stream_id);
                 event.detail = "operation=peer-stop-sending application_error=" +
                     (stop->application_error ? std::to_string(*stop->application_error) : "unavailable");
+            } else if (const auto* datagram = std::get_if<transport::DatagramEvent>(&source)) {
+                // The transcript keeps the datagram event whole (it is bounded by the path MTU).
+                event.kind = "raw_probe_transport_event";
+                event.detail = "operation=peer-datagram bytes=" + std::to_string(datagram->data.size());
             } else if (const auto* close = std::get_if<transport::PeerCloseEvent>(&source)) {
                 event.kind = "peer_close";
                 event.detail = std::string(close->error_space == transport::CloseErrorSpace::Application

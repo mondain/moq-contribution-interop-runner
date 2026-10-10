@@ -251,6 +251,10 @@ std::optional<LiteIssueClass> explicit_issue_class(std::string_view code) {
         // sends on a GOAWAY stream (draft 7.18 gives it no response).
         {kIssueTrailingAfterResponse, LiteIssueClass::PeerProtocol},
         {kIssueUnexpectedResponse, LiteIssueClass::PeerProtocol},
+        // L2b: a datagram body above 1200 bytes (draft 6.4: the publisher MUST NOT send one) or one whose header does
+        // not decode. The session records them on the LiteDatagram; the receiver drops them silently (the runner does).
+        {kIssueDatagramOverLimit, LiteIssueClass::PeerProtocol},
+        {kIssueDatagramMalformed, LiteIssueClass::PeerProtocol},
         {kIssueTruncatedAtFin, LiteIssueClass::PeerProtocol},
         // Decision (a): the draft is inconclusive on an unknown ANNOUNCE Type; rows 139, 141, 152 are NotRun.
         {kIssueUnknownAnnounceType, LiteIssueClass::Inconclusive},
@@ -541,9 +545,15 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
             const auto value = std::get<std::uint64_t>(type);
             record.stream_type = value;
             if (record.origin == LiteOrigin::Peer && record.bidirectional) {
-                // Recorded as Unknown (publisher_opened_bidi was raised when the stream was created).
+                // publisher_opened_bidi was raised when the stream was created. A Goaway Stream (draft 5.1.6: either
+                // endpoint can open one) is decoded; every other type is recorded as Unknown.
                 kind_final_ = true;
-                direction.phase = Phase::Raw;
+                if (value == static_cast<std::uint64_t>(BidiStreamType::Goaway)) {
+                    record.kind = LiteStreamKind::Goaway;
+                    direction.phase = Phase::First;
+                } else {
+                    direction.phase = Phase::Raw;
+                }
                 continue;
             }
             record.kind = classify(value, record.bidirectional);
@@ -587,7 +597,14 @@ void LiteStreamDecoder::pump(LiteStreamRecord& record, Direction& direction, std
                 }
                 return;
             case Next::What::Error:
-                issue(record, direction, event, error_code_name(next.error.code), next.error.detail);
+                // A GOAWAY URI over 8192 bytes breaks the draft's own cap (7.18), not a limit the harness chose: when
+                // the peer opened the stream it is the peer's protocol violation.
+                if (record.kind == LiteStreamKind::Goaway && record.origin == LiteOrigin::Peer &&
+                    next.error.code == DecodeErrorCode::LengthExceedsLimit) {
+                    issue(record, direction, event, kIssueProtocolViolation, next.error.detail);
+                } else {
+                    issue(record, direction, event, error_code_name(next.error.code), next.error.detail);
+                }
                 stop(direction);
                 return;
             case Next::What::Unexpected:

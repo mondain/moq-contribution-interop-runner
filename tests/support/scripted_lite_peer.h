@@ -29,6 +29,7 @@
 #include "moq/interop/scenarios/lite_probe.h"
 #include "moq/interop/wire/cursor.h"
 #include "moq/interop/wire/moqlite06/announce.h"
+#include "moq/interop/wire/moqlite06/datagram.h"
 #include "moq/interop/wire/moqlite06/fetch.h"
 #include "moq/interop/wire/moqlite06/framing.h"
 #include "moq/interop/wire/moqlite06/goaway.h"
@@ -237,6 +238,8 @@ public:
         events_.push_back(transport::StreamDataEvent{id, std::move(bytes), fin});
     }
     void fin(transport::StreamId id) { data(id, {}, true); }
+    // One QUIC datagram from the publisher (draft 6.4).
+    void datagram(Bytes bytes) { events_.push_back(transport::DatagramEvent{std::move(bytes)}); }
     void peer_reset(transport::StreamId id, std::optional<std::uint64_t> code) {
         events_.push_back(transport::PeerResetEvent{id, code});
     }
@@ -306,6 +309,11 @@ enum class LiteDefect {
     GoawayDuplicateIgnored,           // a second GOAWAY does not close the session
     GoawayClosesSessionOnFirst,       // closes the session (NO_ERROR) on the first GOAWAY instead of carrying on
     OpensStreamsAfterGoaway,          // keeps opening Group streams after a GOAWAY (draft 5.1.6: MUST NOT)
+    // L2b (datagrams, draft 6.4; effective only with config.datagrams):
+    DatagramOversize,                 // the datagram body is 1201 bytes or more (MUST NOT exceed 1200)
+    DatagramUnknownSubscribeId,       // routed to a Subscribe ID that is not the subscription's
+    DatagramDiffersFromStream,        // the datagram's frame differs from the Group stream's copy of the group
+    DatagramOnly,                     // the group is delivered by datagram alone, no Group stream is opened
 };
 
 // A request the runner opened, decoded far enough to answer.
@@ -359,6 +367,10 @@ struct ConformingLitePublisherConfig {
     // Draft 4.3: close the send direction (FIN) of a stream this publisher answered once the runner closed (FIN) its
     // own. A test whose hooks script the reaction to the runner's FIN themselves (the row 025 tests) sets it false.
     bool echo_runner_fin{true};
+    // L2b. A group of exactly one frame is also sent as a QUIC datagram (draft 6.4: "in addition to (or instead of) a
+    // Group Stream"): Subscribe ID, group sequence, the frame's absolute timestamp and its payload. A multi-frame
+    // group is never sent as a datagram.
+    bool datagrams{false};
     // L2a. TRACK_INFO, defaulting to the moq CLI's video track (priority 60, max age 30 s, source timescale 90000).
     std::uint8_t track_priority{60};
     std::uint64_t track_max_age_ms{30000};
@@ -882,6 +894,32 @@ private:
         }
     }
 
+    // Draft 6.4: DATAGRAM Body { Subscribe ID, Group Sequence, Timestamp, Payload } for a single-frame group.
+    void send_group_datagram(ScriptedLitePeer& peer, const PendingGroup& group) {
+        l06::DatagramBody body;
+        body.subscribe_id = group.subscribe_id;
+        if (config_.defect == LiteDefect::DatagramUnknownSubscribeId) body.subscribe_id += 1000;
+        body.group_sequence = group.sequence;
+        body.timestamp = group.sequence * 1000;  // the first frame's absolute timestamp (delta from 0)
+        body.payload = bytes_of("frame-" + std::to_string(group.sequence) + "-" + std::to_string(group.frame_start));
+        if (body.payload.size() < config_.frame_payload_bytes)
+            body.payload.resize(config_.frame_payload_bytes, std::byte{0x2e});
+        if (config_.defect == LiteDefect::DatagramDiffersFromStream) body.payload = bytes_of("DIFFERENT");
+        if (config_.defect == LiteDefect::DatagramOversize) body.payload.resize(1201, std::byte{0x2e});
+        Bytes wire;
+        wire::ByteWriter out(std::size_t{1} << 12);
+        // The typed encoder refuses an oversize body, so an oversize one is built raw.
+        if (config_.defect == LiteDefect::DatagramOversize) {
+            l06::write_varint(body.subscribe_id, out);
+            l06::write_varint(body.group_sequence, out);
+            l06::write_varint(body.timestamp, out);
+            (void)out.append_bytes(body.payload);
+        } else if (l06::encode_datagram_body(body, out)) {
+            return;
+        }
+        peer.datagram(Bytes(out.bytes().begin(), out.bytes().end()));
+    }
+
     void emit_one_group(ScriptedLitePeer& peer) {
         if (goaway_received_ && config_.defect != LiteDefect::OpensStreamsAfterGoaway) {
             pending_groups_.clear();  // draft 5.1.6: no new streams after a GOAWAY; open ones are served on
@@ -902,6 +940,11 @@ private:
                     value.payload.resize(config_.frame_payload_bytes, std::byte{0x2e});
                 const auto encoded = frame(value);
                 bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+            }
+            if (config_.datagrams && group.frames == 1) send_group_datagram(peer, group);
+            if (config_.datagrams && config_.defect == LiteDefect::DatagramOnly && group.frames == 1) {
+                ++groups_sent_;
+                return;
             }
             const auto id = peer.open_peer_uni();
             peer.data(id, std::move(bytes), group.fin);

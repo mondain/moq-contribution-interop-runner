@@ -208,11 +208,11 @@ build/moq-interop-audit --draft moq-lite-06 [--format text|json] [--database PAT
 ```
 
 `--draft moq-lite-06` audits the moq-lite-06 catalog, which is still being classified
-(`complete: false`). Thirty-nine evaluators are bound to the 26 scenarios (43 bindings), so the static audit
-reports the coverage of the reviewed required rows by those bindings (35 of 35 required and 4 of 4 optional
+(`complete: false`). Forty evaluators are bound to the 27 scenarios (44 bindings), so the static audit
+reports the coverage of the reviewed required rows by those bindings (36 of 36 required and 4 of 4 optional
 reviewed Applicable and Testable rows) next to the catalog's state, and its verdict is never a pass. The planned
 scenario and evaluator ids follow `l06-<area>-<name>`, with the areas `session`, `setup`, `announce`, `subscribe`,
-`group`, `frame`, `errors`, `track`, `fetch`, `probe` and `goaway`. Other spellings (`106`, `moq-lite-05`)
+`group`, `frame`, `errors`, `track`, `fetch`, `probe`, `goaway` and `datagram`. Other spellings (`106`, `moq-lite-05`)
 are refused. With `--database PATH` the stored moq-lite-06 runs of that database are also
 audited (the execution audit of the MoQ Transport drafts with the lite bindings: each stored
 score is recomputed with the staged scoring, and every scored row must be bound to a selected

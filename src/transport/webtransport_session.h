@@ -18,6 +18,8 @@ struct WebTransportSessionLimits {
     std::size_t max_events = 256;
     std::size_t max_event_payload_bytes = 1u << 20;
     std::size_t max_datagram_payload = 1150;
+    // What a received datagram may carry (the size this endpoint advertised); 0 means max_datagram_payload.
+    std::size_t max_received_datagram_payload = 0;
     std::size_t max_queued_send_bytes = 1u << 20;
 };
 

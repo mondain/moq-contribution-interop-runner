@@ -786,7 +786,7 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   `namespace_hex: ["696e7465726f702e68616e67"]` (`interop.hang`) and `track_name_hex: "302e6d3473"` (`0.m4s`),
   pinned by the L1e live smoke (the CLI announces exactly `interop.hang`; `0.m4s` is its first video track, one group
   per GOP). moq starts only once ffmpeg has written its first bytes: the CLI creates the media track from the moov
-  and refuses a SUBSCRIBE that arrives earlier. The adapter has no per-scenario options: all 26 executable
+  and refuses a SUBSCRIBE that arrives earlier. The adapter has no per-scenario options: all 27 executable
   scenarios use the same command line and differ only in what the runner does
   (`tests/golden/moq-lite-cmdlines.txt`). The CLI has no duration flag, so use a run `timeout_ms` that fits the
   longest probe. Rows such as 152 (the publisher must end and restart a broadcast within one session; the adapter has
@@ -797,7 +797,7 @@ string `"moq-lite-06"` in `draft`. The bundled adapter is `adapters/moq-lite` (b
   `CARGO_TARGET_DIR=<scratch>/target cargo +1.98.1 build -p moq-cli --release --offline --locked` (the dependencies
   must already be in the cargo cache; about 3 minutes) and export `MOQ_CLI_BIN=<scratch>/target/release/moq`. The
   adapter also needs `ffmpeg` with libx264, `jq` and coreutils `timeout`. With the runner built,
-  `MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner` runs the 26 scenarios on both
+  `MOQ_CLI_BIN=... bash tests/e2e/moq-lite-matrix.sh build/moq-interop-runner` runs the 27 scenarios on both
   transports (native QUIC on ports 19231/19232, WebTransport on 19233/19234) with `timeout_ms` 30000 (the
   `l06-fetch-group` probe needs more than 24000), audits each database and posts the
   five-scenario group run that row `L06-4-4-MUST-027` needs (that row stays `not_run` in single runs).

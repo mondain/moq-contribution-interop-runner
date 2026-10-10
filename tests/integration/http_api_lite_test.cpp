@@ -241,7 +241,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     const auto list = get("/api/v1/runs");
     EXPECT_EQ(list.at("items").at(0).at("config").at("draft"), "moq-lite-06");
 
-    // The JSON export: every row, unreviewed rows not_run with their reason.
+    // The JSON export: every row. Since L2b none is unreviewed; the staged note remains (complete: false).
     const auto document = get("/results/" + id + ".json");
     EXPECT_EQ(document.at("run").at("config").at("draft"), "moq-lite-06");
     EXPECT_TRUE(document.at("staged"));
@@ -256,7 +256,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
         EXPECT_EQ(row.at("outcome"), "not_run") << row.at("id");
         EXPECT_TRUE(row.at("rationale").get<std::string>().starts_with(kUnreviewedPrefix)) << row.at("id");
     }
-    EXPECT_EQ(unreviewed, 39u);
+    EXPECT_EQ(unreviewed, 0u);
     EXPECT_EQ(document.dump().find("\"draft\":106"), std::string::npos);
 
     // TAP.
@@ -271,7 +271,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     EXPECT_NE(page.find("Staged catalog:"), std::string::npos);
     EXPECT_NE(page.find("incomplete"), std::string::npos);
     const auto filtered = get_text("/results/" + id + "?outcome=not_run&section=10");
-    EXPECT_NE(filtered.find("Unreviewed: classification pending."), std::string::npos);
+    EXPECT_EQ(filtered.find("Unreviewed: classification pending."), std::string::npos);
     const auto runs_page = get_text("/results");
     EXPECT_NE(runs_page.find("<td>moq-lite-06</td>"), std::string::npos);
 
@@ -281,7 +281,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
     const auto& entry = completeness.at("drafts").at(3);
     EXPECT_EQ(entry.at("draft"), "moq-lite-06");
     EXPECT_TRUE(entry.at("staged"));
-    EXPECT_FALSE(entry.at("evaluator_complete"));
+    EXPECT_TRUE(entry.at("evaluator_complete")) << "every reviewed row is bound since L2b; the catalog flag keeps it staged";
     std::size_t pending = 0;
     for (const auto& residual : entry.at("classified_residuals")) {
         const auto reason = residual.at("reason").get<std::string>();
@@ -292,7 +292,7 @@ TEST_F(LiteHttpApi, AnObservedNativeRunIsCreatedPlayedAndReadThroughEveryRoute) 
         ++pending;
         EXPECT_EQ(residual.at("classification"), "not_run") << residual.dump();
     }
-    EXPECT_EQ(pending, 39u);
+    EXPECT_EQ(pending, 0u);
     const auto& native = entry.at("transports").at(0);
     EXPECT_EQ(native.at("transport"), "native-quic");
     EXPECT_EQ(native.at("run_count"), 1);

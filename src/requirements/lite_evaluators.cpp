@@ -2,6 +2,7 @@
 
 #include "moq/interop/scenarios/lite06_announce.h"
 #include "moq/interop/scenarios/lite06_common.h"
+#include "moq/interop/scenarios/lite06_datagram.h"
 #include "moq/interop/scenarios/lite06_errors.h"
 #include "moq/interop/scenarios/lite06_fetch.h"
 #include "moq/interop/scenarios/lite06_goaway.h"
@@ -106,6 +107,8 @@ const std::vector<BindingRow>& binding_rows() {
         {"L06-5-1-6-MUST-NOT-077", "l06-goaway-single", "l06-goaway-no-new-streams", &kGroups},
         {"L06-7-18-MUST-186", "l06-goaway-duplicate", "l06-goaway-second-closes", &kClose},
         {"L06-7-18-MUST-179", "l06-goaway-oversize", "l06-goaway-oversize-violation", &kClose},
+        // L2b. A Pass rests on the datagrams that arrived (stored as raw_probe_transport_event peer-datagram).
+        {"L06-6-4-MUST-NOT-105", "l06-datagram-size", "l06-datagram-size-limit", &kStreamEnding},
     };
     return rows;
 }
@@ -172,6 +175,7 @@ const std::map<std::string, LiteEvaluator>& lite_evaluator_registry() {
         {"l06-goaway-no-new-streams", s::evaluate_l06_goaway_no_new_streams},
         {"l06-goaway-second-closes", s::evaluate_l06_goaway_second_closes},
         {"l06-goaway-oversize-violation", s::evaluate_l06_goaway_oversize_violation},
+        {"l06-datagram-size-limit", s::evaluate_l06_datagram_size_limit},
     };
     return registry;
 }

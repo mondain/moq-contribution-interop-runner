@@ -41,7 +41,7 @@ matrix_runs=(
     l06-subscribe-abutting-frame-start l06-errors-unknown-stream-type l06-errors-unknown-reset-code
     l06-errors-reserved-reset-code l06-errors-code-space
     l06-track-info l06-fetch-group l06-fetch-unknown-group l06-probe-report
-    l06-goaway-single l06-goaway-duplicate l06-goaway-oversize
+    l06-datagram-size l06-goaway-single l06-goaway-duplicate l06-goaway-oversize
     l06-errors-code-space,l06-setup-duplicate-stream,l06-setup-duplicate-parameter,l06-setup-server-path,l06-setup-server-role
 )
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

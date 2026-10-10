@@ -1166,6 +1166,48 @@ catalog is staged (39 rows unreviewed, 19 required), so a run can never pass; `l
 `l06-goaway-duplicate` can only judge a publisher that survives a GOAWAY; `l06-probe-report` judges row 072 only for
 a publisher that advertised Report or Increase and row 075 only for one that advertised none.
 
+## moq-lite-06 third sweep (L2b) against the moq CLI b8b0d235
+
+Same peer, rules and caveats as the first and second sweeps ([first](#moq-lite-06-first-sweep-against-the-moq-cli-b8b0d235),
+[second](#moq-lite-06-second-sweep-l2a-against-the-moq-cli-b8b0d235)): one revision on one date, loopback, a `pass` row is wire
+evidence in one run, and the catalog stays `complete: false`, so no run is ever `pass`. L2b classified the last 39 rows, so all 212
+rows are reviewed (0 unreviewed), and added one scenario (`l06-datagram-size`, row 105), the datagram recorder, and three runner duties.
+
+| Item | Value |
+|---|---|
+| Peer, build, payload, fixture, endpoints | as in the first sweep |
+| Runner | this repository on the L2b branch (`worktree-moqlite-l2b`), `tests/e2e/moq-lite-matrix.sh`, `timeout_ms` 30000 |
+| Date | 2026-10-10, loopback, one machine |
+| Catalog | 212 rows, 212 reviewed; 27 scenarios, 40 evaluators, 44 bindings |
+
+| Sweep | transport | runs | incomplete | fail | error | scored rows | execution audit |
+|---|---|---:|---:|---:|---:|---:|---|
+| L2b matrix, 27 single + 1 group run | native QUIC | 28 | 23 | 5 | 0 | 39 | consistent, 0 findings |
+| L2b matrix, 27 single + 1 group run | WebTransport | 28 | 24 | 4 | 0 | 36 | consistent, 0 findings |
+
+No regression: the five failing rows (107, 126, 131, 072, 179) are the second sweep's, and nothing new fails. The new scenario:
+
+| Scenario | row | state | What the wire showed |
+|---|---|---|---|
+| `l06-datagram-size` | 105 | not_run | The CLI sends no QUIC datagram (no `peer-datagram` event in either run): datagrams are a permission (row 100) and the CLI never uses it |
+
+### Triage of the L2b rows
+
+- **(a) Runner defects:** none found by the live runs. Runner features that the catalog now promises (rows 069, 171, 184: reset on
+  zero timescale or undecodable frames, close on a GOAWAY URI received) were built with tests first; the datagram recorder (the probe
+  engine used to drop datagram events) and the decoding of a peer-opened Goaway Stream (raw in L1) are new. The L2b runner-defect count is 0.
+- **(b) Peer defects:** none new (ML-04 and ML-05 stand). **(c) Questions:** none.
+- **(d) Not observable against this peer:** 105 (no datagram is sent), and now by classification the unscored rows 083, 086 and 090:
+  measured with a 1 ms Subscriber Max Age the CLI delivered its groups one at a time about 0.95 s apart, each finished before the next
+  opened, so there was never a backlog to order or to expire.
+
+Of the 39 rows classified, 1 is Applicable and Testable (105), 19 Applicable and NotTestable (permissions, scheduler and resource
+policy, rules with no observable edge on a loopback), 16 NotApplicable (subscriber, relay and compatibility rules; the runner's own
+compliance is pinned by the duty and recorder tests) and 3 Informative.
+
+Known limits: as before; datagram rows can only be exercised against a publisher that sends datagrams (the scripted publisher does;
+the L2c reference publisher will), and `complete: true` is L2c's flip.
+
 ## Other publishers
 
 A different publisher integrates through the same driver contract with no change
