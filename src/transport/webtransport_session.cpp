@@ -26,6 +26,18 @@ std::array<std::uint8_t, 8> encode_varint(std::uint64_t value,
     return bytes;
 }
 
+// Resets the sending half of a WebTransport stream. picowt_reset_stream sends RESET_STREAM_AT with a reliable
+// size covering the stream header of a local stream, which picoquic refuses (PICOQUIC_ERROR_ILLEGAL_TRANSPORT_
+// EXTENSION) unless both endpoints enabled RESET_STREAM_AT. Only the moq-lite profile admits a client without it
+// (validate_connect requires it of every MoQ Transport client), and there the stream is reset with a plain
+// RESET_STREAM instead. MoQ Transport sessions always negotiate RESET_STREAM_AT, so their path is unchanged.
+int reset_stream(picoquic_cnx_t* connection, h3zero_stream_ctx_t* stream, std::uint64_t wire_error) {
+    if (connection->is_reset_stream_at_enabled) return picowt_reset_stream(connection, stream, wire_error);
+    const int result = picoquic_reset_stream(connection, stream->stream_id, wire_error);
+    if (result == 0) stream->ps.stream_state.is_fin_sent = 1;
+    return result;
+}
+
 OperationResult unavailable() { return {TransportStatus::InvalidState, 0, std::nullopt}; }
 OperationResult failed() { return {TransportStatus::InternalError, 0, std::nullopt}; }
 
@@ -176,7 +188,7 @@ void WebTransportSession::terminate_streams() {
     for (const auto stream_id : writable_streams_) {
         if (finished_streams_.contains(stream_id)) continue;
         auto* stream = h3zero_find_stream(h3_, stream_id);
-        if (stream != nullptr) (void)picowt_reset_stream(connection_, stream, session_gone);
+        if (stream != nullptr) (void)reset_stream(connection_, stream, session_gone);
     }
     for (const auto stream_id : readable_streams_)
         (void)picoquic_stop_sending(connection_, stream_id, session_gone);
@@ -249,9 +261,8 @@ OperationResult WebTransportSession::reset(StreamId stream_id,
         application_error > std::numeric_limits<std::uint32_t>::max()) return unavailable();
     auto* stream = h3zero_find_stream(h3_, stream_id);
     if (stream == nullptr) return unavailable();
-    if (picowt_reset_stream(connection_, stream,
-                            webtransport_to_http_error(
-                                static_cast<std::uint32_t>(application_error))) != 0)
+    if (reset_stream(connection_, stream,
+                     webtransport_to_http_error(static_cast<std::uint32_t>(application_error))) != 0)
         return failed();
     finished_streams_.insert(stream_id);
     return {TransportStatus::Success, 0, std::nullopt};
