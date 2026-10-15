@@ -241,10 +241,19 @@ NativeQuicListenerCreateResult NativeQuicListener::create(
         length = sizeof(sockaddr_in6);
     }
 
+#ifdef SOCK_CLOEXEC
     impl->socket_fd = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+#else
+    impl->socket_fd = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+#endif
     if (impl->socket_fd < 0) {
         return {nullptr, NativeQuicListenerError::SocketOpenFailed};
     }
+#ifndef SOCK_CLOEXEC
+    if (::fcntl(impl->socket_fd, F_SETFD, FD_CLOEXEC) < 0) {
+        return {nullptr, NativeQuicListenerError::SocketConfigurationFailed};
+    }
+#endif
     const int flags = ::fcntl(impl->socket_fd, F_GETFL, 0);
     if (flags < 0 || ::fcntl(impl->socket_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
         return {nullptr, NativeQuicListenerError::SocketConfigurationFailed};
