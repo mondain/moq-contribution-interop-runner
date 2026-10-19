@@ -9,14 +9,13 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
-      # moqxr 4b615f4 ("Add moqt draft 22") is the revision the first draft 22 sweep ran
-      # against (2026-10-06). It replaced 0993cf7, against which the draft 18 and 21 moqxr
-      # stages were first verified. 4b615f4 still publishes drafts 18 and 21; their
-      # repeatability stages passed against a local 4b615f4 build, but not yet in this workflow.
+      # moqxr v0.4.7 (97de3a2, equal to main on 2026-10-19) is the revision the latest
+      # sweep and the driven matrix ran against; see docs/interop-notes.md. It replaced
+      # 4b615f4, which first published draft 22.
       - uses: actions/checkout@v5
         with:
           repository: openmoq/moqxr
-          ref: 4b615f4874d67653035642c80a3d454db759859e
+          ref: 97de3a2ec81344010479bd8fd2b40f38aa98ec45
           path: external/moqxr
       - name: Install build and audit dependencies
         run: |

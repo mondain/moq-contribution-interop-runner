@@ -346,6 +346,55 @@ No experiment made a row pass or reach a verdict, so `adapters/moqxr/run.sh` is 
 two adapter-mode questions above are closed as negative results. No runner defect (category (a))
 was found.
 
+## Sweep against moqxr v0.4.7
+
+| Item | Value |
+|---|---|
+| Peer | `openmoq-publisher` (moqxr) `v0.4.7`, `97de3a2ec81344010479bd8fd2b40f38aa98ec45` (equal to `origin/main` on 2026-10-19), `--version` `0.4.7`; built in a scratch worktree, Release, target `openmoq-publisher`, 33 commits after `1883b9f` |
+| Fixture | moqxr's `tests/fixtures/locmaf-publisher.mp4`, namespace `media`, track `vide_1` |
+| Runner | this repository at `ae0364d`, bundled `adapters/moqxr/run.sh` unchanged |
+| Date | 2026-10-19 |
+
+Method as for the `4b615f4` sweep above (one driven run per executable id, `timeout_ms` 12000,
+`--publisher-no-fetch`, then the row-completion groups), with one runner per draft and transport
+and four parallel posts per runner. Drafts 18, 21 and 22 on native QUIC and WebTransport.
+
+| Sweep | ids | refused 400 | refused 422 | runs | incomplete | fail | error | group runs (incomplete / error) |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| draft 18 native QUIC | 165 | 0 | 25 | 140 | 133 | 4 | 3 | 3 (3 / 0; one more group refused 422) |
+| draft 18 WebTransport | 165 | 0 | 25 | 140 | 133 | 4 | 3 | 3 (3 / 0) |
+| draft 21 native QUIC | 222 | 6 | 28 | 188 | 166 | 14 | 8 | 39 (34 / 5) |
+| draft 21 WebTransport | 222 | 6 | 28 | 188 | 166 | 14 | 8 | 39 (34 / 5) |
+| draft 22 native QUIC | 223 | 6 | 29 | 188 | 181 | 1 | 6 | 41 (36 / 5) |
+| draft 22 WebTransport | 223 | 6 | 29 | 188 | 181 | 1 | 6 | 41 (36 / 5) |
+
+Requirement rows touched by the sweep (a row counts `fail` if any run failed it, else `pass`
+if any run passed it, else `not_run`):
+
+| Sweep | rows | pass | fail | not_run |
+|---|---:|---:|---:|---:|
+| draft 18 native QUIC | 150 | 78 | 3 | 69 |
+| draft 18 WebTransport | 150 | 77 | 3 | 70 |
+| draft 21 native QUIC | 148 | 59 | 11 | 78 |
+| draft 21 WebTransport | 145 | 60 | 11 | 74 |
+| draft 22 native QUIC | 147 | 75 | 1 | 71 |
+| draft 22 WebTransport | 144 | 76 | 1 | 67 |
+
+Against the `1883b9f` result (draft 22: 69 pass, 6 fail, 72 or 69 not_run) the failures fell
+from 6 to 1 and the passes rose from 69 to 75 (native QUIC) and 76 (WebTransport). Row changes: `D22-9-2-MUST-339`, `D22-3-6-MUST-083` and
+`D22-9-2-MUST-340` went from fail or not_run to pass, `D22-11-5-1-MUST-541`, `D22-9-5-1-MUST-363`
+and `D22-9-20-18-MUST-445` went from not_run to pass, `D22-11-MUST-488` now passes on WebTransport
+too, and `D22-3-3-2-MUST-077`, `D22-9-1-6-MUST-326` and `D22-9-MUST-295` went from fail to
+not_run because the wrong behavior is gone but their companion scenarios stay unscored.
+`D22-8-9-MUST-281` still fails, now because moqxr closes the session with 0x17 instead of
+rejecting the message. The same behavior fails two draft 18 rows (`D18-10-2-2-MUST-007`,
+`D18-10-3-1-4-MUST-001`); `D18-10-4-MUST-007` fails as it did on `1883b9f`. The draft 21 fails are
+the `--forward 1` adapter artifact described under `4b615f4`. Details and the new defect are in the
+[punch list](moqxr-punch-list.md#status-against-moqxr-v047).
+
+The six-pair matrix `tests/e2e/moqxr-matrix.sh` against the same build passes: adapter contract
+passed, publisher stopped and zero failed rows on every pair.
+
 ## Draft 22 sweep against imquic 6836173
 
 This is one peer at one revision on one date. It says nothing about another imquic
