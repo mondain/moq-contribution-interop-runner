@@ -386,10 +386,12 @@ from 6 to 1 and the passes rose from 69 to 75 (native QUIC) and 76 (WebTransport
 and `D22-9-20-18-MUST-445` went from not_run to pass, `D22-11-MUST-488` now passes on WebTransport
 too, and `D22-3-3-2-MUST-077`, `D22-9-1-6-MUST-326` and `D22-9-MUST-295` went from fail to
 not_run because the wrong behavior is gone but their companion scenarios stay unscored.
-`D22-8-9-MUST-281` still fails, now because moqxr closes the session with 0x17 instead of
-rejecting the message. The same behavior fails two draft 18 rows (`D18-10-2-2-MUST-007`,
-`D18-10-3-1-4-MUST-001`); `D18-10-4-MUST-007` fails as it did on `1883b9f`. The draft 21 fails are
-the `--forward 1` adapter artifact described under `4b615f4`. Details and the new defect are in the
+`D22-8-9-MUST-281`, `D18-10-2-2-MUST-007` and `D18-10-3-1-4-MUST-001` failed in this sweep because moqxr
+closes the session with 0x17 when an alias is unregistered. That name is defined only as a Session
+termination code, so the runner expectation was wrong; the evaluators were corrected afterwards
+(a close with 0x17 now gives no verdict) and the three scenarios re-run `incomplete`. So draft 22 has
+no failing row on v0.4.7 after the correction. `D18-10-4-MUST-007` fails as it did on `1883b9f`. The draft 21 fails are
+the `--forward 1` adapter artifact described under `4b615f4`. Details and the runner correction are in the
 [punch list](moqxr-punch-list.md#status-against-moqxr-v047).
 
 The six-pair matrix `tests/e2e/moqxr-matrix.sh` against the same build passes: adapter contract

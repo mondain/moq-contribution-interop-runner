@@ -112,8 +112,14 @@ std::optional<bool> setup_token_alias_not_registered(const RawProbeTranscript& t
     if (!control || advertised_token_cache(control->setup_options) >= kOversizeTokenCost)
         return std::nullopt;
     const auto reply = write_reply(transcript, 0);
-    if (reply.messages.empty()) return application_close(transcript) ? std::optional<bool>{false}
-                                                                     : std::nullopt;
+    if (reply.messages.empty()) {
+        // UNKNOWN_AUTH_TOKEN_ALIAS (0x17) is defined only as a Session termination code, so a close
+        // with it is one reading of "reject the message": it proves nothing either way.
+        const auto close = peer_close(transcript);
+        if (close && close->space == transport::CloseErrorSpace::Application &&
+            close->code == kCloseUnknownAuthTokenAlias) return std::nullopt;
+        return application_close(transcript) ? std::optional<bool>{false} : std::nullopt;
+    }
     const auto* error = request_error(reply);
     if (!error) return false;  // an alias that was never registered cannot succeed
     // Draft 18 names no REQUEST_ERROR code for UNKNOWN_AUTH_TOKEN_ALIAS, so the

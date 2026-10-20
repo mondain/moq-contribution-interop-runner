@@ -81,6 +81,10 @@ std::optional<bool> evaluate_raw_probe_request_error(
         // A publisher that ends the session instead of answering fails the rule only when the
         // close is attributable to the request; a NO_ERROR close is not (see observe_close).
         const auto observed = observe_raw_probe_close(transcript, profile.definition);
+        // UNKNOWN_AUTH_TOKEN_ALIAS (0x17) is defined only as a Session termination code (draft 18
+        // Section 3.5, draft 21 and 22 Section 12.2), so closing with it is one reading of "reject the
+        // message" for the compatibility-mapped profiles; it is not a violation.
+        if (profile.compatibility_error && observed && observed->error_code == 0x17) return std::nullopt;
         if (observed && observed->error_code != 0) return false;
         return std::nullopt;
     }

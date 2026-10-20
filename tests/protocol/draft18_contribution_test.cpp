@@ -244,6 +244,17 @@ TEST(Draft18ContributionSetup, AliasOfOversizeSetupRegisterIsNotRegistered) {
     EXPECT_EQ(run(reject, 0x18), std::optional<bool>{false});
     EXPECT_EQ(run(reject, std::nullopt), std::nullopt);
     EXPECT_EQ(run([](PeerView&) {}, 0x17, true), std::nullopt);
+    // A session close with UNKNOWN_AUTH_TOKEN_ALIAS (0x17) is one reading of the rejection; any
+    // other application close is not a rejection.
+    const auto close_with = [](std::uint64_t code) {
+        return [code](PeerView& v) {
+            v.when("close", v.sent(1), [&v, code] {
+                v.push(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, code, {}});
+            });
+        };
+    };
+    EXPECT_EQ(run(close_with(0x17), std::nullopt), std::nullopt);
+    EXPECT_EQ(run(close_with(3), std::nullopt), std::optional<bool>{false});
 }
 
 // The registry, healthz listing and evaluator all key on the probe list.

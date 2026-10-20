@@ -11,7 +11,8 @@ failure against `1883b9f` (see "Status against moqxr 1883b9f"). Background and t
 result set are in [interop-notes.md](interop-notes.md).
 
 The current status, against moqxr `v0.4.7`, is the first section below; most D22- items are fixed
-there and one new defect (an unknown token alias closes the session) is recorded. The later status
+there. A runner expectation about unknown token aliases that wrongly failed three rows was
+corrected (see "Runner correction" below). The later status
 sections and the item bodies are the history they were written against.
 
 ## Status against moqxr v0.4.7
@@ -29,8 +30,9 @@ on a control-stream GOAWAY and validates WebTransport datagrams. The later ones 
 draft 16 and WebTransport error-code work, a forward=1 replay and a close-once fix.
 
 Result: draft 22 went from 6 failing rows to 1 on each transport (rows 75 pass, 1 fail, 71
-not_run on native QUIC; 76, 1, 67 on WebTransport). The remaining draft 22 failure is a defect
-that the fix introduced, see D22-10 below.
+not_run on native QUIC; 76, 1, 67 on WebTransport) in the sweep. That one failure,
+`D22-8-9-MUST-281`, was a runner scoring error, not a moqxr defect; with the runner corrected
+(see "Runner correction" below) draft 22 has no failing row on v0.4.7.
 
 | Item | Status on v0.4.7 | Evidence |
 |------|------------------|----------|
@@ -43,7 +45,7 @@ that the fix introduced, see D22-10 below.
 | D22-07 / M-18 WebTransport datagrams | Fixed | `D22-11-MUST-488` passes on both transports (it was confounded on WebTransport) |
 | D22-08 second GOAWAY on a request stream | Fixed | `D22-9-2-MUST-339` passes: the second GOAWAY closes with 0x3 |
 | D22-09 SUBSCRIBE_TRACKS overlap | Fixed | `D22-3-6-MUST-083` passes: the second prefix gets REQUEST_ERROR code 0x30 "track prefix overlap" |
-| D22-10 unregistered token alias | Open, changed | The alias is now detected but the session is closed with code 0x17 instead of rejecting the message. **New defect, see below** |
+| D22-10 unregistered token alias | Fixed (runner scoring corrected) | The alias is now detected and the session is closed with 0x17, the only meaning the draft gives that name. The sweep scored this `fail` through a runner expectation that has since been corrected; see "Runner correction" |
 | D22-11 message framing | Mostly fixed | Unknown control type closes (D22-02); `D22-9-10-MUST-381` still `not_run` |
 | D22-C1 refused PUBLISH ends the session | Unchanged | `D22-13-MUST-568`, `-NOT-569`, `-NOT-576` still `not_run` |
 
@@ -54,36 +56,34 @@ M-10, M-12, M-13 and M-15 rows pass or are unscored with no failure; M-16 still 
 | Row | State on v0.4.7 | Note |
 |-----|-----------------|------|
 | `D18-10-4-MUST-007` (M-09) | fail, unchanged | A control GOAWAY whose cutoff has the wrong receiver parity closes with 0x3, not INVALID_REQUEST_ID; also fails the same way on `1883b9f` |
-| `D18-10-2-2-MUST-007`, `D18-10-3-1-4-MUST-001` | fail, **new** | An unregistered or oversize-registered alias is answered with a session close 0x17; see D22-10 |
+| `D18-10-2-2-MUST-007`, `D18-10-3-1-4-MUST-001` | fail in the sweep, runner scoring since corrected | An unregistered or oversize-registered alias is answered with a session close 0x17; see "Runner correction" |
 | `D18-10-12-MUST-001`, `D18-10-12-2-MUST-004` (M-17, M-21) | not_run | FETCH scenarios are refused (422) under the cache-less declaration |
 | `D18-14-MUST-004`, `-NOT-001`, `-NOT-002` (M-20) | not_run | Unscored; D22-C1 stays unchanged |
 | `D18-11-4-2-MUST-002` (M-18), `D21-13-MUST-593` (M-01), `D21-9-15-MUST-385` (M-05), `D21-9-3-MUST-337`, `D21-9-5-MUST-344` (M-14) | not_run | No verdict; unchanged |
 | `D21-8-7-MUST-251` to `-254`, `D21-8-9-MUST-267`, `-269`, `-277`, `D21-9-15-MUST-383`, `D21-9-20-9-MUST-429`, `-10-MUST-432`, `-16-MUST-447` | fail | The adapter artifact documented under `4b615f4`: draft 21 command lines are frozen at `--forward 1`, moqxr blocks on its own PUBLISH and closes with code 0. The draft 22 twins pass (`D22-8-7-MUST-269` to `-272`, `D22-8-9-MUST-279` and `-289`, `D22-9-20-8-MUST-421`, `D22-9-20-9-MUST-424`, `D22-9-20-15-MUST-432`) |
 
-### New: an unknown token alias closes the session (D22-10 changed; drafts 18 and 22)
+### Runner correction: a session close with 0x17 is not a failure (D22-10; drafts 18, 21 and 22)
 
-- **Rows:** `D22-8-9-MUST-281`, `D18-10-2-2-MUST-007`, `D18-10-3-1-4-MUST-001` (fail).
-- **Draft:** draft 22 lines 3708-3709 (section 8.9) and draft 18 lines 3164-3165 (section
-  10.2.2): a message that references an Alias that is not registered MUST be rejected with
-  UNKNOWN_AUTH_TOKEN_ALIAS. That is a message error; it does not close the session (compare
-  duplicate registration, which does).
-- **Observed:** `d22-request-unknown-token-alias`, `receive-use-alias-for-unregistered-token`,
-  `receive-delete-for-unregistered-token` and `receive-oversize-setup-register-then-use-its-alias`
-  all end with `peer_close application close code=23` (0x17). On `1883b9f` the same draft 18
-  scenarios drew a REQUEST_ERROR for an unrelated reason and no verdict; the D22-10 symptom there
-  was that the alias was served.
-- **Where:** `authorization_token_status` in `src/transport/moqt_session.cpp` (the `unknown_alias`
-  branch calls `close_session(transport, 0x17, ...)`), and the REQUEST_UPDATE decoder
-  (`RequestUpdateDecodeError::kUnknownAuthTokenAlias`) at the same code. Introduced in `f4c2f36`.
-- **Fix direction:** answer the offending request with REQUEST_ERROR UNKNOWN_AUTH_TOKEN_ALIAS and
-  keep the session. Where the carrying message has no request stream to answer on (a REQUEST_UPDATE
-  or a DELETE on its own), reject that message the way the draft defines for it. Severity: medium.
-  Confidence: confirmed (wire evidence plus the code).
-- **Repro:** `d22-request-unknown-token-alias` with `"draft": 22`; at draft 18,
-  `receive-use-alias-for-unregistered-token` and `receive-delete-for-unregistered-token`.
-- **Runner note:** the draft 18 run logs `unresolved_error_mapping` because the checked-in
-  draft 18 text assigns no REQUEST_ERROR code for UNKNOWN_AUTH_TOKEN_ALIAS (0x17 is a session
-  close code there); the verdict is `fail` through the session-close observation.
+- **Rows:** `D22-8-9-MUST-281`, `D18-10-2-2-MUST-007`, `D18-10-3-1-4-MUST-001`.
+- **What the sweep showed:** `d22-request-unknown-token-alias`,
+  `receive-use-alias-for-unregistered-token`, `receive-delete-for-unregistered-token` and
+  `receive-oversize-setup-register-then-use-its-alias` end with an application close, code 0x17,
+  and the three rows scored `fail`. moqxr introduced the close in `f4c2f36`; before that it served
+  the alias.
+- **Why that is not a moqxr defect:** draft 22 line 3708-3709 (draft 18 lines 3164-3165) says to
+  "reject the message with UNKNOWN_AUTH_TOKEN_ALIAS". That name is defined only as a Session
+  termination code (0x17, section 12.2, line 6796 and the table at line 7913; draft 18 section
+  3.5). The REQUEST_ERROR table (section 12.3, Table 20) has no code for it. A REQUEST_ERROR reply
+  would have to use a code the draft does not assign, so closing with 0x17 is a reasonable reading.
+  The runner's own `unresolved_error_mapping` event already said the request code is unassigned.
+  An issue filed upstream (openmoq/moqxr#75) claiming otherwise was wrong and is retracted.
+- **Runner change:** for the compatibility-mapped unknown-alias profiles
+  (`request_probe.cpp`) and the oversize-register probe (`draft18_contribution_setup.cpp`), a
+  session close with 0x17 now yields no verdict instead of `fail`; any other close code, or an
+  accepted request, still fails. The same four scenarios against v0.4.7 now end `incomplete`
+  with no failing row. The catalog rationale text for `D22-8-9-MUST-281` ("message error, not
+  automatic Session closure") is left as written and should be softened when the catalog is next
+  regenerated.
 
 The item bodies in "Draft 22 items" below describe the `4b615f4` and `1883b9f` behavior; the table
 above supersedes their status. The adapter-mode `--forward 1` artifact and the 11 draft 22 error runs (publisher process

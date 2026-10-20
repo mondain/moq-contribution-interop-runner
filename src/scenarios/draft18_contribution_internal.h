@@ -40,6 +40,7 @@ inline constexpr std::uint64_t kErrorInvalidRange = 0x11;
 inline constexpr std::uint64_t kCloseNoError = 0x0;
 inline constexpr std::uint64_t kCloseProtocolViolation = 0x3;
 inline constexpr std::uint64_t kCloseAuthTokenCacheOverflow = 0x13;
+inline constexpr std::uint64_t kCloseUnknownAuthTokenAlias = 0x17;
 inline constexpr std::uint64_t kGreaseOdd = 0x9D;
 inline constexpr std::uint64_t kGreaseEven = 0x11C;
 

@@ -115,6 +115,12 @@ TEST(Draft18RequestProfiles, ErrorProofRequiresExactResponseAndDeliveredRequest)
         auto session_close = observed;
         session_close.events.back() = transport::PeerCloseEvent{transport::CloseErrorSpace::Application,
             profile.expected_error,{}};
+        // 0x17 is defined only as a Session termination code, so a close with it is not scored as a
+        // violation of the compatibility-mapped unknown-alias rule; any other code still is.
+        if (profile.compatibility_error) {
+            EXPECT_FALSE(evaluate_raw_probe_request_error(session_close,profile).has_value());
+            session_close.events.back() = transport::PeerCloseEvent{transport::CloseErrorSpace::Application,3,{}};
+        }
         EXPECT_EQ(evaluate_raw_probe_request_error(session_close,profile),false);
     }
 }
