@@ -76,7 +76,9 @@ M-10, M-12, M-13 and M-15 rows pass or are unscored with no failure; M-16 still 
   3.5). The REQUEST_ERROR table (section 12.3, Table 20) has no code for it. A REQUEST_ERROR reply
   would have to use a code the draft does not assign, so closing with 0x17 is a reasonable reading.
   The runner's own `unresolved_error_mapping` event already said the request code is unassigned.
-  An issue filed upstream (openmoq/moqxr#75) claiming otherwise was wrong and is retracted.
+  An issue filed upstream (openmoq/moqxr#75) claiming otherwise was wrong; it was retracted
+  with a comment and closed as not planned on 2026-10-19
+  (https://github.com/openmoq/moqxr/issues/75#issuecomment-6280941577).
 - **Runner change:** for the compatibility-mapped unknown-alias profiles
   (`request_probe.cpp`) and the oversize-register probe (`draft18_contribution_setup.cpp`), a
   session close with 0x17 now yields no verdict instead of `fail`; any other close code, or an
