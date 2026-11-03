@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage: driven-moqxr.sh [--dry-run] DRAFT TRANSPORT RUNNER_BIN MOQXR_BIN MP4_FIXTURE
-#   DRAFT      18, 21 or 22. Each draft drives one scenario: draft 18 subscribe-to-publisher-track,
+#   DRAFT      18, 21, 22 or 23. Each draft drives one scenario: draft 18 subscribe-to-publisher-track,
 #              draft 21 d21-publisher-request-stream-placement and draft 22 its shared twin
 #              d22-publisher-request-stream-placement (the moqxr adapter runs it with the draft 21
 #              options and --draft 22: moqt-22 over native QUIC, h3 over WebTransport).
@@ -13,6 +13,8 @@ set -euo pipefail
 #              during a run show as @TMP@. Nothing is started, no certificate or temporary directory
 #              is created, and the binaries need not exist. Off by default.
 # MOQ_INTEROP_TEST_HTTP_PORT and MOQ_INTEROP_TEST_UDP_PORT choose the ports (default 19301/19302).
+# MOQ_INTEROP_TEST_KEEP=1 retains the database and logs. At draft 23,
+# MOQ_INTEROP_TEST_SCENARIO selects either smoke ID (default d23-publisher-smoke).
 dry_run=0
 if [[ "${1:-}" == --dry-run ]]; then
     dry_run=1
@@ -29,8 +31,18 @@ if ((dry_run)); then realpath_args=(-m); fi
 runner_bin=$(realpath "${realpath_args[@]}" "$3")
 publisher_bin=$(realpath "${realpath_args[@]}" "$4")
 fixture=$(realpath "${realpath_args[@]}" "$5")
-[[ "$draft" == 18 || "$draft" == 21 || "$draft" == 22 ]] || exit 2
+[[ "$draft" == 18 || "$draft" == 21 || "$draft" == 22 || "$draft" == 23 ]] || exit 2
 [[ "$transport" == native_quic || "$transport" == webtransport ]] || exit 2
+scenario=subscribe-to-publisher-track
+if [[ "$draft" == 21 ]]; then scenario=d21-publisher-request-stream-placement; fi
+if [[ "$draft" == 22 ]]; then scenario=d22-publisher-request-stream-placement; fi
+if [[ "$draft" == 23 ]]; then
+    scenario=${MOQ_INTEROP_TEST_SCENARIO:-d23-publisher-smoke}
+    case "$scenario" in
+        d23-publisher-smoke|d23-direct-subscribe-smoke) ;;
+        *) printf 'unsupported draft 23 smoke scenario: %s\n' "$scenario" >&2; exit 2 ;;
+    esac
+fi
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 if ((dry_run)); then
     test_dir=@TMP@
@@ -49,9 +61,6 @@ runner_args=(--bind 127.0.0.1 --port "$http_port"
     --driver-executable "$root_dir/adapters/moqxr/run.sh"
     --driver-fixture "$fixture" --driver-log-root "$test_dir/logs")
 
-scenario=subscribe-to-publisher-track
-if [[ "$draft" == 21 ]]; then scenario=d21-publisher-request-stream-placement; fi
-if [[ "$draft" == 22 ]]; then scenario=d22-publisher-request-stream-placement; fi
 api_transport=$transport
 if [[ "$transport" == native_quic ]]; then api_transport=native-quic; fi
 request=$(jq -n --argjson draft "$draft" --arg transport "$api_transport" \
@@ -72,6 +81,10 @@ cleanup() {
     if [[ -n "$runner_pid" ]]; then
         kill "$runner_pid" 2>/dev/null || true
         wait "$runner_pid" 2>/dev/null || true
+    fi
+    if [[ "${MOQ_INTEROP_TEST_KEEP:-}" == 1 ]]; then
+        printf 'kept %s\n' "$test_dir" >&2
+        return
     fi
     case "$test_dir" in
         /tmp/moq-interop-driven.*) rm -rf -- "$test_dir" ;;
@@ -101,7 +114,9 @@ created=$(curl --fail --silent --show-error -X POST \
     -H 'Content-Type: application/json' -d "$request")
 run_id=$(jq -er '.run.id' <<<"$created")
 result=
-for attempt in {1..160}; do
+poll_attempts=160
+if [[ "$draft" == 23 ]]; then poll_attempts=300; fi
+for ((attempt=0; attempt<poll_attempts; ++attempt)); do
     result=$(curl --fail --silent --show-error \
         "http://127.0.0.1:$http_port/api/v1/runs/$run_id")
     if [[ $(jq -r '.run.state' <<<"$result") == finalized ]]; then break; fi
@@ -115,17 +130,31 @@ events=$(curl --fail --silent --show-error \
     "http://127.0.0.1:$http_port/api/v1/runs/$run_id/events?limit=100")
 exported=$(curl --fail --silent --show-error \
     "http://127.0.0.1:$http_port/results/$run_id.json")
+contract_path="$test_dir/logs/$run_id/request.json"
+if [[ "$draft" == 23 ]]; then contract_path="$test_dir/logs/$run_id/$scenario/request.json"; fi
 if [[ $(jq '[.items[] | select(.kind == "publisher_process")] | length' \
-    <<<"$events") -ne 1 || ! -f "$test_dir/logs/$run_id/request.json" ||
+    <<<"$events") -ne 1 || ! -f "$contract_path" ||
     $(jq '.requirements | length' <<<"$exported") -eq 0 ]]; then
     printf 'missing driver evidence, retained contract, or requirement rows\n' >&2
     sed -n '1,120p' "$test_dir/runner.log" >&2
     exit 1
 fi
-printf 'draft=%s transport=%s run=%s verdict=%s publisher=%s pass=%s fail=%s\n' \
+printf 'draft=%s transport=%s run=%s verdict=%s publisher=%s pass=%s fail=%s' \
     "$draft" "$transport" "$run_id" \
     "$(jq -r '.run.verdict' <<<"$result")" \
     "$(jq -r '.items[] | select(.kind == "publisher_process") | .detail | fromjson | .status' \
         <<<"$events")" \
     "$(jq '[.run.outcomes[] | select(.state == "pass")] | length' <<<"$result")" \
     "$(jq '[.run.outcomes[] | select(.state == "fail")] | length' <<<"$result")"
+
+if [[ "$draft" == 23 ]]; then
+    smoke=$(jq -r '[.items[] | select(.kind == "draft23_smoke") | .detail | fromjson | .status] | last // "MISSING"' <<<"$events")
+    printf ' smoke=%s\n' "$smoke"
+    if [[ "$smoke" != PASS || $(jq -r '.run.verdict' <<<"$result") != incomplete ]]; then
+        printf 'draft 23 smoke did not demonstrate delivery: %s\n' "$events" >&2
+        printf 'set MOQ_INTEROP_TEST_KEEP=1 to retain logs for debugging\n' >&2
+        exit 1
+    fi
+else
+    printf '\n'
+fi

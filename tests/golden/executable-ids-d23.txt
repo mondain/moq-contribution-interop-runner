@@ -1,0 +1,2 @@
+d23-direct-subscribe-smoke
+d23-publisher-smoke

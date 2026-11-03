@@ -173,7 +173,7 @@ by [`adapters/contract.schema.json`](../adapters/contract.schema.json).
 | `run_id` | string | Run identifier, for example `run-18dabdcec655134a` |
 | `scenario_id` | string | The scenario this context runs, as it was selected for the run: the same id as in the run's `config.scenarios` and on its events (a draft 22 run's ids start with `d22-`, also for scenarios the runner shares with draft 21). Adapters may use it to select options that make the publisher emit messages the scenario observes. They must not use it to change what is expected |
 | `endpoint` | string | URI to connect to: `moqt://HOST:PORT/moq` for native QUIC, `https://HOST:PORT/moq` for WebTransport. Some scenarios use a different path or query (`/moq?run=1`, `/moq?`, `?interop=1`) or an empty host; pass the URI through unchanged. A moq-lite-06 run uses `moql://HOST:PORT/moq?token=l1d` and `https://HOST:PORT/moq?token=l1d` for every scenario (section 7.1) |
-| `draft` | `18`, `21`, `22` or `"moq-lite-06"` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21 and 22 (moqxr's `--draft 22`, native backend); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21). The string `"moq-lite-06"` (a moq-lite draft, never the number 106) is carried by the contract and `adapters/contract.schema.json`; only `adapters/moq-lite` (the moq CLI) runs it, and it refuses every numeric draft. moqxr, moq5 and imquic refuse `"moq-lite-06"` (exit 64, naming "moq-lite-06") |
+| `draft` | `18`, `21`, `22`, `23` or `"moq-lite-06"` | Draft under test: the run's draft, whose ALPN the runner accepts. The bundled `adapters/moqxr` supports drafts 18, 21, 22 and 23 (native backend; draft 23 accepts the two smoke scenarios); `adapters/moq5` supports drafts 18 and 21 only and refuses a draft 22 request (exit 64, "draft 22 is not supported by this adapter"); `adapters/imquic` supports draft 22 only (exit 64 for 18 and 21). The string `"moq-lite-06"` (a moq-lite draft, never the number 106) is carried by the contract and `adapters/contract.schema.json`; only `adapters/moq-lite` (the moq CLI) runs it, and it refuses every numeric draft. moqxr, moq5 and imquic refuse `"moq-lite-06"` (exit 64, naming "moq-lite-06") |
 | `transport` | `"native_quic"` or `"webtransport"` | Note the underscore here; the HTTP API uses `native-quic` |
 | `namespace_hex` | array of hex strings | Namespace fields as lowercase hex of opaque bytes (0 to 32 fields) |
 | `track_name_hex` | hex string | Track name as lowercase hex, possibly empty |
@@ -612,10 +612,11 @@ Replace the stand-in with your publisher by setting `ACME_PUB_BIN` (or the varia
 your adapter reads) and adapting the flag mapping. The environment of the runner is
 inherited by the adapter, which is how that variable reaches it. The driven-mode
 check scripts are `tests/e2e/driven-moqxr.sh` (one draft and transport) and
-`tests/e2e/moqxr-matrix.sh` (the adapter contract, then drafts 18, 21 and 22 over native
-QUIC and WebTransport: six pairs). Each pair runs a single scenario
+`tests/e2e/moqxr-matrix.sh` (the adapter contract, then drafts 18, 21, 22 and 23 over native
+QUIC and WebTransport: eight pairs). Each pair runs a single scenario
 (`subscribe-to-publisher-track` for draft 18, `d21-publisher-request-stream-placement`
-for draft 21, `d22-publisher-request-stream-placement` for draft 22), so the matrix is a
+for draft 21, `d22-publisher-request-stream-placement` for draft 22, and
+`d23-publisher-smoke` for draft 23), so the matrix is a
 smoke test of the harness, not a conformance sweep.
 
 ### 6.2 In Docker Compose
@@ -972,3 +973,8 @@ this guide. The existing driver contract supplies draft integer `23`, the smoke
 scenario ID, endpoint, fixture and trust file to your adapter. Implement the
 publisher-specific command there; existing adapters continue to advertise only
 the drafts their publishers support. No draft-23 publisher executable is bundled.
+
+For moqxr draft-23 driven runs, the adapter requires namespace `media` and track
+`vide_1` (name hex `766964655f31`). See the
+[moqxr adapter instructions](../adapters/moqxr/README.md#draft-23-testing-and-debugging)
+for both transport commands, direct subscription and retained debug logs.

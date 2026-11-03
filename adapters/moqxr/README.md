@@ -2,7 +2,7 @@
 
 `run.sh` lets the runner drive `openmoq-publisher`, the C++ publisher from the sibling
 `moqxr` checkout (picoquic native backend, with an opt-in moq5 backend), as a
-contribution publisher in driven mode. The adapter supports MoQ drafts 18, 21 and 22 on
+contribution publisher in driven mode. The adapter supports MoQ drafts 18, 21, 22 and 23 on
 native QUIC and WebTransport. It only translates the runner's request into moqxr's
 command line; it never decides what a scenario expects. `adapter.json` is a descriptive
 manifest; the runner does not read it.
@@ -11,7 +11,7 @@ manifest; the runner does not read it.
 
 | Item | Value |
 |---|---|
-| Drafts | 18, 21, 22 (anything else exits 64: "supported drafts: 18, 21, 22") |
+| Drafts | 18, 21, 22, 23 (anything else exits 64: "supported drafts: 18, 21, 22, 23") |
 | Transports | `native_quic` (endpoint must be `moqt://...`), `webtransport` (endpoint must be `https://...`) |
 | Namespace | exactly `["6d65646961"]` (`media`) |
 | Track name | exactly `766964655f31` (`vide_1`) |
@@ -69,20 +69,20 @@ and posts `{"draft": 22, "transport": "native-quic", "mode": "driven", "scenario
 
 `tests/e2e/moqxr-matrix.sh [--dry-run] [--pair DRAFT TRANSPORT] RUNNER_BIN MOQXR_BIN
 MP4_FIXTURE` runs the adapter contract test, then the driven script for drafts 18, 21
-and 22 on both transports, each pair on fixed ports (19201 to 19212). It is a smoke test
+22 and 23 on both transports, each pair on fixed ports (19201 to 19216). It is a smoke test
 of the harness, not a conformance sweep.
 
 ## How the request maps to moqxr options
 
 | Request field | moqxr option |
 |---|---|
-| `draft` | `--draft 18`, `--draft 21` or `--draft 22` |
+| `draft` | `--draft 18`, `--draft 21`, `--draft 22` or `--draft 23` |
 | `transport` | `--transport raw` (native QUIC) or `--transport webtransport` |
 | `endpoint` | `--endpoint`, unchanged |
 | `fixture` | `--input` |
 | `tls_ca` | `--ca` |
 | namespace (fixed) | `--namespace media` |
-| `scenario_timeout_ms` | `--timeout`, rounded up to whole seconds (plus 3 in paced mode) |
+| `scenario_timeout_ms` | `--timeout`, rounded up to whole seconds: T; older paced modes use T+3, draft 23 uses 2T+3 |
 | `scenario_id` | selects `--forward`, `--paced` and `--publish-catalog` (below) |
 | `log_dir` | not passed; the runner keeps the adapter's (and moqxr's) output in `stdout.bin` and `stderr.bin` there |
 
@@ -103,15 +103,16 @@ explicit entry (all paced except `d22-publisher-location-filter-parameter`, whic
 The adapter `exec`s moqxr, so moqxr receives the runner's signals directly. When a
 context ends the runner sends SIGTERM to the adapter's process group and SIGKILL 100 ms
 later; a SIGKILL is recorded as a process failure. moqxr's own `--timeout` is the
-scenario timeout rounded up (plus 3 seconds when paced), within the runner's
-`process_timeout_ms`.
+scenario timeout rounded up (plus 3 seconds for older paced scenarios). Draft 23
+uses twice the rounded timeout plus 3 seconds, covering separate connection and
+delivery deadlines; the runner enforces `process_timeout_ms` and stops the child.
 
 ## Tests and goldens
 
 | ctest | What it pins |
 |---|---|
 | `moqxr-adapter-contract` | validation and refusals (exit 64), transport and endpoint mapping, `--forward` defaults per draft, draft 22 normalization, paced overrides, `--publish-catalog` |
-| `moqxr-adapter-cmdlines-d18`, `-d21`, `-d22` | the full argument list for every executable id on both transports, in `tests/golden/moqxr-cmdlines-d18.txt`, `-d21.txt`, `-d22.txt`; at draft 22 also that every shared id equals its `d21-` twin except the paced overrides |
+| `moqxr-adapter-cmdlines-d18`, `-d21`, `-d22`, `-d23` | the full argument list for every executable id on both transports, in `tests/golden/moqxr-cmdlines-d18.txt`, `-d21.txt`, `-d22.txt`, `-d23.txt`; at draft 22 also that every shared id equals its `d21-` twin except the paced overrides |
 | `moqxr-matrix-plan` | the matrix and driven scripts' `--dry-run` plan (`tests/golden/moqxr-matrix-plan.txt`) and that a stub run does what the plan says |
 
 All of them use stubs and need no network. Goldens are never rewritten by default; to
@@ -128,7 +129,7 @@ imquic golden updated too.
 
 ## Known limits and results
 
-- moqxr supports drafts 21 and 22 on its native backend only; the moq5 backend stays on
+- moqxr supports drafts 21, 22 and 23 on its native backend only; the moq5 backend stays on
   drafts 16 and 18 (moqxr `README.md`). The adapter does not select a backend.
 - The adapter refuses what it cannot express (other names, drafts or schemes) instead
   of guessing, and passes no option that describes an expectation.
@@ -140,3 +141,38 @@ The draft 22 sweeps at moqxr `4b615f4` (re-swept after the F1 runner fixes) and 
 each is one peer at one revision on one date, not a conformance claim. The method, triage and full results are in
 [interop-notes.md](../../docs/interop-notes.md#draft-22-sweep-against-moqxr-4b615f4), and
 the open findings in [moqxr-punch-list.md](../../docs/moqxr-punch-list.md).
+
+## Draft 23 testing and debugging
+
+Use a native-backend moqxr build whose `--help` lists `--draft ...|23`; rebuild
+local `main` if the binary is older than its source. The adapter accepts exactly
+`d23-publisher-smoke` and `d23-direct-subscribe-smoke` for draft 23, using
+`--forward 0 --paced` so the runner can subscribe and observe subgroup objects.
+The fixture remains namespace `media`, track `vide_1` (`766964655f31`); use that
+track in API requests rather than the generic publisher guide's `vide` example.
+
+```sh
+export MOQXR_BIN=/path/to/moqxr/build/openmoq-publisher
+MOQ_INTEROP_TEST_KEEP=1 bash tests/e2e/driven-moqxr.sh 23 native_quic \
+    build/moq-interop-runner "$MOQXR_BIN" /path/to/locmaf-publisher.mp4
+MOQ_INTEROP_TEST_KEEP=1 bash tests/e2e/driven-moqxr.sh 23 webtransport \
+    build/moq-interop-runner "$MOQXR_BIN" /path/to/locmaf-publisher.mp4
+```
+
+Set `MOQ_INTEROP_TEST_SCENARIO=d23-direct-subscribe-smoke` to test direct
+subscription after SETUP. `--dry-run` prints the exact runner invocation and
+request. `tests/e2e/moqxr-matrix.sh --pair 23 native_quic ...` and `--pair 23
+webtransport ...` select the draft-23 matrix pairs on ports 19213/19214 and
+19215/19216. The default matrix includes both pairs.
+
+With `MOQ_INTEROP_TEST_KEEP=1`, the helper prints `kept /tmp/moq-interop-driven.*`
+and preserves the database, runner log and
+`logs/<run-id>/<scenario-id>/{request.json,stdout.bin,stderr.bin}`. Inspect these
+when diagnosing negotiation or delivery; the script exits nonzero if the smoke
+evidence is missing or its status is not PASS. A successful draft-23 run prints
+`smoke=PASS` and `verdict=incomplete`: unreviewed requirements remain NOT_RUN.
+
+Validated on 2026-11-03 with moqxr main `fae20de` (0.4.12): both scenarios passed
+on native QUIC and WebTransport, four runs total. Each stored SETUP, namespace
+announcement, subscription establishment, two distinct objects and 1357 payload
+bytes. This is delivery smoke evidence; the runner treats payloads as opaque.

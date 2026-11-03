@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft23.err" "$test_dir/moq5.err" "$test_dir/lite.err"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft24.err" "$test_dir/moq5.err" "$test_dir/lite.err"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -141,15 +141,36 @@ for transport in native_quic webtransport; do
         MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
     [[ "$output" == *"<--draft>"$'\n'"<22>"$'\n'"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
 done
-# A draft the adapter does not list is refused (exit 64) before the publisher starts.
+# Draft 23 uses only the smoke engine, without draft-21 scenario normalization.
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke; do
+    for transport in native_quic webtransport; do
+        make_request 23 "$transport" 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+        jq --arg scenario "$scenario" '.scenario_id = $scenario' "$test_dir/request.json" >"$test_dir/request.next"
+        mv "$test_dir/request.next" "$test_dir/request.json"
+        output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+            MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+        [[ "$output" == *"<--draft>"$'\n'"<23>"* ]]
+        [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<9>"* ]]
+        [[ "$output" != *"<--publish-catalog>"* ]]
+    done
+done
 make_request 23 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d22-publisher-request-stream-placement"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>&1; then
+    printf 'unsupported draft 23 scenario unexpectedly accepted\n' >&2
+    exit 1
+fi
+# A draft the adapter does not list is refused (exit 64) before the publisher starts.
+make_request 24 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
 set +e
 MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
-    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft23.err"
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft24.err"
 status=$?
 set -e
-[[ "$status" -eq 64 ]] || { printf 'draft 23 request not refused (status %s)\n' "$status" >&2; exit 1; }
-grep -q 'moqxr adapter: unsupported or malformed request (supported drafts: 18, 21, 22)' "$test_dir/draft23.err"
+[[ "$status" -eq 64 ]] || { printf 'draft 24 request not refused (status %s)\n' "$status" >&2; exit 1; }
+grep -q 'moqxr adapter: unsupported or malformed request (supported drafts: 18, 21, 22, 23)' "$test_dir/draft24.err"
 # The moq5 adapter does not speak draft 22: it refuses with a message that says so (exit 64).
 moq5_adapter="$root_dir/adapters/moq5/run.sh"
 make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"

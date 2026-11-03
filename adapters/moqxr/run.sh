@@ -16,12 +16,13 @@ publisher_bin=${MOQXR_BIN:-}
 
 # moq-lite is not a MoQ Transport draft: refuse it by name rather than as a malformed request.
 if jq -e '.draft == "moq-lite-06"' "$request_file" >/dev/null 2>&1; then
-    fail 'draft moq-lite-06 is not supported (supported drafts: 18, 21, 22)'
+    fail 'draft moq-lite-06 is not supported (supported drafts: 18, 21, 22, 23)'
 fi
 
 jq -e '
     .schema_version == 1 and
-    (.draft == 18 or .draft == 21 or .draft == 22) and
+    (.draft == 18 or .draft == 21 or .draft == 22 or .draft == 23) and
+    (.draft != 23 or .scenario_id == "d23-publisher-smoke" or .scenario_id == "d23-direct-subscribe-smoke") and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and
@@ -33,7 +34,7 @@ jq -e '
     (.process_timeout_ms | type == "number" and . == floor and . >= 1) and
     (.namespace_hex == ["6d65646961"]) and
     (.track_name_hex == "766964655f31")
-' "$request_file" >/dev/null || fail 'unsupported or malformed request (supported drafts: 18, 21, 22)'
+' "$request_file" >/dev/null || fail 'unsupported or malformed request (supported drafts: 18, 21, 22, 23)'
 
 draft=$(jq -r '.draft' "$request_file")
 transport=$(jq -r '.transport' "$request_file")
@@ -269,4 +270,11 @@ case "$own22" in
               --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
         ;;
 esac
+# Both draft-23 smoke scenarios receive subgroup streams. Wait for the runner's
+# SUBSCRIBE and pace objects; outlive its connection and delivery windows.
+if [[ "$draft" == 23 ]]; then
+    args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
+          --namespace media --draft 23 --forward 0 --paced
+          --timeout "$((2 * timeout_seconds + 3))" --ca "$ca_cert")
+fi
 exec "$publisher_bin" "${args[@]}"

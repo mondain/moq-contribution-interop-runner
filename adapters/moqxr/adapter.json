@@ -3,9 +3,23 @@
   "driver_contract_version": 1,
   "entrypoint": "run.sh",
   "publisher_binary_environment": "MOQXR_BIN",
-  "supported_drafts": [18, 21, 22],
-  "supported_transports": ["native_quic", "webtransport"],
-  "supported_namespace_hex": ["6d65646961"],
+  "supported_drafts": [
+    18,
+    21,
+    22,
+    23
+  ],
+  "supported_transports": [
+    "native_quic",
+    "webtransport"
+  ],
+  "supported_namespace_hex": [
+    "6d65646961"
+  ],
   "supported_track_name_hex": "766964655f31",
-  "protocol_expectations": "none; logs and exit status are diagnostic only"
+  "protocol_expectations": "none; logs and exit status are diagnostic only",
+  "draft23_scenarios": [
+    "d23-publisher-smoke",
+    "d23-direct-subscribe-smoke"
+  ]
 }

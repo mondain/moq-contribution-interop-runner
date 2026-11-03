@@ -35,6 +35,7 @@ void expect_golden_matches_registry(unsigned draft) {
 TEST(ExecutableIdsGolden, Draft18) { expect_golden_matches_registry(18); }
 TEST(ExecutableIdsGolden, Draft21) { expect_golden_matches_registry(21); }
 TEST(ExecutableIdsGolden, Draft22) { expect_golden_matches_registry(22); }
+TEST(ExecutableIdsGolden, Draft23) { expect_golden_matches_registry(23); }
 TEST(ExecutableIdsGolden, MoqLite06) { expect_golden_matches_registry(106); }
 
 }  // namespace

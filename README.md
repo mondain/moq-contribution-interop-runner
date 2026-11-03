@@ -128,7 +128,7 @@ have the runner launch your publisher for you, follow the
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
 | `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, `draft22.json`, staged `draft23.json` and `moq-lite-06.json`), the draft 21 to 22 and draft 22 to 23 delta audits (with the moq-lite hand-off notes), schema and draft digests |
-| `adapters/` | Driver contract schema and the bundled `moqxr` (drafts 18, 21, 22), `imquic` (draft 22), `moq5` (drafts 18, 21), `moq-lite` (the `moq` CLI, moq-lite-06) and `moq-lite-ref` (the reference publisher, moq-lite-06) adapters, each with a `README.md` |
+| `adapters/` | Driver contract schema and the bundled `moqxr` (drafts 18, 21, 22, 23), `imquic` (draft 22), `moq5` (drafts 18, 21), `moq-lite` (the `moq` CLI, moq-lite-06) and `moq-lite-ref` (the reference publisher, moq-lite-06) adapters, each with a `README.md` |
 | `tools/lite-ref/` | The moq-lite-06 reference publisher: a conforming publisher with named defect modes (`--defect`), used by the live and negative sweeps (`tests/e2e/moq-lite-ref-matrix.sh`, `moq-lite-ref-negative.sh`) |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |
 | `docs/` | Documentation and the draft texts |

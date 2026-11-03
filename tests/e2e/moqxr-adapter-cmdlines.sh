@@ -2,7 +2,7 @@
 # Pin the argument list adapters/moqxr/run.sh would exec the moqxr publisher with.
 #
 # Usage: moqxr-adapter-cmdlines.sh DRAFT [--update]
-#   DRAFT     18, 21 or 22.
+#   DRAFT     18, 21, 22 or 23.
 #   --update  rewrite tests/golden/moqxr-cmdlines-dDRAFT.txt from the live adapter instead of
 #             comparing. MOQ_UPDATE_GOLDEN=1 in the environment does the same. Without one of
 #             them the golden file is never written: a mismatch fails with a unified diff.
@@ -31,8 +31,8 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 draft=${1:-}
-[[ "$draft" == 18 || "$draft" == 21 || "$draft" == 22 ]] ||
-    { printf 'usage: %s 18|21|22 [--update]\n' "$0" >&2; exit 2; }
+[[ "$draft" == 18 || "$draft" == 21 || "$draft" == 22 || "$draft" == 23 ]] ||
+    { printf 'usage: %s 18|21|22|23 [--update]\n' "$0" >&2; exit 2; }
 update=0
 [[ "${2:-}" == --update || "${MOQ_UPDATE_GOLDEN:-}" == 1 ]] && update=1
 
@@ -58,6 +58,7 @@ if [[ "$draft" == 22 ]]; then
     extra_ids+=(d22-location-filter-unknown-type d22-location-filter-absolute-origin)
 fi
 
+if [[ "$draft" == 23 ]]; then extra_ids=(); fi
 ids=$(sort -u < <(cat "$ids_file"; printf '%s\n' "${extra_ids[@]}"))
 
 # The arguments run.sh passes the publisher for one draft, scenario id and transport.

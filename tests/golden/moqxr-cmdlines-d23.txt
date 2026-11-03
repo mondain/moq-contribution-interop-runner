@@ -1,0 +1,4 @@
+d23-direct-subscribe-smoke native_quic <--input> <@TMP@/fixture.mp4> <--endpoint> <moqt://127.0.0.1:4443/moq> <--transport> <raw> <--namespace> <media> <--draft> <23> <--forward> <0> <--paced> <--timeout> <9> <--ca> <@TMP@/ca.pem>
+d23-direct-subscribe-smoke webtransport <--input> <@TMP@/fixture.mp4> <--endpoint> <https://127.0.0.1:4443/moq> <--transport> <webtransport> <--namespace> <media> <--draft> <23> <--forward> <0> <--paced> <--timeout> <9> <--ca> <@TMP@/ca.pem>
+d23-publisher-smoke native_quic <--input> <@TMP@/fixture.mp4> <--endpoint> <moqt://127.0.0.1:4443/moq> <--transport> <raw> <--namespace> <media> <--draft> <23> <--forward> <0> <--paced> <--timeout> <9> <--ca> <@TMP@/ca.pem>
+d23-publisher-smoke webtransport <--input> <@TMP@/fixture.mp4> <--endpoint> <https://127.0.0.1:4443/moq> <--transport> <webtransport> <--namespace> <media> <--draft> <23> <--forward> <0> <--paced> <--timeout> <9> <--ca> <@TMP@/ca.pem>

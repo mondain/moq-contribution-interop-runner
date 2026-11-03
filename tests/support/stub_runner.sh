@@ -24,5 +24,9 @@ done
 [[ -n "$log_root" && -n "$port" ]] || { printf 'stub runner: missing --port or --driver-log-root\n' >&2; exit 2; }
 mkdir -p "$log_root/run-$port"
 printf '{}\n' >"$log_root/run-$port/request.json"
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke; do
+    mkdir -p "$log_root/run-$port/$scenario"
+    printf '{}\n' >"$log_root/run-$port/$scenario/request.json"
+done
 touch "$MOQ_STUB_DIR/ready-$port"
 exec sleep 60

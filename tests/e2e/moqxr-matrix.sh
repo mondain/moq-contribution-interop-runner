@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # Usage: moqxr-matrix.sh [--dry-run] [--pair DRAFT TRANSPORT] RUNNER_BIN MOQXR_BIN MP4_FIXTURE
-# Runs the adapter contract, then tests/e2e/driven-moqxr.sh for drafts 18, 21 and 22 over
+# Runs the adapter contract, then tests/e2e/driven-moqxr.sh for drafts 18, 21, 22 and 23 over
 # native_quic and webtransport, each pair on its own fixed ports (HTTP/UDP):
 #   18 native_quic 19201/19202   21 native_quic 19203/19204   22 native_quic 19209/19210
 #   18 webtransport 19205/19206  21 webtransport 19207/19208  22 webtransport 19211/19212
+#   23 native_quic 19213/19214  23 webtransport 19215/19216
 #   --pair DRAFT TRANSPORT  run only that pair (on its matrix ports).
 #   --dry-run               print the plan (the driven script's --dry-run output per pair) and
 #                           start nothing, not even the adapter contract.
@@ -20,7 +21,7 @@ while [[ "${1:-}" == --dry-run || "${1:-}" == --pair ]]; do
         [[ $# -ge 3 ]] || { printf 'Usage: --pair DRAFT TRANSPORT\n' >&2; exit 2; }
         only_draft=$2
         only_transport=$3
-        [[ "$only_draft" == 18 || "$only_draft" == 21 || "$only_draft" == 22 ]] || exit 2
+        [[ "$only_draft" == 18 || "$only_draft" == 21 || "$only_draft" == 22 || "$only_draft" == 23 ]] || exit 2
         [[ "$only_transport" == native_quic || "$only_transport" == webtransport ]] || exit 2
         shift 3
     fi
@@ -41,7 +42,7 @@ if ((dry_run)); then
 else
     bash "$script_dir/moqxr-adapter-contract.sh"
 fi
-for draft in 18 21 22; do
+for draft in 18 21 22 23; do
     for transport in native_quic webtransport; do
         if [[ -n "$only_draft" ]] &&
             [[ "$draft" != "$only_draft" || "$transport" != "$only_transport" ]]; then
@@ -56,6 +57,12 @@ for draft in 18 21 22; do
         elif [[ "$draft" == 22 && "$transport" == native_quic ]]; then
             http_port=19209
             udp_port=19210
+        elif [[ "$draft" == 23 && "$transport" == native_quic ]]; then
+            http_port=19213
+            udp_port=19214
+        elif [[ "$draft" == 23 ]]; then
+            http_port=19215
+            udp_port=19216
         elif [[ "$draft" == 18 ]]; then
             http_port=19205
             udp_port=19206
