@@ -118,6 +118,8 @@ add_library(moq-interop-wire
     src/wire/draft21/successful_response.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
+    src/wire/draft23/frame.cpp
+    src/wire/draft23/setup.cpp
     src/wire/draft22/location_filter.cpp
     src/wire/draft22/publish.cpp
     src/wire/draft22/publisher_request.cpp
@@ -1906,4 +1908,10 @@ if(MOQ_INTEROP_BUILD_FUZZERS)
     target_link_options(moq-interop-webtransport-stream-fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
     )
+endif()
+
+if(MOQ_INTEROP_BUILD_TESTS)
+    add_executable(moq-interop-d23-frame-tests tests/protocol/draft23_frame_test.cpp)
+    target_link_libraries(moq-interop-d23-frame-tests PRIVATE moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft23-frame COMMAND moq-interop-d23-frame-tests)
 endif()
