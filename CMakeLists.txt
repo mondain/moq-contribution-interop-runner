@@ -1098,7 +1098,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
-    target_link_libraries(moq-interop-draft-source-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    target_link_libraries(moq-interop-draft-source-tests PRIVATE
+                          moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME draft-source COMMAND moq-interop-draft-source-tests)
 
     add_executable(moq-interop-carry-forward-tests tests/unit/carry_forward_test.cpp)
