@@ -583,13 +583,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "document",
+      "actor": "endpoint",
       "summary": "Unless otherwise specified, an endpoint that receives a request for an unrecognized reserved namespace MUST pass it to the Application, so that future extensions can define new reserved namespaces without breaking older implementations.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: editorial text, registry policy, security guidance or change-log entry with no directly observable publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: endpoint must pass unrecognized reserved namespaces to the application; low observability, family namespace, tier P3. No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -1153,13 +1153,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher",
       "summary": "If no Objects have been published for the track or Start Location is greater than the Largest Object (Section 3.1.4) the publisher MUST return FETCH_ERROR with error code INVALID_RANGE.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: publisher obligation (FETCH_ERROR INVALID_RANGE), family fetch, tier P3 (capability-gated: run only if the publisher declares FETCH). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -1343,13 +1343,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher",
       "summary": "It MUST reset the bidi request stream and unidirectional data stream associated with the FETCH.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: publisher reaction to STOP_SENDING on a FETCH, family fetch, tier P3 (capability-gated: run only if the publisher declares FETCH). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -3034,13 +3034,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher",
+      "actor": "publisher receiving unrecognized session-level request",
       "summary": "An endpoint that receives a request for an unrecognized session-level track or namespace MUST reject it with REQUEST_ERROR using error code DOES_NOT_EXIST rather than passing it to the Application.",
       "applicability": "Applicable",
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: receiver-side obligation exercised by a request for an unrecognized .session track, family session_setup, tier P2 (negative probe). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -5067,13 +5067,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher receiving malformed input",
+      "actor": "server",
       "summary": "It MUST NOT be used by the server, or when WebTransport is used.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: server-only rule (AUTHORITY must not be sent by a server); the runner is the server and the publisher under test is the client. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -5143,13 +5143,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher receiving malformed input",
+      "actor": "server",
       "summary": "It MUST NOT be used by the server, or when WebTransport is used.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: server-only rule (PATH must not be sent by a server); the runner is the server and the publisher under test is the client. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -5675,13 +5675,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher receiving GOAWAY",
       "summary": "The client MUST use this URI for the new session if provided.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: the publisher under test is the client and must follow a server GOAWAY New Session URI, family goaway, tier P3 (capability-gated). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -5960,13 +5960,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher receiving malformed input",
       "summary": "An endpoint that receives a REQUEST_ERROR with Error Code REDIRECT and no REDIRECT Error Detail MUST close the session with MALFORMED_MESSAGE.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: receiver-side obligation for REDIRECT without the REDIRECT detail, family error_details, tier P2 (negative probe). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -5998,13 +5998,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "publisher receiving malformed input",
+      "actor": "server",
       "summary": "If a server receives a Redirect with a non-zero Connect URI Length it MUST close the session with ROLE_VIOLATION.",
-      "applicability": "Applicable",
-      "testability": "NotTestable",
+      "applicability": "NotApplicable",
+      "testability": "NotApplicable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family error_details, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: server-only rule (a server receiving a Redirect with a non-zero Connect URI); the publisher under test is the client. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -9038,13 +9038,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher receiving padding",
       "summary": "The receiver MUST discard all data received on a padding stream to prevent exhausting flow control.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: receiver must discard a padding stream, family padding, tier P3 (low priority probe). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
@@ -9114,13 +9114,13 @@
         "occurrence": 1,
         "clause": 1
       },
-      "actor": "subscriber",
+      "actor": "publisher receiving padding",
       "summary": "The receiver MUST discard all data received in a padding datagram.",
-      "applicability": "NotApplicable",
-      "testability": "NotApplicable",
+      "applicability": "Applicable",
+      "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: obligation falls on the subscribing side, which the runner plays when testing a publisher; it is harness behavior, not publisher behavior. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
+      "rationale": "Triage: receiver must discard a padding datagram, family padding, tier P3 (low priority probe; needs datagrams). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. Revised after spot-check against the draft text; not fully reviewed, so reviewed stays false.",
       "reviewed": false
     },
     {
