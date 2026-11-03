@@ -376,6 +376,10 @@ static_assert(all_scenario_ids_set(kDraft21GapRawScenarios));
 inline bool executable_scenario(unsigned draft, std::string_view scenario);
 
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
+    if (draft == 23) {
+        static constexpr std::string_view ids[]{"d23-publisher-smoke", "d23-direct-subscribe-smoke"};
+        return ids;
+    }
     if (draft == 18) return kDraft18AllExecutableScenarios;
     if (draft == 21) {
         static const std::vector<std::string_view> combined = [] {
@@ -533,6 +537,7 @@ inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::st
 static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 23) return executable_scenario(draft, scenario);
     if (draft == 106) {
         const auto lite = lite_executable_scenario(scenario);
         return lite && lite->requires_track;
@@ -592,7 +597,7 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario) {
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
     // moq-lite scenarios run on the lite probe engine, never as MoQ Transport raw probes.
-    if (draft == 106) return false;
+    if (draft == 106 || draft == 23) return false;
     if (draft == 22) {
         // Own draft 22 scenarios are always raw probes (src/app/own_scenario_dispatch_22.cpp).
         if (own_scenario_22(scenario)) return true;

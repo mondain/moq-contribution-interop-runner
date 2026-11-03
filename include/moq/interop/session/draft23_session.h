@@ -1,0 +1,48 @@
+#pragma once
+
+#include "moq/interop/transport/session_transport.h"
+
+#include <memory>
+
+namespace moq::interop::session {
+
+struct Draft23SessionConfig {
+    std::vector<std::vector<std::byte>> track_namespace;
+    std::vector<std::byte> track_name;
+    bool webtransport{false};
+    bool subscribe_immediately{false};
+    std::size_t maximum_streams{128};
+    std::size_t maximum_buffered_bytes{1u << 20};
+    std::size_t maximum_stream_bytes{1u << 18};
+};
+
+struct Draft23SessionStats {
+    bool connected{false};
+    bool setup_received{false};
+    bool namespace_announced{false};
+    bool subscription_established{false};
+    std::uint64_t objects{0};
+    std::uint64_t payload_bytes{0};
+    std::uint64_t distinct_objects{0};
+    [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }
+};
+
+// A bounded publisher smoke receiver, not a full draft-23 conformance engine.
+// Call flush() each polling iteration to retry writes after transport backpressure.
+class Draft23Session {
+public:
+    Draft23Session(transport::SessionTransport& transport, Draft23SessionConfig config);
+    ~Draft23Session();
+    Draft23Session(const Draft23Session&) = delete;
+    Draft23Session& operator=(const Draft23Session&) = delete;
+    void on_event(const transport::TransportEvent& event);
+    void flush();
+    [[nodiscard]] const Draft23SessionStats& stats() const noexcept;
+    [[nodiscard]] const std::optional<std::string>& error() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> application_error() const noexcept;
+private:
+    class Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+} // namespace moq::interop::session

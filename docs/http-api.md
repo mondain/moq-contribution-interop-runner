@@ -16,7 +16,7 @@ The examples below assume the runner listens on `127.0.0.1:8080`.
 |---|---|
 | `GET /healthz` | Database readiness and the list of executable profiles |
 | `GET /api/v1/drafts` | Per-draft catalog summary: source digest, row counts, applicability and testability counts, and `runnable`. Draft 22 appears as a third entry (`complete: true`, `runnable: true`) when the service loaded its catalog, and moq-lite-06 as the last entry (`"draft": "moq-lite-06"`, `complete: true`, `runnable: true`) when it loaded the lite catalog |
-| `GET /api/v1/requirements?draft=18\|21\|22\|moq-lite-06` | Requirement catalog rows with draft line citations (paginated) |
+| `GET /api/v1/requirements?draft=18\|21\|22\|23\|moq-lite-06` | Requirement catalog rows with draft line citations (paginated) |
 | `POST /api/v1/runs` | Create a run |
 | `GET /api/v1/runs` | List runs, newest first (paginated) |
 | `GET /api/v1/runs/{id}` | One run with its score and per-requirement outcomes |
@@ -54,7 +54,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 
 | Field | Rules |
 |---|---|
-| `draft` | `18`, `21` or `22`. Drafts are scored independently. A runner that did not load a draft's catalog refuses runs of that draft with `422 draft_not_runnable` before any scenario is validated (the production runner always loads all three or does not start). Any other number is `400 invalid_run_config`. The moq-lite draft is the string `"moq-lite-06"` (a string, never a number: the integer 106 is an internal storage form and is `400 invalid_run_config` like any other unlisted value, as are floats, booleans and other strings; a float such as `18.0` is refused even though it equals an integer draft). A runner that loaded the moq-lite-06 catalog accepts `"moq-lite-06"` runs (see [moq-lite-06 runs](#moq-lite-06-runs)); one that did not refuses them with `422 draft_not_runnable` (`Draft moq-lite-06 is not runnable on this runner.`), before scenario validation. |
+| `draft` | `18`, `21`, `22` or `23`. Drafts are scored independently; draft 23 currently has staged, unscored smoke scenarios (see below). A runner that did not load a draft's catalog refuses runs of that draft with `422 draft_not_runnable` before any scenario is validated (the production runner requires the three complete catalogs; draft 23 is optional and staged). Any other number is `400 invalid_run_config`. The moq-lite draft is the string `"moq-lite-06"` (a string, never a number: the integer 106 is an internal storage form and is `400 invalid_run_config` like any other unlisted value, as are floats, booleans and other strings; a float such as `18.0` is refused even though it equals an integer draft). A runner that loaded the moq-lite-06 catalog accepts `"moq-lite-06"` runs (see [moq-lite-06 runs](#moq-lite-06-runs)); one that did not refuses them with `422 draft_not_runnable` (`Draft moq-lite-06 is not runnable on this runner.`), before scenario validation. |
 | `transport` | `native-quic` or `webtransport` (hyphen here; the driver contract uses `native_quic`). |
 | `mode` | `observed` (you start the publisher) or `driven` (the runner starts it through the adapter). |
 | `scenarios` | 1 to 100 distinct nonempty scenario IDs. Several IDs are allowed only for raw-probe scenarios; the original typed scenarios take exactly one per run, and mixing the two returns 422. |
@@ -62,7 +62,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/runs \
 | `track` | Optional for receiver-error probes in observed mode, required for most scenarios and always required in driven mode. `namespace_hex` is an array of 0 to 32 nonempty hex strings; `name_hex` is the possibly empty hex Track Name. The decoded namespace plus name is limited to 4096 bytes. Hex preserves arbitrary bytes. |
 | `publisher_capabilities` | Optional object declaring what the publisher does not implement; see below. Absent means the publisher is fully capable. |
 
-A draft is echoed the way it is requested: an integer for MoQ Transport (`18`, `21`, `22`) and the string `"moq-lite-06"` for moq-lite, in `config.draft` of a run and in a result's `run`. A stored moq-lite run is readable through `/api/v1/runs`; its `/results/{id}` routes need the moq-lite-06 catalog and answer `409 draft_catalog_not_configured` on a runner that did not load it.
+A draft is echoed the way it is requested: an integer for MoQ Transport (`18`, `21`, `22`, `23`) and the string `"moq-lite-06"` for moq-lite, in `config.draft` of a run and in a result's `run`. A stored moq-lite run is readable through `/api/v1/runs`; its `/results/{id}` routes need the moq-lite-06 catalog and answer `409 draft_catalog_not_configured` on a runner that did not load it.
 
 Draft 22 runs take draft 22 scenario IDs. The 221 executable ones are the 213
 scenarios draft 22 shares with draft 21, named by the draft 21 ID with `d21-`
@@ -344,7 +344,7 @@ lists them per requirement in `evidence_sequences`.
 
 ## Requirements and the completeness endpoint
 
-`GET /api/v1/requirements?draft=18` (or `21`, or `22` when the service loaded the draft 22 catalog, or `moq-lite-06` when it loaded the lite catalog) lists catalog rows with `id`, `strength`,
+`GET /api/v1/requirements?draft=18` (or `21`, or `22`/`23` when the service loaded that catalog, or `moq-lite-06` when it loaded the lite catalog) lists catalog rows with `id`, `strength`,
 `source` (`section`, `first_line`, `last_line` in the checked-in draft text),
 `actor`, `summary`, `applicability`, `testability`, `scenarios`, `evaluators`
 and `rationale`. The line numbers refer to `docs/draft-ietf-moq-transport-18.txt`
@@ -364,7 +364,7 @@ stored in the current database. A pass or fail observation is not proof of
 conformance; inspect the run's evidence.
 
 `GET /healthz` returns `status`, `database.ready`, `supported_drafts` (the MoQ
-Transport drafts this runner accepts runs for, integers only: `[18, 21, 22]` when the
+Transport drafts this runner accepts runs for, integers only: `[18, 21, 22, 23]` when the
 draft 22 catalog is loaded, as in production), the
 `validator` build identity, `publisher_capability_defaults` and
 `executable_profiles`: one entry per `draft`, `transport`, `mode` and `scenario`
@@ -409,3 +409,28 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 | 503 | `publisher_listener_unavailable` | No TLS material configured, or the listener could not start |
 | 503 | `publisher_ports_exhausted` | Every port in the range is in use (replacement-session scenarios need two free ports) |
 | 503 | `database_not_ready` | Health check could not read the database |
+
+## Draft 23 smoke runs
+
+With its staged catalog loaded, draft integer `23` is listed in
+`/api/v1/drafts`, `/healthz` and the requirements endpoint. Two executable
+profiles are available for both transports and observed/driven modes:
+`d23-publisher-smoke` and `d23-direct-subscribe-smoke`. Select exactly one,
+provide a nonempty track name and namespace (1–32 nonempty fields, at most
+4096 bytes including the track name), and set `timeout_ms` to 100–3600000.
+Invalid selections return `400 invalid_run_config`. A server without this
+catalog returns `422 draft_not_runnable` for draft-23 runs.
+
+The `draft23_smoke` evidence event contains a JSON object with a smoke status,
+SETUP/subscription booleans, object and distinct-location counts, and payload
+bytes. Two distinct selected-track objects and nonempty payload are required
+for smoke `PASS`. This event is unscored: every unreviewed catalog row remains
+`not_run`, and conformance is `incomplete` even after successful delivery.
+The staged catalog and results carry the standard staged note; completeness
+reports never claim full draft-23 coverage. Refer to the
+[publisher instructions](publisher-harness-guide.md#draft-23-first-contact)
+for a request example and the current delivery limits.
+
+Invalid-draft messages enumerate configured catalogs; with draft 23 and
+moq-lite-06 loaded the run-validation message is
+`draft must be 18, 21, 22, 23 or moq-lite-06.`.

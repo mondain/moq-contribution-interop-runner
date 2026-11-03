@@ -4,6 +4,15 @@
 
 namespace moq::interop::wire::draft23 {
 
+bool encode_frame(std::uint64_t type, std::span<const std::byte> body,
+                  std::uint64_t maximum_body_size, ByteWriter& output) {
+    if (body.size() > maximum_body_size) return false;
+    ByteWriter header(18);
+    if (!write_vi64(type, header) || !write_vi64(body.size(), header)) return false;
+    if (header.size() > output.remaining() || body.size() > output.remaining() - header.size()) return false;
+    return output.append_bytes(header.bytes()) && output.append_bytes(body);
+}
+
 DecodeResult<Frame> decode_frame(Cursor& input, std::uint64_t maximum_body_size) {
     Cursor working = input;
     const auto type = read_vi64(working);

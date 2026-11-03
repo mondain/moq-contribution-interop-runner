@@ -26,6 +26,8 @@ struct ServerConfig {
     // "draft": "moq-lite-06" runs and presents stored ones; without it lite runs are refused with 422
     // draft_not_runnable and stored ones answer 409, as for draft 22.
     std::shared_ptr<const requirements::RequirementCatalog> moqlite06_catalog;
+    // Draft 23 uses a staged catalog and unscored publisher smoke scenarios.
+    std::shared_ptr<const requirements::RequirementCatalog> draft23_catalog;
 };
 
 struct ApiError {

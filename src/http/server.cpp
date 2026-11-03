@@ -1,4 +1,5 @@
 #include "moq/interop/http/server.h"
+#include "moq/interop/app/draft23_run.h"
 #include "json.h"
 #include "moq/interop/http/result_schema.h"
 #include "moq/interop/app/publisher_capabilities.h"
@@ -165,7 +166,7 @@ detail::ReportFilters report_filters(const httplib::Request& request) {
 // `lite_served`: this server accepts moq-lite-06 runs, so the invalid-draft message names it too (the message of a
 // server without the lite catalog is unchanged).
 app::RunConfig parse_run_config(const httplib::Request& request,
-                                const app::PublisherCapabilities& default_capabilities, bool lite_served) {
+                                const app::PublisherCapabilities& default_capabilities, bool lite_served, bool draft23_served) {
     Json body;
     try {
         body = Json::parse(request.body);
@@ -184,7 +185,10 @@ app::RunConfig parse_run_config(const httplib::Request& request,
         // The integer form is MoQ Transport only and moq-lite is its string; 106 is never accepted.
         if (!parsed_draft) {
             throw ApiError{400, "invalid_run_config",
-                           lite_served ? "draft must be 18, 21, 22 or moq-lite-06." : "draft must be 18, 21 or 22."};
+                           draft23_served ? (lite_served ? "draft must be 18, 21, 22, 23 or moq-lite-06."
+                                                       : "draft must be 18, 21, 22 or 23.")
+                                          : (lite_served ? "draft must be 18, 21, 22 or moq-lite-06."
+                                                         : "draft must be 18, 21 or 22.")};
         }
         const unsigned draft = app::draft_number(*parsed_draft);
         if (transport != "native-quic" && transport != "webtransport") {
@@ -360,6 +364,7 @@ std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersi
         case app::DraftVersion::Draft18: return requirements::draft18_executable_bindings();
         case app::DraftVersion::Draft21: return requirements::draft21_executable_bindings();
         case app::DraftVersion::Draft22: return requirements::draft22_executable_bindings();
+        case app::DraftVersion::Draft23: return {};  // Smoke results carry no conformance score.
         case app::DraftVersion::MoqLite06: return requirements::lite_executable_bindings();
     }
     throw std::logic_error("unknown draft");
@@ -371,11 +376,13 @@ Json completeness_json(const requirements::RequirementCatalog& draft18,
                        const requirements::RequirementCatalog& draft21,
                        const requirements::RequirementCatalog* draft22,
                        const requirements::RequirementCatalog* moqlite06,
+                       const requirements::RequirementCatalog* draft23,
                        const storage::RunStore& store, const app::BuildInfo& build) {
     Json drafts = Json::array();
     std::vector<const requirements::RequirementCatalog*> catalogs{&draft18, &draft21};
     if (draft22) catalogs.push_back(draft22);
     if (moqlite06) catalogs.push_back(moqlite06);
+    if (draft23) catalogs.push_back(draft23);
     for (const auto* catalog : catalogs) {
         const auto selection = detail::audit_catalog(*catalog);
         const auto& bindings = selection.bindings;
@@ -499,7 +506,7 @@ CatalogAudit audit_catalog(const requirements::RequirementCatalog& catalog) {
     CatalogAudit result;
     if (draft) result.bindings = executable_bindings(*draft);
     const auto scenarios = app::executable_scenarios(catalog.draft);
-    result.report = catalog.complete || moqt
+    result.report = catalog.complete || (moqt && catalog.draft != 23)
         ? requirements::audit_completeness(catalog, result.bindings, scenarios)
         : requirements::audit_completeness_staged(catalog, result.bindings, scenarios);
     return result;
@@ -529,6 +536,9 @@ public:
         if (config.moqlite06_catalog &&
             config.moqlite06_catalog->draft != app::draft_number(app::DraftVersion::MoqLite06)) {
             throw std::invalid_argument("HTTP server moq-lite-06 catalog must be moq-lite-06");
+        }
+        if (config.draft23_catalog && config.draft23_catalog->draft != 23) {
+            throw std::invalid_argument("HTTP server draft 23 catalog must be draft 23");
         }
         register_routes();
     }
@@ -782,6 +792,12 @@ public:
                             append_profile(22, id, transport.c_str());
                     }
                 }
+                if (accepts_runs(app::DraftVersion::Draft23)) {
+                    for (const auto id : app::executable_scenarios(23)) {
+                        append_profile(23, id, "native-quic");
+                        append_profile(23, id, "webtransport");
+                    }
+                }
                 for (auto& profile : profiles) {
                     profile["requires_fetch"] = app::scenario_requires_fetch(
                         profile.at("draft").get<unsigned>(), profile.at("scenario").get<std::string>());
@@ -834,6 +850,7 @@ public:
                 Json drafts = Json::array();
                 std::vector<const requirements::RequirementCatalog*> listed = {draft18.get(), draft21.get()};
                 if (config.draft22_catalog) listed.push_back(config.draft22_catalog.get());
+                if (config.draft23_catalog) listed.push_back(config.draft23_catalog.get());
                 if (config.moqlite06_catalog) listed.push_back(config.moqlite06_catalog.get());
                 for (const auto* catalog : listed) {
                     auto entry = detail::catalog_json(*catalog);
@@ -855,6 +872,7 @@ public:
                 if (draft == "18") catalog = draft18.get();
                 else if (draft == "21") catalog = draft21.get();
                 else if (draft == "22") catalog = config.draft22_catalog.get();
+                else if (draft == "23") catalog = config.draft23_catalog.get();
                 else if (draft == app::draft_text(app::DraftVersion::MoqLite06))
                     catalog = config.moqlite06_catalog.get();
                 if (!catalog) {
@@ -864,6 +882,13 @@ public:
                     if (config.moqlite06_catalog)
                         message = config.draft22_catalog ? "draft must be 18, 21, 22 or moq-lite-06."
                                                          : "draft must be 18, 21 or moq-lite-06.";
+                    if (config.draft23_catalog) {
+                        message = config.draft22_catalog ? "draft must be 18, 21, 22 or 23."
+                                                         : "draft must be 18, 21 or 23.";
+                        if (config.moqlite06_catalog)
+                            message = config.draft22_catalog ? "draft must be 18, 21, 22, 23 or moq-lite-06."
+                                                             : "draft must be 18, 21, 23 or moq-lite-06.";
+                    }
                     throw ApiError{400, "unsupported_draft", message};
                 }
                 const auto page = query(request);
@@ -885,7 +910,8 @@ public:
                                             httplib::Response& response) {
             guarded(response, [this, &request, &response] {
                 const auto requested = parse_run_config(request, config.default_publisher_capabilities,
-                                                  accepts_runs(app::DraftVersion::MoqLite06));
+                                                  accepts_runs(app::DraftVersion::MoqLite06),
+                                                  accepts_runs(app::DraftVersion::Draft23));
                 if (!accepts_runs(requested.draft))
                     throw ApiError{422, "draft_not_runnable",
                         "Draft " + detail::draft_display(requested.draft) +
@@ -902,6 +928,10 @@ public:
                     }
                     // moq-lite scenarios each run as their own context on the lite probe engine (app/lite_run.h), so
                     // any selection of them is allowed; the typed/raw rule is MoQ Transport's.
+                    if (requested.draft == app::DraftVersion::Draft23 && requested.scenario_ids.size() != 1)
+                        throw ApiError{400, "invalid_run_config", "Draft 23 smoke runs select exactly one scenario."};
+                    if (requested.draft == app::DraftVersion::Draft23 && !app::valid_draft23_run(requested))
+                        throw ApiError{400, "invalid_run_config", "Draft 23 smoke runs require a nonempty track fixture and timeout_ms between 100 and 3600000."};
                     if (requested.scenario_ids.size() > 1 && app::is_moqt(requested.draft)) {
                         for (const auto& id : requested.scenario_ids) {
                             if (!app::raw_probe_scenario(draft_number, id))
@@ -1036,7 +1066,7 @@ public:
                                                         httplib::Response& response) {
             guarded(response, [this, &response] {
                 json_response(response, completeness_json(*draft18, *draft21, config.draft22_catalog.get(),
-                                                          config.moqlite06_catalog.get(), *store, build));
+                                                          config.moqlite06_catalog.get(), config.draft23_catalog.get(), *store, build));
             });
         });
         server.Get(R"(/results/(.+)\.json)", [this](const httplib::Request& request,
@@ -1089,7 +1119,7 @@ public:
                 html_headers(response);
                 response.set_content(detail::render_run_list(
                     runs.items, completeness_json(*draft18, *draft21, config.draft22_catalog.get(),
-                                      config.moqlite06_catalog.get(), *store, build)),
+                                      config.moqlite06_catalog.get(), config.draft23_catalog.get(), *store, build)),
                     "text/html; charset=utf-8");
             });
         });
@@ -1110,6 +1140,7 @@ public:
             case app::DraftVersion::Draft18: return true;
             case app::DraftVersion::Draft21: return true;
             case app::DraftVersion::Draft22: return config.draft22_catalog != nullptr;
+            case app::DraftVersion::Draft23: return config.draft23_catalog != nullptr;
             case app::DraftVersion::MoqLite06: return config.moqlite06_catalog != nullptr;
         }
         return false;
@@ -1118,7 +1149,7 @@ public:
     // The MoQ Transport drafts only (integers); moq-lite-06 is /healthz supported_lite_drafts.
     Json supported_drafts() const {
         Json drafts = Json::array();
-        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22})
+        for (const auto draft : {app::DraftVersion::Draft18, app::DraftVersion::Draft21, app::DraftVersion::Draft22, app::DraftVersion::Draft23})
             if (accepts_runs(draft)) drafts.push_back(app::draft_number(draft));
         return drafts;
     }
@@ -1131,6 +1162,9 @@ public:
             case app::DraftVersion::Draft21: return *draft21;
             case app::DraftVersion::Draft22:
                 if (config.draft22_catalog) return *config.draft22_catalog;
+                break;
+            case app::DraftVersion::Draft23:
+                if (config.draft23_catalog) return *config.draft23_catalog;
                 break;
             case app::DraftVersion::MoqLite06:
                 if (config.moqlite06_catalog) return *config.moqlite06_catalog;

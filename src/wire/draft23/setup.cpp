@@ -3,6 +3,16 @@
 
 namespace moq::interop::wire::draft23 {
 
+bool encode_setup(const SetupMessage& message, ByteWriter& output) {
+    ByteWriter body(65535);
+    if (draft21::encode_key_values(message.options, body)) return false;
+    ByteWriter encoded(65553);
+    if (!encode_frame(0x2f00, body.bytes(), 65535, encoded)) return false;
+    Cursor validate(encoded.bytes());
+    if (!std::holds_alternative<SetupMessage>(decode_setup(validate))) return false;
+    return output.append_bytes(encoded.bytes());
+}
+
 DecodeResult<SetupMessage> decode_setup(Cursor& input) {
     Cursor working = input;
     const auto frame = decode_frame(working, 65535);

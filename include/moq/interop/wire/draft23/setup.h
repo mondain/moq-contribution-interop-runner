@@ -11,6 +11,8 @@ struct SetupMessage {
 
 // Decodes framing and generic options, plus MAX_CONTROL_MESSAGE_SIZE.
 // Other known options still require their context-specific validation.
+bool encode_setup(const SetupMessage& message, ByteWriter& output);
+
 DecodeResult<SetupMessage> decode_setup(Cursor& input);
 
 }  // namespace moq::interop::wire::draft23

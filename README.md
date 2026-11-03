@@ -26,6 +26,12 @@ payloads; payload bytes are opaque.
 
 ## Status
 
+- Draft 23 has staged publisher smoke support on native QUIC and WebTransport:
+  SETUP, namespace announcement or PUBLISH-first, subscription, and progressing
+  subgroup objects. Its 532-row requirements baseline is incomplete; smoke
+  evidence does not earn conformance points. See
+  [the draft-23 publisher instructions](docs/publisher-harness-guide.md#draft-23-first-contact).
+
 - Every applicable, testable MUST/MUST NOT row of each draft has a bound scenario
   and evaluator: 173 of 173 for draft 18, 173 of 173 for draft 21 and 170 of 170
   for draft 22 (check with `build/moq-interop-audit --draft 18`, `--draft 21` and
@@ -113,7 +119,7 @@ have the runner launch your publisher for you, follow the
 | [docs/interop-notes.md](docs/interop-notes.md) | Publisher compatibility notes: the bundled moqxr and imquic adapters, observed results (including the draft 22 sweeps against moqxr and imquic), the standing rule on expected behavior |
 | [docs/moqxr-punch-list.md](docs/moqxr-punch-list.md), [docs/imquic-punch-list.md](docs/imquic-punch-list.md), [docs/moq-lite-punch-list.md](docs/moq-lite-punch-list.md) | Work lists of the findings against moqxr, imquic and the `moq` CLI (moq-lite-06; not yet sent upstream), with evidence and draft citations |
 | [docs/moq-contribution-interop-runner-design.md](docs/moq-contribution-interop-runner-design.md) | Design: goals, architecture, requirement catalog, scoring model, verification strategy |
-| [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt), [-22.txt](docs/draft-ietf-moq-transport-22.txt), [docs/draft-lcurley-moq-lite-06.txt](docs/draft-lcurley-moq-lite-06.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
+| [docs/draft-ietf-moq-transport-18.txt](docs/draft-ietf-moq-transport-18.txt), [-21.txt](docs/draft-ietf-moq-transport-21.txt), [-22.txt](docs/draft-ietf-moq-transport-22.txt), [-23.txt](docs/draft-ietf-moq-transport-23.txt), [docs/draft-lcurley-moq-lite-06.txt](docs/draft-lcurley-moq-lite-06.txt) | The protocol authority (checked in, digests recorded in `requirements/draft-digests.json`) |
 | [docs/plans/](docs/plans/) | Historical implementation plans |
 
 ## Repository layout
@@ -121,7 +127,7 @@ have the runner launch your publisher for you, follow the
 | Path | Contents |
 |---|---|
 | `src/`, `include/moq/interop/` | Runner source, grouped by `app`, `http`, `requirements`, `scenarios`, `session`, `storage`, `transport`, `wire` |
-| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, `draft22.json` and `moq-lite-06.json`), the draft 21 to 22 delta audit (with the moq-lite hand-off notes), schema and draft digests |
+| `requirements/` | Requirement catalogs (`draft18.json`, `draft21.json`, `draft22.json`, staged `draft23.json` and `moq-lite-06.json`), the draft 21 to 22 and draft 22 to 23 delta audits (with the moq-lite hand-off notes), schema and draft digests |
 | `adapters/` | Driver contract schema and the bundled `moqxr` (drafts 18, 21, 22), `imquic` (draft 22), `moq5` (drafts 18, 21), `moq-lite` (the `moq` CLI, moq-lite-06) and `moq-lite-ref` (the reference publisher, moq-lite-06) adapters, each with a `README.md` |
 | `tools/lite-ref/` | The moq-lite-06 reference publisher: a conforming publisher with named defect modes (`--defect`), used by the live and negative sweeps (`tests/e2e/moq-lite-ref-matrix.sh`, `moq-lite-ref-negative.sh`) |
 | `examples/harness/` | Worked example adapter (bash and Python), capture-stub test, run helper |

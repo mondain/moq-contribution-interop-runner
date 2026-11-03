@@ -7,7 +7,7 @@
 
 namespace moq::interop::app {
 
-enum class DraftVersion : unsigned { Draft18 = 18, Draft21 = 21, Draft22 = 22, MoqLite06 = 106 };
+enum class DraftVersion : unsigned { Draft18 = 18, Draft21 = 21, Draft22 = 22, Draft23 = 23, MoqLite06 = 106 };
 enum class TransportKind { NativeQuic, WebTransport };
 enum class RunMode { Observed, Driven };
 

@@ -922,3 +922,53 @@ OUT_DIR=ci-results TIMEOUT_MS=15000 \
   publisher binary and fixture are identical (see [scoring-and-audit.md](scoring-and-audit.md)).
 - Use a fresh database or a unique run directory per job, a port range that does not
   collide with other jobs on the host, and stop the runner at the end of the job.
+
+## Draft 23 first contact
+
+Build the runner normally, then start it with the certificate and key your
+publisher trusts (see [building and running](building-and-running.md)). The
+`moqt-23` listener supports native QUIC and WebTransport. Submit one scenario
+per run, using the exact namespace and track the publisher will serve:
+
+```sh
+curl -sS http://127.0.0.1:8080/api/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"draft":23,"transport":"native-quic","mode":"observed","scenarios":["d23-publisher-smoke"],"timeout_ms":15000,"track":{"namespace_hex":["6d65646961"],"name_hex":"76696465"}}'
+```
+
+This fixture is namespace `media`, track `vide`. Connect the publisher to the
+endpoint returned by the API before the 15-second connection deadline. Native
+QUIC negotiates `moqt-23`; WebTransport uses the returned HTTPS URL and offers
+`moqt-23` in `WT-Available-Protocols`. To test WebTransport, create another run
+with `"transport":"webtransport"`.
+
+`d23-publisher-smoke` accepts a matching PUBLISH_NAMESPACE and sends SUBSCRIBE,
+or accepts a PUBLISH-first publisher. `d23-direct-subscribe-smoke` sends SUBSCRIBE
+after SETUP without waiting for a namespace announcement. The publisher must send
+at least two distinct object locations and nonempty payload data on the selected
+track. The runner has separate connection and delivery deadlines, each bounded
+by `timeout_ms`. It currently receives subgroup streams; datagram delivery,
+FETCH scenarios, catalog interpretation and media decoding are outside these
+smoke scenarios.
+
+Read `GET /api/v1/runs/<id>` and its events. A `draft23_smoke` event records
+SETUP, namespace announcement, subscription, object count, distinct locations,
+payload bytes and a smoke status. `PASS` requires SETUP, an established
+subscription and progressing objects; a connection alone cannot pass. An
+unfinished smoke records `NOT_RUN` with the available evidence.
+
+The requirements catalog is deliberately staged (`complete:false`): all
+unreviewed requirements retain `NOT_RUN`, and the overall conformance verdict
+remains `incomplete` even when the delivery smoke succeeds. Missing connections,
+operator cancellation and driver failures produce an operational `error`.
+Audit the baseline with:
+
+```sh
+build/moq-interop-audit --draft 23 --staged
+```
+
+For driven runs, configure `--driver-executable` and `--driver-log-root` as in
+this guide. The existing driver contract supplies draft integer `23`, the smoke
+scenario ID, endpoint, fixture and trust file to your adapter. Implement the
+publisher-specific command there; existing adapters continue to advertise only
+the drafts their publishers support. No draft-23 publisher executable is bundled.

@@ -18,6 +18,7 @@ constexpr unsigned draft_number(DraftVersion draft) {
         case DraftVersion::Draft18: return 18;
         case DraftVersion::Draft21: return 21;
         case DraftVersion::Draft22: return 22;
+        case DraftVersion::Draft23: return 23;
         case DraftVersion::MoqLite06: return 106;
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -29,6 +30,7 @@ constexpr DraftVersion family_draft(DraftVersion draft) {
         case DraftVersion::Draft18: return DraftVersion::Draft18;
         case DraftVersion::Draft21: return DraftVersion::Draft21;
         case DraftVersion::Draft22: return DraftVersion::Draft21;
+        case DraftVersion::Draft23: return DraftVersion::Draft23;
         case DraftVersion::MoqLite06: return DraftVersion::MoqLite06;  // no lineage
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -39,6 +41,7 @@ constexpr std::string_view alpn(DraftVersion draft) {
         case DraftVersion::Draft18: return "moqt-18";
         case DraftVersion::Draft21: return "moqt-21";
         case DraftVersion::Draft22: return "moqt-22";
+        case DraftVersion::Draft23: return "moqt-23";
         case DraftVersion::MoqLite06: return "moq-lite-06";
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -52,6 +55,7 @@ constexpr bool runnable(DraftVersion draft) {
         case DraftVersion::Draft18: return true;
         case DraftVersion::Draft21: return true;
         case DraftVersion::Draft22: return true;
+        case DraftVersion::Draft23: return true;
         case DraftVersion::MoqLite06: return true;  // its own probe family (app/lite_run.h), staged catalog
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -63,6 +67,7 @@ constexpr bool is_moqt(DraftVersion draft) {
         case DraftVersion::Draft18: return true;
         case DraftVersion::Draft21: return true;
         case DraftVersion::Draft22: return true;
+        case DraftVersion::Draft23: return true;
         case DraftVersion::MoqLite06: return false;
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -74,6 +79,7 @@ constexpr std::string_view draft_text(DraftVersion draft) {
         case DraftVersion::Draft18: return "";
         case DraftVersion::Draft21: return "";
         case DraftVersion::Draft22: return "";
+        case DraftVersion::Draft23: return "";
         case DraftVersion::MoqLite06: return "moq-lite-06";
     }
     throw std::logic_error("unreachable DraftVersion");
@@ -81,7 +87,7 @@ constexpr std::string_view draft_text(DraftVersion draft) {
 
 // The single place that turns an externally supplied draft number into a DraftVersion.
 constexpr std::optional<DraftVersion> parse_draft(unsigned number) {
-    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21, DraftVersion::Draft22, DraftVersion::MoqLite06}) {
+    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21, DraftVersion::Draft22, DraftVersion::Draft23, DraftVersion::MoqLite06}) {
         if (draft_number(draft) == number) return draft;
     }
     return std::nullopt;
@@ -93,7 +99,7 @@ constexpr std::optional<DraftVersion> parse_draft_text(std::string_view text) {
 }
 
 constexpr bool known_alpn(std::string_view value) {
-    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21, DraftVersion::Draft22, DraftVersion::MoqLite06}) {
+    for (const auto draft : {DraftVersion::Draft18, DraftVersion::Draft21, DraftVersion::Draft22, DraftVersion::Draft23, DraftVersion::MoqLite06}) {
         if (alpn(draft) == value) return true;
     }
     return false;
@@ -109,6 +115,7 @@ decltype(auto) by_draft(DraftVersion draft, When18&& when_18, When21&& when_21) 
         case DraftVersion::Draft18: return std::forward<When18>(when_18)();
         case DraftVersion::Draft21: return std::forward<When21>(when_21)();
         case DraftVersion::Draft22: throw std::logic_error("by_draft chooses between drafts 18 and 21 only");
+        case DraftVersion::Draft23: throw std::logic_error("draft 23 has its own session and scenarios");
         case DraftVersion::MoqLite06: throw std::logic_error("by_draft does not apply to moq-lite");
     }
     throw std::logic_error("unreachable DraftVersion");
