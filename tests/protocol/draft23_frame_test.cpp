@@ -345,3 +345,25 @@ TEST(Draft23Setup, InvalidMaximumIsDistinguishedFromMalformedFraming) {
     EXPECT_EQ(std::get<DecodeError>(decoded).code,DecodeErrorCode::InvalidValue);
     EXPECT_EQ(input.offset(),0u);
 }
+
+TEST(Draft23SetupObservation, KeepsOptionsAndFrameLengthThatStrictDecodeRejects) {
+    // Duplicate MAX_CONTROL_MESSAGE_SIZE (option 9), the first below the minimum of 65535.
+    std::vector<std::byte> data{std::byte{0xaf}, std::byte{0}, std::byte{6},
+        std::byte{9}, std::byte{1}, std::byte{0x40}, std::byte{0}, std::byte{1}, std::byte{0x40}};
+    Cursor strict(data);
+    EXPECT_TRUE(std::holds_alternative<DecodeError>(decode_setup(strict)));
+    Cursor lenient(data);
+    const auto observed = decode_setup_observation(lenient);
+    ASSERT_TRUE(std::holds_alternative<SetupObservation>(observed));
+    const auto& value = std::get<SetupObservation>(observed);
+    EXPECT_EQ(value.frame_length, 6u);
+    ASSERT_EQ(value.options.size(), 2u);
+    EXPECT_EQ(value.options[0].type, 9u);
+    EXPECT_EQ(value.options[1].type, 9u);
+    EXPECT_EQ(lenient.remaining(), 0u);
+}
+TEST(Draft23SetupObservation, StillReportsMalformedFraming) {
+    std::vector<std::byte> data{std::byte{0xaf}, std::byte{0}, std::byte{2}, std::byte{9}, std::byte{5}};
+    Cursor input(data);
+    EXPECT_TRUE(std::holds_alternative<DecodeError>(decode_setup_observation(input)));
+}

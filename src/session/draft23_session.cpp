@@ -188,6 +188,12 @@ public:
     void control(Stream& stream) {
         if (stream.fin) { fail("publisher closed control stream",0x306); return; }
         wire::Cursor cursor(stream.bytes);
+        if (!stats_.peer_setup) {
+            wire::Cursor probe(stream.bytes);
+            const auto seen=d23::decode_setup_observation(probe);
+            if (const auto* observed=std::get_if<d23::SetupObservation>(&seen))
+                stats_.peer_setup=Draft23PeerSetup{observed->options,observed->frame_length};
+        }
         const auto setup=d23::decode_setup(cursor);
         if (std::holds_alternative<wire::NeedMore>(setup)) return;
         if (const auto* issue=std::get_if<wire::DecodeError>(&setup)) {

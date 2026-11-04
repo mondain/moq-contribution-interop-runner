@@ -7,6 +7,7 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/draft22_evaluators.h"
+#include "moq/interop/requirements/draft23_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/storage/run_store.h"
@@ -163,7 +164,7 @@ int audit_staged_catalog(const Options& options) {
     const bool complete = catalog.complete;
     const auto source_audit = complete ? requirements::audit_normative_occurrences(source, catalog)
                                        : requirements::audit_normative_occurrences_staged(source, catalog);
-    const auto bindings = options.draft == 23 ? std::vector<requirements::ExecutableBinding>{}
+    const auto bindings = options.draft == 23 ? requirements::draft23_executable_bindings()
                                               : requirements::lite_executable_bindings();
     const auto report = complete ? requirements::audit_completeness(
                                        catalog, bindings, app::executable_scenarios(options.draft))
@@ -266,7 +267,7 @@ int main(int argc, char* argv[]) {
                 case 18: return moq::interop::requirements::draft18_executable_bindings();
                 case 21: return moq::interop::requirements::draft21_executable_bindings();
                 case 22: return moq::interop::requirements::draft22_executable_bindings();
-                case 23: return std::vector<moq::interop::requirements::ExecutableBinding>{};
+                case 23: return moq::interop::requirements::draft23_executable_bindings();
                 default: throw std::invalid_argument("draft must be 18, 21, 22 or 23");
             }
         }();

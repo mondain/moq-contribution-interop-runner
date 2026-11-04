@@ -1,6 +1,7 @@
 #pragma once
 
 #include "moq/interop/transport/session_transport.h"
+#include "moq/interop/wire/draft21/key_values.h"
 
 #include <memory>
 
@@ -16,6 +17,12 @@ struct Draft23SessionConfig {
     std::size_t maximum_stream_bytes{1u << 18};
 };
 
+// The publisher's SETUP exactly as received, kept even when the session then closes over it.
+struct Draft23PeerSetup {
+    wire::draft21::KeyValues options;
+    std::uint64_t frame_length{0};
+};
+
 struct Draft23SessionStats {
     bool connected{false};
     bool setup_received{false};
@@ -24,6 +31,7 @@ struct Draft23SessionStats {
     std::uint64_t objects{0};
     std::uint64_t payload_bytes{0};
     std::uint64_t distinct_objects{0};
+    std::optional<Draft23PeerSetup> peer_setup;
     [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }
 };
 

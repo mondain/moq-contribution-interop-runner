@@ -31,6 +31,7 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/draft22_evaluators.h"
+#include "moq/interop/requirements/draft23_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 
@@ -364,7 +365,7 @@ std::vector<requirements::ExecutableBinding> executable_bindings(app::DraftVersi
         case app::DraftVersion::Draft18: return requirements::draft18_executable_bindings();
         case app::DraftVersion::Draft21: return requirements::draft21_executable_bindings();
         case app::DraftVersion::Draft22: return requirements::draft22_executable_bindings();
-        case app::DraftVersion::Draft23: return {};  // Smoke results carry no conformance score.
+        case app::DraftVersion::Draft23: return requirements::draft23_executable_bindings();  // The reviewed SETUP slice only.
         case app::DraftVersion::MoqLite06: return requirements::lite_executable_bindings();
     }
     throw std::logic_error("unknown draft");

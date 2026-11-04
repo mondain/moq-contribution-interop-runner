@@ -13,7 +13,7 @@ bool encode_setup(const SetupMessage& message, ByteWriter& output) {
     return output.append_bytes(encoded.bytes());
 }
 
-DecodeResult<SetupMessage> decode_setup(Cursor& input) {
+DecodeResult<SetupObservation> decode_setup_observation(Cursor& input) {
     Cursor working = input;
     const auto frame = decode_frame(working, 65535);
     if (const auto* need = std::get_if<NeedMore>(&frame)) return *need;
@@ -25,7 +25,17 @@ DecodeResult<SetupMessage> decode_setup(Cursor& input) {
     auto parsed = draft21::decode_key_values_to_end(payload);
     if (const auto* error = std::get_if<DecodeError>(&parsed)) return *error;
     if (const auto* need = std::get_if<NeedMore>(&parsed)) return *need;
-    SetupMessage setup{std::get<draft21::KeyValues>(std::move(parsed))};
+    SetupObservation observation{std::get<draft21::KeyValues>(std::move(parsed)), message.body.size()};
+    input = working;
+    return observation;
+}
+
+DecodeResult<SetupMessage> decode_setup(Cursor& input) {
+    Cursor working = input;
+    const auto observed = decode_setup_observation(working);
+    if (const auto* need = std::get_if<NeedMore>(&observed)) return *need;
+    if (const auto* error = std::get_if<DecodeError>(&observed)) return *error;
+    SetupMessage setup{std::get<SetupObservation>(observed).options};
     bool seen = false;
     for (const auto& option : setup.options) {
         if (option.type != 9) continue;

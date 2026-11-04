@@ -2717,8 +2717,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. Section 9.1 defines no Setup Option that is required in every SETUP; the options a client must send are the native QUIC AUTHORITY and PATH, which rows 9-1-1-269 and 9-1-2-273 cover. No separate observable behavior remains, so this row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-6-3-2-MUST-144",
@@ -5032,11 +5032,16 @@
       "actor": "publisher",
       "summary": "Senders MUST NOT repeat the same Option Type in a message unless the option definition explicitly allows multiple instances.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-setup-option-multiplicity"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1: a sender must not repeat an Option Type unless its definition allows it. Only AUTHORIZATION TOKEN (0x03) allows repeats; the evaluator fails when the publisher's SETUP repeats PATH, MAX_AUTH_TOKEN_CACHE_SIZE, AUTHORITY, MAX_FILTER_RANGES, MOQT_IMPLEMENTATION, MAX_REQUEST_UPDATES or MAX_CONTROL_MESSAGE_SIZE. Unknown option types are not judged. Evidence: the publisher's SETUP as received (peer_setup_received).",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-MUST-266",
@@ -5108,11 +5113,16 @@
       "actor": "publisher",
       "summary": "When connecting to a server using a URI with the \"moqt\" scheme, the client MUST set the AUTHORITY option to the authority portion of the URI.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-setup-native-authority"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.1: over native QUIC the client sets AUTHORITY (0x05) to the authority of the moqt URI it was given. Compared with the authority of the endpoint the runner advertised. Not applicable on WebTransport. Evidence: the publisher's SETUP as received (peer_setup_received).",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-1-MUST-270",
@@ -5184,11 +5194,16 @@
       "actor": "publisher",
       "summary": "When connecting to a server using a URI with the \"moqt\" scheme, the client MUST set the PATH option to the path-abempty portion of the URI; if query is present, the client MUST concatenate ?, followed by the query portion of the URI to the option.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-setup-native-path"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.2: over native QUIC the client sets PATH (0x01) to the path-abempty of the moqt URI. Compared with the path of the endpoint the runner advertised. Not applicable on WebTransport. Evidence: the publisher's SETUP as received (peer_setup_received).",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-2-MUST-274",
@@ -5203,11 +5218,16 @@
       "actor": "publisher",
       "summary": "When connecting to a server using a URI with the \"moqt\" scheme, the client MUST set the PATH option to the path-abempty portion of the URI; if query is present, the client MUST concatenate ?, followed by the query portion of the URI to the option.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-setup-native-path-query"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.2: when the moqt URI has a query, PATH carries a question mark followed by the query. Not applicable on WebTransport or when the advertised endpoint has no query. Evidence: the publisher's SETUP as received (peer_setup_received).",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-2-MUST-275",
@@ -5469,11 +5489,16 @@
       "actor": "publisher",
       "summary": "The value is encoded as a variable-length integer and MUST be at least 65535.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-setup-max-control-message-size"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.8: a MAX_CONTROL_MESSAGE_SIZE value must be at least 65535. Fails on an undersized or undecodable value, passes on a valid one, and is not applicable when the publisher does not send the option. Evidence: the publisher's SETUP as received (peer_setup_received).",
+      "reviewed": true
     },
     {
       "id": "D23-9-2-MUST-289",

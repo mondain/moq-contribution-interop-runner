@@ -1,6 +1,7 @@
 #include "moq/interop/app/draft23_run.h"
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
+#include "moq/interop/requirements/draft23_evaluators.h"
 #include "moq/interop/session/draft23_session.h"
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -30,6 +31,10 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     PublisherDriver driver;
     DriverHandle handle;
     bool operational_error = false;
+    requirements::Draft23SetupContext setup_context;
+    setup_context.webtransport = config.transport == TransportKind::WebTransport;
+    setup_context.authority = authority;
+    setup_context.path = "/moq";
     auto event = [&](std::string kind, std::string detail) {
         storage::EvidenceEvent e;
         e.kind = std::move(kind); e.detail = std::move(detail); e.scenario_id = config.scenario_ids.front();
@@ -43,7 +48,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         settings.subscribe_immediately = config.scenario_ids.front() == "d23-direct-subscribe-smoke";
         session::Draft23Session session(*listener, std::move(settings));
         const auto endpoint = std::string(config.transport == TransportKind::WebTransport ? "https://" : "moqt://") + authority + "/moq";
-        event("context_start", "draft=23 protocol=moqt-23 endpoint=" + endpoint + " scoring=unscored");
+        event("context_start", "draft=23 protocol=moqt-23 endpoint=" + endpoint + " scoring=staged");
         if (config.mode == RunMode::Driven) {
             DriverRequest request;
             request.executable = manager.driver_executable; request.arguments = manager.driver_arguments;
@@ -86,6 +91,16 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         summary["status"] = delivered ? "PASS" : "NOT_RUN";
         if (session.error()) summary["error"] = *session.error();
         event("draft23_smoke",summary.dump());
+        if (stats.peer_setup) {
+            setup_context.peer_setup = stats.peer_setup;
+            nlohmann::json options = nlohmann::json::array();
+            for (const auto& option : stats.peer_setup->options) {
+                const auto* value = std::get_if<std::vector<std::byte>>(&option.value);
+                options.push_back({{"type",option.type},{"bytes",value ? value->size() : 0},
+                    {"number",std::holds_alternative<std::uint64_t>(option.value) ? nlohmann::json(std::get<std::uint64_t>(option.value)) : nlohmann::json()}});
+            }
+            event("peer_setup_received",nlohmann::json{{"frame_length",stats.peer_setup->frame_length},{"options",options}}.dump());
+        }
         if (!stats.connected) { operational_error = true; event("harness_error", "draft-23 publisher did not connect before deadline"); }
         if (stopped) { operational_error = true; event("run_stopped", "operator stopped draft-23 smoke"); }
     } catch (const std::exception& error) {
@@ -100,8 +115,8 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     }
     (void)listener->close(0, {});
     try {
-        std::vector<requirements::Outcome> outcomes;
-        for (const auto& row : catalog.requirements) outcomes.push_back({row.id, requirements::OutcomeState::NotRun});
+        // Rows outside the reviewed SETUP slice stay at their staged state, so smoke delivery alone never scores them.
+        auto outcomes = requirements::evaluate_draft23_setup(catalog, setup_context);
         auto score = requirements::score_staged(catalog, outcomes);
         if (operational_error) score.verdict = requirements::RunVerdict::Error;
         store.finalize(id,score,outcomes);

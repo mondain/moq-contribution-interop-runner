@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <thread>
 
 namespace moq::interop {
@@ -67,11 +68,39 @@ nlohmann::json smoke(const storage::RunRecord& run) {
     ADD_FAILURE()<<"missing draft23_smoke evidence";
     return nlohmann::json::object();
 }
-void expect_unscored(const storage::RunRecord& run) {
+using SetupExpectation = std::map<std::string,requirements::OutcomeState>;
+constexpr auto kMultiplicity="D23-9-1-MUST-NOT-265";
+constexpr auto kMaxSize="D23-9-1-8-MUST-288";
+constexpr auto kAuthority="D23-9-1-1-MUST-269";
+constexpr auto kPath="D23-9-1-2-MUST-273";
+constexpr auto kQuery="D23-9-1-2-MUST-274";
+// Every row outside the SETUP slice keeps its staged state; the slice rows must match `setup`.
+void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict) {
     ASSERT_TRUE(run.score);
-    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Incomplete);
-    EXPECT_EQ(run.outcomes.size(),catalog(23)->requirements.size());
-    for (const auto& row:run.outcomes) EXPECT_EQ(row.state,requirements::OutcomeState::NotRun)<<row.requirement_id;
+    EXPECT_EQ(run.score->verdict,verdict);
+    const auto rows=catalog(23);  // keep the shared catalog alive while iterating it
+    EXPECT_EQ(run.outcomes.size(),rows->requirements.size());
+    std::map<std::string,requirements::OutcomeState> actual;
+    for (const auto& row:run.outcomes) actual[row.requirement_id]=row.state;
+    for (const auto& row:rows->requirements) {
+        const auto found=setup.find(row.id);
+        if (found!=setup.end()) { EXPECT_EQ(actual[row.id],found->second)<<row.id; continue; }
+        const auto expected=!row.reviewed?requirements::OutcomeState::NotRun
+            :row.testability==requirements::Testability::NotTestable?requirements::OutcomeState::NotTestable
+            :row.testability==requirements::Testability::NotApplicable?requirements::OutcomeState::NotApplicable
+            :requirements::OutcomeState::NotRun;
+        EXPECT_EQ(actual[row.id],expected)<<row.id;
+    }
+}
+std::string advertised_authority(const storage::RunRecord& run) {
+    for (const auto& event:run.events) {
+        if (event.kind!="context_start") continue;
+        const auto start=event.detail.find("moqt://");
+        const auto end=event.detail.find("/moq",start);
+        if (start!=std::string::npos&&end!=std::string::npos) return event.detail.substr(start+7,end-start-7);
+    }
+    ADD_FAILURE()<<"missing advertised endpoint";
+    return {};
 }
 class Draft23WebTransportPublisher {
 public:
@@ -230,7 +259,10 @@ TEST(Draft23RunLive, NativeQuicStoresProgressingMediaAsUnscoredSmoke) {
     EXPECT_EQ(summary.at("distinct_objects"),2);
     EXPECT_EQ(summary.at("payload_bytes"),2);
     EXPECT_FALSE(summary.at("conformance_scored"));
-    expect_unscored(run);
+    // An empty SETUP carries no AUTHORITY or PATH, which a native QUIC client must send.
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -246,7 +278,9 @@ TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     EXPECT_EQ(summary.at("status"),"PASS")<<summary.dump();
     EXPECT_EQ(summary.at("distinct_objects"),2);
     EXPECT_EQ(summary.at("payload_bytes"),2);
-    expect_unscored(run);
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::NotApplicable},{kPath,requirements::OutcomeState::NotApplicable},
+        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Incomplete);
 }
 TEST(Draft23RunLive, MissingPublisherIsHarnessError) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -279,7 +313,9 @@ TEST(Draft23RunLive, OneObjectCannotPassProgressingMedia) {
     const auto run=store->load(started.id);
     EXPECT_EQ(smoke(run).at("status"),"NOT_RUN");
     EXPECT_EQ(smoke(run).at("distinct_objects"),1);
-    expect_unscored(run);
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -296,11 +332,48 @@ TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
         }
         return true;
     }));
-    const auto summary=smoke(store->load(started.id));
+    const auto run=store->load(started.id);
+    const auto summary=smoke(run);
     EXPECT_EQ(summary.at("status"),"NOT_RUN");
     EXPECT_FALSE(summary.at("setup_received"));
+    // The rejected SETUP is still evidence: its undersized MAX_CONTROL_MESSAGE_SIZE fails row 288.
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::Fail},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
     ASSERT_TRUE(summary.contains("error"));
     EXPECT_NE(summary.at("error").get<std::string>().find("SETUP"),std::string::npos);
+}
+TEST(Draft23RunLive, NativeQuicScoresMatchingAuthorityAndPath) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    ASSERT_TRUE(client);
+    // The listener binds a loopback address; derive the same authority the runner advertised.
+    const auto authority=std::string(started.endpoint.address.find(':')!=std::string::npos?"[":"")+started.endpoint.address+
+        (started.endpoint.address.find(':')!=std::string::npos?"]":"")+":"+std::to_string(started.endpoint.port);
+    Bytes setup;
+    for (const unsigned v:{0xafu,0u,static_cast<unsigned>(8+authority.size()),1u,4u,static_cast<unsigned>('/'),static_cast<unsigned>('m'),
+                           static_cast<unsigned>('o'),static_cast<unsigned>('q'),4u,static_cast<unsigned>(authority.size())})
+        setup.push_back(static_cast<std::byte>(v));
+    for (const char c:authority) setup.push_back(static_cast<std::byte>(c));
+    bool sent=false;
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,setup,false));
+            EXPECT_TRUE(client->send_stream(0,publish_message(),false));
+            EXPECT_TRUE(client->send_stream(6,media_objects(2),true)); sent=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    EXPECT_EQ(advertised_authority(run),authority);
+    EXPECT_EQ(smoke(run).at("status"),"PASS")<<smoke(run).dump();
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Pass},{kPath,requirements::OutcomeState::Pass},
+        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Incomplete);
 }
 } // namespace
 } // namespace moq::interop

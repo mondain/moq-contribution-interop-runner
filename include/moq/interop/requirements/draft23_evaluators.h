@@ -1,0 +1,32 @@
+#pragma once
+
+#include "moq/interop/requirements/completeness.h"
+#include "moq/interop/requirements/scoring.h"
+#include "moq/interop/session/draft23_session.h"
+
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace moq::interop::requirements {
+
+// What the SETUP evaluators need: the publisher's SETUP as received (absent when none arrived) and the
+// endpoint the runner advertised to the publisher. `authority` is the URI authority, `path` the path-abempty
+// and `query` the query without its question mark.
+struct Draft23SetupContext {
+    std::optional<session::Draft23PeerSetup> peer_setup;
+    bool webtransport{false};
+    std::string authority;
+    std::string path;
+    std::optional<std::string> query;
+};
+
+// One outcome per catalog row. Rows without a SETUP evaluator keep their staged state: unreviewed and
+// untested rows are NotRun, NotTestable rows NotTestable, NotApplicable rows NotApplicable. The five SETUP
+// rows are judged from the context; before any SETUP arrives they are NotRun.
+std::vector<Outcome> evaluate_draft23_setup(const RequirementCatalog& catalog, const Draft23SetupContext& context);
+
+// The five SETUP rows, each bound to both draft-23 smoke scenarios.
+std::vector<ExecutableBinding> draft23_executable_bindings();
+
+}  // namespace moq::interop::requirements

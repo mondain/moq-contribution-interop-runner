@@ -258,3 +258,33 @@ TEST(Draft23Session, InvalidMaximumIsInvalidFieldAndMalformedOptionIsMalformedMe
     EXPECT_EQ(malformed.application_error(),0x300u);
 }
 } // namespace
+namespace {
+TEST(Draft23Session, RecordsPeerSetupOptionsAndLength) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session);
+    // PATH "/moq" (0x01) then AUTHORITY "h:1" (0x05, delta 4).
+    session.on_event(transport::StreamDataEvent{2, bytes({0xaf,0,11, 1,4,'/','m','o','q', 4,3,'h',':','1'}), false});
+    ASSERT_TRUE(session.stats().peer_setup.has_value());
+    const auto& observed = *session.stats().peer_setup;
+    EXPECT_EQ(observed.frame_length, 11u);
+    ASSERT_EQ(observed.options.size(), 2u);
+    EXPECT_EQ(observed.options[0].type, 1u);
+    EXPECT_EQ(observed.options[1].type, 5u);
+}
+TEST(Draft23Session, KeepsPeerSetupEvidenceWhenItClosesForDuplicateOption) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session);
+    session.on_event(transport::StreamDataEvent{2, bytes({0xaf,0,6, 1,1,'a', 0,1,'b'}), false});
+    EXPECT_TRUE(session.error());
+    ASSERT_TRUE(session.stats().peer_setup.has_value());
+    EXPECT_EQ(session.stats().peer_setup->options.size(), 2u);
+}
+TEST(Draft23Session, NoPeerSetupEvidenceBeforeSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session);
+    EXPECT_FALSE(session.stats().peer_setup.has_value());
+}
+}
