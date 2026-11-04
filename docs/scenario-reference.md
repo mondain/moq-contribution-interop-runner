@@ -1025,3 +1025,21 @@ In every row the transcript must be judgeable: the publisher connected, the sess
 | moq-lite-06 rows | 125 on native QUIC; 120, 124 and 126 on WebTransport are `not_applicable` since L2c (the other transport's rule), not `not_run`; 075, 105, 077 and 186 are `not_applicable` to a publisher that advertised a Probe capability, sent no datagram, or ended the session on the first GOAWAY; 152 is `not_run` unless the publisher retracts its broadcast inside the window (the `moq` CLI keeps it; the reference publisher does with `--retract-after-polls`); every row but 111 and 125 of a WebTransport session whose SETUP carried a Path; 027 outside a run holding its five scenarios |
 
 `NOT_RUN` is not a failure and never counts as a pass.
+
+## Draft 23 smoke scenarios
+
+| Scenario | Trigger | Successful smoke evidence |
+|---|---|---|
+| `d23-publisher-smoke` | PUBLISH_NAMESPACE for the fixture prefix, or PUBLISH for the fixture track | SETUP, established subscription, two distinct normal object locations and nonempty payload |
+| `d23-direct-subscribe-smoke` | Send SUBSCRIBE immediately after peer SETUP | Same selected-track evidence |
+| `d23-publish-smoke` | The publisher offers its tracks with PUBLISH (moqxr `--forward 1`); the runner accepts every PUBLISH in the fixture namespace and sends no SUBSCRIBE | Same selected-track evidence on the fixture track, plus the PUBLISH messages themselves. It judges `D23-2-4-1-MUST-028`, `D23-3-1-3-MUST-NOT-050` and `D23-3-1-3-SHOULD-NOT-052`, which the other smokes cannot because a publisher that waits for a SUBSCRIBE sends no PUBLISH |
+
+These scenarios use the draft-23 session engine on native QUIC and
+WebTransport. They are unscored against the staged draft-23 catalog. Each run
+selects one scenario and requires a track fixture; unrelated PUBLISH requests
+receive UNINTERESTED and their objects cannot contribute to progress. The exception is
+`d23-publish-smoke`, which accepts PUBLISH for any track in the fixture namespace (a publisher
+that pushes its tracks blocks on each one) and counts only the fixture track's objects. They
+support subgroup delivery and finite PUBLISH_DONE. Unsupported known operations
+are reported as harness limitations. See
+[publisher setup](publisher-harness-guide.md#draft-23-first-contact).

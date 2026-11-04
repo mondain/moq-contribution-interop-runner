@@ -97,6 +97,15 @@ std::shared_ptr<const requirements::RequirementCatalog> catalog22() {
                                                requirements::CatalogLoadMode::AllowIncomplete));
 }
 
+std::shared_ptr<const requirements::RequirementCatalog> catalog23() {
+    const auto root = std::filesystem::path(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source = requirements::load_draft_source(
+        23, root / "docs", root / "requirements/draft-digests.json");
+    return std::make_shared<const requirements::RequirementCatalog>(
+        requirements::RequirementCatalog::load(source, root / "requirements/draft23.json",
+                                               requirements::CatalogLoadMode::AllowIncomplete));
+}
+
 app::BuildInfo test_build() {
     return {std::string{"0.1<script>\0", 13}, "rev&\"'", {{"dep<script>", "one&two"}}};
 }
@@ -362,6 +371,87 @@ protected:
     std::unique_ptr<httplib::Client> client_;
 };
 
+class HttpApiDraft23Test : public HttpApiDraft22Test {
+protected:
+    void SetUp() override {
+        store_ = std::make_shared<storage::SqliteRunStore>(database_.path(), test_build());
+        ServerConfig config{.port = 0};
+        config.draft22_catalog = catalog22();
+        config.draft23_catalog = catalog23();
+        server_ = std::make_unique<HttpServer>(catalog(18), catalog(21), store_, test_build(), config);
+        ASSERT_TRUE(server_->start());
+        client_ = std::make_unique<httplib::Client>("127.0.0.1", server_->port());
+        client_->set_connection_timeout(2s);
+        client_->set_read_timeout(2s);
+    }
+};
+
+TEST_F(HttpApiDraft23Test, ListsDraft23AsStagedWithItsOwnProfilesAndSource) {
+    const auto drafts = get_json("/api/v1/drafts").at("drafts");
+    ASSERT_EQ(drafts.size(), 4u);
+    const auto& draft = drafts.at(3);
+    EXPECT_EQ(draft.at("draft"), 23);
+    EXPECT_FALSE(draft.at("complete"));
+    EXPECT_TRUE(draft.at("staged"));
+    EXPECT_TRUE(draft.at("runnable"));
+    EXPECT_EQ(draft.at("requirement_count"), 532);
+    const auto health = get_json("/healthz");
+    EXPECT_EQ(health.at("supported_drafts"), Json::array({18, 21, 22, 23}));
+    std::size_t profiles = 0;
+    for (const auto& profile : health.at("executable_profiles")) {
+        if (profile.at("draft") != 23) continue;
+        EXPECT_TRUE(profile.at("scenario") == "d23-publisher-smoke" ||
+                    profile.at("scenario") == "d23-direct-subscribe-smoke" ||
+                    profile.at("scenario") == "d23-publish-smoke" ||
+                    profile.at("scenario").get<std::string>().starts_with("d23-probe-"));
+        EXPECT_FALSE(profile.at("configured"));
+        ++profiles;
+    }
+    EXPECT_EQ(profiles, 220u);  // 55 scenarios (three smoke, 52 probes) on two transports in two modes
+    const auto page = get_json("/api/v1/requirements?draft=23&limit=2");
+    EXPECT_EQ(page.at("draft"), 23);
+    EXPECT_EQ(page.at("pagination").at("total"), 532);
+    EXPECT_TRUE(page.at("items").at(0).at("id").get<std::string>().starts_with("D23-"));
+}
+
+TEST_F(HttpApiDraft23Test, AcceptsOnlyItsOwnSmokeScenariosAndRequiresAListener) {
+    const auto request = [](std::string id) {
+        return Json{{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},
+                    {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
+                    {"track", {{"namespace_hex", Json::array({"74657374"})}, {"name_hex", "766964656f"}}}};
+    };
+    for (const auto* id : {"d23-publisher-smoke", "d23-direct-subscribe-smoke", "d23-publish-smoke"}) {
+        const auto response = client_->Post("/api/v1/runs", request(id).dump(), "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 503) << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "publisher_listener_unavailable");
+    }
+    const auto unsupported = client_->Post("/api/v1/runs", request("d22-setup-unknown-options").dump(), "application/json");
+    ASSERT_TRUE(unsupported);
+    EXPECT_EQ(unsupported->status, 422);
+    EXPECT_EQ(Json::parse(unsupported->body).at("error").at("code"), "unsupported_run_config");
+    std::vector<Json> invalid;
+    auto value = request("d23-publisher-smoke"); value["timeout_ms"] = 99; invalid.push_back(value);
+    value = request("d23-publisher-smoke"); value.erase("track"); invalid.push_back(value);
+    value = request("d23-publisher-smoke"); value["track"]["name_hex"] = ""; invalid.push_back(value);
+    value = request("d23-publisher-smoke");
+    value["scenarios"] = Json::array({"d23-publisher-smoke", "d23-direct-subscribe-smoke"});
+    invalid.push_back(value);
+    for (const auto& body : invalid) {
+        const auto response = client_->Post("/api/v1/runs", body.dump(), "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 400) << response->body;
+        EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "invalid_run_config");
+    }
+}
+
+TEST(HttpServerConfigTest, RefusesAnotherDraftAsTheDraft23Catalog) {
+    TemporaryDatabase database;
+    auto store = std::make_shared<storage::SqliteRunStore>(database.path(), test_build());
+    ServerConfig config{.port = 0}; config.draft23_catalog = catalog22();
+    EXPECT_THROW(HttpServer(catalog(18), catalog(21), store, test_build(), config), std::invalid_argument);
+}
+
 // The draft 22 catalog is complete since D3 and draft 22 is runnable since D4.
 TEST_F(HttpApiDraft22Test, ListsDraft22AsCompleteAndRunnable) {
     const auto drafts = get_json("/api/v1/drafts");
@@ -491,8 +581,8 @@ TEST_F(HttpApiDraft22Test, Draft22RunsAreValidatedLikeDraft18And21Runs) {
         EXPECT_EQ(Json::parse(response->body).at("error").at("code"), "publisher_listener_unavailable");
     }
     EXPECT_EQ(store_->list({1, 0}).total, 0u);
-    // Draft 23 is still a malformed run configuration.
-    const auto invalid = post({{"draft", 23}, {"transport", "native-quic"}, {"mode", "observed"},
+    // An unrecognized draft is still a malformed run configuration.
+    const auto invalid = post({{"draft", 24}, {"transport", "native-quic"}, {"mode", "observed"},
                                {"scenarios", Json::array({"x"})}, {"timeout_ms", 1000}});
     ASSERT_TRUE(invalid);
     EXPECT_EQ(invalid->status, 400);

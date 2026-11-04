@@ -376,6 +376,64 @@ static_assert(all_scenario_ids_set(kDraft21GapRawScenarios));
 inline bool executable_scenario(unsigned draft, std::string_view scenario);
 
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
+    if (draft == 23) {
+        // The two smoke scenarios, then the negative probes (tests/protocol/draft23_probes_test.cpp checks the probe ids
+        // against session::draft23_probes()).
+        static constexpr std::string_view ids[]{"d23-publisher-smoke", "d23-direct-subscribe-smoke", "d23-publish-smoke",
+            "d23-probe-unknown-control-message",
+            "d23-probe-bad-first-bidi-message",
+            "d23-probe-length-mismatch",
+            "d23-probe-oversize-control-message",
+            "d23-probe-server-authority",
+            "d23-probe-server-path",
+            "d23-probe-unknown-uni-stream",
+            "d23-probe-subscribe-reserved-namespace",
+            "d23-probe-subscribe-session-namespace",
+            "d23-probe-empty-track-name",
+            "d23-probe-control-stream-closed",
+            "d23-probe-wrong-request-id-parity",
+            "d23-probe-duplicate-request-id",
+            "d23-probe-setup-delta-overflow",
+            "d23-probe-setup-malformed-value",
+            "d23-probe-reason-phrase-too-long",
+            "d23-probe-namespace-empty-field",
+            "d23-probe-namespace-too-many-fields",
+            "d23-probe-namespace-too-long",
+            "d23-probe-unknown-setup-option",
+            "d23-probe-duplicate-unknown-setup-option",
+            "d23-probe-request-ok-with-properties",
+            "d23-probe-unknown-error-detail",
+            "d23-probe-redirect-without-detail",
+            "d23-probe-redirect-track-name-in-namespace-request",
+            "d23-probe-unknown-request-error-code",
+            "d23-probe-publish-state-notify-on-announce",
+            "d23-probe-publish-state-notify-to-publisher",
+            "d23-probe-unknown-message-parameter",
+            "d23-probe-parameter-out-of-scope",
+            "d23-probe-group-order-out-of-range",
+            "d23-probe-paused-out-of-range",
+            "d23-probe-include-properties-out-of-range",
+            "d23-probe-subgroup-header-reserved-mode",
+            "d23-probe-datagram-unknown-type",
+            "d23-probe-datagram-reserved-bit",
+            "d23-probe-datagram-status-end-of-group",
+            "d23-probe-datagram-properties-length-zero",
+            "d23-probe-filter-ranges-over-limit",
+            "d23-probe-location-filter-unknown-type",
+            "d23-probe-location-filter-overflow",
+            "d23-probe-fill-parameters-invalid",
+            "d23-probe-padding-stream",
+            "d23-probe-padding-datagram",
+            "d23-probe-goaway-twice",
+            "d23-probe-goaway-uri-too-long",
+            "d23-probe-goaway-on-subscribe-stream",
+            "d23-probe-request-update-wrong-direction",
+            "d23-probe-second-announce-response",
+            "d23-probe-second-publish-response",
+            "d23-probe-duplicate-parameter",
+            "d23-probe-datagram-status-properties-not-normal"};
+        return ids;
+    }
     if (draft == 18) return kDraft18AllExecutableScenarios;
     if (draft == 21) {
         static const std::vector<std::string_view> combined = [] {
@@ -533,6 +591,7 @@ inline constexpr auto kDraft18ContributionTrackScenarios = std::to_array<std::st
 static_assert(all_scenario_ids_set(kDraft18ContributionTrackScenarios));
 
 inline bool scenario_requires_track(unsigned draft, std::string_view scenario) {
+    if (draft == 23) return executable_scenario(draft, scenario);
     if (draft == 106) {
         const auto lite = lite_executable_scenario(scenario);
         return lite && lite->requires_track;
@@ -592,7 +651,7 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario) {
 
 inline bool raw_probe_scenario(unsigned draft, std::string_view scenario) {
     // moq-lite scenarios run on the lite probe engine, never as MoQ Transport raw probes.
-    if (draft == 106) return false;
+    if (draft == 106 || draft == 23) return false;
     if (draft == 22) {
         // Own draft 22 scenarios are always raw probes (src/app/own_scenario_dispatch_22.cpp).
         if (own_scenario_22(scenario)) return true;

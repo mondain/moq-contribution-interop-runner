@@ -2,6 +2,7 @@
 #include "moq/interop/app/draft_traits.h"
 #include "moq/interop/app/lineage_run.h"
 #include "moq/interop/app/lite_run.h"
+#include "moq/interop/app/draft23_run.h"
 #include "moq/interop/app/own_scenario_dispatch_22.h"
 #include "moq/interop/app/publisher_capabilities.h"
 #include "moq/interop/app/publisher_driver.h"
@@ -446,11 +447,13 @@ public:
          std::shared_ptr<storage::RunStore> supplied_store,
          NativeRunManagerConfig supplied_config,
          std::shared_ptr<const requirements::RequirementCatalog> supplied_draft22,
-         std::shared_ptr<const requirements::RequirementCatalog> supplied_moqlite06)
+         std::shared_ptr<const requirements::RequirementCatalog> supplied_moqlite06,
+         std::shared_ptr<const requirements::RequirementCatalog> supplied_draft23)
         : draft18(std::move(supplied_draft18)),
           draft21(std::move(supplied_draft21)),
           draft22(std::move(supplied_draft22)),
           moqlite06(std::move(supplied_moqlite06)),
+          draft23(std::move(supplied_draft23)),
           store(std::move(supplied_store)),
           config(std::move(supplied_config)) {
         // Every catalog must be complete: requirements::score() refuses an incomplete one.
@@ -459,6 +462,7 @@ public:
             (draft22 && (draft22->draft != 22 || !draft22->complete)) ||
             // The lite catalog may be staged (score_staged) or complete (score): either loads.
             (moqlite06 && moqlite06->draft != 106) ||
+            (draft23 && (draft23->draft != 23 || draft23->complete)) ||
             config.maximum_active_runs == 0 ||
             config.port_start > config.port_end ||
             (config.port_start == 0) != (config.port_end == 0) ||
@@ -1703,10 +1707,79 @@ public:
         return result;
     }
 
+    RunStartResult start_draft23(const RunConfig& requested) {
+        if (!draft23 || (requested.mode == RunMode::Driven && config.driver_executable.empty()))
+            return {RunStartStatus::Unsupported, {}, {}};
+        if (!valid_draft23_run(requested)) return {RunStartStatus::InvalidConfig, {}, {}};
+        std::lock_guard lock(mutex);
+        reap_finished();
+        if (workers.size() >= config.maximum_active_runs) return {RunStartStatus::PortExhausted, {}, {}};
+        const bool ephemeral = config.port_start == 0;
+        const auto attempts = ephemeral ? config.maximum_active_runs + 1 :
+            static_cast<std::size_t>(config.port_end - config.port_start) + 1;
+        // A WebTransport lite session is CONNECTed at the fixed session target "/moq?token=l1d" (lite_run.h).
+        const std::string target = "/moq";
+        const Tuning tuning{{}, {}, {}, false, target};
+        ListenerResult created;
+        for (std::size_t attempt = 0; attempt < attempts && !created.listener; ++attempt) {
+            const auto port = ephemeral ? std::uint16_t{0} : static_cast<std::uint16_t>(config.port_start + attempt);
+            if (port != 0 && reserved_ports.contains(port)) continue;
+            created = create_listener(requested.transport, DraftVersion::Draft23, port, tuning);
+            if (created.listener && reserved_ports.contains(created.endpoint.port)) {
+                created = {};
+            } else if (!created.listener && created.error != transport::NativeQuicListenerError::BindFailed) {
+                std::fprintf(stderr, "publisher listener could not start on port %u%s\n", static_cast<unsigned>(port),
+                             describe_listener_failure(created, port).c_str());
+                return {RunStartStatus::ListenerError, {}, {}};
+            }
+        }
+        if (!created.listener) return {RunStartStatus::PortExhausted, {}, {}};
+        auto worker = std::make_unique<Worker>();
+        worker->endpoint = created.endpoint;
+        if (!config.advertised_address.empty()) worker->endpoint.address = config.advertised_address;
+        worker->id = store->create_run(requested);
+        auto* run = worker.get();
+        RunStartResult result{RunStartStatus::Started, run->id, run->endpoint};
+        if (requested.transport == TransportKind::WebTransport) {
+            result.path = "/moq";
+            result.protocol = std::string(app::alpn(DraftVersion::Draft23));
+            result.url = "https://" + authority_of(run) + "/moq";
+        }
+        workers.push_back(std::move(worker));
+        reserved_ports.insert(run->endpoint.port);
+        try {
+            run->thread = std::thread([this, run, requested, target, listener = std::move(created.listener)]() mutable {
+                const auto port = run->endpoint.port;
+                run_draft23(run->id, authority_of(run), *store, *draft23, config,
+                            run->stop_requested, std::move(listener), requested);
+                {
+                    std::lock_guard released(mutex);
+                    reserved_ports.erase(port);
+                }
+                run->finished = true;
+            });
+        } catch (...) {
+            const auto id = run->id;
+            reserved_ports.erase(run->endpoint.port);
+            workers.pop_back();
+            try {
+                storage::EvidenceEvent reason;
+                reason.kind = "harness_error";
+                reason.detail = "the run's worker thread could not be started";
+                store->append_events(id, std::span(&reason, 1));
+            } catch (...) {}
+            const requirements::ScoreSummary failure{requirements::RunVerdict::Error, {0, 0}, {0, 0}, {0, 0}};
+            store->finalize(id, failure, {});
+            return {RunStartStatus::ListenerError, {}, {}};
+        }
+        return result;
+    }
+
     std::shared_ptr<const requirements::RequirementCatalog> draft18;
     std::shared_ptr<const requirements::RequirementCatalog> draft21;
     std::shared_ptr<const requirements::RequirementCatalog> draft22;
     std::shared_ptr<const requirements::RequirementCatalog> moqlite06;
+    std::shared_ptr<const requirements::RequirementCatalog> draft23;
     std::shared_ptr<storage::RunStore> store;
     NativeRunManagerConfig config;
     std::mutex mutex;
@@ -1727,10 +1800,11 @@ NativeRunManager::NativeRunManager(
     std::shared_ptr<storage::RunStore> store,
     NativeRunManagerConfig config,
     std::shared_ptr<const requirements::RequirementCatalog> draft22,
-    std::shared_ptr<const requirements::RequirementCatalog> moqlite06)
+    std::shared_ptr<const requirements::RequirementCatalog> moqlite06,
+    std::shared_ptr<const requirements::RequirementCatalog> draft23)
     : impl_(std::make_unique<Impl>(std::move(draft18), std::move(draft21),
                                     std::move(store), std::move(config), std::move(draft22),
-                                    std::move(moqlite06))) {}
+                                    std::move(moqlite06), std::move(draft23))) {}
 
 NativeRunManager::~NativeRunManager() = default;
 
@@ -1739,6 +1813,7 @@ NativeRunManager::~NativeRunManager() = default;
 // draft 22 the draft 21 family with each shared scenario's draft 21 implementation id.
 RunStartResult NativeRunManager::start(const RunConfig& requested) {
     // moq-lite runs its own family (app/lite_run.h), only when this manager holds the lite catalog.
+    if (requested.draft == DraftVersion::Draft23) return impl_->start_draft23(requested);
     if (requested.draft == DraftVersion::MoqLite06) return impl_->start_lite(requested);
     // Identity: whether this runner can run the requested draft (its catalogs).
     if (!supports(requested.draft) ||
@@ -2062,6 +2137,7 @@ bool NativeRunManager::supports(DraftVersion draft) const noexcept {
         case DraftVersion::Draft21: return impl_->draft21 != nullptr;
         // Draft 22 runs its shared scenarios on draft 21's family (lineage).
         case DraftVersion::Draft22: return impl_->draft22 != nullptr && impl_->draft21 != nullptr;
+        case DraftVersion::Draft23: return impl_->draft23 != nullptr;
         case DraftVersion::MoqLite06: return impl_->moqlite06 != nullptr;
     }
     return false;

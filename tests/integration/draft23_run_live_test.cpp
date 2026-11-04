@@ -1,0 +1,522 @@
+#include "moq/interop/app/native_run_manager.h"
+#include "moq/interop/requirements/draft_source.h"
+#include "moq/interop/storage/run_store.h"
+#include "support/picoquic_client.h"
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <pico_webtransport.h>
+#include <picoquic_internal.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstring>
+#include <filesystem>
+#include <map>
+#include <thread>
+
+namespace moq::interop {
+namespace {
+using namespace std::chrono_literals;
+using Bytes=std::vector<std::byte>;
+Bytes b(std::initializer_list<unsigned> input) {
+    Bytes result;
+    for (const auto value:input) result.push_back(static_cast<std::byte>(value));
+    return result;
+}
+Bytes publish_message() { return b({0x1d,15,0,1,5,'m','e','d','i','a',4,'v','i','d','e',7,0}); }
+Bytes media_objects(unsigned count) {
+    Bytes result=b({0x30,7,0});
+    for (unsigned i=0;i<count;++i) {
+        const auto object=b({0,1,static_cast<unsigned>('a')+i});
+        result.insert(result.end(),object.begin(),object.end());
+    }
+    return result;
+}
+std::shared_ptr<const requirements::RequirementCatalog> catalog(unsigned draft) {
+    const std::filesystem::path root(MOQ_INTEROP_PROJECT_SOURCE_DIR);
+    const auto source=requirements::load_draft_source(draft,root/"docs",root/"requirements/draft-digests.json");
+    return std::make_shared<const requirements::RequirementCatalog>(requirements::RequirementCatalog::load(
+        source,root/("requirements/draft"+std::to_string(draft)+".json"),requirements::CatalogLoadMode::AllowIncomplete));
+}
+app::NativeRunManager manager_for(const std::shared_ptr<storage::SqliteRunStore>& store) {
+    return app::NativeRunManager(catalog(18),catalog(21),store,
+        {.bind_address="127.0.0.1",.advertised_address="127.0.0.1",.port_start=0,.port_end=0,.maximum_active_runs=1,
+         .certificate_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"cert.pem",
+         .private_key_path=std::filesystem::path(PICOQUIC_TEST_CERT_DIR)/"key.pem"},catalog(22),nullptr,catalog(23));
+}
+app::RunConfig config(app::TransportKind transport, std::chrono::milliseconds timeout=2000ms) {
+    return {app::DraftVersion::Draft23,transport,app::RunMode::Observed,{"d23-publisher-smoke"},timeout,
+        app::TrackFixture{{"media"},"vide"},{}};
+}
+app::RunConfig probe_config(std::string scenario, app::TransportKind transport=app::TransportKind::NativeQuic,
+                            std::chrono::milliseconds timeout=2000ms) {
+    return {app::DraftVersion::Draft23,transport,app::RunMode::Observed,{std::move(scenario)},timeout,
+        app::TrackFixture{{"media"},"vide"},{}};
+}
+bool wait_finalized(const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id,
+                    const std::function<bool()>& pump={}) {
+    const auto deadline=std::chrono::steady_clock::now()+5s;
+    while (std::chrono::steady_clock::now()<deadline) {
+        if (store->load(id).state==storage::RunState::Finalized) return true;
+        if (pump) (void)pump();
+        std::this_thread::sleep_for(1ms);
+    }
+    return false;
+}
+nlohmann::json smoke(const storage::RunRecord& run) {
+    for (const auto& event:run.events) if (event.kind=="draft23_smoke") return nlohmann::json::parse(event.detail);
+    ADD_FAILURE()<<"missing draft23_smoke evidence";
+    return nlohmann::json::object();
+}
+using SetupExpectation = std::map<std::string,requirements::OutcomeState>;
+constexpr auto kMultiplicity="D23-9-1-MUST-NOT-265";
+constexpr auto kMaxSize="D23-9-1-8-MUST-288";
+constexpr auto kAuthority="D23-9-1-1-MUST-269";
+constexpr auto kPath="D23-9-1-2-MUST-273";
+constexpr auto kQuery="D23-9-1-2-MUST-274";
+constexpr auto kBitFour="D23-11-3-1-MUST-445";
+constexpr auto kOneStream="D23-2-2-MUST-NOT-020";
+constexpr auto kLength="D23-9-MUST-NOT-259";
+constexpr auto kRequestId="D23-6-4-2-1-MUST-NOT-147";
+constexpr auto kSingleResponse="D23-3-1-MUST-036";
+constexpr auto kFinRequired="D23-6-4-2-2-MUST-NOT-150";
+constexpr auto kResponseBeforeFin="D23-6-4-2-2-MUST-151";
+constexpr auto kDoneBeforeFin="D23-6-4-2-2-MUST-152";
+constexpr auto kStreamCount="D23-9-9-MUST-342";
+// Every row outside the SETUP slice keeps its staged state; the slice rows must match `setup`.
+// What the P1 rows added after the SETUP slice report, by how far the stand-in publisher got.
+enum class Flow { Published, SetupOnly, Probe };
+std::map<std::string,requirements::OutcomeState> flow_baseline(Flow flow) {
+    using S=requirements::OutcomeState;
+    // A probe run executes none of the smoke-bound rows, so each stays NotRun there.
+    if (flow==Flow::Probe)
+        return {{"D23-2-4-1-MUST-028",S::NotRun},{"D23-8-7-MUST-232",S::NotRun},{"D23-2-4-3-MUST-NOT-032",S::NotRun},
+            {"D23-2-4-3-MUST-NOT-033",S::NotRun},{"D23-6-5-MUST-NOT-158",S::NotRun},{"D23-9-19-MUST-NOT-355",S::NotRun},
+            {"D23-6-3-MUST-NOT-136",S::NotRun},{"D23-3-1-3-MUST-NOT-050",S::NotRun},{"D23-6-2-MUST-135",S::NotRun},
+            {"D23-6-3-MUST-NOT-140",S::NotRun},{"D23-8-3-MUST-NOT-210",S::NotRun},{"D23-9-19-MUST-351",S::NotRun},
+            {"D23-9-6-MUST-332",S::NotRun},{"D23-9-9-MUST-341",S::NotRun},{"D23-11-5-1-MUST-475",S::NotRun},
+            {"D23-9-1-5-SHOULD-281",S::NotRun},{"D23-9-1-5-SHOULD-280",S::NotRun},{"D23-3-1-3-SHOULD-NOT-052",S::NotRun},
+            {"D23-11-3-SHOULD-NOT-443",S::NotRun},{"D23-6-4-2-2-SHOULD-154",S::NotRun}};
+    const auto published=flow==Flow::Published;
+    return {{"D23-2-4-1-MUST-028",published?S::Pass:S::NotRun},{"D23-8-7-MUST-232",published?S::Pass:S::NotRun},
+        {"D23-2-4-3-MUST-NOT-032",published?S::Pass:S::NotRun},{"D23-2-4-3-MUST-NOT-033",published?S::Pass:S::NotRun},
+        {"D23-6-5-MUST-NOT-158",published?S::Pass:S::NotRun},{"D23-9-19-MUST-NOT-355",published?S::Pass:S::NotRun},
+        {"D23-6-3-MUST-NOT-136",published?S::Pass:S::NotRun},{"D23-3-1-3-MUST-NOT-050",S::NotRun},
+        {"D23-6-2-MUST-135",S::Pass},{"D23-6-3-MUST-NOT-140",S::Pass},{"D23-8-3-MUST-NOT-210",S::Pass},
+        {"D23-9-19-MUST-351",S::Pass},{"D23-9-6-MUST-332",S::NotApplicable},{"D23-9-9-MUST-341",S::NotRun},
+        {"D23-11-5-1-MUST-475",S::NotRun},
+        // The recommendation rows: the stand-in publisher's empty SETUP carries no MOQT_IMPLEMENTATION option.
+        {"D23-9-1-5-SHOULD-281",S::Fail},{"D23-9-1-5-SHOULD-280",S::NotApplicable},{"D23-3-1-3-SHOULD-NOT-052",S::NotRun},
+        {"D23-11-3-SHOULD-NOT-443",published?S::Pass:S::NotRun},{"D23-6-4-2-2-SHOULD-154",S::NotRun}};
+}
+void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict, Flow flow=Flow::Published) {
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,verdict);
+    const auto rows=catalog(23);  // keep the shared catalog alive while iterating it
+    EXPECT_EQ(run.outcomes.size(),rows->requirements.size());
+    std::map<std::string,requirements::OutcomeState> actual;
+    for (const auto& row:run.outcomes) actual[row.requirement_id]=row.state;
+    for (const auto& row:rows->requirements) {
+        const auto found=setup.find(row.id);
+        if (found!=setup.end()) { EXPECT_EQ(actual[row.id],found->second)<<row.id; continue; }
+        const auto baseline=flow_baseline(flow);
+        if (baseline.contains(row.id)) { EXPECT_EQ(actual[row.id],baseline.at(row.id))<<row.id; continue; }
+        const auto expected=!row.reviewed?requirements::OutcomeState::NotRun
+            :row.testability==requirements::Testability::NotTestable?requirements::OutcomeState::NotTestable
+            :row.testability==requirements::Testability::NotApplicable?requirements::OutcomeState::NotApplicable
+            :requirements::OutcomeState::NotRun;
+        EXPECT_EQ(actual[row.id],expected)<<row.id;
+    }
+}
+std::string advertised_authority(const storage::RunRecord& run) {
+    for (const auto& event:run.events) {
+        if (event.kind!="context_start") continue;
+        const auto start=event.detail.find("moqt://");
+        const auto end=event.detail.find("/moq",start);
+        if (start!=std::string::npos&&end!=std::string::npos) return event.detail.substr(start+7,end-start-7);
+    }
+    ADD_FAILURE()<<"missing advertised endpoint";
+    return {};
+}
+class Draft23WebTransportPublisher {
+public:
+    Draft23WebTransportPublisher(std::uint16_t port, Bytes setup_stream, std::string target = "/moq")
+        : port_(port), setup_(std::move(setup_stream)), target_(std::move(target)) {
+        fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd_ < 0) return;
+        const int flags = ::fcntl(fd_, F_GETFL, 0);
+        sockaddr_in local{};
+        local.sin_family = AF_INET;
+        local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (flags < 0 || ::fcntl(fd_, F_SETFL, flags | O_NONBLOCK) < 0 ||
+            ::bind(fd_, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0)
+            return;
+        socklen_t size = sizeof(local);
+        (void)::getsockname(fd_, reinterpret_cast<sockaddr*>(&local), &size);
+        local_ = local;
+        remote_.sin_family = AF_INET;
+        remote_.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        remote_.sin_port = htons(port);
+        quic_ = picoquic_create(1, nullptr, nullptr, nullptr, "h3", nullptr, nullptr, nullptr, nullptr, nullptr,
+                                picoquic_current_time(), nullptr, nullptr, nullptr, 0);
+        if (!quic_) return;
+        picoquic_set_null_verifier(quic_);
+        ok_ = picowt_prepare_client_cnx(quic_, reinterpret_cast<sockaddr*>(&remote_), &cnx_, &h3_, &control_,
+                                        picoquic_current_time(), "runner.test") == 0 &&
+              h3zero_declare_stream_prefix(h3_, control_->stream_id, callback, this) == 0 &&
+              picoquic_start_client_cnx(cnx_) == 0;
+    }
+    ~Draft23WebTransportPublisher() {
+        if (h3_ != nullptr) h3zero_callback_delete_context(cnx_, h3_);
+        if (quic_ != nullptr) picoquic_free(quic_);
+        if (fd_ >= 0) ::close(fd_);
+    }
+    Draft23WebTransportPublisher(const Draft23WebTransportPublisher&) = delete;
+    Draft23WebTransportPublisher& operator=(const Draft23WebTransportPublisher&) = delete;
+
+    [[nodiscard]] bool accepted() const { return accepted_; }
+    [[nodiscard]] bool setup_sent() const { return setup_sent_; }
+
+    bool step() {
+        if (!ok_) return false;
+        std::array<std::uint8_t, 2048> buffer{};
+        for (int packet = 0; packet < 16; ++packet) {
+            sockaddr_storage destination{};
+            sockaddr_storage source{};
+            picoquic_connection_id_t log_id{};
+            picoquic_cnx_t* last = nullptr;
+            std::size_t length = 0;
+            int interface_index = 0;
+            if (picoquic_prepare_next_packet(quic_, picoquic_current_time(), buffer.data(), buffer.size(), &length,
+                                             &destination, &source, &interface_index, &log_id, &last) != 0 ||
+                length == 0)
+                break;
+            (void)::sendto(fd_, buffer.data(), length, 0, reinterpret_cast<sockaddr*>(&destination), sizeof(remote_));
+        }
+        for (int packet = 0; packet < 16; ++packet) {
+            sockaddr_in peer{};
+            socklen_t peer_size = sizeof(peer);
+            const auto length = ::recvfrom(fd_, buffer.data(), buffer.size(), 0, reinterpret_cast<sockaddr*>(&peer),
+                                           &peer_size);
+            if (length < 0) break;
+            auto received_at = local_;
+            (void)picoquic_incoming_packet(quic_, buffer.data(), static_cast<std::size_t>(length),
+                                           reinterpret_cast<sockaddr*>(&peer),
+                                           reinterpret_cast<sockaddr*>(&received_at), 0, 0, picoquic_current_time());
+        }
+        if (!connect_sent_ && h3_->settings.settings_received) {
+            const std::string authority = "127.0.0.1:" + std::to_string(port_);
+            const std::string offered = "\"" + std::string("moqt-23") + "\"";
+            std::array<std::uint8_t, 512> qpack{};
+            auto* end = h3zero_create_connect_header_frame(qpack.data(), qpack.data() + qpack.size(),
+                                                           authority.c_str(),
+                                                           reinterpret_cast<const std::uint8_t*>(target_.data()), target_.size(),
+                                                           "webtransport-h3", nullptr, nullptr, offered.c_str());
+            if (end == nullptr) return false;
+            std::array<std::uint8_t, 1024> frame{};
+            auto* cursor = picoquic_frames_varint_encode(frame.data(), frame.data() + frame.size(), h3zero_frame_header);
+            cursor = picoquic_frames_varint_encode(cursor, frame.data() + frame.size(),
+                                                   static_cast<std::uint64_t>(end - qpack.data()));
+            if (cursor == nullptr) return false;
+            std::memcpy(cursor, qpack.data(), static_cast<std::size_t>(end - qpack.data()));
+            cursor += end - qpack.data();
+            control_->path_callback = callback;
+            control_->path_callback_ctx = this;
+            control_->is_open = 1;
+            control_->ps.stream_state.is_upgrade_requested = 1;
+            if (picoquic_add_to_stream_with_ctx(cnx_, control_->stream_id, frame.data(),
+                                                static_cast<std::size_t>(cursor - frame.data()), 0, control_) != 0)
+                return false;
+            connect_sent_ = true;
+        }
+        if (accepted_ && !setup_sent_) {
+            auto* stream = picowt_create_local_stream(cnx_, 0, h3_, control_->stream_id);
+            if (stream == nullptr ||
+                picoquic_add_to_stream_with_ctx(cnx_, stream->stream_id, reinterpret_cast<const std::uint8_t*>(setup_.data()),
+                                                setup_.size(), 0, stream) != 0)
+                return false;
+            auto* request = picowt_create_local_stream(cnx_, 1, h3_, control_->stream_id);
+            auto* data = picowt_create_local_stream(cnx_, 0, h3_, control_->stream_id);
+            const auto publish = publish_message();
+            const auto objects = media_objects(2);
+            if (!request || !data ||
+                picoquic_add_to_stream_with_ctx(cnx_,request->stream_id,reinterpret_cast<const std::uint8_t*>(publish.data()),publish.size(),0,request) != 0 ||
+                picoquic_add_to_stream_with_ctx(cnx_,data->stream_id,reinterpret_cast<const std::uint8_t*>(objects.data()),objects.size(),1,data) != 0) return false;
+            setup_sent_ = true;
+        }
+        return true;
+    }
+
+private:
+    static int callback(picoquic_cnx_t*, std::uint8_t*, std::size_t, picohttp_call_back_event_t event,
+                        h3zero_stream_ctx_t*, void* context) {
+        if (event == picohttp_callback_connect_accepted) static_cast<Draft23WebTransportPublisher*>(context)->accepted_ = true;
+        return 0;
+    }
+
+    std::uint16_t port_;
+    Bytes setup_;
+    std::string target_;
+    int fd_{-1};
+    sockaddr_in local_{};
+    sockaddr_in remote_{};
+    picoquic_quic_t* quic_{nullptr};
+    picoquic_cnx_t* cnx_{nullptr};
+    h3zero_callback_ctx_t* h3_{nullptr};
+    h3zero_stream_ctx_t* control_{nullptr};
+    bool ok_{false};
+    bool connect_sent_{false};
+    bool accepted_{false};
+    bool setup_sent_{false};
+};
+
+
+TEST(Draft23RunLive, NativeQuicStoresProgressingMediaAsUnscoredSmoke) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    ASSERT_TRUE(client);
+    bool sent=false;
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false));
+            EXPECT_TRUE(client->send_stream(0,publish_message(),false));
+            EXPECT_TRUE(client->send_stream(6,media_objects(2),true));
+            sent=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    const auto summary=smoke(run);
+    EXPECT_EQ(summary.at("status"),"PASS");
+    EXPECT_EQ(summary.at("distinct_objects"),2);
+    EXPECT_EQ(summary.at("payload_bytes"),2);
+    EXPECT_FALSE(summary.at("conformance_scored"));
+    // An empty SETUP carries no AUTHORITY or PATH, which a native QUIC client must send.
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+}
+TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::WebTransport));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    Draft23WebTransportPublisher publisher(started.endpoint.port,b({0xaf,0,0}));
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] { return publisher.step(); }));
+    EXPECT_TRUE(publisher.accepted());
+    EXPECT_TRUE(publisher.setup_sent());
+    const auto run=store->load(started.id);
+    const auto summary=smoke(run);
+    EXPECT_EQ(summary.at("status"),"PASS")<<summary.dump();
+    EXPECT_EQ(summary.at("distinct_objects"),2);
+    EXPECT_EQ(summary.at("payload_bytes"),2);
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::NotApplicable},{kPath,requirements::OutcomeState::NotApplicable},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Incomplete);
+}
+TEST(Draft23RunLive, MissingPublisherIsHarnessError) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic,100ms));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    ASSERT_TRUE(wait_finalized(store,started.id));
+    const auto run=store->load(started.id);
+    ASSERT_TRUE(run.score);
+    EXPECT_EQ(run.score->verdict,requirements::RunVerdict::Error);
+    EXPECT_EQ(smoke(run).at("status"),"NOT_RUN");
+}
+TEST(Draft23RunLive, OneObjectCannotPassProgressingMedia) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic,300ms));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    ASSERT_TRUE(client);
+    bool sent=false;
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false));
+            EXPECT_TRUE(client->send_stream(0,publish_message(),false));
+            EXPECT_TRUE(client->send_stream(6,media_objects(1),true)); sent=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    EXPECT_EQ(smoke(run).at("status"),"NOT_RUN");
+    EXPECT_EQ(smoke(run).at("distinct_objects"),1);
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+}
+TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic,300ms));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    ASSERT_TRUE(client);
+    bool sent=false;
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,3,9,1,0}),false)); sent=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    const auto summary=smoke(run);
+    EXPECT_EQ(summary.at("status"),"NOT_RUN");
+    EXPECT_FALSE(summary.at("setup_received"));
+    // The rejected SETUP is still evidence: its undersized MAX_CONTROL_MESSAGE_SIZE fails row 288.
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::Fail},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::NotRun},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail,Flow::SetupOnly);
+    ASSERT_TRUE(summary.contains("error"));
+    EXPECT_NE(summary.at("error").get<std::string>().find("SETUP"),std::string::npos);
+}
+TEST(Draft23RunLive, NativeQuicScoresMatchingAuthorityAndPath) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(config(app::TransportKind::NativeQuic));
+    ASSERT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    ASSERT_TRUE(client);
+    // The listener binds a loopback address; derive the same authority the runner advertised.
+    const auto authority=std::string(started.endpoint.address.find(':')!=std::string::npos?"[":"")+started.endpoint.address+
+        (started.endpoint.address.find(':')!=std::string::npos?"]":"")+":"+std::to_string(started.endpoint.port);
+    Bytes setup;
+    for (const unsigned v:{0xafu,0u,static_cast<unsigned>(8+authority.size()),1u,4u,static_cast<unsigned>('/'),static_cast<unsigned>('m'),
+                           static_cast<unsigned>('o'),static_cast<unsigned>('q'),4u,static_cast<unsigned>(authority.size())})
+        setup.push_back(static_cast<std::byte>(v));
+    for (const char c:authority) setup.push_back(static_cast<std::byte>(c));
+    bool sent=false;
+    ASSERT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,setup,false));
+            EXPECT_TRUE(client->send_stream(0,publish_message(),false));
+            EXPECT_TRUE(client->send_stream(6,media_objects(2),true)); sent=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    EXPECT_EQ(advertised_authority(run),authority);
+    EXPECT_EQ(smoke(run).at("status"),"PASS")<<smoke(run).dump();
+    expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Pass},{kPath,requirements::OutcomeState::Pass},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Incomplete);
+}
+// A stand-in for a publisher that reacts to a probe: it sends SETUP, waits for the runner's injection, then closes the
+// connection with the given application code (or leaves it open when `close_code` is empty).
+requirements::OutcomeState run_probe(const std::string& scenario, std::optional<std::uint64_t> close_code,
+                                     storage::RunRecord* record=nullptr) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(probe_config(scenario));
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    EXPECT_TRUE(client);
+    bool sent=false;
+    std::optional<std::chrono::steady_clock::time_point> sent_at;
+    bool closed=false;
+    EXPECT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false)); sent=true; sent_at=std::chrono::steady_clock::now();
+        }
+        if (sent && !closed && close_code && std::chrono::steady_clock::now()-*sent_at>150ms) {
+            (void)client->close(*close_code,{}); closed=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    if (record) *record=run;
+    const auto rows=catalog(23);
+    for (const auto& row:rows->requirements)
+        if (row.scenarios.size()==1 && row.scenarios.front()==scenario)
+            for (const auto& outcome:run.outcomes) if (outcome.requirement_id==row.id) return outcome.state;
+    ADD_FAILURE()<<"no row is bound to "<<scenario;
+    return requirements::OutcomeState::NotRun;
+}
+// A stand-in publisher for the reply probes: after SETUP it answers on the runner's probe stream (the first
+// server-initiated bidirectional stream, id 1) with the given bytes and keeps the session open.
+requirements::OutcomeState run_reply_probe(const std::string& scenario, const Bytes& reply,
+                                           const std::string& row, storage::RunRecord* record=nullptr) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(probe_config(scenario));
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    EXPECT_TRUE(client);
+    bool sent=false, replied=false;
+    std::optional<std::chrono::steady_clock::time_point> sent_at;
+    EXPECT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false)); sent=true; sent_at=std::chrono::steady_clock::now();
+        }
+        if (sent && !replied && !reply.empty() && std::chrono::steady_clock::now()-*sent_at>150ms) {
+            (void)client->send_stream(1,reply,false); replied=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    if (record) *record=run;
+    for (const auto& outcome:run.outcomes) if (outcome.requirement_id==row) return outcome.state;
+    ADD_FAILURE()<<"missing outcome for "<<row;
+    return requirements::OutcomeState::NotRun;
+}
+TEST(Draft23RunLive, ReplyProbePassesOnADoesNotExistRequestError) {
+    storage::RunRecord run;
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-reserved-namespace",b({5,3,0x10,0,0}),"D23-2-4-3-MUST-034",&run),requirements::OutcomeState::Pass);
+    for (const auto& outcome:run.outcomes) {
+        if (outcome.requirement_id=="D23-9-4-2-MUST-NOT-311") EXPECT_EQ(outcome.state,requirements::OutcomeState::Pass);
+        if (outcome.requirement_id=="D23-9-4-2-1-MUST-313") EXPECT_EQ(outcome.state,requirements::OutcomeState::NotApplicable);
+        if (outcome.requirement_id=="D23-6-5-MUST-160") EXPECT_EQ(outcome.state,requirements::OutcomeState::NotRun);
+    }
+}
+TEST(Draft23RunLive, ReplyProbeFailsWhenTheRequestIsAccepted) {
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-session-namespace",b({4,2,7,0}),"D23-6-5-MUST-160"),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ReplyProbeFailsOnTheWrongErrorCodeAndWhenSilent) {
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-session-namespace",b({5,3,0x11,0,0}),"D23-6-5-MUST-160"),requirements::OutcomeState::Fail);
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-reserved-namespace",{},"D23-2-4-3-MUST-034"),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ProbePassesWhenThePublisherClosesWithTheExpectedCode) {
+    storage::RunRecord run;
+    EXPECT_EQ(run_probe("d23-probe-unknown-control-message",0x303,&run),requirements::OutcomeState::Pass);
+    // A probe run judges its own row and nothing else; the publisher's other behavior is the smoke scenarios' business.
+    expect_staged(run,{{"D23-9-MUST-257",requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete,Flow::Probe);
+    bool recorded=false;
+    for (const auto& event:run.events) if (event.kind=="draft23_probe") {
+        const auto detail=nlohmann::json::parse(event.detail);
+        EXPECT_EQ(detail.at("scenario"),"d23-probe-unknown-control-message");
+        EXPECT_TRUE(detail.at("injected"));
+        EXPECT_EQ(detail.at("close").at("code"),0x303);
+        EXPECT_TRUE(detail.at("close").at("application"));
+        recorded=true;
+    }
+    EXPECT_TRUE(recorded);
+}
+TEST(Draft23RunLive, ProbeFailsOnTheWrongCloseCode) {
+    EXPECT_EQ(run_probe("d23-probe-length-mismatch",0x303),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ProbeFailsWhenThePublisherNeverCloses) {
+    EXPECT_EQ(run_probe("d23-probe-unknown-uni-stream",std::nullopt),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ServerOptionProbeIsJudgedFromTheRunnersOwnSetup) {
+    EXPECT_EQ(run_probe("d23-probe-server-authority",0x19),requirements::OutcomeState::Pass);
+    EXPECT_EQ(run_probe("d23-probe-server-path",0x8),requirements::OutcomeState::Pass);
+}
+} // namespace
+} // namespace moq::interop

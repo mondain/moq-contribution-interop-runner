@@ -5,7 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 adapter="$root_dir/adapters/moqxr/run.sh"
 capture_source="$root_dir/tests/support/capture_publisher.sh"
 test_dir=$(mktemp -d /tmp/moqxr-adapter-contract.XXXXXX)
-trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft23.err" "$test_dir/moq5.err" "$test_dir/lite.err"; rmdir -- "$test_dir"' EXIT
+trap 'rm -f -- "$test_dir/request.next" "$test_dir/request.json" "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem" "$test_dir/publisher binary" "$test_dir/draft24.err" "$test_dir/moq5.err" "$test_dir/lite.err"; rmdir -- "$test_dir"' EXIT
 touch "$test_dir/fixture with spaces.mp4" "$test_dir/ca cert.pem"
 capture="$test_dir/publisher binary"
 ln -s "$capture_source" "$capture"
@@ -141,15 +141,94 @@ for transport in native_quic webtransport; do
         MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
     [[ "$output" == *"<--draft>"$'\n'"<22>"$'\n'"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
 done
-# A draft the adapter does not list is refused (exit 64) before the publisher starts.
+# Draft 23 uses only the smoke engine, without draft-21 scenario normalization.
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke d23-publish-smoke \
+    d23-probe-unknown-control-message \
+    d23-probe-bad-first-bidi-message \
+    d23-probe-length-mismatch \
+    d23-probe-oversize-control-message \
+    d23-probe-server-authority \
+    d23-probe-server-path \
+    d23-probe-unknown-uni-stream \
+    d23-probe-subscribe-reserved-namespace \
+    d23-probe-subscribe-session-namespace \
+    d23-probe-empty-track-name \
+    d23-probe-control-stream-closed \
+    d23-probe-wrong-request-id-parity \
+    d23-probe-duplicate-request-id \
+    d23-probe-setup-delta-overflow \
+    d23-probe-setup-malformed-value \
+    d23-probe-reason-phrase-too-long \
+    d23-probe-namespace-empty-field \
+    d23-probe-namespace-too-many-fields \
+    d23-probe-namespace-too-long \
+    d23-probe-unknown-setup-option \
+    d23-probe-duplicate-unknown-setup-option \
+    d23-probe-request-ok-with-properties \
+    d23-probe-unknown-error-detail \
+    d23-probe-redirect-without-detail \
+    d23-probe-redirect-track-name-in-namespace-request \
+    d23-probe-unknown-request-error-code \
+    d23-probe-publish-state-notify-on-announce \
+    d23-probe-publish-state-notify-to-publisher \
+    d23-probe-unknown-message-parameter \
+    d23-probe-parameter-out-of-scope \
+    d23-probe-group-order-out-of-range \
+    d23-probe-paused-out-of-range \
+    d23-probe-include-properties-out-of-range \
+    d23-probe-subgroup-header-reserved-mode \
+    d23-probe-datagram-unknown-type \
+    d23-probe-datagram-reserved-bit \
+    d23-probe-datagram-status-end-of-group \
+    d23-probe-datagram-properties-length-zero \
+    d23-probe-filter-ranges-over-limit \
+    d23-probe-location-filter-unknown-type \
+    d23-probe-location-filter-overflow \
+    d23-probe-fill-parameters-invalid \
+    d23-probe-padding-stream \
+    d23-probe-padding-datagram \
+    d23-probe-goaway-twice \
+    d23-probe-goaway-uri-too-long \
+    d23-probe-goaway-on-subscribe-stream \
+    d23-probe-request-update-wrong-direction \
+    d23-probe-second-announce-response \
+    d23-probe-second-publish-response \
+    d23-probe-duplicate-parameter \
+    d23-probe-datagram-status-properties-not-normal; do
+    for transport in native_quic webtransport; do
+        make_request 23 "$transport" 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+        jq --arg scenario "$scenario" '.scenario_id = $scenario' "$test_dir/request.json" >"$test_dir/request.next"
+        mv "$test_dir/request.next" "$test_dir/request.json"
+        output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+            MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
+        [[ "$output" == *"<--draft>"$'\n'"<23>"* ]]
+        case "$scenario" in
+            # The runner reads the publisher's own PUBLISH: moqxr offers its tracks and the runner answers them.
+            d23-publish-smoke|d23-probe-unknown-error-detail|d23-probe-unknown-request-error-code|d23-probe-second-publish-response)
+                [[ "$output" == *"<--forward>"$'\n'"<1>"$'\n'"<--timeout>"$'\n'"<9>"* ]]
+                [[ "$output" != *"<--paced>"* ]] ;;
+            *) [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<9>"* ]] ;;
+        esac
+        [[ "$output" != *"<--publish-catalog>"* ]]
+    done
+done
 make_request 23 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
+jq '.scenario_id = "d22-publisher-request-stream-placement"' "$test_dir/request.json" >"$test_dir/request.next"
+mv "$test_dir/request.next" "$test_dir/request.json"
+if MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>&1; then
+    printf 'unsupported draft 23 scenario unexpectedly accepted\n' >&2
+    exit 1
+fi
+# A draft the adapter does not list is refused (exit 64) before the publisher starts.
+make_request 24 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"
 set +e
 MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
-    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft23.err"
+    MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter" >/dev/null 2>"$test_dir/draft24.err"
 status=$?
 set -e
-[[ "$status" -eq 64 ]] || { printf 'draft 23 request not refused (status %s)\n' "$status" >&2; exit 1; }
-grep -q 'moqxr adapter: unsupported or malformed request (supported drafts: 18, 21, 22)' "$test_dir/draft23.err"
+[[ "$status" -eq 64 ]] || { printf 'draft 24 request not refused (status %s)\n' "$status" >&2; exit 1; }
+grep -q 'moqxr adapter: unsupported or malformed request (supported drafts: 18, 21, 22, 23)' "$test_dir/draft24.err"
 # The moq5 adapter does not speak draft 22: it refuses with a message that says so (exit 64).
 moq5_adapter="$root_dir/adapters/moq5/run.sh"
 make_request 22 native_quic 6d65646961 766964655f31 "$test_dir/ca cert.pem"

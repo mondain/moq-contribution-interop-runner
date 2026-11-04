@@ -266,3 +266,17 @@ and is `not_run` in a single-scenario run; when a WebTransport client's SETUP ca
 for it (draft 7.3.2, a receiver MUST close) and every other row of that session is `not_run` except 111 and 125. A Fail by
 the absence of a close (rows 107, 126, 131, 179 and 186, whose bindings declare `peer_close`) is counted as observed on the
 completeness page for the moq-lite-06 catalog; a Pass still needs the evidence its binding declares.
+
+## Draft 23 staged audit
+
+`build/moq-interop-audit --draft 23 --staged` verifies the pinned draft text,
+all 532 normative occurrences and staged classifications. The baseline has no
+reviewed evaluator bindings: every requirement retains NOT_RUN. A staged audit
+can succeed as a baseline integrity check but prints STAGED rather than a
+conformance pass. Ordinary `--draft 23` rejects the incomplete catalog.
+
+Publisher smoke status is recorded separately in a `draft23_smoke` event.
+Successful SETUP and media delivery cannot turn an incomplete catalog into a
+passing conformance verdict. The 22-to-23 delta audit records candidate reuse
+only; draft-22 scenarios and outcomes are never automatically treated as
+proof for draft 23.

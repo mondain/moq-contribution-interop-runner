@@ -220,3 +220,18 @@ other credential flags. To use them, supply a Compose override file that sets
 See the "Tests" section of the [README](../README.md) for the test commands, and
 [scoring-and-audit.md](scoring-and-audit.md) for the sanitizer, fuzz and release
 audit scripts.
+
+### Draft 23 startup
+
+When `requirements/draft23.json` exists, startup also loads
+`docs/draft-ietf-moq-transport-23.txt` against the pinned `23` digest and accepts
+its staged catalog with `complete:false`. An absent draft-23 catalog leaves
+that draft unavailable. A present but invalid catalog or mismatched/missing
+source digest is a startup error. The complete draft-18/21/22 catalogs retain
+their existing startup requirements.
+
+Draft-23 runs use one smoke scenario per run. See the
+[publisher guide](publisher-harness-guide.md#draft-23-first-contact) for both
+transport forms. On first open, a version-5 database migrates transactionally
+to schema version 6, preserving its existing runs and child tables while
+allowing draft-23 records.
