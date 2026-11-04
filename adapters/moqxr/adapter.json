@@ -21,6 +21,7 @@
   "draft23_scenarios": [
     "d23-publisher-smoke",
     "d23-direct-subscribe-smoke",
+    "d23-publish-smoke",
     "d23-probe-unknown-control-message",
     "d23-probe-bad-first-bidi-message",
     "d23-probe-length-mismatch",

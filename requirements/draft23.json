@@ -537,12 +537,13 @@
       "testability": "Testable",
       "scenarios": [
         "d23-publisher-smoke",
-        "d23-direct-subscribe-smoke"
+        "d23-direct-subscribe-smoke",
+        "d23-publish-smoke"
       ],
       "evaluators": [
         "d23-track-name-not-empty"
       ],
-      "rationale": "Reviewed against the draft 23 text. Section 2.4.1: a Track Name has at least one byte. Fails when the publisher sent a PUBLISH with an empty Track Name; passes when at least one PUBLISH was seen and none was empty. Evidence: request_observed.",
+      "rationale": "Reviewed against the draft 23 text. Section 2.4.1: a Track Name has at least one byte. Fails when the publisher sent a PUBLISH with an empty Track Name; passes when at least one PUBLISH was seen and none was empty. Evidence: request_observed. The smokes run moqxr --forward 0, which sends no PUBLISH, so they leave this row not_run; d23-publish-smoke runs --forward 1 and accepts every PUBLISH, which is the run that supplies the evidence.",
       "reviewed": true
     },
     {
@@ -987,12 +988,13 @@
       "testability": "Testable",
       "scenarios": [
         "d23-publisher-smoke",
-        "d23-direct-subscribe-smoke"
+        "d23-direct-subscribe-smoke",
+        "d23-publish-smoke"
       ],
       "evaluators": [
         "d23-track-alias-unique"
       ],
-      "rationale": "Reviewed against the draft 23 text. Section 3.1.3: one Track Alias does not refer to two different Tracks in a session. Fails when two PUBLISH messages for different tracks share an alias; passes when at least two tracks were published with distinct aliases; NOT_RUN when fewer than two were seen. Evidence: request_observed.",
+      "rationale": "Reviewed against the draft 23 text. Section 3.1.3: one Track Alias does not refer to two different Tracks in a session. Fails when two PUBLISH messages for different tracks share an alias; passes when at least two tracks were published with distinct aliases; NOT_RUN when fewer than two were seen. Evidence: request_observed. The smokes run moqxr --forward 0, which sends no PUBLISH, so they leave this row not_run; d23-publish-smoke runs --forward 1 and accepts every PUBLISH, which is the run that supplies the evidence.",
       "reviewed": true
     },
     {
@@ -1030,12 +1032,13 @@
       "testability": "Testable",
       "scenarios": [
         "d23-publisher-smoke",
-        "d23-direct-subscribe-smoke"
+        "d23-direct-subscribe-smoke",
+        "d23-publish-smoke"
       ],
       "evaluators": [
         "d23-track-alias-unique"
       ],
-      "rationale": "Reviewed against the draft 23 text. Section 3.1.3: a publisher does not reuse a Track Alias for different Tracks within a session. Judged with the same evidence as the simultaneous-use rule: fails when two PUBLISH messages for different tracks share an alias, passes when at least two tracks had distinct aliases. Evidence: request_observed.",
+      "rationale": "Reviewed against the draft 23 text. Section 3.1.3: a publisher does not reuse a Track Alias for different Tracks within a session. Judged with the same evidence as the simultaneous-use rule: fails when two PUBLISH messages for different tracks share an alias, passes when at least two tracks had distinct aliases. Evidence: request_observed. The smokes run moqxr --forward 0, which sends no PUBLISH, so they leave this row not_run; d23-publish-smoke runs --forward 1 and accepts every PUBLISH, which is the run that supplies the evidence.",
       "reviewed": true
     },
     {

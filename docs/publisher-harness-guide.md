@@ -945,7 +945,10 @@ with `"transport":"webtransport"`.
 
 `d23-publisher-smoke` accepts a matching PUBLISH_NAMESPACE and sends SUBSCRIBE,
 or accepts a PUBLISH-first publisher. `d23-direct-subscribe-smoke` sends SUBSCRIBE
-after SETUP without waiting for a namespace announcement. The publisher must send
+after SETUP without waiting for a namespace announcement. `d23-publish-smoke` is for a
+publisher that offers its tracks with PUBLISH instead of waiting to be subscribed to (moqxr
+`--forward 1`): the runner accepts every PUBLISH in the fixture namespace, sends no SUBSCRIBE and
+judges the fixture track's delivery. The publisher must send
 at least two distinct object locations and nonempty payload data on the selected
 track. The runner has separate connection and delivery deadlines, each bounded
 by `timeout_ms`. It currently receives subgroup streams; datagram delivery,

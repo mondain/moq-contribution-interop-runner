@@ -636,6 +636,26 @@ TEST(Draft23Evaluators, SharedEvaluatorsJudgeTheirSecondRowToo) {
     EXPECT_EQ(run(with_streams({stream(6, 0x30, 7, 0, 0), stream(10, 0x30, 7, 1, 0)})).at("D23-11-3-SHOULD-NOT-443"), OutcomeState::Pass);
 }
 
+TEST(Draft23Evaluators, PublishRowsNeedThePublishScenarioBecauseTheSmokesNeverSeeAPublish) {
+    const auto judged = [](std::string scenario, std::vector<session::Draft23PublishedTrack> tracks) {
+        auto context = with_tracks(std::move(tracks));
+        context.scenario = std::move(scenario);
+        return run(context);
+    };
+    const auto tracks = std::vector{published("media", "catalog", 0), published("media", "soun_2", 2), published("media", "vide_1", 1)};
+    for (const auto* row : {"D23-2-4-1-MUST-028", "D23-3-1-3-MUST-NOT-050", "D23-3-1-3-SHOULD-NOT-052"}) {
+        EXPECT_EQ(judged("d23-publish-smoke", tracks).at(row), OutcomeState::Pass) << row;
+        EXPECT_EQ(judged("d23-publish-smoke", {}).at(row), OutcomeState::NotRun) << row;
+    }
+    EXPECT_EQ(judged("d23-publish-smoke", {published("media", "a", 1), published("media", "b", 1)}).at("D23-3-1-3-MUST-NOT-050"),
+              OutcomeState::Fail);
+    // A row that is not bound to the PUBLISH scenario stays unjudged there.
+    EXPECT_NE(judged("d23-publish-smoke", tracks).at("D23-9-1-MUST-NOT-265"), OutcomeState::Pass);
+    std::size_t bound = 0;
+    for (const auto& binding : requirements::draft23_executable_bindings()) if (binding.scenario_id == "d23-publish-smoke") ++bound;
+    EXPECT_EQ(bound, 3u);
+}
+
 TEST(Draft23Evaluators, ARowIsOnlyJudgedInTheScenariosItIsBoundTo) {
     constexpr auto kSmokeRow = "D23-9-1-MUST-NOT-265";  // bound to the two smoke scenarios
     auto context = native({option(7, text("a")), option(7, text("b"))});

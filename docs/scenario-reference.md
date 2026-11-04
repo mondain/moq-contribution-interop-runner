@@ -1032,11 +1032,14 @@ In every row the transcript must be judgeable: the publisher connected, the sess
 |---|---|---|
 | `d23-publisher-smoke` | PUBLISH_NAMESPACE for the fixture prefix, or PUBLISH for the fixture track | SETUP, established subscription, two distinct normal object locations and nonempty payload |
 | `d23-direct-subscribe-smoke` | Send SUBSCRIBE immediately after peer SETUP | Same selected-track evidence |
+| `d23-publish-smoke` | The publisher offers its tracks with PUBLISH (moqxr `--forward 1`); the runner accepts every PUBLISH in the fixture namespace and sends no SUBSCRIBE | Same selected-track evidence on the fixture track, plus the PUBLISH messages themselves. It judges `D23-2-4-1-MUST-028`, `D23-3-1-3-MUST-NOT-050` and `D23-3-1-3-SHOULD-NOT-052`, which the other smokes cannot because a publisher that waits for a SUBSCRIBE sends no PUBLISH |
 
 These scenarios use the draft-23 session engine on native QUIC and
 WebTransport. They are unscored against the staged draft-23 catalog. Each run
 selects one scenario and requires a track fixture; unrelated PUBLISH requests
-receive UNINTERESTED and their objects cannot contribute to progress. They
+receive UNINTERESTED and their objects cannot contribute to progress. The exception is
+`d23-publish-smoke`, which accepts PUBLISH for any track in the fixture namespace (a publisher
+that pushes its tracks blocks on each one) and counts only the fixture track's objects. They
 support subgroup delivery and finite PUBLISH_DONE. Unsupported known operations
 are reported as harness limitations. See
 [publisher setup](publisher-harness-guide.md#draft-23-first-contact).

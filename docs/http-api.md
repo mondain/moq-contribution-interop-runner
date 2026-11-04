@@ -415,7 +415,7 @@ Errors have the form `{"error": {"status", "code", "message"}, "schema_version":
 With its staged catalog loaded, draft integer `23` is listed in
 `/api/v1/drafts`, `/healthz` and the requirements endpoint. Two executable
 profiles are available for both transports and observed/driven modes:
-`d23-publisher-smoke` and `d23-direct-subscribe-smoke`. Select exactly one,
+`d23-publisher-smoke`, `d23-direct-subscribe-smoke` and `d23-publish-smoke`. Select exactly one,
 provide a nonempty track name and namespace (1–32 nonempty fields, at most
 4096 bytes including the track name), and set `timeout_ms` to 100–3600000.
 Invalid selections return `400 invalid_run_config`. A server without this

@@ -146,8 +146,14 @@ the open findings in [moqxr-punch-list.md](../../docs/moqxr-punch-list.md).
 
 Use a native-backend moqxr build whose `--help` lists `--draft ...|23`; rebuild
 local `main` if the binary is older than its source. The adapter accepts exactly
-`d23-publisher-smoke` and `d23-direct-subscribe-smoke` for draft 23, using
-`--forward 0 --paced` so the runner can subscribe and observe subgroup objects.
+`d23-publisher-smoke`, `d23-direct-subscribe-smoke`, `d23-publish-smoke` and the `d23-probe-*`
+ids for draft 23. Most run `--forward 0 --paced` so the runner can subscribe and observe subgroup objects.
+Four run `--forward 1` instead, because they read the publisher's own PUBLISH: `d23-publish-smoke` and the probes
+`d23-probe-unknown-error-detail`, `d23-probe-unknown-request-error-code` and `d23-probe-second-publish-response`.
+At `--forward 1` moqxr offers `catalog`, `soun_2` and `vide_1` with PUBLISH, one after another, and blocks on each
+answer. The runner accepts every PUBLISH in the fixture namespace and does not SUBSCRIBE; a refused PUBLISH ends
+moqxr's session. The unknown-detail and unknown-code probes refuse the first track (`catalog`) with their own bytes
+as the probe, so moqxr's close with code 0 that follows is not a verdict.
 The fixture remains namespace `media`, track `vide_1` (`766964655f31`); use that
 track in API requests rather than the generic publisher guide's `vide` example.
 

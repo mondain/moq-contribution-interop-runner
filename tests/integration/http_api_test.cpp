@@ -402,11 +402,12 @@ TEST_F(HttpApiDraft23Test, ListsDraft23AsStagedWithItsOwnProfilesAndSource) {
         if (profile.at("draft") != 23) continue;
         EXPECT_TRUE(profile.at("scenario") == "d23-publisher-smoke" ||
                     profile.at("scenario") == "d23-direct-subscribe-smoke" ||
+                    profile.at("scenario") == "d23-publish-smoke" ||
                     profile.at("scenario").get<std::string>().starts_with("d23-probe-"));
         EXPECT_FALSE(profile.at("configured"));
         ++profiles;
     }
-    EXPECT_EQ(profiles, 216u);  // 54 scenarios (two smoke, 52 probes) on two transports in two modes
+    EXPECT_EQ(profiles, 220u);  // 55 scenarios (three smoke, 52 probes) on two transports in two modes
     const auto page = get_json("/api/v1/requirements?draft=23&limit=2");
     EXPECT_EQ(page.at("draft"), 23);
     EXPECT_EQ(page.at("pagination").at("total"), 532);
@@ -419,7 +420,7 @@ TEST_F(HttpApiDraft23Test, AcceptsOnlyItsOwnSmokeScenariosAndRequiresAListener) 
                     {"scenarios", Json::array({id})}, {"timeout_ms", 1000},
                     {"track", {{"namespace_hex", Json::array({"74657374"})}, {"name_hex", "766964656f"}}}};
     };
-    for (const auto* id : {"d23-publisher-smoke", "d23-direct-subscribe-smoke"}) {
+    for (const auto* id : {"d23-publisher-smoke", "d23-direct-subscribe-smoke", "d23-publish-smoke"}) {
         const auto response = client_->Post("/api/v1/runs", request(id).dump(), "application/json");
         ASSERT_TRUE(response);
         EXPECT_EQ(response->status, 503) << response->body;

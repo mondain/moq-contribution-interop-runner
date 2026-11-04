@@ -16,6 +16,8 @@ namespace moq::interop::requirements {
 namespace {
 
 constexpr std::string_view kScenarios[] = {"d23-publisher-smoke", "d23-direct-subscribe-smoke"};
+// moqxr --forward 1: the publisher offers its tracks with PUBLISH and the harness accepts them all.
+constexpr std::string_view kPublishScenario = "d23-publish-smoke";
 
 constexpr std::uint64_t kPathOption = 1;
 constexpr std::uint64_t kAuthorityOption = 5;
@@ -74,6 +76,7 @@ constexpr Row kImplementationSent{"D23-9-1-5-SHOULD-281", "d23-implementation-op
 constexpr Row kImplementationText{"D23-9-1-5-SHOULD-280", "d23-implementation-option-text", "peer_setup_received"};
 constexpr Row kAliasReuse{"D23-3-1-3-SHOULD-NOT-052", "d23-track-alias-unique", "request_observed"};
 constexpr Row kStreamSpread{"D23-11-3-SHOULD-NOT-443", "d23-subgroup-single-stream", "peer_stream_classified"};
+constexpr Row kPublishRows[] = {kTrackName, kAliasUnique, kAliasReuse};
 constexpr Row kRows[] = {kFinAfterDone, kImplementationSent, kImplementationText, kAliasReuse, kStreamSpread, kTrackName, kNamespaceField, kReservedPublish, kReservedAnyPurpose, kSessionNamespace, kAliasUnique,
                          kDatagram, kFirstBidi, kControlOpen, kNoOverflow210, kNoOverflow351, kNoDuplicateParameter,
                          kAnsweredOk, kZeroCount, kPadding, kMultiplicity, kMaxSize, kAuthority, kPath, kQuery, kBitFour, kOneStream, kLength, kRequestId,
@@ -534,6 +537,10 @@ std::vector<ExecutableBinding> draft23_executable_bindings() {
             if (probe.expect == session::Draft23ProbeExpect::RequestError)
                 bindings.push_back({23, std::string(row.requirement), std::string(probe.scenario_id), std::string(row.evaluator),
                                     evidence_kinds(row.evidence)});
+    // The rows that need the publisher's own PUBLISH are judged in the run that accepts it, as well as in the smokes.
+    for (const auto& row : kPublishRows)
+        bindings.push_back({23, std::string(row.requirement), std::string(kPublishScenario), std::string(row.evaluator),
+                            evidence_kinds(row.evidence)});
     for (const auto& row : kRows)
         for (const auto scenario : kScenarios)
             bindings.push_back({23, std::string(row.requirement), std::string(scenario), std::string(row.evaluator),

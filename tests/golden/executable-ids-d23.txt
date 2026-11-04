@@ -51,4 +51,5 @@ d23-probe-unknown-request-error-code
 d23-probe-unknown-setup-option
 d23-probe-unknown-uni-stream
 d23-probe-wrong-request-id-parity
+d23-publish-smoke
 d23-publisher-smoke

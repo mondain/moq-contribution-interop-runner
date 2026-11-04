@@ -34,7 +34,7 @@ public:
         Kind kind{Kind::Unknown};
         std::vector<std::byte> bytes;
         bool fin{false}, first{true}, local{false}, header{false}, properties{false}, done{false};
-        bool media_request{false}, rejected_data_stopped{false};
+        bool media_request{false}, rejected_data_stopped{false}, accepted_publish{false};
         std::uint64_t alias{0}, group{0}, previous{0};
         bool has_previous{false};
         std::optional<std::size_t> trace;
@@ -55,6 +55,7 @@ public:
     std::optional<std::uint64_t> alias_;
     std::set<std::uint64_t> request_ids_;
     std::set<std::uint64_t> rejected_aliases_;
+    std::set<std::uint64_t> accepted_aliases_;  // PUBLISH accepted for a track other than the fixture track
     std::set<std::pair<std::uint64_t,std::uint64_t>> locations_;
     std::uint64_t peer_message_limit_{65535};
     std::size_t queued_{0};
@@ -323,7 +324,7 @@ public:
                     if (!value.track_namespace.empty()) stats_.announced_namespaces.push_back(to_text(value.track_namespace.front()));
                     if (!register_request(value.request_id)) return;
                     if (!answer_announce(id)) send(id,d23::RequestOkMessage{});
-                    if (namespace_matches(value.track_namespace)) { stats_.namespace_announced=true; subscribe(); }
+                    if (namespace_matches(value.track_namespace)) { stats_.namespace_announced=true; if (!config_.publisher_pushes) subscribe(); }
                 } else if constexpr (std::is_same_v<T,d23::PublishMessage>) {
                     if (stream.local || !stream.first) { fail("PUBLISH on wrong stream",0x303); return; }
                     traced_request(id,stream).request_id=value.request_id;
@@ -331,6 +332,16 @@ public:
                         to_text(value.track_name),value.track_alias});
                     if (!register_request(value.request_id)) return;
                     if (value.track_namespace!=config_.track_namespace || value.track_name!=config_.track_name) {
+                        // A publisher that pushes its tracks blocks on each PUBLISH, so the harness accepts the others in the
+                        // fixture namespace (the catalog, the other media tracks). A PUBLISH-reply probe keeps the first of
+                        // them as its carrier, which it answers with its own bytes.
+                        const bool carrier=config_.probe && !stats_.probe->injected && config_.probe->channel==Draft23ProbeChannel::PublishReply;
+                        if (config_.publisher_pushes && !carrier && value.track_namespace==config_.track_namespace) {
+                            accepted_aliases_.insert(value.track_alias);
+                            stream.accepted_publish=true;
+                            send(id,d23::RequestOkMessage{});
+                            return;
+                        }
                         rejected_aliases_.insert(value.track_alias);
                         if (!answer_declined_publish(id)) send(id,d23::RequestErrorMessage{0x20,0,{},{}},true);
                         return;
@@ -354,7 +365,7 @@ public:
                 } else if constexpr (std::is_same_v<T,d23::RequestErrorMessage>) {
                     fail("publisher rejected request: code="+std::to_string(value.error_code));
                 } else if constexpr (std::is_same_v<T,d23::PublishDoneMessage>) {
-                    if (stream.first || stream.done || !stream.media_request) {
+                    if (stream.first || stream.done || !(stream.media_request || stream.accepted_publish)) {
                         fail("unexpected PUBLISH_DONE",0x303); return;
                     }
                     // FIN/data streams may arrive after this request-stream message.
@@ -445,6 +456,7 @@ public:
             }
             stream.bytes.clear(); return;
         }
+        if (accepted_aliases_.contains(stream.alias)) { stream.bytes.clear(); return; }  // accepted, but not the media under test
         if (!alias_) return; // Response and data streams can arrive in either order.
         if (stream.alias!=*alias_) { fail("harness smoke received data for an unknown Track Alias"); return; }
         while (!stream.bytes.empty() && !error_) {

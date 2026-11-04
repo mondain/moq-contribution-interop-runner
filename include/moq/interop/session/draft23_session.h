@@ -16,6 +16,9 @@ struct Draft23SessionConfig {
     std::vector<std::byte> track_name;
     bool webtransport{false};
     bool subscribe_immediately{false};
+    // The publisher offers its tracks with PUBLISH (moqxr --forward 1) instead of waiting for a SUBSCRIBE. The harness then
+    // accepts every PUBLISH in the fixture namespace, not only the fixture track, and does not subscribe on its own.
+    bool publisher_pushes{false};
     const Draft23Probe* probe{nullptr};  // a negative probe run; the session then injects its malformed input
     std::size_t maximum_streams{128};
     std::size_t maximum_buffered_bytes{1u << 20};

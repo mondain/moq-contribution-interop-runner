@@ -24,7 +24,7 @@ done
 [[ -n "$log_root" && -n "$port" ]] || { printf 'stub runner: missing --port or --driver-log-root\n' >&2; exit 2; }
 mkdir -p "$log_root/run-$port"
 printf '{}\n' >"$log_root/run-$port/request.json"
-for scenario in d23-publisher-smoke d23-direct-subscribe-smoke \
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke d23-publish-smoke \
     d23-probe-unknown-control-message \
     d23-probe-bad-first-bidi-message \
     d23-probe-length-mismatch \

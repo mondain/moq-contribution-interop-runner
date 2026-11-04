@@ -39,7 +39,7 @@ if [[ "$draft" == 22 ]]; then scenario=d22-publisher-request-stream-placement; f
 if [[ "$draft" == 23 ]]; then
     scenario=${MOQ_INTEROP_TEST_SCENARIO:-d23-publisher-smoke}
     case "$scenario" in
-        d23-publisher-smoke|d23-direct-subscribe-smoke|d23-probe-*) ;;
+        d23-publisher-smoke|d23-direct-subscribe-smoke|d23-publish-smoke|d23-probe-*) ;;
         *) printf 'unsupported draft 23 smoke scenario: %s\n' "$scenario" >&2; exit 2 ;;
     esac
 fi

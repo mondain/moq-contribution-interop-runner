@@ -142,7 +142,7 @@ for transport in native_quic webtransport; do
     [[ "$output" == *"<--draft>"$'\n'"<22>"$'\n'"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
 done
 # Draft 23 uses only the smoke engine, without draft-21 scenario normalization.
-for scenario in d23-publisher-smoke d23-direct-subscribe-smoke \
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke d23-publish-smoke \
     d23-probe-unknown-control-message \
     d23-probe-bad-first-bidi-message \
     d23-probe-length-mismatch \
@@ -202,7 +202,13 @@ for scenario in d23-publisher-smoke d23-direct-subscribe-smoke \
         output=$(MOQXR_BIN="$capture" MOQ_INTEROP_DRIVER_CONTRACT_VERSION=1 \
             MOQ_INTEROP_DRIVER_REQUEST_FILE="$test_dir/request.json" "$adapter")
         [[ "$output" == *"<--draft>"$'\n'"<23>"* ]]
-        [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<9>"* ]]
+        case "$scenario" in
+            # The runner reads the publisher's own PUBLISH: moqxr offers its tracks and the runner answers them.
+            d23-publish-smoke|d23-probe-unknown-error-detail|d23-probe-unknown-request-error-code|d23-probe-second-publish-response)
+                [[ "$output" == *"<--forward>"$'\n'"<1>"$'\n'"<--timeout>"$'\n'"<9>"* ]]
+                [[ "$output" != *"<--paced>"* ]] ;;
+            *) [[ "$output" == *"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<9>"* ]] ;;
+        esac
         [[ "$output" != *"<--publish-catalog>"* ]]
     done
 done

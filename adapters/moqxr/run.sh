@@ -22,7 +22,7 @@ fi
 jq -e '
     .schema_version == 1 and
     (.draft == 18 or .draft == 21 or .draft == 22 or .draft == 23) and
-    (.draft != 23 or .scenario_id == "d23-publisher-smoke" or .scenario_id == "d23-direct-subscribe-smoke" or
+    (.draft != 23 or .scenario_id == "d23-publisher-smoke" or .scenario_id == "d23-direct-subscribe-smoke" or .scenario_id == "d23-publish-smoke" or
      (.scenario_id | test("^d23-probe-[a-z0-9-]+$"))) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
@@ -271,11 +271,20 @@ case "$own22" in
               --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
         ;;
 esac
-# Both draft-23 smoke scenarios receive subgroup streams, and the negative probes only need the publisher to connect
-# and announce. Wait for the runner's SUBSCRIBE and pace objects; outlive its connection and delivery windows.
+# Most draft-23 scenarios wait for the runner: the smokes subscribe and receive subgroup streams, and the negative probes
+# only need the publisher to connect and announce. That is --forward 0 --paced; outlive the runner's connection and
+# delivery windows. A scenario that reads the publisher's own PUBLISH runs --forward 1 instead: moqxr then offers
+# catalog, vide_1 and soun_2 with PUBLISH, one after another, and blocks on each answer, so the runner accepts every
+# track in the namespace (d23-publish-smoke) or takes the first for its carrier (the three PUBLISH-reply probes).
 if [[ "$draft" == 23 ]]; then
+    d23_mode=(--forward 0 --paced)
+    case "$scenario_id" in
+        d23-publish-smoke|d23-probe-unknown-error-detail|d23-probe-unknown-request-error-code|\
+        d23-probe-second-publish-response)
+            d23_mode=(--forward 1) ;;
+    esac
     args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
-          --namespace media --draft 23 --forward 0 --paced
+          --namespace media --draft 23 "${d23_mode[@]}"
           --timeout "$((2 * timeout_seconds + 3))" --ca "$ca_cert")
 fi
 exec "$publisher_bin" "${args[@]}"

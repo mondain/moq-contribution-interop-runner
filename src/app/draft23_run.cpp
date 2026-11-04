@@ -54,6 +54,11 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         settings.probe = session::find_draft23_probe(config.scenario_ids.front());
         // A probe that talks on the runner's SUBSCRIBE stream needs the runner to subscribe first.
         if (settings.probe && settings.probe->channel == session::Draft23ProbeChannel::SubscribeExtra) settings.subscribe_immediately = true;
+        // A publisher that offers its tracks with PUBLISH needs them accepted; it does not wait for a SUBSCRIBE. The PUBLISH
+        // smoke does so, and so do the probes that answer or extend one of the publisher's PUBLISH requests.
+        settings.publisher_pushes = config.scenario_ids.front() == "d23-publish-smoke" ||
+            (settings.probe && (settings.probe->channel == session::Draft23ProbeChannel::PublishReply ||
+                                settings.probe->channel == session::Draft23ProbeChannel::PublishExtra));
         const session::Draft23Probe* settings_probe = settings.probe;
         session::Draft23Session session(*listener, std::move(settings));
         const auto endpoint = std::string(config.transport == TransportKind::WebTransport ? "https://" : "moqt://") + authority + "/moq";

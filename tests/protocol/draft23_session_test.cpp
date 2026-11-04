@@ -244,6 +244,60 @@ TEST(Draft23Session, UnrelatedPublishIsRejectedWithFinAndItsObjectsDoNotCount) {
     EXPECT_EQ(session.stats().objects,2u);
     EXPECT_TRUE(session.stats().progressing());
 }
+// moqxr --forward 1 offers catalog, soun_2 and vide_1 with PUBLISH and blocks on each answer.
+TEST(Draft23Session, APublisherThatPushesHasEveryTrackInTheNamespaceAcceptedAndIsNotSubscribedTo) {
+    Transport transport;
+    auto pushed=config(); pushed.publisher_pushes=true;
+    session::Draft23Session session(transport,pushed);
+    connect(session); setup(session); announce(session);
+    for (const auto& write:transport.writes) EXPECT_NE(write.id,1u) << "the harness must not SUBSCRIBE";
+    EXPECT_TRUE(session.stats().namespace_announced);
+    // catalog: accepted with REQUEST_OK and not a decline; its data is drained and never counted.
+    session.on_event(transport::StreamDataEvent{4,bytes({0x1d,18,2,1,5,'m','e','d','i','a',7,'c','a','t','a','l','o','g',8,0}),false});
+    EXPECT_EQ(transport.writes.back().id,4u);
+    EXPECT_EQ(transport.writes.back().data,bytes({7,1,0}));
+    EXPECT_FALSE(transport.writes.back().fin);
+    session.on_event(transport::StreamDataEvent{6,bytes({0x30,8,0,0,1,'a'}),true});
+    EXPECT_EQ(session.stats().objects,0u);
+    // the fixture track is the media under test.
+    session.on_event(transport::StreamDataEvent{8,bytes({0x1d,15,4,1,5,'m','e','d','i','a',4,'v','i','d','e',7,0}),false});
+    session.on_event(transport::StreamDataEvent{10,bytes({0x30,7,0,0,1,'a',0,1,'b'}),true});
+    // PUBLISH_DONE is legal on the accepted catalog request too.
+    session.on_event(transport::StreamDataEvent{4,bytes({0xb,3,0,0,0}),true});
+    EXPECT_FALSE(session.error());
+    EXPECT_TRUE(session.stats().subscription_established);
+    EXPECT_EQ(session.stats().objects,2u);
+    EXPECT_TRUE(session.stats().progressing());
+    ASSERT_EQ(session.stats().published_tracks.size(),2u);
+    EXPECT_EQ(session.stats().published_tracks[0].name,"catalog");
+    EXPECT_EQ(session.stats().published_tracks[1].name,"vide");
+}
+TEST(Draft23Session, APublisherThatPushesStillHasAnotherNamespaceDeclined) {
+    Transport transport;
+    auto pushed=config(); pushed.publisher_pushes=true;
+    session::Draft23Session session(transport,pushed);
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{0,bytes({0x1d,15,0,1,5,'o','t','h','e','r',4,'s','o','u','n',8,0}),false});
+    EXPECT_EQ(transport.writes.back().data,bytes({5,3,0x20,0,0}));
+    EXPECT_TRUE(transport.writes.back().fin);
+}
+TEST(Draft23Session, APublishReplyProbeTakesTheFirstOtherTrackAsItsCarrierAndAcceptsTheRest) {
+    Transport transport;
+    auto probe=config(); probe.publisher_pushes=true;
+    probe.probe=session::find_draft23_probe("d23-probe-unknown-request-error-code");
+    ASSERT_NE(probe.probe,nullptr);
+    session::Draft23Session session(transport,probe);
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{0,bytes({0x1d,18,2,1,5,'m','e','d','i','a',7,'c','a','t','a','l','o','g',8,0}),false});
+    ASSERT_TRUE(session.stats().probe.has_value());
+    EXPECT_TRUE(session.stats().probe->injected);
+    EXPECT_EQ(transport.writes.back().id,0u);
+    EXPECT_EQ(transport.writes.back().data.front(),std::byte{5});  // REQUEST_ERROR carrying the probe's unknown code
+    EXPECT_TRUE(transport.writes.back().fin);
+    session.on_event(transport::StreamDataEvent{4,bytes({0x1d,17,4,1,5,'m','e','d','i','a',6,'s','o','u','n','_','2',9,0}),false});
+    EXPECT_EQ(transport.writes.back().id,4u);
+    EXPECT_EQ(transport.writes.back().data,bytes({7,1,0}));
+}
 TEST(Draft23Session, KnownUnsupportedRequestReportsHarnessLimitWithoutClosingPeer) {
     Transport transport;
     session::Draft23Session session(transport,config());
