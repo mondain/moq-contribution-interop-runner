@@ -27,6 +27,7 @@ public:
         if (config_.track_name.empty() || config_.track_namespace.size() > 32 ||
             !config_.maximum_streams || !config_.maximum_stream_bytes || !config_.maximum_buffered_bytes)
             throw std::invalid_argument("draft-23 smoke requires a track and positive buffer limits");
+        if (config_.probe) stats_.probe = Draft23ProbeResult{};
     }
     enum class Kind { Unknown, Control, Request, Subgroup, Padding };
     struct Stream {
@@ -47,7 +48,7 @@ public:
     std::optional<std::uint64_t> application_error_;
     std::map<StreamId,Stream> streams_;
     std::deque<Pending> pending_;
-    std::optional<StreamId> control_, subscription_;
+    std::optional<StreamId> control_, subscription_, probe_stream_;
     std::optional<std::uint64_t> alias_;
     std::set<std::uint64_t> request_ids_;
     std::set<std::uint64_t> rejected_aliases_;
@@ -126,9 +127,30 @@ public:
         d23::SetupMessage setup;
         setup.options.push_back({7,std::vector<std::byte>{std::byte{'m'},std::byte{'o'},std::byte{'q'},
             std::byte{'-'},std::byte{'i'},std::byte{'n'},std::byte{'t'},std::byte{'e'},std::byte{'r'},std::byte{'o'},std::byte{'p'}}});
+        if (config_.probe) {
+            draft23_probe_setup_options(*config_.probe,setup.options);
+            std::stable_sort(setup.options.begin(),setup.options.end(),[](const auto& a,const auto& b) { return a.type<b.type; });
+        }
         wire::ByteWriter writer(65553);
         if (!d23::encode_setup(setup,writer)) { fail("harness could not encode SETUP"); return; }
         queue(opened.stream_id,writer.bytes());
+        // A server-only option probe is the SETUP itself.
+        if (config_.probe && config_.probe->channel==Draft23ProbeChannel::SetupOption) stats_.probe->injected=true;
+    }
+    // The malformed input of a Bidi or Uni probe goes out on a new stream once the publisher's SETUP has arrived.
+    void inject_probe() {
+        if (!config_.probe || stats_.probe->injected || config_.probe->channel==Draft23ProbeChannel::SetupOption) return;
+        const auto opened=config_.probe->channel==Draft23ProbeChannel::Bidi?transport_.open_bidi():transport_.open_uni();
+        if (!success(opened.status)) { fail("harness could not open the probe stream"); return; }
+        queue(opened.stream_id,draft23_probe_bytes(*config_.probe,peer_message_limit_));
+        probe_stream_=opened.stream_id;
+        if (config_.probe->channel==Draft23ProbeChannel::Bidi) {
+            // The publisher may answer on this stream. Anything it sends is recorded as the probe's reply and otherwise
+            // ignored, so a reply never ends the run before the publisher has had its chance to close the session.
+            Stream reply; reply.kind=Kind::Padding; reply.local=true;
+            streams_[opened.stream_id]=std::move(reply);
+        }
+        stats_.probe->injected=true;
     }
     void consume(Stream& stream, std::size_t count) {
         stream.bytes.erase(stream.bytes.begin(),stream.bytes.begin()+static_cast<std::ptrdiff_t>(count));
@@ -251,6 +273,7 @@ public:
         }
         peer_message_limit_=value.maximum_control_message_size;
         consume(stream,cursor.offset()); stats_.setup_received=true;
+        inject_probe();
         if (config_.subscribe_immediately) subscribe();
         if (!stream.bytes.empty()) fail("harness smoke does not implement post-SETUP control messages");
     }
@@ -404,6 +427,10 @@ public:
             found=streams_.emplace(event.stream_id,Stream{}).first;
         }
         auto& stream=found->second;
+        if (stats_.probe && probe_stream_==event.stream_id) {
+            stats_.probe->reply_bytes+=event.data.size();
+            stats_.probe->reply_fin=stats_.probe->reply_fin||event.fin;
+        }
         if (stream.fin) { fail("transport delivered bytes after stream FIN"); return; }
         std::size_t buffered=queued_;
         for (const auto& [id,entry]:streams_) { (void)id; buffered+=entry.bytes.size(); }
@@ -429,6 +456,8 @@ public:
                 }
                 else fail("publisher reset or stopped smoke stream");
             } else if constexpr (std::is_same_v<T,transport::PeerCloseEvent> || std::is_same_v<T,transport::LocalCloseEvent>) {
+                if (stats_.probe && !stats_.probe->close)
+                    stats_.probe->close=Draft23ProbeClose{value.error_space==transport::CloseErrorSpace::Application,value.error_code};
                 if (value.error_space!=transport::CloseErrorSpace::Application || value.error_code!=0 || !stats_.progressing())
                     fail("session closed: code="+std::to_string(value.error_code));
             }

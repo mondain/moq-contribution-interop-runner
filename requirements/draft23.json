@@ -2610,11 +2610,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "If they do, the peer MUST close the Session with UNEXPECTED_MESSAGE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-bad-first-bidi-message"
+      ],
+      "evaluators": [
+        "d23-close-on-bad-first-bidi-message"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.3: a bidirectional stream may not begin with a message type other than the permitted request openers, and the peer closes the session with UNEXPECTED_MESSAGE (0x303). The runner opens a request stream with SUBSCRIBE_OK. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-3-SHOULD-138",
@@ -2781,11 +2785,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "An endpoint that receives an unknown stream type MUST close the session with INVALID_STREAM_HEADER.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-unknown-uni-stream"
+      ],
+      "evaluators": [
+        "d23-close-on-unknown-uni-stream"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.4.1: an unknown unidirectional stream type closes the session with INVALID_STREAM_HEADER (0x200). The runner opens a unidirectional stream whose type is not in the stream type table. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-4-2-1-MUST-NOT-147",
@@ -4910,11 +4918,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "An endpoint that receives an unknown message type MUST close the session with UNEXPECTED_MESSAGE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-unknown-control-message"
+      ],
+      "evaluators": [
+        "d23-close-on-unknown-message-type"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9: an endpoint that receives an unknown message type closes the session with UNEXPECTED_MESSAGE (0x303). The runner opens a request stream and sends an unassigned message type. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-9-MUST-258",
@@ -4929,11 +4941,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "If the length does not match the length of the Message Body, the receiver MUST close the session with MALFORMED_MESSAGE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-length-mismatch"
+      ],
+      "evaluators": [
+        "d23-close-on-length-mismatch"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9: if the length does not match the message body the receiver closes the session with MALFORMED_MESSAGE (0x300). The runner sends PUBLISH_NAMESPACE declaring a body one byte too short to hold its fields. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-9-MUST-NOT-259",
@@ -4972,11 +4988,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "If an endpoint receives a control message with a length larger than its MAX_CONTROL_MESSAGE_SIZE, it MUST close the session with FIELD_LENGTH_EXCEEDED.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-oversize-control-message"
+      ],
+      "evaluators": [
+        "d23-close-on-oversize-control-message"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9: a control message longer than the receiver's MAX_CONTROL_MESSAGE_SIZE closes the session with FIELD_LENGTH_EXCEEDED (0x401). The runner declares a length one byte over the limit the publisher advertised, or over 65535 when it advertised none. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-MAY-261",
@@ -5129,11 +5149,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "When an AUTHORITY option is received from a server, or when an AUTHORITY option is received while WebTransport is used, or when an AUTHORITY option is received by a server but the server does not support the specified authority, the session MUST be closed with INVALID_AUTHORITY.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-server-authority"
+      ],
+      "evaluators": [
+        "d23-close-on-server-authority"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.1: an AUTHORITY option received from a server closes the session with INVALID_AUTHORITY (0x19). The runner, acting as the server, puts AUTHORITY in its own SETUP. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-1-MUST-269",
@@ -5210,11 +5234,15 @@
       "actor": "publisher receiving malformed input",
       "summary": "When a PATH setup option is received from a server, or when a PATH parameter is received while WebTransport is used, or when a PATH parameter is received by a server but the server does not support the specified path, the session MUST be closed with INVALID_PATH.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: receiver-side obligation exercised by a negative probe, family session_setup, tier P2 (negative probe: inject malformed input, expect the specified session close). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-probe-server-path"
+      ],
+      "evaluators": [
+        "d23-close-on-server-path"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.1.2: a PATH option received from a server closes the session with INVALID_PATH (0x8). The runner, acting as the server, puts PATH in its own SETUP. Passes only when the publisher closes the session with that application error code. A different code, a transport-level close or no close within the probe window fails it, and NOT_RUN means the probe could not be sent. Evidence: peer_closed.",
+      "reviewed": true
     },
     {
       "id": "D23-9-1-2-MUST-273",

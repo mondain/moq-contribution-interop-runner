@@ -142,7 +142,14 @@ for transport in native_quic webtransport; do
     [[ "$output" == *"<--draft>"$'\n'"<22>"$'\n'"<--forward>"$'\n'"<0>"$'\n'"<--paced>"$'\n'"<--timeout>"$'\n'"<6>"* ]]
 done
 # Draft 23 uses only the smoke engine, without draft-21 scenario normalization.
-for scenario in d23-publisher-smoke d23-direct-subscribe-smoke; do
+for scenario in d23-publisher-smoke d23-direct-subscribe-smoke \
+    d23-probe-unknown-control-message \
+    d23-probe-bad-first-bidi-message \
+    d23-probe-length-mismatch \
+    d23-probe-oversize-control-message \
+    d23-probe-server-authority \
+    d23-probe-server-path \
+    d23-probe-unknown-uni-stream; do
     for transport in native_quic webtransport; do
         make_request 23 "$transport" 6d65646961 766964655f31 "$test_dir/ca cert.pem"
         jq --arg scenario "$scenario" '.scenario_id = $scenario' "$test_dir/request.json" >"$test_dir/request.next"

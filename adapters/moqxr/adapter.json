@@ -20,6 +20,13 @@
   "protocol_expectations": "none; logs and exit status are diagnostic only",
   "draft23_scenarios": [
     "d23-publisher-smoke",
-    "d23-direct-subscribe-smoke"
+    "d23-direct-subscribe-smoke",
+    "d23-probe-unknown-control-message",
+    "d23-probe-bad-first-bidi-message",
+    "d23-probe-length-mismatch",
+    "d23-probe-oversize-control-message",
+    "d23-probe-server-authority",
+    "d23-probe-server-path",
+    "d23-probe-unknown-uni-stream"
   ]
 }

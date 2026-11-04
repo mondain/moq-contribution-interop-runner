@@ -22,6 +22,8 @@ struct Draft23Evidence {
     std::vector<session::Draft23DataStream> data_streams;
     std::vector<session::Draft23RequestStream> requests;
     std::optional<std::uint64_t> subscription_alias;
+    std::optional<std::string> probe_scenario;               // set on a negative probe run
+    std::optional<session::Draft23ProbeResult> probe;
     bool direct_subscribe{false};  // the runner sent the SUBSCRIBE (d23-direct-subscribe-smoke)
     bool duplicate_request_id{false};
     bool oversize_control_message{false};

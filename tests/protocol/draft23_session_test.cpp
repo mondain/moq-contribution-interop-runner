@@ -1,4 +1,6 @@
 #include "moq/interop/session/draft23_session.h"
+#include "moq/interop/session/draft23_probes.h"
+#include "moq/interop/wire/draft23/setup.h"
 
 #include <gtest/gtest.h>
 
@@ -419,5 +421,97 @@ TEST(Draft23Session, PublishDoneAndFinInOneEventIsRecordedInOrder) {
     EXPECT_TRUE(subscribe->fin);
     EXPECT_TRUE(subscribe->fin_after_publish_done);
     EXPECT_FALSE(session.error());
+}
+session::Draft23SessionConfig probe_config(std::string_view scenario) {
+    auto result = config();
+    result.probe = session::find_draft23_probe(scenario);
+    return result;
+}
+TEST(Draft23Session, OrdinarySessionsCarryNoProbeResult) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    EXPECT_FALSE(session.stats().probe.has_value());
+}
+TEST(Draft23Session, BidiProbeIsWrittenOnANewStreamOnlyAfterThePublishersSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
+    connect(session);
+    ASSERT_TRUE(session.stats().probe.has_value());
+    EXPECT_FALSE(session.stats().probe->injected);
+    const auto before = transport.writes.size();
+    setup(session);
+    EXPECT_TRUE(session.stats().probe->injected);
+    ASSERT_EQ(transport.writes.size(), before + 1);
+    EXPECT_EQ(transport.writes.back().id, 1u);
+    EXPECT_EQ(transport.writes.back().data, bytes({0x3f, 0}));
+    EXPECT_FALSE(transport.writes.back().fin);
+}
+TEST(Draft23Session, UniProbeUsesAUnidirectionalStream) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-uni-stream"));
+    connect(session); setup(session);
+    EXPECT_TRUE(session.stats().probe->injected);
+    EXPECT_EQ(transport.writes.back().data, bytes({0x0a}));
+}
+TEST(Draft23Session, OversizeProbeFollowsThePublishersAdvertisedLimit) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-oversize-control-message"));
+    connect(session);
+    // SETUP carrying MAX_CONTROL_MESSAGE_SIZE (option 9) = 70000 (vi64 c1 11 70).
+    session.on_event(transport::StreamDataEvent{2, bytes({0xaf,0,5, 9,3,0xc1,0x11,0x70}), false});
+    ASSERT_TRUE(session.stats().probe->injected);
+    // 70001 = 0x11171 -> c1 11 71
+    EXPECT_EQ(transport.writes.back().data, bytes({6, 0xc1, 0x11, 0x71}));
+}
+TEST(Draft23Session, ServerOptionProbesChangeTheRunnersOwnSetupAndInjectAtConnect) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-server-authority"));
+    connect(session);
+    ASSERT_FALSE(transport.writes.empty());
+    wire::Cursor cursor(transport.writes[0].data);
+    const auto decoded = wire::draft23::decode_setup(cursor);
+    ASSERT_TRUE(std::holds_alternative<wire::draft23::SetupMessage>(decoded));
+    bool authority = false;
+    for (const auto& option : std::get<wire::draft23::SetupMessage>(decoded).options) authority = authority || option.type == 5;
+    EXPECT_TRUE(authority);
+    EXPECT_TRUE(session.stats().probe->injected);
+}
+TEST(Draft23Session, RecordsHowThePublisherClosedTheSession) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
+    connect(session); setup(session);
+    session.on_event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0x303, {}});
+    ASSERT_TRUE(session.stats().probe->close.has_value());
+    EXPECT_TRUE(session.stats().probe->close->application);
+    EXPECT_EQ(session.stats().probe->close->code, 0x303u);
+    EXPECT_FALSE(transport.closed.has_value());  // the runner does not answer with a close of its own
+}
+TEST(Draft23Session, KeepsTheFirstCloseAndTellsTransportClosesApart) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
+    connect(session); setup(session);
+    session.on_event(transport::PeerCloseEvent{transport::CloseErrorSpace::Transport, 0x0a, {}});
+    session.on_event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0x303, {}});
+    EXPECT_FALSE(session.stats().probe->close->application);
+    EXPECT_EQ(session.stats().probe->close->code, 0x0au);
+}
+TEST(Draft23Session, RecordsWhatThePublisherSendsBackOnTheProbeStream) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
+    connect(session); setup(session);
+    ASSERT_TRUE(session.stats().probe->injected);
+    EXPECT_EQ(session.stats().probe->reply_bytes, 0u);
+    EXPECT_FALSE(session.stats().probe->reply_fin);
+    session.on_event(transport::StreamDataEvent{1, bytes({5, 3, 0x20, 0, 0}), false});
+    session.on_event(transport::StreamDataEvent{1, {}, true});
+    EXPECT_EQ(session.stats().probe->reply_bytes, 5u);
+    EXPECT_TRUE(session.stats().probe->reply_fin);
+}
+TEST(Draft23Session, DataOnOtherStreamsIsNotCountedAsAProbeReply) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
+    connect(session); setup(session); announce(session);
+    EXPECT_EQ(session.stats().probe->reply_bytes, 0u);
 }
 }

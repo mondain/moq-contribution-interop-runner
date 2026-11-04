@@ -53,6 +53,11 @@ app::RunConfig config(app::TransportKind transport, std::chrono::milliseconds ti
     return {app::DraftVersion::Draft23,transport,app::RunMode::Observed,{"d23-publisher-smoke"},timeout,
         app::TrackFixture{{"media"},"vide"},{}};
 }
+app::RunConfig probe_config(std::string scenario, app::TransportKind transport=app::TransportKind::NativeQuic,
+                            std::chrono::milliseconds timeout=2000ms) {
+    return {app::DraftVersion::Draft23,transport,app::RunMode::Observed,{std::move(scenario)},timeout,
+        app::TrackFixture{{"media"},"vide"},{}};
+}
 bool wait_finalized(const std::shared_ptr<storage::SqliteRunStore>& store,const app::RunId& id,
                     const std::function<bool()>& pump={}) {
     const auto deadline=std::chrono::steady_clock::now()+5s;
@@ -383,6 +388,70 @@ TEST(Draft23RunLive, NativeQuicScoresMatchingAuthorityAndPath) {
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Pass},{kPath,requirements::OutcomeState::Pass},
         {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Incomplete);
+}
+// A stand-in for a publisher that reacts to a probe: it sends SETUP, waits for the runner's injection, then closes the
+// connection with the given application code (or leaves it open when `close_code` is empty).
+requirements::OutcomeState run_probe(const std::string& scenario, std::optional<std::uint64_t> close_code,
+                                     storage::RunRecord* record=nullptr) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(probe_config(scenario));
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    EXPECT_TRUE(client);
+    bool sent=false;
+    std::optional<std::chrono::steady_clock::time_point> sent_at;
+    bool closed=false;
+    EXPECT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false)); sent=true; sent_at=std::chrono::steady_clock::now();
+        }
+        if (sent && !closed && close_code && std::chrono::steady_clock::now()-*sent_at>150ms) {
+            (void)client->close(*close_code,{}); closed=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    if (record) *record=run;
+    const auto rows=catalog(23);
+    for (const auto& row:rows->requirements)
+        if (row.scenarios.size()==1 && row.scenarios.front()==scenario)
+            for (const auto& outcome:run.outcomes) if (outcome.requirement_id==row.id) return outcome.state;
+    ADD_FAILURE()<<"no row is bound to "<<scenario;
+    return requirements::OutcomeState::NotRun;
+}
+TEST(Draft23RunLive, ProbePassesWhenThePublisherClosesWithTheExpectedCode) {
+    storage::RunRecord run;
+    EXPECT_EQ(run_probe("d23-probe-unknown-control-message",0x303,&run),requirements::OutcomeState::Pass);
+    expect_staged(run,{{"D23-9-MUST-257",requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},
+        {kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
+        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
+        {kQuery,requirements::OutcomeState::NotApplicable},{kRequestId,requirements::OutcomeState::NotRun},
+        {kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},
+        {kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},
+        {kStreamCount,requirements::OutcomeState::NotRun},{kBitFour,requirements::OutcomeState::NotRun},
+        {kOneStream,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+    bool recorded=false;
+    for (const auto& event:run.events) if (event.kind=="draft23_probe") {
+        const auto detail=nlohmann::json::parse(event.detail);
+        EXPECT_EQ(detail.at("scenario"),"d23-probe-unknown-control-message");
+        EXPECT_TRUE(detail.at("injected"));
+        EXPECT_EQ(detail.at("close").at("code"),0x303);
+        EXPECT_TRUE(detail.at("close").at("application"));
+        recorded=true;
+    }
+    EXPECT_TRUE(recorded);
+}
+TEST(Draft23RunLive, ProbeFailsOnTheWrongCloseCode) {
+    EXPECT_EQ(run_probe("d23-probe-length-mismatch",0x303),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ProbeFailsWhenThePublisherNeverCloses) {
+    EXPECT_EQ(run_probe("d23-probe-unknown-uni-stream",std::nullopt),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ServerOptionProbeIsJudgedFromTheRunnersOwnSetup) {
+    EXPECT_EQ(run_probe("d23-probe-server-authority",0x19),requirements::OutcomeState::Pass);
+    EXPECT_EQ(run_probe("d23-probe-server-path",0x8),requirements::OutcomeState::Pass);
 }
 } // namespace
 } // namespace moq::interop

@@ -1,5 +1,6 @@
 #include "moq/interop/requirements/draft23_evaluators.h"
 
+#include "moq/interop/session/draft23_probes.h"
 #include "moq/interop/wire/cursor.h"
 
 #include <algorithm>
@@ -38,6 +39,20 @@ constexpr Row kFinRequired{"D23-6-4-2-2-MUST-NOT-150", "d23-request-stream-fin-a
 constexpr Row kResponseBeforeFin{"D23-6-4-2-2-MUST-151", "d23-subscribe-response-before-fin", "request_observed"};
 constexpr Row kDoneBeforeFin{"D23-6-4-2-2-MUST-152", "d23-publish-done-before-fin", "request_observed"};
 constexpr Row kStreamCount{"D23-9-9-MUST-342", "d23-publish-done-stream-count", "request_observed,peer_stream_classified"};
+// Negative probes: each requirement has its own scenario and expected close code, held once in draft23_probes().
+constexpr Row kProbeRows[] = {
+    {"D23-9-MUST-257", "d23-close-on-unknown-message-type", "peer_closed"},
+    {"D23-6-3-MUST-137", "d23-close-on-bad-first-bidi-message", "peer_closed"},
+    {"D23-9-MUST-258", "d23-close-on-length-mismatch", "peer_closed"},
+    {"D23-9-MUST-260", "d23-close-on-oversize-control-message", "peer_closed"},
+    {"D23-9-1-1-MUST-268", "d23-close-on-server-authority", "peer_closed"},
+    {"D23-9-1-2-MUST-272", "d23-close-on-server-path", "peer_closed"},
+    {"D23-6-4-1-MUST-146", "d23-close-on-unknown-uni-stream", "peer_closed"},
+};
+const session::Draft23Probe* probe_for(std::string_view requirement) {
+    for (const auto& probe : session::draft23_probes()) if (probe.requirement_id == requirement) return &probe;
+    return nullptr;
+}
 constexpr Row kRows[] = {kMultiplicity, kMaxSize, kAuthority, kPath, kQuery, kBitFour, kOneStream, kLength, kRequestId,
                          kSingleResponse, kFinRequired, kResponseBeforeFin, kDoneBeforeFin, kStreamCount};
 
@@ -223,8 +238,18 @@ OutcomeState stream_count(const Draft23Evidence& context) {
     return received == done->stream_count ? OutcomeState::Pass : OutcomeState::NotRun;
 }
 
+// A probe row is judged only on the run of its own probe. The publisher must close the session with the expected
+// application code; any other close, or none, fails. A probe that was never sent proves nothing.
+std::optional<OutcomeState> judge_probe(const session::Draft23Probe& probe, const Draft23Evidence& context) {
+    if (!context.probe_scenario || *context.probe_scenario != probe.scenario_id) return std::nullopt;
+    if (!context.probe || !context.probe->injected) return std::nullopt;
+    if (!context.probe->close) return OutcomeState::Fail;
+    return verdict(context.probe->close->application && context.probe->close->code == probe.expected_code);
+}
+
 // nullopt keeps the row at its staged NotRun: the evidence the row needs has not arrived.
 std::optional<OutcomeState> judge(std::string_view id, const Draft23Evidence& context) {
+    if (const auto* probe = probe_for(id)) return judge_probe(*probe, context);
     const auto native_only = id == kAuthority.requirement || id == kPath.requirement || id == kQuery.requirement;
     if (native_only && context.webtransport) return OutcomeState::NotApplicable;
     if (id == kBitFour.requirement) return bit_four(context.data_streams);
@@ -275,6 +300,10 @@ std::vector<std::string> evidence_kinds(std::string_view list) {
 
 std::vector<ExecutableBinding> draft23_executable_bindings() {
     std::vector<ExecutableBinding> bindings;
+    for (const auto& row : kProbeRows)
+        if (const auto* probe = probe_for(row.requirement))
+            bindings.push_back({23, std::string(row.requirement), std::string(probe->scenario_id), std::string(row.evaluator),
+                                evidence_kinds(row.evidence)});
     for (const auto& row : kRows)
         for (const auto scenario : kScenarios)
             bindings.push_back({23, std::string(row.requirement), std::string(scenario), std::string(row.evaluator),

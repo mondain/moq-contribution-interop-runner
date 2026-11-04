@@ -217,6 +217,7 @@ add_library(moq-interop-session
     src/session/lite_stream_reader.cpp
     src/session/lite_session.cpp
     src/session/draft23_session.cpp
+    src/session/draft23_probes.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -1939,6 +1940,9 @@ if(MOQ_INTEROP_BUILD_TESTS)
     add_executable(moq-interop-d23-frame-tests tests/protocol/draft23_frame_test.cpp)
     target_link_libraries(moq-interop-d23-frame-tests PRIVATE moq-interop-wire GTest::gtest_main)
     add_test(NAME draft23-frame COMMAND moq-interop-d23-frame-tests)
+    add_executable(moq-interop-d23-probes-tests tests/protocol/draft23_probes_test.cpp)
+    target_link_libraries(moq-interop-d23-probes-tests PRIVATE moq-interop-session GTest::gtest_main)
+    add_test(NAME draft23-probes COMMAND moq-interop-d23-probes-tests)
     add_executable(moq-interop-d23-evaluators-tests tests/protocol/draft23_evaluators_test.cpp)
     target_compile_definitions(moq-interop-d23-evaluators-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_link_libraries(moq-interop-d23-evaluators-tests PRIVATE moq-interop-draft23-evaluators GTest::gtest_main)

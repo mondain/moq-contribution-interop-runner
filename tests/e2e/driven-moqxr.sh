@@ -14,7 +14,7 @@ set -euo pipefail
 #              is created, and the binaries need not exist. Off by default.
 # MOQ_INTEROP_TEST_HTTP_PORT and MOQ_INTEROP_TEST_UDP_PORT choose the ports (default 19301/19302).
 # MOQ_INTEROP_TEST_KEEP=1 retains the database and logs. At draft 23,
-# MOQ_INTEROP_TEST_SCENARIO selects either smoke ID (default d23-publisher-smoke).
+# MOQ_INTEROP_TEST_SCENARIO selects a smoke ID or a d23-probe-* negative probe (default d23-publisher-smoke).
 dry_run=0
 if [[ "${1:-}" == --dry-run ]]; then
     dry_run=1
@@ -39,7 +39,7 @@ if [[ "$draft" == 22 ]]; then scenario=d22-publisher-request-stream-placement; f
 if [[ "$draft" == 23 ]]; then
     scenario=${MOQ_INTEROP_TEST_SCENARIO:-d23-publisher-smoke}
     case "$scenario" in
-        d23-publisher-smoke|d23-direct-subscribe-smoke) ;;
+        d23-publisher-smoke|d23-direct-subscribe-smoke|d23-probe-*) ;;
         *) printf 'unsupported draft 23 smoke scenario: %s\n' "$scenario" >&2; exit 2 ;;
     esac
 fi
@@ -147,7 +147,26 @@ printf 'draft=%s transport=%s run=%s verdict=%s publisher=%s pass=%s fail=%s' \
     "$(jq '[.run.outcomes[] | select(.state == "pass")] | length' <<<"$result")" \
     "$(jq '[.run.outcomes[] | select(.state == "fail")] | length' <<<"$result")"
 
-if [[ "$draft" == 23 ]]; then
+if [[ "$draft" == 23 && "$scenario" == d23-probe-* ]]; then
+    # A negative probe passes or fails on how the publisher closes the session; a failed row is a finding, not a harness
+    # error. Only a probe that was never sent (the publisher did not get as far as SETUP) fails this script.
+    probe=$(jq -r '[.items[] | select(.kind == "draft23_probe") | .detail | fromjson] | last // empty' <<<"$events")
+    if [[ -z "$probe" || $(jq -r '.injected' <<<"$probe") != true ]]; then
+        printf '\ndraft 23 probe was not sent: %s\n' "$events" >&2
+        printf 'set MOQ_INTEROP_TEST_KEEP=1 to retain logs for debugging\n' >&2
+        exit 1
+    fi
+    expected=$(jq -r '.expected_code' <<<"$probe")
+    close_code=$(jq -r '.close.code // empty' <<<"$probe")
+    if [[ -z "$close_code" ]]; then
+        close_text=none
+    elif [[ $(jq -r '.close.application' <<<"$probe") == true ]]; then
+        close_text=$(printf 'app:0x%x' "$close_code")
+    else
+        close_text=$(printf 'transport:0x%x' "$close_code")
+    fi
+    printf ' probe=%s expected=0x%x close=%s\n' "$scenario" "$expected" "$close_text"
+elif [[ "$draft" == 23 ]]; then
     smoke=$(jq -r '[.items[] | select(.kind == "draft23_smoke") | .detail | fromjson | .status] | last // "MISSING"' <<<"$events")
     printf ' smoke=%s\n' "$smoke"
     if [[ "$smoke" != PASS || $(jq -r '.run.verdict' <<<"$result") != incomplete ]]; then

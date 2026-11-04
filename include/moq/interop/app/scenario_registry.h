@@ -377,7 +377,12 @@ inline bool executable_scenario(unsigned draft, std::string_view scenario);
 
 inline std::span<const std::string_view> executable_scenarios(unsigned draft) {
     if (draft == 23) {
-        static constexpr std::string_view ids[]{"d23-publisher-smoke", "d23-direct-subscribe-smoke"};
+        // The two smoke scenarios, then the negative probes (tests/protocol/draft23_probes_test.cpp checks the probe ids
+        // against session::draft23_probes()).
+        static constexpr std::string_view ids[]{"d23-publisher-smoke", "d23-direct-subscribe-smoke",
+            "d23-probe-unknown-control-message", "d23-probe-bad-first-bidi-message", "d23-probe-length-mismatch",
+            "d23-probe-oversize-control-message", "d23-probe-server-authority", "d23-probe-server-path",
+            "d23-probe-unknown-uni-stream"};
         return ids;
     }
     if (draft == 18) return kDraft18AllExecutableScenarios;

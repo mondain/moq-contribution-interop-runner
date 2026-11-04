@@ -1,5 +1,6 @@
 #pragma once
 
+#include "moq/interop/session/draft23_probes.h"
 #include "moq/interop/transport/session_transport.h"
 #include "moq/interop/wire/draft21/key_values.h"
 
@@ -14,6 +15,7 @@ struct Draft23SessionConfig {
     std::vector<std::byte> track_name;
     bool webtransport{false};
     bool subscribe_immediately{false};
+    const Draft23Probe* probe{nullptr};  // a negative probe run; the session then injects its malformed input
     std::size_t maximum_streams{128};
     std::size_t maximum_buffered_bytes{1u << 20};
     std::size_t maximum_stream_bytes{1u << 18};
@@ -64,6 +66,19 @@ struct Draft23RequestStream {
     bool established{false};  // the harness accepted this request as the media subscription
 };
 
+// How the publisher ended the connection after a negative probe. `application` is false for a transport-level close.
+struct Draft23ProbeClose {
+    bool application{false};
+    std::uint64_t code{0};
+};
+
+struct Draft23ProbeResult {
+    bool injected{false};
+    std::optional<Draft23ProbeClose> close;  // the first close the publisher caused
+    std::uint64_t reply_bytes{0};            // what the publisher sent back on the stream the probe used
+    bool reply_fin{false};
+};
+
 struct Draft23SessionStats {
     bool connected{false};
     bool setup_received{false};
@@ -78,6 +93,7 @@ struct Draft23SessionStats {
     std::vector<Draft23RequestStream> requests;
     bool duplicate_request_id{false};
     bool oversize_control_message{false};
+    std::optional<Draft23ProbeResult> probe;  // present only in negative probe runs
     std::optional<std::uint64_t> subscription_alias;  // Track Alias of the accepted media subscription
     [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }
 };

@@ -401,11 +401,12 @@ TEST_F(HttpApiDraft23Test, ListsDraft23AsStagedWithItsOwnProfilesAndSource) {
     for (const auto& profile : health.at("executable_profiles")) {
         if (profile.at("draft") != 23) continue;
         EXPECT_TRUE(profile.at("scenario") == "d23-publisher-smoke" ||
-                    profile.at("scenario") == "d23-direct-subscribe-smoke");
+                    profile.at("scenario") == "d23-direct-subscribe-smoke" ||
+                    profile.at("scenario").get<std::string>().starts_with("d23-probe-"));
         EXPECT_FALSE(profile.at("configured"));
         ++profiles;
     }
-    EXPECT_EQ(profiles, 8u);
+    EXPECT_EQ(profiles, 36u);  // nine scenarios (two smoke, seven probes) on two transports in two modes
     const auto page = get_json("/api/v1/requirements?draft=23&limit=2");
     EXPECT_EQ(page.at("draft"), 23);
     EXPECT_EQ(page.at("pagination").at("total"), 532);

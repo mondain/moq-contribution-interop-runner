@@ -125,7 +125,7 @@ TEST(Draft23Evaluators, MaximumControlMessageSizeBoundaries) {
 }
 TEST(Draft23Evaluators, BindingsNameEveryTestableRowOnBothSmokeScenarios) {
     const auto bindings = requirements::draft23_executable_bindings();
-    std::map<std::string, int> per_row;
+    std::map<std::string, std::size_t> per_row;
     for (const auto& binding : bindings) {
         EXPECT_EQ(binding.draft, 23u);
         EXPECT_FALSE(binding.evidence_kinds.empty());
@@ -136,10 +136,10 @@ TEST(Draft23Evaluators, BindingsNameEveryTestableRowOnBothSmokeScenarios) {
     for (const auto& row : catalog().requirements) {
         if (row.testability != requirements::Testability::Testable) continue;
         ++testable;
-        EXPECT_EQ(per_row[row.id], 2) << row.id;
+        EXPECT_EQ(per_row[row.id], row.scenarios.size()) << row.id;
     }
     EXPECT_EQ(per_row.size(), static_cast<std::size_t>(testable));
-    EXPECT_EQ(testable, 14);
+    EXPECT_EQ(testable, 21);
 }
 
 constexpr auto kBitFour = "D23-11-3-1-MUST-445";
@@ -298,5 +298,55 @@ TEST(Draft23Evaluators, PublishDoneWithoutAnyFinStillSatisfiesTheOrdering) {
     const auto outcomes = run(with_requests({done}));
     EXPECT_EQ(outcomes.at(kDoneBeforeFin), OutcomeState::Pass);
     EXPECT_EQ(outcomes.at(kFinRequired), OutcomeState::Pass);
+}
+
+struct ProbeRow { const char* scenario; const char* row; std::uint64_t code; };
+constexpr ProbeRow kProbeRows[] = {
+    {"d23-probe-unknown-control-message", "D23-9-MUST-257", 0x303},
+    {"d23-probe-bad-first-bidi-message", "D23-6-3-MUST-137", 0x303},
+    {"d23-probe-length-mismatch", "D23-9-MUST-258", 0x300},
+    {"d23-probe-oversize-control-message", "D23-9-MUST-260", 0x401},
+    {"d23-probe-server-authority", "D23-9-1-1-MUST-268", 0x19},
+    {"d23-probe-server-path", "D23-9-1-2-MUST-272", 0x8},
+    {"d23-probe-unknown-uni-stream", "D23-6-4-1-MUST-146", 0x200},
+};
+Draft23Evidence probe_evidence(const ProbeRow& probe, bool injected, std::optional<session::Draft23ProbeClose> close) {
+    Draft23Evidence context;
+    context.probe_scenario = probe.scenario;
+    session::Draft23ProbeResult result;
+    result.injected = injected;
+    result.close = close;
+    context.probe = result;
+    return context;
+}
+TEST(Draft23Evaluators, ProbePassesOnlyWithTheExpectedApplicationCloseCode) {
+    for (const auto& probe : kProbeRows) {
+        EXPECT_EQ(run(probe_evidence(probe, true, session::Draft23ProbeClose{true, probe.code})).at(probe.row), OutcomeState::Pass) << probe.row;
+        EXPECT_EQ(run(probe_evidence(probe, true, session::Draft23ProbeClose{true, probe.code + 1})).at(probe.row), OutcomeState::Fail) << probe.row;
+        EXPECT_EQ(run(probe_evidence(probe, true, session::Draft23ProbeClose{false, probe.code})).at(probe.row), OutcomeState::Fail) << probe.row;
+        EXPECT_EQ(run(probe_evidence(probe, true, std::nullopt)).at(probe.row), OutcomeState::Fail) << probe.row;
+        EXPECT_EQ(run(probe_evidence(probe, false, std::nullopt)).at(probe.row), OutcomeState::NotRun) << probe.row;
+    }
+}
+TEST(Draft23Evaluators, OnlyTheProbeThatRanIsJudged) {
+    const auto outcomes = run(probe_evidence(kProbeRows[0], true, session::Draft23ProbeClose{true, 0x303}));
+    EXPECT_EQ(outcomes.at(kProbeRows[0].row), OutcomeState::Pass);
+    for (std::size_t i = 1; i < std::size(kProbeRows); ++i) EXPECT_EQ(outcomes.at(kProbeRows[i].row), OutcomeState::NotRun) << kProbeRows[i].row;
+}
+TEST(Draft23Evaluators, SmokeRunsLeaveEveryProbeRowNotRun) {
+    const auto outcomes = run(native({option(1, text("/moq")), option(5, text("127.0.0.1:4443"))}));
+    for (const auto& probe : kProbeRows) EXPECT_EQ(outcomes.at(probe.row), OutcomeState::NotRun) << probe.row;
+}
+TEST(Draft23Evaluators, ProbeBindingsUseTheProbeScenarioAndPeerClosedEvidence) {
+    std::size_t found = 0;
+    for (const auto& binding : requirements::draft23_executable_bindings()) {
+        for (const auto& probe : kProbeRows) {
+            if (binding.requirement_id != probe.row) continue;
+            ++found;
+            EXPECT_EQ(binding.scenario_id, probe.scenario);
+            EXPECT_EQ(binding.evidence_kinds, std::vector<std::string>{"peer_closed"});
+        }
+    }
+    EXPECT_EQ(found, std::size(kProbeRows));
 }
 }  // namespace

@@ -2,6 +2,7 @@
 #include "moq/interop/app/publisher_driver.h"
 #include "moq/interop/app/scenario_registry.h"
 #include "moq/interop/requirements/draft23_evaluators.h"
+#include "moq/interop/session/draft23_probes.h"
 #include "moq/interop/session/draft23_session.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -49,6 +50,8 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         settings.track_name = bytes(config.track_fixture->track_name);
         settings.webtransport = config.transport == TransportKind::WebTransport;
         settings.subscribe_immediately = config.scenario_ids.front() == "d23-direct-subscribe-smoke";
+        settings.probe = session::find_draft23_probe(config.scenario_ids.front());
+        const session::Draft23Probe* settings_probe = settings.probe;
         session::Draft23Session session(*listener, std::move(settings));
         const auto endpoint = std::string(config.transport == TransportKind::WebTransport ? "https://" : "moqt://") + authority + "/moq";
         event("context_start", "draft=23 protocol=moqt-23 endpoint=" + endpoint + " scoring=staged");
@@ -71,6 +74,8 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         // observed. The smoke verdict is fixed at that moment: later activity can add evidence but never undo delivery.
         constexpr auto kLinger = std::chrono::milliseconds(1500);
         std::optional<std::chrono::steady_clock::time_point> goal_at;
+        std::optional<std::chrono::steady_clock::time_point> probe_injected_at;
+        const auto probe_window = std::min<std::chrono::milliseconds>(config.timeout, std::chrono::milliseconds(3000));
         while (!stopped && std::chrono::steady_clock::now() < deadline && !session.error()) {
             for (const auto& e : listener->poll(256)) session.on_event(e);
             session.flush();
@@ -81,6 +86,12 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
             if (!goal_at && session.stats().setup_received && session.stats().subscription_established && session.stats().progressing()) {
                 goal_at = std::chrono::steady_clock::now();
                 delivered_at_goal = !session.error() && !stopped;
+            }
+            if (const auto& probe_state = session.stats().probe) {
+                const auto now = std::chrono::steady_clock::now();
+                if (probe_state->injected && !probe_injected_at) probe_injected_at = now;
+                // The probe ends the session: stop at the publisher's close, or when it has had its window to react.
+                if (probe_state->close || (probe_injected_at && now - *probe_injected_at >= probe_window)) break;
             }
             if (goal_at) {
                 if (std::chrono::steady_clock::now() - *goal_at >= kLinger) break;
@@ -101,6 +112,19 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         const auto& stats = session.stats();
+        if (stats.probe) {
+            const auto& probe = *settings_probe;
+            nlohmann::json detail{{"scenario",probe.scenario_id},{"requirement",probe.requirement_id},
+                {"expected_code",probe.expected_code},{"injected",stats.probe->injected},
+                {"reply_bytes",stats.probe->reply_bytes},{"reply_fin",stats.probe->reply_fin},
+                {"close",stats.probe->close ? nlohmann::json{{"application",stats.probe->close->application},
+                    {"code",stats.probe->close->code}} : nlohmann::json()}};
+            if (session.error()) detail["session_note"] = *session.error();
+            event("draft23_probe",detail.dump());
+            if (stats.probe->close) event("peer_closed",detail.dump());
+            setup_context.probe_scenario = config.scenario_ids.front();
+            setup_context.probe = stats.probe;
+        } else {
         nlohmann::json summary{{"setup_received",stats.setup_received},{"namespace_announced",stats.namespace_announced},
             {"subscription_established",stats.subscription_established},{"objects",stats.objects},
             {"distinct_objects",stats.distinct_objects},{"payload_bytes",stats.payload_bytes},
@@ -108,6 +132,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         summary["status"] = delivered_at_goal && !stopped ? "PASS" : "NOT_RUN";
         if (session.error()) summary["error"] = *session.error();
         event("draft23_smoke",summary.dump());
+        }
         setup_context.data_streams = stats.data_streams;
         setup_context.requests = stats.requests;
         setup_context.subscription_alias = stats.subscription_alias;
@@ -156,8 +181,10 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     if (handle.valid()) {
         const auto result = driver.stop(handle);
         try { event("publisher_process",serialize_driver_result(result)); } catch (...) { operational_error = true; }
+        // A publisher that rejects a probe by closing the session may exit non-zero; that is the behavior under test.
+        const bool probe_run = session::find_draft23_probe(config.scenario_ids.front()) != nullptr;
         if (result.status == DriverStatus::Error || result.status == DriverStatus::TimedOut || result.status == DriverStatus::Signaled ||
-            (result.status == DriverStatus::Exited && result.exit_code.value_or(1) != 0)) operational_error = true;
+            (!probe_run && result.status == DriverStatus::Exited && result.exit_code.value_or(1) != 0)) operational_error = true;
     }
     (void)listener->close(0, {});
     try {

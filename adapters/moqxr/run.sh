@@ -22,7 +22,14 @@ fi
 jq -e '
     .schema_version == 1 and
     (.draft == 18 or .draft == 21 or .draft == 22 or .draft == 23) and
-    (.draft != 23 or .scenario_id == "d23-publisher-smoke" or .scenario_id == "d23-direct-subscribe-smoke") and
+    (.draft != 23 or (.scenario_id | IN("d23-publisher-smoke", "d23-direct-subscribe-smoke",
+        "d23-probe-unknown-control-message",
+        "d23-probe-bad-first-bidi-message",
+        "d23-probe-length-mismatch",
+        "d23-probe-oversize-control-message",
+        "d23-probe-server-authority",
+        "d23-probe-server-path",
+        "d23-probe-unknown-uni-stream"))) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and
@@ -270,8 +277,8 @@ case "$own22" in
               --timeout "$((timeout_seconds + 3))" --ca "$ca_cert")
         ;;
 esac
-# Both draft-23 smoke scenarios receive subgroup streams. Wait for the runner's
-# SUBSCRIBE and pace objects; outlive its connection and delivery windows.
+# Both draft-23 smoke scenarios receive subgroup streams, and the negative probes only need the publisher to connect
+# and announce. Wait for the runner's SUBSCRIBE and pace objects; outlive its connection and delivery windows.
 if [[ "$draft" == 23 ]]; then
     args=(--input "$fixture" --endpoint "$endpoint" --transport "$publisher_transport"
           --namespace media --draft 23 --forward 0 --paced
