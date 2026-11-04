@@ -129,6 +129,7 @@ TEST(Draft23Evaluators, BindingsNameEveryTestableRowOnBothSmokeScenarios) {
     for (const auto& binding : bindings) {
         EXPECT_EQ(binding.draft, 23u);
         EXPECT_FALSE(binding.evidence_kinds.empty());
+        for (const auto& kind : binding.evidence_kinds) EXPECT_FALSE(kind.empty());
         ++per_row[binding.requirement_id];
     }
     int testable = 0;
@@ -138,7 +139,7 @@ TEST(Draft23Evaluators, BindingsNameEveryTestableRowOnBothSmokeScenarios) {
         EXPECT_EQ(per_row[row.id], 2) << row.id;
     }
     EXPECT_EQ(per_row.size(), static_cast<std::size_t>(testable));
-    EXPECT_EQ(testable, 7);
+    EXPECT_EQ(testable, 14);
 }
 
 constexpr auto kBitFour = "D23-11-3-1-MUST-445";
@@ -184,5 +185,118 @@ TEST(Draft23Evaluators, ResetStreamExcusesASecondStreamForTheSameSubgroup) {
 TEST(Draft23Evaluators, StreamsWithoutAKnownSubgroupAreNotJudged) {
     EXPECT_EQ(run(with_streams({stream(6, 0x32, 7, 0, std::nullopt), stream(10, 0x32, 7, 0, std::nullopt)})).at(kOneStream),
               OutcomeState::NotRun);
+}
+
+constexpr auto kLength = "D23-9-MUST-NOT-259";
+constexpr auto kRequestId = "D23-6-4-2-1-MUST-NOT-147";
+constexpr auto kSingleResponse = "D23-3-1-MUST-036";
+constexpr auto kFinRequired = "D23-6-4-2-2-MUST-NOT-150";
+constexpr auto kResponseBeforeFin = "D23-6-4-2-2-MUST-151";
+constexpr auto kDoneBeforeFin = "D23-6-4-2-2-MUST-152";
+constexpr auto kStreamCount = "D23-9-9-MUST-342";
+
+session::Draft23RequestStream request_stream(std::uint64_t id, bool local, std::vector<std::uint64_t> types) {
+    session::Draft23RequestStream result;
+    result.stream_id = id; result.local = local;
+    for (const auto type : types) result.messages.push_back({type, 4});
+    return result;
+}
+Draft23Evidence with_requests(std::vector<session::Draft23RequestStream> requests, bool direct = true) {
+    auto context = native({});
+    context.direct_subscribe = direct;
+    context.requests = std::move(requests);
+    return context;
+}
+TEST(Draft23Evaluators, LifecycleRowsAreNotRunWithoutRequestEvidence) {
+    const auto outcomes = run(native({}));
+    for (const auto id : {kRequestId, kSingleResponse, kFinRequired, kResponseBeforeFin, kDoneBeforeFin, kStreamCount})
+        EXPECT_NE(outcomes.at(id), OutcomeState::Pass) << id;
+    EXPECT_EQ(outcomes.at(kRequestId), OutcomeState::NotRun);
+    EXPECT_EQ(outcomes.at(kDoneBeforeFin), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, ControlMessageLengthPassesWithinTheDefaultLimitAndFailsOverIt) {
+    EXPECT_EQ(run(native({})).at(kLength), OutcomeState::Pass);  // SETUP frame_length 20
+    auto over = native({});
+    over.oversize_control_message = true;
+    EXPECT_EQ(run(over).at(kLength), OutcomeState::Fail);
+    auto long_message = with_requests({request_stream(0, false, {6})});
+    long_message.requests[0].messages[0].body_length = 65536;
+    EXPECT_EQ(run(long_message).at(kLength), OutcomeState::Fail);
+    EXPECT_EQ(run(Draft23Evidence{}).at(kLength), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, RequestIdReuseFails) {
+    auto streams = with_requests({request_stream(0, false, {6})});
+    streams.requests[0].request_id = 0;
+    EXPECT_EQ(run(streams).at(kRequestId), OutcomeState::Pass);
+    streams.duplicate_request_id = true;
+    EXPECT_EQ(run(streams).at(kRequestId), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, SubscribeNeedsExactlyOneResponse) {
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4})})).at(kSingleResponse), OutcomeState::Pass);
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4, 5})})).at(kSingleResponse), OutcomeState::Fail);
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4, 4})})).at(kSingleResponse), OutcomeState::Fail);
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {})})).at(kSingleResponse), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_requests({request_stream(0, false, {0x1d})}, false)).at(kSingleResponse), OutcomeState::NotApplicable);
+}
+TEST(Draft23Evaluators, FinBeforeTheSubscribeResponseFails) {
+    auto early = request_stream(1, true, {});
+    early.fin = true;
+    EXPECT_EQ(run(with_requests({early})).at(kResponseBeforeFin), OutcomeState::Fail);
+    EXPECT_EQ(run(with_requests({early})).at(kFinRequired), OutcomeState::Fail);
+    auto answered = request_stream(1, true, {4});
+    answered.fin = true;
+    EXPECT_EQ(run(with_requests({answered})).at(kResponseBeforeFin), OutcomeState::Pass);
+    EXPECT_EQ(run(with_requests({request_stream(0, false, {0x1d})}, false)).at(kResponseBeforeFin), OutcomeState::NotApplicable);
+}
+TEST(Draft23Evaluators, PublishDoneMustPrecedeTheFinOfAnEstablishedSubscription) {
+    auto bad = request_stream(1, true, {4});
+    bad.established = true; bad.fin = true; bad.fin_after_publish_done = false;
+    EXPECT_EQ(run(with_requests({bad})).at(kDoneBeforeFin), OutcomeState::Fail);
+    EXPECT_EQ(run(with_requests({bad})).at(kFinRequired), OutcomeState::Fail);
+    auto good = request_stream(1, true, {4, 0x0b});
+    good.established = true; good.fin = true; good.fin_after_publish_done = true;
+    good.publish_done = session::Draft23PublishDone{0, 1};
+    EXPECT_EQ(run(with_requests({good})).at(kDoneBeforeFin), OutcomeState::Pass);
+    EXPECT_EQ(run(with_requests({good})).at(kFinRequired), OutcomeState::Pass);
+    auto open = request_stream(1, true, {4});
+    open.established = true;
+    EXPECT_EQ(run(with_requests({open})).at(kDoneBeforeFin), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_requests({open})).at(kFinRequired), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, PublishFirstSubscriptionsAreCheckedForPublishDoneToo) {
+    auto good = request_stream(0, false, {0x1d, 0x0b});
+    good.established = true; good.fin = true; good.fin_after_publish_done = true;
+    good.publish_done = session::Draft23PublishDone{0, 0};
+    const auto outcomes = run(with_requests({good}, false));
+    EXPECT_EQ(outcomes.at(kDoneBeforeFin), OutcomeState::Pass);
+    EXPECT_EQ(outcomes.at(kFinRequired), OutcomeState::Pass);
+    EXPECT_EQ(outcomes.at(kResponseBeforeFin), OutcomeState::NotApplicable);
+}
+TEST(Draft23Evaluators, StreamCountComparesWithStreamsReceivedForTheAlias) {
+    auto done = request_stream(1, true, {4, 0x0b});
+    done.established = true;
+    auto make = [&](std::uint64_t count, int streams, std::uint64_t other_alias_streams = 0) {
+        auto context = with_requests({done});
+        context.requests[0].publish_done = session::Draft23PublishDone{0, count};
+        context.subscription_alias = 7;
+        for (int i = 0; i < streams; ++i) context.data_streams.push_back(stream(static_cast<std::uint64_t>(6 + 4 * i), 0x30, 7, static_cast<std::uint64_t>(i), 0));
+        for (std::uint64_t i = 0; i < other_alias_streams; ++i) context.data_streams.push_back(stream(100 + 4 * i, 0x30, 9, i, 0));
+        return context;
+    };
+    EXPECT_EQ(run(make(2, 2)).at(kStreamCount), OutcomeState::Pass);
+    EXPECT_EQ(run(make(1, 2)).at(kStreamCount), OutcomeState::Fail);
+    EXPECT_EQ(run(make(3, 2)).at(kStreamCount), OutcomeState::NotRun);  // a late stream may still be in flight
+    EXPECT_EQ(run(make(~std::uint64_t{0}, 2)).at(kStreamCount), OutcomeState::Pass);
+    EXPECT_EQ(run(make(2, 2, 5)).at(kStreamCount), OutcomeState::Pass);  // other tracks' streams are not counted
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4})})).at(kStreamCount), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, PublishDoneWithoutAnyFinStillSatisfiesTheOrdering) {
+    // The rule only forbids a FIN before PUBLISH_DONE; once PUBLISH_DONE has arrived no earlier FIN can exist.
+    auto done = request_stream(1, true, {4, 0x0b});
+    done.established = true;
+    done.publish_done = session::Draft23PublishDone{2, 2};
+    const auto outcomes = run(with_requests({done}));
+    EXPECT_EQ(outcomes.at(kDoneBeforeFin), OutcomeState::Pass);
+    EXPECT_EQ(outcomes.at(kFinRequired), OutcomeState::Pass);
 }
 }  // namespace

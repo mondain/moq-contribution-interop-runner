@@ -4,6 +4,8 @@
 #include "moq/interop/requirements/draft23_evaluators.h"
 #include "moq/interop/session/draft23_session.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <optional>
 #include <thread>
 #include <stdexcept>
 
@@ -31,6 +33,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     PublisherDriver driver;
     DriverHandle handle;
     bool operational_error = false;
+    bool delivered_at_goal = false;
     requirements::Draft23Evidence setup_context;
     setup_context.webtransport = config.transport == TransportKind::WebTransport;
     setup_context.authority = authority;
@@ -64,6 +67,10 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         }
         auto deadline = std::chrono::steady_clock::now() + config.timeout;
         bool connected = false;
+        // Once media is flowing the run lingers briefly so PUBLISH_DONE, stream FINs and the late data streams can be
+        // observed. The smoke verdict is fixed at that moment: later activity can add evidence but never undo delivery.
+        constexpr auto kLinger = std::chrono::milliseconds(1500);
+        std::optional<std::chrono::steady_clock::time_point> goal_at;
         while (!stopped && std::chrono::steady_clock::now() < deadline && !session.error()) {
             for (const auto& e : listener->poll(256)) session.on_event(e);
             session.flush();
@@ -71,12 +78,23 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
                 connected = true;
                 deadline = std::chrono::steady_clock::now() + config.timeout;
             }
-            if (session.stats().setup_received && session.stats().subscription_established && session.stats().progressing()) break;
+            if (!goal_at && session.stats().setup_received && session.stats().subscription_established && session.stats().progressing()) {
+                goal_at = std::chrono::steady_clock::now();
+                delivered_at_goal = !session.error() && !stopped;
+            }
+            if (goal_at) {
+                if (std::chrono::steady_clock::now() - *goal_at >= kLinger) break;
+                const auto& requests = session.stats().requests;
+                const bool established = std::any_of(requests.begin(), requests.end(), [](const auto& r) { return r.established; });
+                const bool all_finished = std::all_of(requests.begin(), requests.end(), [](const auto& r) { return !r.established || r.fin; });
+                if (established && all_finished) break;
+            }
             if (handle.valid()) {
                 auto result = driver.poll(handle);
                 if (result.status != DriverStatus::Running) {
                     event("publisher_process", serialize_driver_result(result));
-                    // A publisher that exits before the smoke goal has not demonstrated delivery.
+                    // Whatever the publisher already sent has been processed; stop waiting for more.
+                    for (const auto& e : listener->poll(256)) session.on_event(e);
                     break;
                 }
             }
@@ -87,11 +105,28 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
             {"subscription_established",stats.subscription_established},{"objects",stats.objects},
             {"distinct_objects",stats.distinct_objects},{"payload_bytes",stats.payload_bytes},
             {"progressing",stats.progressing()},{"conformance_scored",false}};
-        const bool delivered = stats.setup_received && stats.subscription_established && stats.progressing() && !session.error() && !stopped;
-        summary["status"] = delivered ? "PASS" : "NOT_RUN";
+        summary["status"] = delivered_at_goal && !stopped ? "PASS" : "NOT_RUN";
         if (session.error()) summary["error"] = *session.error();
         event("draft23_smoke",summary.dump());
         setup_context.data_streams = stats.data_streams;
+        setup_context.requests = stats.requests;
+        setup_context.subscription_alias = stats.subscription_alias;
+        setup_context.direct_subscribe = config.scenario_ids.front() == "d23-direct-subscribe-smoke";
+        setup_context.duplicate_request_id = stats.duplicate_request_id;
+        setup_context.oversize_control_message = stats.oversize_control_message;
+        if (!stats.requests.empty()) {
+            nlohmann::json requests = nlohmann::json::array();
+            for (const auto& request : stats.requests) {
+                nlohmann::json messages = nlohmann::json::array();
+                for (const auto& message : request.messages) messages.push_back({{"type",message.type},{"body_length",message.body_length}});
+                requests.push_back({{"stream_id",request.stream_id},{"local",request.local},{"established",request.established},
+                    {"request_id",request.request_id ? nlohmann::json(*request.request_id) : nlohmann::json()},
+                    {"messages",messages},{"fin",request.fin},{"fin_after_publish_done",request.fin_after_publish_done},
+                    {"publish_done",request.publish_done ? nlohmann::json{{"status_code",request.publish_done->status_code},
+                        {"stream_count",request.publish_done->stream_count}} : nlohmann::json()}});
+            }
+            event("request_observed",nlohmann::json{{"requests",requests}}.dump());
+        }
         if (!stats.data_streams.empty()) {
             nlohmann::json streams = nlohmann::json::array();
             for (const auto& stream : stats.data_streams) {

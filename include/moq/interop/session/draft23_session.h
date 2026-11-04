@@ -40,6 +40,30 @@ struct Draft23DataStream {
     bool reset{false};
 };
 
+// A control message the publisher sent on a request stream: its type code and the length of its body.
+struct Draft23ControlMessage {
+    std::uint64_t type{0};
+    std::uint64_t body_length{0};
+};
+
+struct Draft23PublishDone {
+    std::uint64_t status_code{0};
+    std::uint64_t stream_count{0};
+};
+
+// One request stream, kept after it ends. `local` streams are the ones the harness opened (SUBSCRIBE);
+// the publisher opened the others. Only the publisher's messages and FIN are recorded.
+struct Draft23RequestStream {
+    std::uint64_t stream_id{0};
+    bool local{false};
+    std::optional<std::uint64_t> request_id;
+    std::vector<Draft23ControlMessage> messages;
+    std::optional<Draft23PublishDone> publish_done;
+    bool fin{false};
+    bool fin_after_publish_done{false};
+    bool established{false};  // the harness accepted this request as the media subscription
+};
+
 struct Draft23SessionStats {
     bool connected{false};
     bool setup_received{false};
@@ -51,6 +75,10 @@ struct Draft23SessionStats {
     std::optional<Draft23PeerSetup> peer_setup;
     std::vector<Draft23DataStream> data_streams;  // bounded; see data_streams_truncated
     bool data_streams_truncated{false};
+    std::vector<Draft23RequestStream> requests;
+    bool duplicate_request_id{false};
+    bool oversize_control_message{false};
+    std::optional<std::uint64_t> subscription_alias;  // Track Alias of the accepted media subscription
     [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }
 };
 

@@ -76,6 +76,13 @@ constexpr auto kPath="D23-9-1-2-MUST-273";
 constexpr auto kQuery="D23-9-1-2-MUST-274";
 constexpr auto kBitFour="D23-11-3-1-MUST-445";
 constexpr auto kOneStream="D23-2-2-MUST-NOT-020";
+constexpr auto kLength="D23-9-MUST-NOT-259";
+constexpr auto kRequestId="D23-6-4-2-1-MUST-NOT-147";
+constexpr auto kSingleResponse="D23-3-1-MUST-036";
+constexpr auto kFinRequired="D23-6-4-2-2-MUST-NOT-150";
+constexpr auto kResponseBeforeFin="D23-6-4-2-2-MUST-151";
+constexpr auto kDoneBeforeFin="D23-6-4-2-2-MUST-152";
+constexpr auto kStreamCount="D23-9-9-MUST-342";
 // Every row outside the SETUP slice keeps its staged state; the slice rows must match `setup`.
 void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict) {
     ASSERT_TRUE(run.score);
@@ -264,7 +271,7 @@ TEST(Draft23RunLive, NativeQuicStoresProgressingMediaAsUnscoredSmoke) {
     // An empty SETUP carries no AUTHORITY or PATH, which a native QUIC client must send.
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -282,7 +289,7 @@ TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     EXPECT_EQ(summary.at("payload_bytes"),2);
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::NotApplicable},{kPath,requirements::OutcomeState::NotApplicable},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Incomplete);
 }
 TEST(Draft23RunLive, MissingPublisherIsHarnessError) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -317,7 +324,7 @@ TEST(Draft23RunLive, OneObjectCannotPassProgressingMedia) {
     EXPECT_EQ(smoke(run).at("distinct_objects"),1);
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -341,7 +348,7 @@ TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     // The rejected SETUP is still evidence: its undersized MAX_CONTROL_MESSAGE_SIZE fails row 288.
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::Fail},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::NotRun},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
     ASSERT_TRUE(summary.contains("error"));
     EXPECT_NE(summary.at("error").get<std::string>().find("SETUP"),std::string::npos);
 }
@@ -375,7 +382,7 @@ TEST(Draft23RunLive, NativeQuicScoresMatchingAuthorityAndPath) {
     EXPECT_EQ(smoke(run).at("status"),"PASS")<<smoke(run).dump();
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Pass},{kPath,requirements::OutcomeState::Pass},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::Pass},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Incomplete);
 }
 } // namespace
 } // namespace moq::interop

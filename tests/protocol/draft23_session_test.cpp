@@ -337,4 +337,87 @@ TEST(Draft23Session, RecordsAHeaderWithBitFourClearBeforeClosing) {
     EXPECT_EQ(session.stats().data_streams[0].type_flags, 0x20u);
     EXPECT_FALSE(session.stats().data_streams[0].valid_header);
 }
+TEST(Draft23Session, RecordsRequestMessagesWithTypeAndBodyLength) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session);
+    ASSERT_FALSE(session.stats().requests.empty());
+    const auto& request = session.stats().requests[0];
+    EXPECT_EQ(request.stream_id, 0u);
+    EXPECT_FALSE(request.local);
+    ASSERT_EQ(request.messages.size(), 1u);
+    EXPECT_EQ(request.messages[0].type, 6u);
+    EXPECT_EQ(request.messages[0].body_length, 9u);
+    EXPECT_EQ(request.request_id, std::optional<std::uint64_t>{0});
+}
+TEST(Draft23Session, RecordsSubscribeResponsePublishDoneAndFinOrder) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    session.on_event(transport::StreamDataEvent{1, bytes({0x0b,3,0,1,0}), false});
+    session.on_event(transport::StreamDataEvent{1, {}, true});
+    const session::Draft23RequestStream* subscribe = nullptr;
+    for (const auto& request : session.stats().requests) if (request.stream_id == 1) subscribe = &request;
+    ASSERT_NE(subscribe, nullptr);
+    EXPECT_TRUE(subscribe->local);
+    ASSERT_EQ(subscribe->messages.size(), 2u);
+    EXPECT_EQ(subscribe->messages[0].type, 4u);
+    EXPECT_EQ(subscribe->messages[1].type, 0x0bu);
+    ASSERT_TRUE(subscribe->publish_done.has_value());
+    EXPECT_EQ(subscribe->publish_done->stream_count, 1u);
+    EXPECT_TRUE(subscribe->fin);
+    EXPECT_TRUE(subscribe->fin_after_publish_done);
+    EXPECT_TRUE(subscribe->established);
+    EXPECT_EQ(session.stats().subscription_alias, std::optional<std::uint64_t>{7});
+}
+TEST(Draft23Session, AnnouncementStreamIsNotAnEstablishedSubscription) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session);
+    ASSERT_FALSE(session.stats().requests.empty());
+    EXPECT_FALSE(session.stats().requests[0].established);
+    EXPECT_FALSE(session.stats().subscription_alias.has_value());
+}
+TEST(Draft23Session, FinBeforePublishDoneIsRecordedAsSuch) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    session.on_event(transport::StreamDataEvent{1, {}, true});
+    for (const auto& request : session.stats().requests) {
+        if (request.stream_id != 1) continue;
+        EXPECT_TRUE(request.fin);
+        EXPECT_FALSE(request.fin_after_publish_done);
+        EXPECT_FALSE(request.publish_done.has_value());
+    }
+}
+TEST(Draft23Session, FlagsAReusedRequestId) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session);
+    session.on_event(transport::StreamDataEvent{4, bytes({6,9,0,1,5,'m','e','d','i','a',0}), false});
+    EXPECT_TRUE(session.error());
+    EXPECT_TRUE(session.stats().duplicate_request_id);
+}
+TEST(Draft23Session, FlagsAControlMessageLongerThanTheAdvertisedLimit) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session);
+    session.on_event(transport::StreamDataEvent{2, bytes({0xaf,0,0xc1,0,0}), false});
+    EXPECT_TRUE(session.error());
+    EXPECT_TRUE(session.stats().oversize_control_message);
+}
+TEST(Draft23Session, PublishDoneAndFinInOneEventIsRecordedInOrder) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    session.on_event(transport::StreamDataEvent{1, bytes({0x0b,3,2,2,0}), true});
+    const session::Draft23RequestStream* subscribe = nullptr;
+    for (const auto& request : session.stats().requests) if (request.stream_id == 1) subscribe = &request;
+    ASSERT_NE(subscribe, nullptr);
+    ASSERT_TRUE(subscribe->publish_done.has_value());
+    EXPECT_EQ(subscribe->publish_done->stream_count, 2u);
+    EXPECT_TRUE(subscribe->fin);
+    EXPECT_TRUE(subscribe->fin_after_publish_done);
+    EXPECT_FALSE(session.error());
+}
 }

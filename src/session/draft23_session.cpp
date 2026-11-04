@@ -37,6 +37,7 @@ public:
         std::uint64_t alias{0}, group{0}, previous{0};
         bool has_previous{false};
         std::optional<std::size_t> trace;
+        std::optional<std::size_t> request_trace;
     };
     struct Pending { StreamId id; std::vector<std::byte> bytes; std::size_t offset{0}; bool fin{false}; };
     transport::SessionTransport& transport_;
@@ -62,6 +63,13 @@ public:
             stream.trace = stats_.data_streams.size() - 1;
         }
         return &stats_.data_streams[*stream.trace];
+    }
+    Draft23RequestStream& traced_request(StreamId id, Stream& stream) {
+        if (!stream.request_trace) {
+            stats_.requests.push_back({}); stats_.requests.back().stream_id = id; stats_.requests.back().local = stream.local;
+            stream.request_trace = stats_.requests.size() - 1;
+        }
+        return stats_.requests[*stream.request_trace];
     }
     void fail(std::string detail, std::optional<std::uint64_t> code = {}) {
         if (error_) return;
@@ -127,6 +135,7 @@ public:
     }
     bool register_request(std::uint64_t id) {
         if ((id&1) || !request_ids_.insert(id).second) {
+            if (!(id&1)) stats_.duplicate_request_id=true;
             fail("invalid publisher Request ID",0x4); return false;
         }
         if (request_ids_.size()>config_.maximum_streams) { fail("harness limit: request history"); return false; }
@@ -137,6 +146,13 @@ public:
             std::equal(prefix.begin(),prefix.end(),config_.track_namespace.begin());
     }
     void request(StreamId id, Stream& stream) {
+        request_messages(id,stream);
+        if (stream.fin && stream.bytes.empty()) {
+            auto& record=traced_request(id,stream);
+            record.fin=true; record.fin_after_publish_done=record.publish_done.has_value();
+        }
+    }
+    void request_messages(StreamId id, Stream& stream) {
         while (!stream.bytes.empty() && !error_) {
             wire::Cursor cursor(stream.bytes);
             auto decoded=d23::decode_message_with_error(cursor);
@@ -145,21 +161,30 @@ public:
                 return;
             }
             if (const auto* issue=std::get_if<d23::MessageDecodeFailure>(&decoded)) {
+                if (issue->error.code==wire::DecodeErrorCode::LengthExceedsLimit) stats_.oversize_control_message=true;
                 fail("draft-23 request decode: "+issue->error.detail,
                     issue->unsupported?std::nullopt:std::optional<std::uint64_t>{d23::session_error_code(*issue)});
                 return;
             }
             auto message=std::get<d23::Message>(std::move(decoded));
+            {
+                wire::Cursor peek(stream.bytes);
+                const auto frame=d23::decode_frame(peek,std::numeric_limits<std::uint64_t>::max());
+                if (const auto* parsed=std::get_if<d23::Frame>(&frame))
+                    traced_request(id,stream).messages.push_back({parsed->type,parsed->body.size()});
+            }
             consume(stream,cursor.offset());
             std::visit([&](const auto& value) {
                 using T=std::decay_t<decltype(value)>;
                 if constexpr (std::is_same_v<T,d23::PublishNamespaceMessage>) {
                     if (stream.local || !stream.first) { fail("PUBLISH_NAMESPACE on wrong stream",0x303); return; }
+                    traced_request(id,stream).request_id=value.request_id;
                     if (!register_request(value.request_id)) return;
                     send(id,d23::RequestOkMessage{});
                     if (namespace_matches(value.track_namespace)) { stats_.namespace_announced=true; subscribe(); }
                 } else if constexpr (std::is_same_v<T,d23::PublishMessage>) {
                     if (stream.local || !stream.first) { fail("PUBLISH on wrong stream",0x303); return; }
+                    traced_request(id,stream).request_id=value.request_id;
                     if (!register_request(value.request_id)) return;
                     if (value.track_namespace!=config_.track_namespace || value.track_name!=config_.track_name) {
                         rejected_aliases_.insert(value.track_alias);
@@ -169,17 +194,17 @@ public:
                     if (stats_.subscription_established || subscription_) {
                         fail("harness smoke does not support simultaneous PUBLISH and SUBSCRIBE"); return;
                     }
-                    alias_=value.track_alias;
+                    alias_=value.track_alias; stats_.subscription_alias=value.track_alias;
                     rejected_aliases_.erase(value.track_alias);
-                    stream.media_request=true;
+                    stream.media_request=true; traced_request(id,stream).established=true;
                     stats_.subscription_established=true;
                     send(id,d23::RequestOkMessage{});
                 } else if constexpr (std::is_same_v<T,d23::SubscribeOkMessage>) {
                     if (!stream.local || !stream.first || subscription_!=id) {
                         fail("unexpected SUBSCRIBE_OK",0x303); return;
                     }
-                    alias_=value.track_alias; rejected_aliases_.erase(value.track_alias);
-                    stats_.subscription_established=true; stream.media_request=true;
+                    alias_=value.track_alias; stats_.subscription_alias=value.track_alias; rejected_aliases_.erase(value.track_alias);
+                    stats_.subscription_established=true; stream.media_request=true; traced_request(id,stream).established=true;
                 } else if constexpr (std::is_same_v<T,d23::RequestErrorMessage>) {
                     fail("publisher rejected request: code="+std::to_string(value.error_code));
                 } else if constexpr (std::is_same_v<T,d23::PublishDoneMessage>) {
@@ -188,6 +213,7 @@ public:
                     }
                     // FIN/data streams may arrive after this request-stream message.
                     stream.done=true;
+                    traced_request(id,stream).publish_done=Draft23PublishDone{value.status_code,value.stream_count};
                 } else {
                     fail("harness smoke does not implement this draft-23 request message");
                 }
@@ -207,6 +233,7 @@ public:
         const auto setup=d23::decode_setup(cursor);
         if (std::holds_alternative<wire::NeedMore>(setup)) return;
         if (const auto* issue=std::get_if<wire::DecodeError>(&setup)) {
+            if (issue->code==wire::DecodeErrorCode::LengthExceedsLimit) stats_.oversize_control_message=true;
             fail("invalid publisher SETUP: "+issue->detail,
                 issue->code==wire::DecodeErrorCode::LengthExceedsLimit?0x401:
                 issue->code==wire::DecodeErrorCode::InvalidValue?0x301:0x300); return;

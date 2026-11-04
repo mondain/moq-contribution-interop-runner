@@ -686,11 +686,16 @@
       "actor": "publisher",
       "summary": "A publisher MUST send exactly one SUBSCRIBE_OK or SUBSCRIBE_ERROR in response to a SUBSCRIBE.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family subscription_lifecycle, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-subscribe-single-response"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 3.1: a publisher sends exactly one SUBSCRIBE_OK or SUBSCRIBE_ERROR in response to a SUBSCRIBE. Judged only where the runner sent a SUBSCRIBE (d23-direct-subscribe-smoke); not applicable when the publisher started the subscription with PUBLISH. Fails on a second response, passes on exactly one, and is NOT_RUN when none arrived. Evidence: request_observed.",
+      "reviewed": true
     },
     {
       "id": "D23-3-1-MUST-037",
@@ -2795,11 +2800,16 @@
       "actor": "publisher",
       "summary": "An endpoint MUST NOT reuse a Request ID within a session.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-request-id-unique"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.4.2.1: a Request ID is not reused within a session. Fails when the publisher opened two requests with the same Request ID; passes when at least one Request ID was seen and none repeated. Evidence: request_observed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-4-2-1-MUST-148",
@@ -2852,11 +2862,16 @@
       "actor": "publisher",
       "summary": "An endpoint MUST NOT send a FIN on a direction of a request stream until it has sent all required messages on that direction for its request type.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-request-stream-fin-after-required"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.4.2.2: an endpoint must not FIN a request stream direction before sending all required messages. Combines the response and PUBLISH_DONE checks below: fails when either is violated, passes when the PUBLISH_DONE check passed and the response check passed or did not apply. Evidence: request_observed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-4-2-2-MUST-151",
@@ -2871,11 +2886,16 @@
       "actor": "publisher",
       "summary": "In particular, an endpoint sending a response to a request MUST send the corresponding response message, and the publisher of an Established subscription MUST send PUBLISH_DONE, before sending a FIN.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-subscribe-response-before-fin"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.4.2.2: a responder sends the response message before its FIN. Judged on the SUBSCRIBE stream the runner opened; not applicable when the publisher started the subscription with PUBLISH. Evidence: request_observed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-4-2-2-MUST-152",
@@ -2890,11 +2910,16 @@
       "actor": "publisher",
       "summary": "In particular, an endpoint sending a response to a request MUST send the corresponding response message, and the publisher of an Established subscription MUST send PUBLISH_DONE, before sending a FIN.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-publish-done-before-fin"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 6.4.2.2: the publisher of an Established subscription sends PUBLISH_DONE before its FIN. Fails when the publisher FINs the subscription's request stream before PUBLISH_DONE. Passes once PUBLISH_DONE has been observed with no earlier FIN, because the ordering can then no longer be broken on that stream, whether or not the publisher ever closes it. NOT_RUN while no PUBLISH_DONE has arrived. Evidence: request_observed.",
+      "reviewed": true
     },
     {
       "id": "D23-6-4-2-2-SHOULD-153",
@@ -4923,11 +4948,16 @@
       "actor": "publisher",
       "summary": "An endpoint MUST NOT send a control message with a length larger than the peer's MAX_CONTROL_MESSAGE_SIZE (Section 9.1.8).",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family session_setup, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-control-message-length"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9: a control message must not be longer than the peer's MAX_CONTROL_MESSAGE_SIZE. The runner advertises no MAX_CONTROL_MESSAGE_SIZE option, so the limit is the default of 65535. Fails when the publisher sent a longer message, passes when every observed message fits. Evidence: peer_setup_received.",
+      "reviewed": true
     },
     {
       "id": "D23-9-MUST-260",
@@ -6525,11 +6555,16 @@
       "actor": "publisher",
       "summary": "If the publisher is unable to set Stream Count to the exact number of streams opened for the subscription, it MUST set Stream Count to 2^64 - 1.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family subscription_lifecycle, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-publish-done-stream-count"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 9.9: Stream Count is the exact number of data streams opened for the subscription, or 2^64-1 when the publisher cannot count them. Fails when the runner received more streams for the subscription's Track Alias than the count states; passes on an exact match or 2^64-1; NOT_RUN when fewer streams arrived than counted, since late streams may still be in flight. Evidence: request_observed and peer_stream_classified.",
+      "reviewed": true
     },
     {
       "id": "D23-9-9-SHOULD-343",
