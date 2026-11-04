@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <map>
+#include <set>
 
 namespace {
 using namespace moq::interop;
@@ -139,7 +140,7 @@ TEST(Draft23Evaluators, BindingsNameEveryTestableRowOnBothSmokeScenarios) {
         EXPECT_EQ(per_row[row.id], row.scenarios.size()) << row.id;
     }
     EXPECT_EQ(per_row.size(), static_cast<std::size_t>(testable));
-    EXPECT_EQ(testable, 21);
+    EXPECT_EQ(testable, 100);
 }
 
 constexpr auto kBitFour = "D23-11-3-1-MUST-445";
@@ -348,5 +349,311 @@ TEST(Draft23Evaluators, ProbeBindingsUseTheProbeScenarioAndPeerClosedEvidence) {
         }
     }
     EXPECT_EQ(found, std::size(kProbeRows));
+}
+
+session::Draft23PublishedTrack published(std::string ns, std::string name, std::uint64_t alias) { return {std::move(ns), std::move(name), alias}; }
+Draft23Evidence with_tracks(std::vector<session::Draft23PublishedTrack> tracks) {
+    auto context = native({});
+    context.published_tracks = std::move(tracks);
+    return context;
+}
+TEST(Draft23Evaluators, EmptyNamesAndNamespaceFieldsFail) {
+    constexpr auto kName = "D23-2-4-1-MUST-028";
+    constexpr auto kField = "D23-8-7-MUST-232";
+    EXPECT_EQ(run(native({})).at(kName), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(kName), OutcomeState::Pass);
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(kField), OutcomeState::Pass);
+    auto empty_name = with_tracks({published("media", "vide", 1)});
+    empty_name.empty_track_name = true;
+    EXPECT_EQ(run(empty_name).at(kName), OutcomeState::Fail);
+    auto empty_field = with_tracks({published("media", "vide", 1)});
+    empty_field.empty_namespace_field = true;
+    EXPECT_EQ(run(empty_field).at(kField), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, ReservedNamespacesAreNotPublished) {
+    for (const auto id : {"D23-2-4-3-MUST-NOT-032", "D23-2-4-3-MUST-NOT-033"}) {
+        EXPECT_EQ(run(native({})).at(id), OutcomeState::NotRun) << id;
+        EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(id), OutcomeState::Pass) << id;
+        EXPECT_EQ(run(with_tracks({published(".", "x", 1)})).at(id), OutcomeState::Fail) << id;
+        auto announced = native({});
+        announced.announced_namespaces = {"."};
+        EXPECT_EQ(run(announced).at(id), OutcomeState::Fail) << id;
+        announced.announced_namespaces = {"media"};
+        EXPECT_EQ(run(announced).at(id), OutcomeState::Pass) << id;
+        EXPECT_EQ(run(with_tracks({published(".session", "x", 1)})).at(id), OutcomeState::Pass) << id;  // a different rule
+    }
+}
+TEST(Draft23Evaluators, SessionNamespaceIsNotPublished) {
+    constexpr auto kId = "D23-6-5-MUST-NOT-158";
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_tracks({published(".session", "x", 1)})).at(kId), OutcomeState::Fail);
+    auto announced = native({});
+    announced.announced_namespaces = {".session"};
+    EXPECT_EQ(run(announced).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(with_tracks({published(".", "x", 1)})).at(kId), OutcomeState::Pass);
+}
+TEST(Draft23Evaluators, TrackAliasesAreUniquePerTrack) {
+    constexpr auto kId = "D23-3-1-3-MUST-NOT-050";
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_tracks({published("media", "catalog", 1), published("media", "vide", 2)})).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(with_tracks({published("media", "catalog", 1), published("media", "vide", 1)})).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1), published("media", "vide", 1)})).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, DatagramCapacityMeansTheExtensionWasNegotiated) {
+    constexpr auto kId = "D23-6-2-MUST-135";
+    EXPECT_EQ(run(Draft23Evidence{}).at(kId), OutcomeState::NotRun);
+    auto negotiated = native({});
+    negotiated.max_datagram_payload = 1150;
+    EXPECT_EQ(run(negotiated).at(kId), OutcomeState::Pass);
+    auto absent = native({});
+    absent.max_datagram_payload = 0;
+    absent.connected = true;
+    EXPECT_EQ(run(absent).at(kId), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, FirstBidiMessageMustBeARequestOpener) {
+    constexpr auto kId = "D23-6-3-MUST-NOT-136";
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::NotRun);
+    for (const std::uint64_t type : {0xdu, 3u, 0x1du, 0x16u, 6u, 0x50u, 0x51u})
+        EXPECT_EQ(run(with_requests({request_stream(0, false, {type})})).at(kId), OutcomeState::Pass) << type;
+    for (const std::uint64_t type : {4u, 5u, 7u, 0xbu, 0x3fu})
+        EXPECT_EQ(run(with_requests({request_stream(0, false, {type})})).at(kId), OutcomeState::Fail) << type;
+    // The runner's own SUBSCRIBE stream starts with the publisher's SUBSCRIBE_OK; only streams the publisher opened count.
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4})})).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, ControlStreamMustStayOpen) {
+    constexpr auto kId = "D23-6-3-MUST-NOT-140";
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(Draft23Evidence{}).at(kId), OutcomeState::NotRun);
+    auto closed = native({});
+    closed.control_stream_closed = true;
+    EXPECT_EQ(run(closed).at(kId), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, DeltaEncodingMustNotOverflow) {
+    for (const auto id : {"D23-8-3-MUST-NOT-210", "D23-9-19-MUST-351"}) {
+        EXPECT_EQ(run(Draft23Evidence{}).at(id), OutcomeState::NotRun) << id;
+        EXPECT_EQ(run(native({})).at(id), OutcomeState::Pass) << id;
+        auto overflow = native({});
+        overflow.delta_overflow = true;
+        EXPECT_EQ(run(overflow).at(id), OutcomeState::Fail) << id;
+    }
+}
+TEST(Draft23Evaluators, DuplicateParametersFail) {
+    constexpr auto kId = "D23-9-19-MUST-NOT-355";
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_tracks({published("media", "vide", 1)})).at(kId), OutcomeState::Pass);
+    auto duplicate = with_tracks({published("media", "vide", 1)});
+    duplicate.duplicate_parameter = true;
+    EXPECT_EQ(run(duplicate).at(kId), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, SubscribeIsAnsweredWithSubscribeOk) {
+    constexpr auto kId = "D23-9-6-MUST-332";
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {4})})).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {5})})).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(with_requests({request_stream(1, true, {})})).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(with_requests({request_stream(0, false, {0x1d})}, false)).at(kId), OutcomeState::NotApplicable);
+}
+TEST(Draft23Evaluators, ZeroStreamCountNeedsNoStreamsReceived) {
+    constexpr auto kId = "D23-9-9-MUST-341";
+    auto make = [&](std::uint64_t count, int streams) {
+        auto done = request_stream(1, true, {4, 0x0b});
+        done.established = true;
+        done.publish_done = session::Draft23PublishDone{0, count};
+        auto context = with_requests({done});
+        context.subscription_alias = 7;
+        for (int i = 0; i < streams; ++i) context.data_streams.push_back(stream(static_cast<std::uint64_t>(6 + 4 * i), 0x30, 7, static_cast<std::uint64_t>(i), 0));
+        return context;
+    };
+    EXPECT_EQ(run(make(0, 0)).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(make(3, 0)).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(make(2, 2)).at(kId), OutcomeState::NotApplicable);
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, PaddingMustBeAllZero) {
+    constexpr auto kId = "D23-11-5-1-MUST-475";
+    EXPECT_EQ(run(native({})).at(kId), OutcomeState::NotRun);
+    auto padded = native({});
+    padded.padding_streams = 2;
+    EXPECT_EQ(run(padded).at(kId), OutcomeState::Pass);
+    padded.padding_nonzero = true;
+    EXPECT_EQ(run(padded).at(kId), OutcomeState::Fail);
+}
+
+constexpr auto kReservedScenario = "d23-probe-subscribe-reserved-namespace";
+constexpr auto kSessionScenario = "d23-probe-subscribe-session-namespace";
+Draft23Evidence reply_evidence(const char* scenario, bool injected, std::optional<session::Draft23ProbeReply> reply,
+                               std::optional<session::Draft23ProbeClose> close = std::nullopt) {
+    Draft23Evidence context;
+    context.probe_scenario = scenario;
+    session::Draft23ProbeResult result;
+    result.injected = injected;
+    result.reply = std::move(reply);
+    result.close = close;
+    context.probe = result;
+    return context;
+}
+session::Draft23ProbeReply request_error(std::uint64_t code, std::vector<std::uint64_t> details = {}) {
+    session::Draft23ProbeReply reply;
+    reply.type = 5; reply.error_code = code; reply.detail_types = std::move(details);
+    return reply;
+}
+TEST(Draft23Evaluators, ReplyProbesPassOnlyOnADoesNotExistRequestError) {
+    for (const auto& [scenario, row] : {std::pair{kReservedScenario, "D23-2-4-3-MUST-034"}, std::pair{kSessionScenario, "D23-6-5-MUST-160"}}) {
+        EXPECT_EQ(run(reply_evidence(scenario, true, request_error(0x10))).at(row), OutcomeState::Pass) << row;
+        EXPECT_EQ(run(reply_evidence(scenario, true, request_error(0x11))).at(row), OutcomeState::Fail) << row;
+        session::Draft23ProbeReply accepted; accepted.type = 4;
+        EXPECT_EQ(run(reply_evidence(scenario, true, accepted)).at(row), OutcomeState::Fail) << row;
+        EXPECT_EQ(run(reply_evidence(scenario, true, std::nullopt, session::Draft23ProbeClose{true, 3})).at(row), OutcomeState::Fail) << row;
+        EXPECT_EQ(run(reply_evidence(scenario, true, std::nullopt)).at(row), OutcomeState::Fail) << row;
+        EXPECT_EQ(run(reply_evidence(scenario, false, std::nullopt)).at(row), OutcomeState::NotRun) << row;
+    }
+    // A probe is judged only on its own run.
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x10))).at("D23-6-5-MUST-160"), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, ErrorDetailTypesAreNotRepeated) {
+    constexpr auto kId = "D23-9-4-2-MUST-NOT-311";
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x10, {1, 1}))).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(reply_evidence(kSessionScenario, true, request_error(0x10, {1}))).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x10))).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, std::nullopt)).at(kId), OutcomeState::NotRun);
+    session::Draft23ProbeReply accepted; accepted.type = 4;
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, accepted)).at(kId), OutcomeState::NotRun);
+    EXPECT_EQ(run(probe_evidence(kProbeRows[0], true, session::Draft23ProbeClose{true, 0x303})).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, RedirectNeedsItsDetail) {
+    constexpr auto kId = "D23-9-4-2-1-MUST-313";
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x34, {1}))).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x34))).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x34, {7}))).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x10))).at(kId), OutcomeState::NotApplicable);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, std::nullopt)).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, ReplyProbeBindingsUseTheirOwnScenarios) {
+    std::map<std::string, std::set<std::string>> scenarios;
+    for (const auto& binding : requirements::draft23_executable_bindings()) scenarios[binding.requirement_id].insert(binding.scenario_id);
+    EXPECT_EQ(scenarios.at("D23-2-4-3-MUST-034"), std::set<std::string>{kReservedScenario});
+    EXPECT_EQ(scenarios.at("D23-6-5-MUST-160"), std::set<std::string>{kSessionScenario});
+    const std::set<std::string> reply_probes{kReservedScenario, kSessionScenario, "d23-probe-filter-ranges-over-limit"};
+    EXPECT_EQ(scenarios.at("D23-9-4-2-MUST-NOT-311"), reply_probes);
+    EXPECT_EQ(scenarios.at("D23-9-4-2-1-MUST-313"), reply_probes);
+}
+
+Draft23Evidence evidence_for(const session::Draft23Probe& probe, bool injected, std::optional<session::Draft23ProbeClose> close,
+                             std::optional<session::Draft23ProbeReply> reply = std::nullopt) {
+    Draft23Evidence context;
+    context.probe_scenario = std::string(probe.scenario_id);
+    session::Draft23ProbeResult result;
+    result.injected = injected;
+    result.close = close;
+    result.reply = std::move(reply);
+    context.probe = result;
+    return context;
+}
+TEST(Draft23Evaluators, EveryCloseProbeRowPassesOnlyOnItsExpectedCode) {
+    for (const auto& probe : session::draft23_probes()) {
+        if (probe.expect != session::Draft23ProbeExpect::Close) continue;
+        for (const auto row : session::draft23_probe_rows(probe)) {
+            const std::string id(row);
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{true, probe.expected_code})).at(id), OutcomeState::Pass) << id;
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{true, probe.expected_code + 1})).at(id), OutcomeState::Fail) << id;
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{false, probe.expected_code})).at(id), OutcomeState::Fail) << id;
+            EXPECT_EQ(run(evidence_for(probe, true, std::nullopt)).at(id), OutcomeState::Fail) << id;
+            EXPECT_EQ(run(evidence_for(probe, false, std::nullopt)).at(id), OutcomeState::NotRun) << id;
+        }
+    }
+}
+TEST(Draft23Evaluators, ToleranceProbesPassWhenThePublisherKeepsTheSessionOpen) {
+    std::size_t seen = 0;
+    for (const auto& probe : session::draft23_probes()) {
+        if (probe.expect != session::Draft23ProbeExpect::Tolerate) continue;
+        ++seen;
+        for (const auto row : session::draft23_probe_rows(probe)) {
+            const std::string id(row);
+            EXPECT_EQ(run(evidence_for(probe, true, std::nullopt)).at(id), OutcomeState::Pass) << id;
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{true, 3})).at(id), OutcomeState::Fail) << id;
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{false, 0})).at(id), OutcomeState::Fail) << id;
+            // A graceful close (NO_ERROR) cannot be tied to the unknown input, so it proves nothing either way.
+            EXPECT_EQ(run(evidence_for(probe, true, session::Draft23ProbeClose{true, 0})).at(id), OutcomeState::NotRun) << id;
+            EXPECT_EQ(run(evidence_for(probe, false, std::nullopt)).at(id), OutcomeState::NotRun) << id;
+        }
+    }
+    EXPECT_EQ(seen, 6u);
+}
+TEST(Draft23Evaluators, AProbeRowIsNeverJudgedOnAnotherProbesRun) {
+    const auto probes = session::draft23_probes();
+    const auto& ran = probes[0];
+    const auto outcomes = run(evidence_for(ran, true, session::Draft23ProbeClose{true, ran.expected_code}));
+    for (const auto& other : probes) {
+        if (other.scenario_id == ran.scenario_id) continue;
+        for (const auto row : session::draft23_probe_rows(other)) {
+            if (row == ran.requirement_id) continue;
+            EXPECT_EQ(outcomes.at(std::string(row)), OutcomeState::NotRun) << row;
+        }
+    }
+}
+TEST(Draft23Evaluators, EveryProbeRowIsBoundToItsProbeScenarioOnly) {
+    std::map<std::string, std::set<std::string>> scenarios;
+    for (const auto& binding : requirements::draft23_executable_bindings()) scenarios[binding.requirement_id].insert(binding.scenario_id);
+    for (const auto& probe : session::draft23_probes())
+        for (const auto row : session::draft23_probe_rows(probe))
+            EXPECT_TRUE(scenarios.at(std::string(row)).contains(std::string(probe.scenario_id))) << row;
+}
+
+TEST(Draft23Evaluators, PublishDoneShouldBeFollowedByAFin) {
+    constexpr auto kId = "D23-6-4-2-2-SHOULD-154";
+    auto done = request_stream(1, true, {4, 0x0b});
+    done.established = true;
+    done.publish_done = session::Draft23PublishDone{2, 2};
+    EXPECT_EQ(run(with_requests({done})).at(kId), OutcomeState::Fail);  // PUBLISH_DONE, then the stream stayed open
+    done.fin = true; done.fin_after_publish_done = true;
+    EXPECT_EQ(run(with_requests({done})).at(kId), OutcomeState::Pass);
+    auto open = request_stream(1, true, {4});
+    open.established = true;
+    EXPECT_EQ(run(with_requests({open})).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, RejectionsShouldCarryAFin) {
+    constexpr auto kId = "D23-6-4-2-3-SHOULD-157";
+    auto with_fin = reply_evidence(kReservedScenario, true, request_error(0x10));
+    with_fin.probe->reply_fin = true;
+    EXPECT_EQ(run(with_fin).at(kId), OutcomeState::Pass);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, request_error(0x10))).at(kId), OutcomeState::Fail);
+    EXPECT_EQ(run(reply_evidence(kReservedScenario, true, std::nullopt)).at(kId), OutcomeState::NotRun);
+}
+TEST(Draft23Evaluators, ImplementationOptionShouldBeSentAndBeText) {
+    constexpr auto kSent = "D23-9-1-5-SHOULD-281";
+    constexpr auto kText = "D23-9-1-5-SHOULD-280";
+    EXPECT_EQ(run(Draft23Evidence{}).at(kSent), OutcomeState::NotRun);
+    EXPECT_EQ(run(native({option(1, text("/moq"))})).at(kSent), OutcomeState::Fail);
+    EXPECT_EQ(run(native({option(7, text("moqxr/1.0"))})).at(kSent), OutcomeState::Pass);
+    EXPECT_EQ(run(native({option(7, text("moqxr/1.0"))})).at(kText), OutcomeState::Pass);
+    EXPECT_EQ(run(native({option(7, {std::byte{0xff}, std::byte{0xfe}})})).at(kText), OutcomeState::Fail);
+    EXPECT_EQ(run(native({option(1, text("/moq"))})).at(kText), OutcomeState::NotApplicable);
+}
+TEST(Draft23Evaluators, SharedEvaluatorsJudgeTheirSecondRowToo) {
+    EXPECT_EQ(run(with_tracks({published("media", "a", 1), published("media", "b", 1)})).at("D23-3-1-3-SHOULD-NOT-052"), OutcomeState::Fail);
+    EXPECT_EQ(run(with_tracks({published("media", "a", 1), published("media", "b", 2)})).at("D23-3-1-3-SHOULD-NOT-052"), OutcomeState::Pass);
+    EXPECT_EQ(run(with_streams({stream(6, 0x30, 7, 0, 0), stream(10, 0x30, 7, 0, 0)})).at("D23-11-3-SHOULD-NOT-443"), OutcomeState::Fail);
+    EXPECT_EQ(run(with_streams({stream(6, 0x30, 7, 0, 0), stream(10, 0x30, 7, 1, 0)})).at("D23-11-3-SHOULD-NOT-443"), OutcomeState::Pass);
+}
+
+TEST(Draft23Evaluators, ARowIsOnlyJudgedInTheScenariosItIsBoundTo) {
+    constexpr auto kSmokeRow = "D23-9-1-MUST-NOT-265";  // bound to the two smoke scenarios
+    auto context = native({option(7, text("a")), option(7, text("b"))});
+    context.scenario = "d23-publisher-smoke";
+    EXPECT_EQ(run(context).at(kSmokeRow), OutcomeState::Fail);
+    context.scenario = "d23-direct-subscribe-smoke";
+    EXPECT_EQ(run(context).at(kSmokeRow), OutcomeState::Fail);
+    context.scenario = "d23-probe-unknown-control-message";
+    EXPECT_EQ(run(context).at(kSmokeRow), OutcomeState::NotRun);
+    context.scenario.clear();  // unspecified: judge on the evidence, as the unit tests above do
+    EXPECT_EQ(run(context).at(kSmokeRow), OutcomeState::Fail);
+}
+TEST(Draft23Evaluators, AProbeRowIsJudgedInItsOwnScenarioAndNoOther) {
+    const auto& probe = *session::find_draft23_probe("d23-probe-length-mismatch");
+    auto context = evidence_for(probe, true, session::Draft23ProbeClose{true, probe.expected_code});
+    context.scenario = std::string(probe.scenario_id);
+    EXPECT_EQ(run(context).at("D23-9-MUST-258"), OutcomeState::Pass);
+    context.scenario = "d23-publisher-smoke";
+    EXPECT_EQ(run(context).at("D23-9-MUST-258"), OutcomeState::NotRun);
 }
 }  // namespace

@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <tuple>
 #include <variant>
@@ -39,21 +40,43 @@ constexpr Row kFinRequired{"D23-6-4-2-2-MUST-NOT-150", "d23-request-stream-fin-a
 constexpr Row kResponseBeforeFin{"D23-6-4-2-2-MUST-151", "d23-subscribe-response-before-fin", "request_observed"};
 constexpr Row kDoneBeforeFin{"D23-6-4-2-2-MUST-152", "d23-publish-done-before-fin", "request_observed"};
 constexpr Row kStreamCount{"D23-9-9-MUST-342", "d23-publish-done-stream-count", "request_observed,peer_stream_classified"};
-// Negative probes: each requirement has its own scenario and expected close code, held once in draft23_probes().
-constexpr Row kProbeRows[] = {
-    {"D23-9-MUST-257", "d23-close-on-unknown-message-type", "peer_closed"},
-    {"D23-6-3-MUST-137", "d23-close-on-bad-first-bidi-message", "peer_closed"},
-    {"D23-9-MUST-258", "d23-close-on-length-mismatch", "peer_closed"},
-    {"D23-9-MUST-260", "d23-close-on-oversize-control-message", "peer_closed"},
-    {"D23-9-1-1-MUST-268", "d23-close-on-server-authority", "peer_closed"},
-    {"D23-9-1-2-MUST-272", "d23-close-on-server-path", "peer_closed"},
-    {"D23-6-4-1-MUST-146", "d23-close-on-unknown-uni-stream", "peer_closed"},
-};
+// Negative probes: every row, scenario, evaluator id and expected outcome comes from session::draft23_probes().
 const session::Draft23Probe* probe_for(std::string_view requirement) {
-    for (const auto& probe : session::draft23_probes()) if (probe.requirement_id == requirement) return &probe;
+    for (const auto& probe : session::draft23_probes())
+        for (const auto row : session::draft23_probe_rows(probe)) if (row == requirement) return &probe;
     return nullptr;
 }
-constexpr Row kRows[] = {kMultiplicity, kMaxSize, kAuthority, kPath, kQuery, kBitFour, kOneStream, kLength, kRequestId,
+// Rows judged on the REQUEST_ERROR reply of every reply probe, not on one probe of their own.
+constexpr Row kReplyRows[] = {
+    {"D23-9-4-2-MUST-NOT-311", "d23-error-details-no-repeat", "request_observed"},
+    {"D23-9-4-2-1-MUST-313", "d23-redirect-detail-present", "request_observed"},
+    {"D23-6-4-2-3-SHOULD-157", "d23-reject-with-error-and-fin", "request_observed"},
+};
+constexpr std::uint64_t kRedirectCode = 0x34;
+constexpr std::uint64_t kRedirectDetail = 1;
+constexpr Row kTrackName{"D23-2-4-1-MUST-028", "d23-track-name-not-empty", "request_observed"};
+constexpr Row kNamespaceField{"D23-8-7-MUST-232", "d23-namespace-field-not-empty", "request_observed"};
+constexpr Row kReservedPublish{"D23-2-4-3-MUST-NOT-033", "d23-no-reserved-namespace", "request_observed"};
+constexpr Row kReservedAnyPurpose{"D23-2-4-3-MUST-NOT-032", "d23-no-reserved-namespace", "request_observed"};
+constexpr Row kSessionNamespace{"D23-6-5-MUST-NOT-158", "d23-no-session-namespace", "request_observed"};
+constexpr Row kAliasUnique{"D23-3-1-3-MUST-NOT-050", "d23-track-alias-unique", "request_observed"};
+constexpr Row kDatagram{"D23-6-2-MUST-135", "d23-quic-datagram-negotiated", "transport_established"};
+constexpr Row kFirstBidi{"D23-6-3-MUST-NOT-136", "d23-first-bidi-message-type", "request_observed"};
+constexpr Row kControlOpen{"D23-6-3-MUST-NOT-140", "d23-control-stream-stays-open", "request_observed"};
+constexpr Row kNoOverflow210{"D23-8-3-MUST-NOT-210", "d23-delta-encoding-no-overflow", "request_observed"};
+constexpr Row kNoOverflow351{"D23-9-19-MUST-351", "d23-delta-encoding-no-overflow", "request_observed"};
+constexpr Row kNoDuplicateParameter{"D23-9-19-MUST-NOT-355", "d23-no-duplicate-parameter", "request_observed"};
+constexpr Row kAnsweredOk{"D23-9-6-MUST-332", "d23-subscribe-answered-ok", "request_observed"};
+constexpr Row kZeroCount{"D23-9-9-MUST-341", "d23-publish-done-zero-stream-count", "request_observed,peer_stream_classified"};
+constexpr Row kPadding{"D23-11-5-1-MUST-475", "d23-padding-all-zero", "peer_stream_classified"};
+constexpr Row kFinAfterDone{"D23-6-4-2-2-SHOULD-154", "d23-fin-after-publish-done", "request_observed"};
+constexpr Row kImplementationSent{"D23-9-1-5-SHOULD-281", "d23-implementation-option-sent", "peer_setup_received"};
+constexpr Row kImplementationText{"D23-9-1-5-SHOULD-280", "d23-implementation-option-text", "peer_setup_received"};
+constexpr Row kAliasReuse{"D23-3-1-3-SHOULD-NOT-052", "d23-track-alias-unique", "request_observed"};
+constexpr Row kStreamSpread{"D23-11-3-SHOULD-NOT-443", "d23-subgroup-single-stream", "peer_stream_classified"};
+constexpr Row kRows[] = {kFinAfterDone, kImplementationSent, kImplementationText, kAliasReuse, kStreamSpread, kTrackName, kNamespaceField, kReservedPublish, kReservedAnyPurpose, kSessionNamespace, kAliasUnique,
+                         kDatagram, kFirstBidi, kControlOpen, kNoOverflow210, kNoOverflow351, kNoDuplicateParameter,
+                         kAnsweredOk, kZeroCount, kPadding, kMultiplicity, kMaxSize, kAuthority, kPath, kQuery, kBitFour, kOneStream, kLength, kRequestId,
                          kSingleResponse, kFinRequired, kResponseBeforeFin, kDoneBeforeFin, kStreamCount};
 
 // The state of a row no SETUP evaluator judges.
@@ -238,18 +261,216 @@ OutcomeState stream_count(const Draft23Evidence& context) {
     return received == done->stream_count ? OutcomeState::Pass : OutcomeState::NotRun;
 }
 
+bool saw_any_namespace(const Draft23Evidence& context) {
+    return !context.published_tracks.empty() || !context.announced_namespaces.empty();
+}
+bool published_under(const Draft23Evidence& context, std::string_view first_field) {
+    return std::any_of(context.announced_namespaces.begin(), context.announced_namespaces.end(),
+                       [&](const std::string& name) { return name == first_field; }) ||
+           std::any_of(context.published_tracks.begin(), context.published_tracks.end(),
+                       [&](const session::Draft23PublishedTrack& track) { return track.namespace_first == first_field; });
+}
+
+OutcomeState track_name_not_empty(const Draft23Evidence& context) {
+    if (context.empty_track_name) return OutcomeState::Fail;
+    return context.published_tracks.empty() ? OutcomeState::NotRun : OutcomeState::Pass;
+}
+
+OutcomeState namespace_field_not_empty(const Draft23Evidence& context) {
+    if (context.empty_namespace_field) return OutcomeState::Fail;
+    return saw_any_namespace(context) ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState not_published_under(const Draft23Evidence& context, std::string_view first_field) {
+    if (published_under(context, first_field)) return OutcomeState::Fail;
+    return saw_any_namespace(context) ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+// One Track Alias names one Track at a time (Section 3.1.3). Two PUBLISH messages for the same track are not a conflict.
+OutcomeState alias_unique(const Draft23Evidence& context) {
+    std::map<std::uint64_t, std::set<std::pair<std::string, std::string>>> tracks_by_alias;
+    std::set<std::pair<std::string, std::string>> distinct;
+    for (const auto& track : context.published_tracks) {
+        const auto key = std::make_pair(track.namespace_first, track.name);
+        tracks_by_alias[track.alias].insert(key);
+        distinct.insert(key);
+    }
+    for (const auto& entry : tracks_by_alias) if (entry.second.size() > 1) return OutcomeState::Fail;
+    return distinct.size() >= 2 ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState datagram_negotiated(const Draft23Evidence& context) {
+    if (context.max_datagram_payload > 0) return OutcomeState::Pass;
+    return context.connected ? OutcomeState::Fail : OutcomeState::NotRun;
+}
+
+// Section 6.3: the seven request openers.
+bool request_opener(std::uint64_t type) {
+    return type == 0xd || type == 0x3 || type == 0x1d || type == 0x16 || type == 0x6 || type == 0x50 || type == 0x51;
+}
+
+OutcomeState first_bidi_message(const Draft23Evidence& context) {
+    bool seen = false;
+    for (const auto& request : context.requests) {
+        if (request.local || request.messages.empty()) continue;
+        seen = true;
+        if (!request_opener(request.messages.front().type)) return OutcomeState::Fail;
+    }
+    return seen ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState control_stream_open(const Draft23Evidence& context) {
+    if (context.control_stream_closed) return OutcomeState::Fail;
+    return context.peer_setup ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState no_delta_overflow(const Draft23Evidence& context) {
+    if (context.delta_overflow) return OutcomeState::Fail;
+    return (context.peer_setup || !context.requests.empty()) ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState no_duplicate_parameter(const Draft23Evidence& context) {
+    if (context.duplicate_parameter) return OutcomeState::Fail;
+    return saw_any_namespace(context) ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState answered_ok(const Draft23Evidence& context) {
+    if (!context.direct_subscribe) return OutcomeState::NotApplicable;
+    const auto* stream = subscribe_stream(context);
+    if (!stream) return OutcomeState::NotRun;
+    for (const auto& message : stream->messages) {
+        if (message.type == kSubscribeOk) return OutcomeState::Pass;
+        if (message.type == kRequestError) return OutcomeState::Fail;
+    }
+    return OutcomeState::NotRun;
+}
+
+// Streams that arrived for the established subscription's Track Alias.
+std::uint64_t streams_for_subscription(const Draft23Evidence& context) {
+    return static_cast<std::uint64_t>(std::count_if(
+        context.data_streams.begin(), context.data_streams.end(), [&](const session::Draft23DataStream& stream) {
+            return stream.valid_header && context.subscription_alias && stream.track_alias == *context.subscription_alias;
+        }));
+}
+
+OutcomeState zero_stream_count(const Draft23Evidence& context) {
+    const session::Draft23PublishDone* done = nullptr;
+    for (const auto& request : context.requests) if (request.established && request.publish_done) done = &*request.publish_done;
+    if (!done || !context.subscription_alias) return OutcomeState::NotRun;
+    if (streams_for_subscription(context) > 0) return OutcomeState::NotApplicable;
+    return done->stream_count == 0 ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+OutcomeState padding_zero(const Draft23Evidence& context) {
+    if (context.padding_nonzero) return OutcomeState::Fail;
+    return context.padding_streams > 0 ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+// Section 6.4.2.2 recommends a FIN promptly once there is nothing more to send: after PUBLISH_DONE, the publisher's stream.
+OutcomeState fin_after_done_should(const Draft23Evidence& context) {
+    bool done = false;
+    for (const auto& request : context.requests) {
+        if (!request.established || !request.publish_done) continue;
+        if (!request.fin_after_publish_done) return OutcomeState::Fail;
+        done = true;
+    }
+    return done ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
+const wire::draft21::KeyValue* implementation_option(const Draft23Evidence& context) {
+    if (!context.peer_setup) return nullptr;
+    for (const auto& option : context.peer_setup->options) if (option.type == 7) return &option;  // MOQT_IMPLEMENTATION
+    return nullptr;
+}
+
+OutcomeState implementation_sent(const Draft23Evidence& context) {
+    if (!context.peer_setup) return OutcomeState::NotRun;
+    return verdict(implementation_option(context) != nullptr);
+}
+
+bool valid_utf8(const std::vector<std::byte>& bytes) {
+    std::size_t i = 0;
+    while (i < bytes.size()) {
+        const auto lead = std::to_integer<unsigned>(bytes[i]);
+        const std::size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xe ? 3 : (lead >> 3) == 0x1e ? 4 : 0;
+        if (length == 0 || i + length > bytes.size()) return false;
+        for (std::size_t k = 1; k < length; ++k) if ((std::to_integer<unsigned>(bytes[i + k]) & 0xc0) != 0x80) return false;
+        i += length;
+    }
+    return true;
+}
+
+OutcomeState implementation_text(const Draft23Evidence& context) {
+    const auto* option = implementation_option(context);
+    if (!option) return context.peer_setup ? OutcomeState::NotApplicable : OutcomeState::NotRun;
+    const auto* bytes = std::get_if<std::vector<std::byte>>(&option->value);
+    return verdict(bytes && valid_utf8(*bytes));
+}
+
 // A probe row is judged only on the run of its own probe. The publisher must close the session with the expected
 // application code; any other close, or none, fails. A probe that was never sent proves nothing.
 std::optional<OutcomeState> judge_probe(const session::Draft23Probe& probe, const Draft23Evidence& context) {
     if (!context.probe_scenario || *context.probe_scenario != probe.scenario_id) return std::nullopt;
     if (!context.probe || !context.probe->injected) return std::nullopt;
+    if (probe.expect == session::Draft23ProbeExpect::Tolerate) {
+        // Ignoring the input means the publisher keeps the session open for the whole probe window. A graceful close
+        // (NO_ERROR) cannot be tied to the unknown input, so it settles nothing.
+        if (!context.probe->close) return OutcomeState::Pass;
+        if (context.probe->close->application && context.probe->close->code == 0) return std::nullopt;
+        return OutcomeState::Fail;
+    }
+    if (probe.expect == session::Draft23ProbeExpect::RequestError) {
+        // The request must be rejected, not accepted and not answered by closing the session.
+        const auto& reply = context.probe->reply;
+        return verdict(reply && reply->error_code && *reply->error_code == probe.expected_code);
+    }
     if (!context.probe->close) return OutcomeState::Fail;
     return verdict(context.probe->close->application && context.probe->close->code == probe.expected_code);
+}
+
+// The REQUEST_ERROR a reply probe drew, if this run is a reply probe and one arrived.
+const session::Draft23ProbeReply* request_error_reply(const Draft23Evidence& context) {
+    if (!context.probe_scenario || !context.probe || !context.probe->injected || !context.probe->reply) return nullptr;
+    const auto* probe = session::find_draft23_probe(*context.probe_scenario);
+    if (!probe || probe->expect != session::Draft23ProbeExpect::RequestError) return nullptr;
+    return context.probe->reply->error_code ? &*context.probe->reply : nullptr;
+}
+
+std::optional<OutcomeState> judge_reply_row(std::string_view id, const Draft23Evidence& context) {
+    const auto* reply = request_error_reply(context);
+    if (!reply) return std::nullopt;
+    if (id == kReplyRows[2].requirement) return verdict(context.probe->reply_fin);
+    if (id == kReplyRows[0].requirement) {
+        std::set<std::uint64_t> seen;
+        for (const auto type : reply->detail_types) if (!seen.insert(type).second) return OutcomeState::Fail;
+        return OutcomeState::Pass;
+    }
+    if (*reply->error_code != kRedirectCode) return OutcomeState::NotApplicable;
+    return verdict(std::find(reply->detail_types.begin(), reply->detail_types.end(), kRedirectDetail) != reply->detail_types.end());
 }
 
 // nullopt keeps the row at its staged NotRun: the evidence the row needs has not arrived.
 std::optional<OutcomeState> judge(std::string_view id, const Draft23Evidence& context) {
     if (const auto* probe = probe_for(id)) return judge_probe(*probe, context);
+    if (id == kReplyRows[0].requirement || id == kReplyRows[1].requirement || id == kReplyRows[2].requirement) return judge_reply_row(id, context);
+    if (id == kFinAfterDone.requirement) return fin_after_done_should(context);
+    if (id == kImplementationSent.requirement) return implementation_sent(context);
+    if (id == kImplementationText.requirement) return implementation_text(context);
+    if (id == kAliasReuse.requirement) return alias_unique(context);
+    if (id == kStreamSpread.requirement) return single_stream(context.data_streams);
+    if (id == kTrackName.requirement) return track_name_not_empty(context);
+    if (id == kNamespaceField.requirement) return namespace_field_not_empty(context);
+    if (id == kReservedPublish.requirement || id == kReservedAnyPurpose.requirement) return not_published_under(context, ".");
+    if (id == kSessionNamespace.requirement) return not_published_under(context, ".session");
+    if (id == kAliasUnique.requirement) return alias_unique(context);
+    if (id == kDatagram.requirement) return datagram_negotiated(context);
+    if (id == kFirstBidi.requirement) return first_bidi_message(context);
+    if (id == kControlOpen.requirement) return control_stream_open(context);
+    if (id == kNoOverflow210.requirement || id == kNoOverflow351.requirement) return no_delta_overflow(context);
+    if (id == kNoDuplicateParameter.requirement) return no_duplicate_parameter(context);
+    if (id == kAnsweredOk.requirement) return answered_ok(context);
+    if (id == kZeroCount.requirement) return zero_stream_count(context);
+    if (id == kPadding.requirement) return padding_zero(context);
     const auto native_only = id == kAuthority.requirement || id == kPath.requirement || id == kQuery.requirement;
     if (native_only && context.webtransport) return OutcomeState::NotApplicable;
     if (id == kBitFour.requirement) return bit_four(context.data_streams);
@@ -278,7 +499,10 @@ std::vector<Outcome> evaluate_draft23(const RequirementCatalog& catalog, const D
     outcomes.reserve(catalog.requirements.size());
     for (const auto& row : catalog.requirements) {
         auto state = staged_state(row);
-        if (row.reviewed && row.testability == Testability::Testable) {
+        // A row is judged only in the scenarios the catalog binds it to; elsewhere it stays at its staged state.
+        const bool bound = context.scenario.empty() || row.scenarios.empty() ||
+            std::find(row.scenarios.begin(), row.scenarios.end(), context.scenario) != row.scenarios.end();
+        if (bound && row.reviewed && row.testability == Testability::Testable) {
             if (const auto judged = judge(row.id, context)) state = *judged;
         }
         outcomes.push_back({row.id, state});
@@ -300,10 +524,16 @@ std::vector<std::string> evidence_kinds(std::string_view list) {
 
 std::vector<ExecutableBinding> draft23_executable_bindings() {
     std::vector<ExecutableBinding> bindings;
-    for (const auto& row : kProbeRows)
-        if (const auto* probe = probe_for(row.requirement))
-            bindings.push_back({23, std::string(row.requirement), std::string(probe->scenario_id), std::string(row.evaluator),
-                                evidence_kinds(row.evidence)});
+    for (const auto& probe : session::draft23_probes()) {
+        const std::string kinds = probe.expect == session::Draft23ProbeExpect::RequestError ? "request_observed" : "peer_closed";
+        for (const auto row : session::draft23_probe_rows(probe))
+            bindings.push_back({23, std::string(row), std::string(probe.scenario_id), std::string(probe.evaluator_id), evidence_kinds(kinds)});
+    }
+    for (const auto& row : kReplyRows)
+        for (const auto& probe : session::draft23_probes())
+            if (probe.expect == session::Draft23ProbeExpect::RequestError)
+                bindings.push_back({23, std::string(row.requirement), std::string(probe.scenario_id), std::string(row.evaluator),
+                                    evidence_kinds(row.evidence)});
     for (const auto& row : kRows)
         for (const auto scenario : kScenarios)
             bindings.push_back({23, std::string(row.requirement), std::string(scenario), std::string(row.evaluator),

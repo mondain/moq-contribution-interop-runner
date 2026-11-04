@@ -39,6 +39,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     setup_context.webtransport = config.transport == TransportKind::WebTransport;
     setup_context.authority = authority;
     setup_context.path = "/moq";
+    setup_context.scenario = config.scenario_ids.front();
     auto event = [&](std::string kind, std::string detail) {
         storage::EvidenceEvent e;
         e.kind = std::move(kind); e.detail = std::move(detail); e.scenario_id = config.scenario_ids.front();
@@ -51,6 +52,8 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         settings.webtransport = config.transport == TransportKind::WebTransport;
         settings.subscribe_immediately = config.scenario_ids.front() == "d23-direct-subscribe-smoke";
         settings.probe = session::find_draft23_probe(config.scenario_ids.front());
+        // A probe that talks on the runner's SUBSCRIBE stream needs the runner to subscribe first.
+        if (settings.probe && settings.probe->channel == session::Draft23ProbeChannel::SubscribeExtra) settings.subscribe_immediately = true;
         const session::Draft23Probe* settings_probe = settings.probe;
         session::Draft23Session session(*listener, std::move(settings));
         const auto endpoint = std::string(config.transport == TransportKind::WebTransport ? "https://" : "moqt://") + authority + "/moq";
@@ -75,6 +78,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         constexpr auto kLinger = std::chrono::milliseconds(1500);
         std::optional<std::chrono::steady_clock::time_point> goal_at;
         std::optional<std::chrono::steady_clock::time_point> probe_injected_at;
+        std::optional<std::chrono::steady_clock::time_point> probe_reply_at;
         const auto probe_window = std::min<std::chrono::milliseconds>(config.timeout, std::chrono::milliseconds(3000));
         while (!stopped && std::chrono::steady_clock::now() < deadline && !session.error()) {
             for (const auto& e : listener->poll(256)) session.on_event(e);
@@ -91,7 +95,12 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
                 const auto now = std::chrono::steady_clock::now();
                 if (probe_state->injected && !probe_injected_at) probe_injected_at = now;
                 // The probe ends the session: stop at the publisher's close, or when it has had its window to react.
-                if (probe_state->close || (probe_injected_at && now - *probe_injected_at >= probe_window)) break;
+                // A reply probe is answered on its own stream and leaves the session open.
+                if (probe_state->reply && !probe_reply_at) probe_reply_at = now;
+                // After a REQUEST_ERROR reply the FIN may follow a moment later; wait briefly so the rejection is judged whole.
+                const bool reply_settled = probe_reply_at && settings_probe->expect == session::Draft23ProbeExpect::RequestError &&
+                    (probe_state->reply_fin || now - *probe_reply_at >= std::chrono::milliseconds(300));
+                if (probe_state->close || reply_settled || (probe_injected_at && now - *probe_injected_at >= probe_window)) break;
             }
             if (goal_at) {
                 if (std::chrono::steady_clock::now() - *goal_at >= kLinger) break;
@@ -117,6 +126,18 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
             nlohmann::json detail{{"scenario",probe.scenario_id},{"requirement",probe.requirement_id},
                 {"expected_code",probe.expected_code},{"injected",stats.probe->injected},
                 {"reply_bytes",stats.probe->reply_bytes},{"reply_fin",stats.probe->reply_fin},
+                {"other_stream_ends",[&] {
+                    nlohmann::json ends = nlohmann::json::array();
+                    for (const auto& other : stats.probe->other_stream_ends)
+                        ends.push_back({{"stream_id",other.stream_id},
+                            {"kind",other.end.kind==session::Draft23ProbeStreamEnd::Kind::Reset?"reset":"stop_sending"},
+                            {"code",other.end.code ? nlohmann::json(*other.end.code) : nlohmann::json()}});
+                    return ends; }()},
+                {"stream_end",stats.probe->stream_end ? nlohmann::json{{"kind",stats.probe->stream_end->kind==session::Draft23ProbeStreamEnd::Kind::Reset?"reset":"stop_sending"},
+                    {"code",stats.probe->stream_end->code ? nlohmann::json(*stats.probe->stream_end->code) : nlohmann::json()}} : nlohmann::json()},
+                {"reply",stats.probe->reply ? nlohmann::json{{"type",stats.probe->reply->type},
+                    {"error_code",stats.probe->reply->error_code ? nlohmann::json(*stats.probe->reply->error_code) : nlohmann::json()},
+                    {"detail_types",stats.probe->reply->detail_types}} : nlohmann::json()},
                 {"close",stats.probe->close ? nlohmann::json{{"application",stats.probe->close->application},
                     {"code",stats.probe->close->code}} : nlohmann::json()}};
             if (session.error()) detail["session_note"] = *session.error();
@@ -133,6 +154,17 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         if (session.error()) summary["error"] = *session.error();
         event("draft23_smoke",summary.dump());
         }
+        setup_context.published_tracks = stats.published_tracks;
+        setup_context.announced_namespaces = stats.announced_namespaces;
+        setup_context.connected = stats.connected;
+        setup_context.max_datagram_payload = stats.max_datagram_payload;
+        setup_context.empty_track_name = stats.empty_track_name;
+        setup_context.empty_namespace_field = stats.empty_namespace_field;
+        setup_context.duplicate_parameter = stats.duplicate_parameter;
+        setup_context.delta_overflow = stats.delta_overflow;
+        setup_context.control_stream_closed = stats.control_stream_closed;
+        setup_context.padding_streams = stats.padding_streams;
+        setup_context.padding_nonzero = stats.padding_nonzero;
         setup_context.data_streams = stats.data_streams;
         setup_context.requests = stats.requests;
         setup_context.subscription_alias = stats.subscription_alias;

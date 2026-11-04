@@ -406,7 +406,7 @@ TEST_F(HttpApiDraft23Test, ListsDraft23AsStagedWithItsOwnProfilesAndSource) {
         EXPECT_FALSE(profile.at("configured"));
         ++profiles;
     }
-    EXPECT_EQ(profiles, 36u);  // nine scenarios (two smoke, seven probes) on two transports in two modes
+    EXPECT_EQ(profiles, 216u);  // 54 scenarios (two smoke, 52 probes) on two transports in two modes
     const auto page = get_json("/api/v1/requirements?draft=23&limit=2");
     EXPECT_EQ(page.at("draft"), 23);
     EXPECT_EQ(page.at("pagination").at("total"), 532);

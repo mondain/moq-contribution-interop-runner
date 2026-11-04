@@ -5,6 +5,7 @@
 #include "moq/interop/wire/draft21/key_values.h"
 
 #include <memory>
+#include <string>
 #include <optional>
 #include <vector>
 
@@ -72,11 +73,41 @@ struct Draft23ProbeClose {
     std::uint64_t code{0};
 };
 
+// The first message the publisher sent back on the probe stream. `error_code` and `detail_types` are set for a
+// REQUEST_ERROR; the detail types are listed in wire order so a repeated type is visible.
+struct Draft23ProbeReply {
+    std::uint64_t type{0};
+    std::optional<std::uint64_t> error_code;
+    std::vector<std::uint64_t> detail_types;
+};
+
+// How the publisher ended the probe's request stream: by resetting its half or by asking the runner to stop sending.
+struct Draft23ProbeStreamEnd {
+    enum class Kind { Reset, StopSending };
+    Kind kind{Kind::Reset};
+    std::optional<std::uint64_t> code;
+};
+
+struct Draft23OtherStreamEnd {
+    std::uint64_t stream_id{0};
+    Draft23ProbeStreamEnd end;
+};
+
 struct Draft23ProbeResult {
     bool injected{false};
     std::optional<Draft23ProbeClose> close;  // the first close the publisher caused
     std::uint64_t reply_bytes{0};            // what the publisher sent back on the stream the probe used
     bool reply_fin{false};
+    std::optional<Draft23ProbeReply> reply;
+    std::optional<Draft23ProbeStreamEnd> stream_end;
+    std::vector<Draft23OtherStreamEnd> other_stream_ends;  // resets or stop-sendings of the publisher's own streams
+};
+
+// A track the publisher announced with PUBLISH: the first field of its namespace, its name and Track Alias.
+struct Draft23PublishedTrack {
+    std::string namespace_first;
+    std::string name;
+    std::uint64_t alias{0};
 };
 
 struct Draft23SessionStats {
@@ -93,6 +124,16 @@ struct Draft23SessionStats {
     std::vector<Draft23RequestStream> requests;
     bool duplicate_request_id{false};
     bool oversize_control_message{false};
+    std::vector<Draft23PublishedTrack> published_tracks;
+    std::vector<std::string> announced_namespaces;  // first field of each PUBLISH_NAMESPACE namespace
+    bool empty_track_name{false};
+    bool empty_namespace_field{false};
+    bool duplicate_parameter{false};
+    bool delta_overflow{false};
+    bool control_stream_closed{false};
+    std::uint64_t max_datagram_payload{0};  // 0 when QUIC DATAGRAM was not negotiated
+    std::uint64_t padding_streams{0};
+    bool padding_nonzero{false};
     std::optional<Draft23ProbeResult> probe;  // present only in negative probe runs
     std::optional<std::uint64_t> subscription_alias;  // Track Alias of the accepted media subscription
     [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }

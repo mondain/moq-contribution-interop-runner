@@ -1,6 +1,7 @@
 #include "moq/interop/session/draft23_session.h"
 #include "moq/interop/session/draft23_probes.h"
 #include "moq/interop/wire/draft23/setup.h"
+#include "moq/interop/wire/draft23/messages.h"
 
 #include <gtest/gtest.h>
 
@@ -17,11 +18,13 @@ class Transport final : public transport::SessionTransport {
 public:
     struct Write { std::uint64_t id; std::vector<std::byte> data; bool fin; };
     std::vector<Write> writes;
+    std::vector<std::vector<std::byte>> datagrams;
     std::optional<std::uint64_t> closed;
     std::size_t allowance{65535};
     transport::OpenResult open_bidi() override { return {transport::TransportStatus::Success, 1}; }
     transport::OpenResult open_uni() override { return {transport::TransportStatus::Success, 3}; }
     transport::OperationResult write(std::uint64_t id, std::span<const std::byte> data, bool fin) override {
+        if (data.empty() && fin) { writes.push_back({id, {}, true}); return {transport::TransportStatus::Success, 0, {}}; }
         const auto count = std::min(data.size(), allowance);
         if (!count) return {transport::TransportStatus::WouldBlock, 0, {}};
         writes.push_back({id, {data.begin(), data.begin() + static_cast<std::ptrdiff_t>(count)}, fin && count == data.size()});
@@ -29,7 +32,10 @@ public:
     }
     transport::OperationResult reset(std::uint64_t, std::uint64_t) override { return {}; }
     transport::OperationResult stop_sending(std::uint64_t, std::uint64_t) override { return {}; }
-    transport::OperationResult send_datagram(std::span<const std::byte>) override { return {}; }
+    transport::OperationResult send_datagram(std::span<const std::byte> data) override {
+        datagrams.emplace_back(data.begin(), data.end());
+        return {transport::TransportStatus::Success, data.size(), {}};
+    }
     transport::OperationResult close(std::uint64_t error, std::span<const std::byte>) override {
         closed = error; return {transport::TransportStatus::Success, 0, {}};
     }
@@ -513,5 +519,336 @@ TEST(Draft23Session, DataOnOtherStreamsIsNotCountedAsAProbeReply) {
     session::Draft23Session session(transport, probe_config("d23-probe-unknown-control-message"));
     connect(session); setup(session); announce(session);
     EXPECT_EQ(session.stats().probe->reply_bytes, 0u);
+}
+std::vector<std::byte> text_bytes(std::string_view value) {
+    const auto view = std::as_bytes(std::span(value));
+    return {view.begin(), view.end()};
+}
+std::vector<std::byte> encoded(const wire::draft23::Message& message) {
+    wire::ByteWriter writer(4096);
+    EXPECT_TRUE(wire::draft23::encode_message(message, writer));
+    const auto out = writer.bytes();
+    return {out.begin(), out.end()};
+}
+TEST(Draft23Session, RecordsEachPublishedTrackWithItsNamespaceNameAndAlias) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    wire::draft23::PublishMessage publish{2, {text_bytes("media")}, text_bytes("vide"), 7, {}, {}};
+    session.on_event(transport::StreamDataEvent{4, encoded(publish), false});
+    ASSERT_EQ(session.stats().published_tracks.size(), 1u);
+    EXPECT_EQ(session.stats().published_tracks[0].namespace_first, "media");
+    EXPECT_EQ(session.stats().published_tracks[0].name, "vide");
+    EXPECT_EQ(session.stats().published_tracks[0].alias, 7u);
+}
+TEST(Draft23Session, RecordsTheFirstFieldOfEveryAnnouncedNamespace) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    wire::draft23::PublishNamespaceMessage dot{0, {text_bytes("."), text_bytes("x")}, {}};
+    session.on_event(transport::StreamDataEvent{0, encoded(dot), false});
+    ASSERT_EQ(session.stats().announced_namespaces.size(), 1u);
+    EXPECT_EQ(session.stats().announced_namespaces[0], ".");
+}
+TEST(Draft23Session, FlagsAnEmptyNamespaceField) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{0, bytes({6,4,0,1,0,0}), false});
+    EXPECT_TRUE(session.error());
+    EXPECT_TRUE(session.stats().empty_namespace_field);
+}
+TEST(Draft23Session, FlagsADuplicateMessageParameter) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session);
+    // SUBSCRIBE_OK, alias 7, two EXPIRES parameters (type 8 then delta 0), no properties.
+    session.on_event(transport::StreamDataEvent{1, bytes({4,7,7,2,8,5,0,6,0}), false});
+    EXPECT_TRUE(session.error());
+    EXPECT_TRUE(session.stats().duplicate_parameter);
+}
+TEST(Draft23Session, RecordsTheTypeOfAFirstMessageEvenWhenItCannotBeDecoded) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{0, bytes({0x3f,0}), false});
+    EXPECT_TRUE(session.error());
+    ASSERT_FALSE(session.stats().requests.empty());
+    ASSERT_FALSE(session.stats().requests[0].messages.empty());
+    EXPECT_EQ(session.stats().requests[0].messages[0].type, 0x3fu);
+    EXPECT_EQ(session.stats().requests[0].messages.size(), 1u);
+}
+TEST(Draft23Session, DoesNotRecordAPartialMessageTwice) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{0, bytes({6,9,0}), false});
+    session.on_event(transport::StreamDataEvent{0, bytes({1,5,'m','e','d','i','a',0}), false});
+    ASSERT_FALSE(session.stats().requests.empty());
+    EXPECT_EQ(session.stats().requests[0].messages.size(), 1u);
+}
+TEST(Draft23Session, FlagsAClosedControlStream) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    EXPECT_FALSE(session.stats().control_stream_closed);
+    session.on_event(transport::StreamDataEvent{2, {}, true});
+    EXPECT_TRUE(session.stats().control_stream_closed);
+}
+TEST(Draft23Session, KeepsTheNegotiatedDatagramCapacity) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session);
+    EXPECT_EQ(session.stats().max_datagram_payload, 1200u);
+}
+TEST(Draft23Session, CountsPaddingStreamsAndSpotsNonZeroPadding) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    wire::ByteWriter type(8);
+    ASSERT_TRUE(wire::write_vi64(0x132b3e28, type));
+    std::vector<std::byte> zeros(type.bytes().begin(), type.bytes().end());
+    zeros.insert(zeros.end(), 16, std::byte{0});
+    session.on_event(transport::StreamDataEvent{6, zeros, true});
+    EXPECT_EQ(session.stats().padding_streams, 1u);
+    EXPECT_FALSE(session.stats().padding_nonzero);
+    auto dirty = std::vector<std::byte>(type.bytes().begin(), type.bytes().end());
+    dirty.push_back(std::byte{0}); dirty.push_back(std::byte{1});
+    session.on_event(transport::StreamDataEvent{10, dirty, true});
+    EXPECT_EQ(session.stats().padding_streams, 2u);
+    EXPECT_TRUE(session.stats().padding_nonzero);
+}
+TEST(Draft23Session, FlagsAnObjectIdDeltaThatOverflows) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    wire::ByteWriter stream(32);
+    for (const auto b : bytes({0x30, 7, 0, 0, 1, 'a'})) ASSERT_TRUE(stream.append_bytes(std::span(&b, 1)));
+    ASSERT_TRUE(wire::write_vi64(~std::uint64_t{0}, stream));  // delta 2^64-1 after Object 0
+    ASSERT_TRUE(stream.append_bytes(bytes({1, 'b'})));
+    session.on_event(transport::StreamDataEvent{6, {stream.bytes().begin(), stream.bytes().end()}, false});
+    EXPECT_TRUE(session.error());
+    EXPECT_TRUE(session.stats().delta_overflow);
+}
+TEST(Draft23Session, ParsesARequestErrorReplyOnTheProbeStream) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session);
+    ASSERT_TRUE(session.stats().probe->injected);
+    EXPECT_FALSE(session.stats().probe->reply.has_value());
+    // REQUEST_ERROR: DOES_NOT_EXIST, retry 0, empty reason, then Error Detail type 1 (REDIRECT) twice (delta 1, then 0).
+    session.on_event(transport::StreamDataEvent{1, bytes({5, 9, 0x10, 0, 0, 1, 1, 'a', 0, 1, 'b'}), false});
+    ASSERT_TRUE(session.stats().probe->reply.has_value());
+    EXPECT_EQ(session.stats().probe->reply->type, 5u);
+    EXPECT_EQ(session.stats().probe->reply->error_code, std::optional<std::uint64_t>{0x10});
+    EXPECT_EQ(session.stats().probe->reply->detail_types, (std::vector<std::uint64_t>{1, 1}));
+}
+TEST(Draft23Session, AReplyThatIsNotARequestErrorStillRecordsItsType) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{1, bytes({4, 2, 7, 0}), false});
+    ASSERT_TRUE(session.stats().probe->reply.has_value());
+    EXPECT_EQ(session.stats().probe->reply->type, 4u);
+    EXPECT_FALSE(session.stats().probe->reply->error_code.has_value());
+}
+TEST(Draft23Session, AReplySplitAcrossEventsIsParsedOnceComplete) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{1, bytes({5, 3, 0x10}), false});
+    EXPECT_FALSE(session.stats().probe->reply.has_value());
+    session.on_event(transport::StreamDataEvent{1, bytes({0, 0}), false});
+    ASSERT_TRUE(session.stats().probe->reply.has_value());
+    EXPECT_EQ(session.stats().probe->reply->error_code, std::optional<std::uint64_t>{0x10});
+}
+TEST(Draft23Session, ARejectionByResetIsRecordedAndDoesNotEndTheProbe) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session);
+    session.on_event(transport::PeerResetEvent{1, std::uint64_t{0x30}});
+    EXPECT_FALSE(session.error());
+    ASSERT_TRUE(session.stats().probe->stream_end.has_value());
+    EXPECT_EQ(session.stats().probe->stream_end->kind, session::Draft23ProbeStreamEnd::Kind::Reset);
+    EXPECT_EQ(session.stats().probe->stream_end->code, std::optional<std::uint64_t>{0x30});
+    // The publisher may still close the session afterwards, and that close is still recorded.
+    session.on_event(transport::PeerCloseEvent{transport::CloseErrorSpace::Application, 0, {}});
+    ASSERT_TRUE(session.stats().probe->close.has_value());
+}
+TEST(Draft23Session, AStopSendingOnTheProbeStreamIsRecordedToo) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session);
+    session.on_event(transport::PeerStopSendingEvent{1, std::uint64_t{0x31}});
+    EXPECT_FALSE(session.error());
+    ASSERT_TRUE(session.stats().probe->stream_end.has_value());
+    EXPECT_EQ(session.stats().probe->stream_end->kind, session::Draft23ProbeStreamEnd::Kind::StopSending);
+}
+TEST(Draft23Session, AResetOnARequestStreamEndsAnOrdinarySession) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session);
+    session.on_event(transport::PeerResetEvent{0, std::uint64_t{1}});
+    EXPECT_TRUE(session.error());
+}
+TEST(Draft23Session, AProbeRecordsAResetOfTheirOwnRequestStreamAndKeepsWatching) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-subscribe-reserved-namespace"));
+    connect(session); setup(session); announce(session);
+    session.on_event(transport::PeerResetEvent{0, std::uint64_t{0}});
+    EXPECT_FALSE(session.error());
+    ASSERT_EQ(session.stats().probe->other_stream_ends.size(), 1u);
+    EXPECT_EQ(session.stats().probe->other_stream_ends[0].stream_id, 0u);
+    EXPECT_EQ(session.stats().probe->other_stream_ends[0].end.kind, session::Draft23ProbeStreamEnd::Kind::Reset);
+    // A reset of the control stream still ends it.
+    session.on_event(transport::PeerResetEvent{2, std::uint64_t{0}});
+    EXPECT_TRUE(session.error());
+}
+std::vector<std::byte> payload_of(std::string_view scenario, std::size_t index = 0) {
+    return session::draft23_probe_payloads(*session::find_draft23_probe(scenario), 65535).at(index);
+}
+TEST(Draft23Session, SetupBytesProbeReplacesTheRunnersWholeSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-setup-delta-overflow"));
+    connect(session);
+    ASSERT_FALSE(transport.writes.empty());
+    EXPECT_EQ(transport.writes[0].id, 3u);
+    EXPECT_EQ(transport.writes[0].data, payload_of("d23-probe-setup-delta-overflow"));
+    EXPECT_TRUE(session.stats().probe->injected);
+}
+TEST(Draft23Session, ControlFinProbeFinishesTheRunnersControlStreamAfterThePublishersSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-control-stream-closed"));
+    connect(session);
+    EXPECT_FALSE(session.stats().probe->injected);
+    setup(session);
+    EXPECT_TRUE(session.stats().probe->injected);
+    bool fin_on_control = false;
+    for (const auto& write : transport.writes) fin_on_control = fin_on_control || (write.id == 3 && write.fin && write.data.empty());
+    EXPECT_TRUE(fin_on_control);
+}
+TEST(Draft23Session, DatagramProbeSendsOneDatagramAfterTheSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-datagram-reserved-bit"));
+    connect(session);
+    EXPECT_TRUE(transport.datagrams.empty());
+    setup(session);
+    ASSERT_EQ(transport.datagrams.size(), 1u);
+    EXPECT_EQ(transport.datagrams[0], payload_of("d23-probe-datagram-reserved-bit"));
+    EXPECT_TRUE(session.stats().probe->injected);
+}
+TEST(Draft23Session, EveryPayloadOfABidiProbeGetsItsOwnStream) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-duplicate-request-id"));
+    connect(session);
+    const auto before = transport.writes.size();
+    setup(session);
+    EXPECT_EQ(transport.writes.size(), before + 2);
+}
+TEST(Draft23Session, AnnounceReplyProbeAnswersTheAnnouncementWithTheProbeInsteadOfRequestOk) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-redirect-without-detail"));
+    connect(session); setup(session);
+    EXPECT_FALSE(session.stats().probe->injected);
+    const auto before = transport.writes.size();
+    announce(session);
+    ASSERT_GT(transport.writes.size(), before);
+    EXPECT_EQ(transport.writes[before].id, 0u);
+    EXPECT_EQ(transport.writes[before].data, payload_of("d23-probe-redirect-without-detail"));
+    EXPECT_TRUE(session.stats().probe->injected);
+    for (std::size_t i = before; i < transport.writes.size(); ++i) EXPECT_NE(transport.writes[i].data, bytes({7, 2, 0, 0}));  // no REQUEST_OK
+}
+TEST(Draft23Session, AnnounceExtraProbeFollowsTheRequestOkOnTheSameStream) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-publish-state-notify-on-announce"));
+    connect(session); setup(session);
+    const auto before = transport.writes.size();
+    announce(session);
+    ASSERT_GE(transport.writes.size(), before + 2);
+    EXPECT_EQ(transport.writes[before].id, 0u);
+    EXPECT_EQ(transport.writes[before + 1].id, 0u);
+    EXPECT_EQ(transport.writes[before + 1].data, payload_of("d23-probe-publish-state-notify-on-announce"));
+}
+TEST(Draft23Session, SubscribeExtraProbeWaitsForSubscribeOk) {
+    Transport transport;
+    auto settings = probe_config("d23-probe-publish-state-notify-to-publisher");
+    settings.subscribe_immediately = true;
+    session::Draft23Session session(transport, settings);
+    connect(session); setup(session);
+    EXPECT_FALSE(session.stats().probe->injected);
+    subscribed(session);
+    EXPECT_TRUE(session.stats().probe->injected);
+    EXPECT_EQ(transport.writes.back().id, 1u);
+    EXPECT_EQ(transport.writes.back().data, payload_of("d23-probe-publish-state-notify-to-publisher"));
+}
+TEST(Draft23Session, ControlBytesProbeWritesOnTheRunnersControlStreamAfterTheSetup) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-goaway-twice"));
+    connect(session);
+    EXPECT_FALSE(session.stats().probe->injected);
+    setup(session);
+    EXPECT_TRUE(session.stats().probe->injected);
+    EXPECT_EQ(transport.writes.back().id, 3u);
+    EXPECT_EQ(transport.writes.back().data, payload_of("d23-probe-goaway-twice"));
+}
+TEST(Draft23Session, FilterRangeProbeSizesItsInputFromThePublishersAdvertisedLimit) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-filter-ranges-over-limit"));
+    connect(session);
+    // SETUP with MAX_FILTER_RANGES (option 6, an even type so a plain varint) = 2.
+    session.on_event(transport::StreamDataEvent{2, bytes({0xaf,0,2, 6,2}), false});
+    ASSERT_TRUE(session.stats().probe->injected);
+    session::Draft23PeerLimits limits;
+    limits.filter_ranges = 2;
+    limits.track_namespace = config().track_namespace;  // the session names the track it was configured with
+    limits.track_name = config().track_name;
+    EXPECT_EQ(transport.writes.back().data,
+              session::draft23_probe_payloads(*session::find_draft23_probe("d23-probe-filter-ranges-over-limit"), limits).front());
+    EXPECT_NE(transport.writes.back().data, payload_of("d23-probe-filter-ranges-over-limit"));  // the default limit is 0
+}
+TEST(Draft23Session, PublishReplyProbeReplacesTheRejectionOfADeclinedTrack) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-request-error-code"));
+    connect(session); setup(session);
+    EXPECT_FALSE(session.stats().probe->injected);
+    wire::draft23::PublishMessage other{2, {text_bytes("media")}, text_bytes("catalog"), 9, {}, {}};  // not the harness's track
+    const auto before = transport.writes.size();
+    session.on_event(transport::StreamDataEvent{4, encoded(other), false});
+    EXPECT_TRUE(session.stats().probe->injected);
+    ASSERT_GT(transport.writes.size(), before);
+    EXPECT_EQ(transport.writes[before].id, 4u);
+    EXPECT_EQ(transport.writes[before].data, payload_of("d23-probe-unknown-request-error-code"));
+    EXPECT_TRUE(transport.writes[before].fin);
+}
+TEST(Draft23Session, PublishReplyProbeWaitsForADeclinedTrackAndIgnoresTheHarnessOwn) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-unknown-request-error-code"));
+    connect(session); setup(session);
+    wire::draft23::PublishMessage own{2, {text_bytes("media")}, text_bytes("vide"), 7, {}, {}};  // the configured track
+    session.on_event(transport::StreamDataEvent{4, encoded(own), false});
+    EXPECT_FALSE(session.stats().probe->injected);
+}
+TEST(Draft23Session, SubscribeProbesNameTheConfiguredTrack) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-wrong-request-id-parity"));
+    connect(session); setup(session);
+    wire::Cursor cursor(transport.writes.back().data);
+    const auto message = wire::draft23::decode_message(cursor);
+    ASSERT_TRUE(std::holds_alternative<wire::draft23::Message>(message));
+    const auto& subscribe = std::get<wire::draft23::SubscribeMessage>(std::get<wire::draft23::Message>(message));
+    EXPECT_EQ(subscribe.track_namespace, config().track_namespace);
+    EXPECT_EQ(subscribe.track_name, config().track_name);
+}
+TEST(Draft23Session, PublishExtraProbeFollowsTheRequestOkToTheFixturePublish) {
+    Transport transport;
+    session::Draft23Session session(transport, probe_config("d23-probe-second-publish-response"));
+    connect(session); setup(session);
+    wire::draft23::PublishMessage own{2, {text_bytes("media")}, text_bytes("vide"), 7, {}, {}};
+    const auto before = transport.writes.size();
+    session.on_event(transport::StreamDataEvent{4, encoded(own), false});
+    ASSERT_GE(transport.writes.size(), before + 2);
+    EXPECT_EQ(transport.writes[before + 1].id, 4u);
+    EXPECT_EQ(transport.writes[before + 1].data, payload_of("d23-probe-second-publish-response"));
+    EXPECT_TRUE(session.stats().probe->injected);
 }
 }

@@ -22,14 +22,8 @@ fi
 jq -e '
     .schema_version == 1 and
     (.draft == 18 or .draft == 21 or .draft == 22 or .draft == 23) and
-    (.draft != 23 or (.scenario_id | IN("d23-publisher-smoke", "d23-direct-subscribe-smoke",
-        "d23-probe-unknown-control-message",
-        "d23-probe-bad-first-bidi-message",
-        "d23-probe-length-mismatch",
-        "d23-probe-oversize-control-message",
-        "d23-probe-server-authority",
-        "d23-probe-server-path",
-        "d23-probe-unknown-uni-stream"))) and
+    (.draft != 23 or .scenario_id == "d23-publisher-smoke" or .scenario_id == "d23-direct-subscribe-smoke" or
+     (.scenario_id | test("^d23-probe-[a-z0-9-]+$"))) and
     (.transport == "native_quic" or .transport == "webtransport") and
     (.run_id | type == "string" and length > 0) and
     (.scenario_id | type == "string" and length > 0) and

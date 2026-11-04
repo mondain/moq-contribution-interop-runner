@@ -89,7 +89,32 @@ constexpr auto kResponseBeforeFin="D23-6-4-2-2-MUST-151";
 constexpr auto kDoneBeforeFin="D23-6-4-2-2-MUST-152";
 constexpr auto kStreamCount="D23-9-9-MUST-342";
 // Every row outside the SETUP slice keeps its staged state; the slice rows must match `setup`.
-void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict) {
+// What the P1 rows added after the SETUP slice report, by how far the stand-in publisher got.
+enum class Flow { Published, SetupOnly, Probe };
+std::map<std::string,requirements::OutcomeState> flow_baseline(Flow flow) {
+    using S=requirements::OutcomeState;
+    // A probe run executes none of the smoke-bound rows, so each stays NotRun there.
+    if (flow==Flow::Probe)
+        return {{"D23-2-4-1-MUST-028",S::NotRun},{"D23-8-7-MUST-232",S::NotRun},{"D23-2-4-3-MUST-NOT-032",S::NotRun},
+            {"D23-2-4-3-MUST-NOT-033",S::NotRun},{"D23-6-5-MUST-NOT-158",S::NotRun},{"D23-9-19-MUST-NOT-355",S::NotRun},
+            {"D23-6-3-MUST-NOT-136",S::NotRun},{"D23-3-1-3-MUST-NOT-050",S::NotRun},{"D23-6-2-MUST-135",S::NotRun},
+            {"D23-6-3-MUST-NOT-140",S::NotRun},{"D23-8-3-MUST-NOT-210",S::NotRun},{"D23-9-19-MUST-351",S::NotRun},
+            {"D23-9-6-MUST-332",S::NotRun},{"D23-9-9-MUST-341",S::NotRun},{"D23-11-5-1-MUST-475",S::NotRun},
+            {"D23-9-1-5-SHOULD-281",S::NotRun},{"D23-9-1-5-SHOULD-280",S::NotRun},{"D23-3-1-3-SHOULD-NOT-052",S::NotRun},
+            {"D23-11-3-SHOULD-NOT-443",S::NotRun},{"D23-6-4-2-2-SHOULD-154",S::NotRun}};
+    const auto published=flow==Flow::Published;
+    return {{"D23-2-4-1-MUST-028",published?S::Pass:S::NotRun},{"D23-8-7-MUST-232",published?S::Pass:S::NotRun},
+        {"D23-2-4-3-MUST-NOT-032",published?S::Pass:S::NotRun},{"D23-2-4-3-MUST-NOT-033",published?S::Pass:S::NotRun},
+        {"D23-6-5-MUST-NOT-158",published?S::Pass:S::NotRun},{"D23-9-19-MUST-NOT-355",published?S::Pass:S::NotRun},
+        {"D23-6-3-MUST-NOT-136",published?S::Pass:S::NotRun},{"D23-3-1-3-MUST-NOT-050",S::NotRun},
+        {"D23-6-2-MUST-135",S::Pass},{"D23-6-3-MUST-NOT-140",S::Pass},{"D23-8-3-MUST-NOT-210",S::Pass},
+        {"D23-9-19-MUST-351",S::Pass},{"D23-9-6-MUST-332",S::NotApplicable},{"D23-9-9-MUST-341",S::NotRun},
+        {"D23-11-5-1-MUST-475",S::NotRun},
+        // The recommendation rows: the stand-in publisher's empty SETUP carries no MOQT_IMPLEMENTATION option.
+        {"D23-9-1-5-SHOULD-281",S::Fail},{"D23-9-1-5-SHOULD-280",S::NotApplicable},{"D23-3-1-3-SHOULD-NOT-052",S::NotRun},
+        {"D23-11-3-SHOULD-NOT-443",published?S::Pass:S::NotRun},{"D23-6-4-2-2-SHOULD-154",S::NotRun}};
+}
+void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict, Flow flow=Flow::Published) {
     ASSERT_TRUE(run.score);
     EXPECT_EQ(run.score->verdict,verdict);
     const auto rows=catalog(23);  // keep the shared catalog alive while iterating it
@@ -99,6 +124,8 @@ void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup,
     for (const auto& row:rows->requirements) {
         const auto found=setup.find(row.id);
         if (found!=setup.end()) { EXPECT_EQ(actual[row.id],found->second)<<row.id; continue; }
+        const auto baseline=flow_baseline(flow);
+        if (baseline.contains(row.id)) { EXPECT_EQ(actual[row.id],baseline.at(row.id))<<row.id; continue; }
         const auto expected=!row.reviewed?requirements::OutcomeState::NotRun
             :row.testability==requirements::Testability::NotTestable?requirements::OutcomeState::NotTestable
             :row.testability==requirements::Testability::NotApplicable?requirements::OutcomeState::NotApplicable
@@ -353,7 +380,7 @@ TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     // The rejected SETUP is still evidence: its undersized MAX_CONTROL_MESSAGE_SIZE fails row 288.
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::Fail},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::NotRun},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun},{kLength,requirements::OutcomeState::Pass},{kRequestId,requirements::OutcomeState::NotRun},{kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},{kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},{kStreamCount,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail,Flow::SetupOnly);
     ASSERT_TRUE(summary.contains("error"));
     EXPECT_NE(summary.at("error").get<std::string>().find("SETUP"),std::string::npos);
 }
@@ -421,17 +448,55 @@ requirements::OutcomeState run_probe(const std::string& scenario, std::optional<
     ADD_FAILURE()<<"no row is bound to "<<scenario;
     return requirements::OutcomeState::NotRun;
 }
+// A stand-in publisher for the reply probes: after SETUP it answers on the runner's probe stream (the first
+// server-initiated bidirectional stream, id 1) with the given bytes and keeps the session open.
+requirements::OutcomeState run_reply_probe(const std::string& scenario, const Bytes& reply,
+                                           const std::string& row, storage::RunRecord* record=nullptr) {
+    auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
+    auto manager=manager_for(store);
+    const auto started=manager.start(probe_config(scenario));
+    EXPECT_EQ(started.status,app::RunStartStatus::Started);
+    auto client=transport::test::PicoquicTestClient::create({.port=started.endpoint.port,.alpn=b({'m','o','q','t','-','2','3'})});
+    EXPECT_TRUE(client);
+    bool sent=false, replied=false;
+    std::optional<std::chrono::steady_clock::time_point> sent_at;
+    EXPECT_TRUE(wait_finalized(store,started.id,[&] {
+        if (!client->pump()) return false;
+        if (!sent && client->established()) {
+            EXPECT_TRUE(client->send_stream(2,b({0xaf,0,0}),false)); sent=true; sent_at=std::chrono::steady_clock::now();
+        }
+        if (sent && !replied && !reply.empty() && std::chrono::steady_clock::now()-*sent_at>150ms) {
+            (void)client->send_stream(1,reply,false); replied=true;
+        }
+        return true;
+    }));
+    const auto run=store->load(started.id);
+    if (record) *record=run;
+    for (const auto& outcome:run.outcomes) if (outcome.requirement_id==row) return outcome.state;
+    ADD_FAILURE()<<"missing outcome for "<<row;
+    return requirements::OutcomeState::NotRun;
+}
+TEST(Draft23RunLive, ReplyProbePassesOnADoesNotExistRequestError) {
+    storage::RunRecord run;
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-reserved-namespace",b({5,3,0x10,0,0}),"D23-2-4-3-MUST-034",&run),requirements::OutcomeState::Pass);
+    for (const auto& outcome:run.outcomes) {
+        if (outcome.requirement_id=="D23-9-4-2-MUST-NOT-311") EXPECT_EQ(outcome.state,requirements::OutcomeState::Pass);
+        if (outcome.requirement_id=="D23-9-4-2-1-MUST-313") EXPECT_EQ(outcome.state,requirements::OutcomeState::NotApplicable);
+        if (outcome.requirement_id=="D23-6-5-MUST-160") EXPECT_EQ(outcome.state,requirements::OutcomeState::NotRun);
+    }
+}
+TEST(Draft23RunLive, ReplyProbeFailsWhenTheRequestIsAccepted) {
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-session-namespace",b({4,2,7,0}),"D23-6-5-MUST-160"),requirements::OutcomeState::Fail);
+}
+TEST(Draft23RunLive, ReplyProbeFailsOnTheWrongErrorCodeAndWhenSilent) {
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-session-namespace",b({5,3,0x11,0,0}),"D23-6-5-MUST-160"),requirements::OutcomeState::Fail);
+    EXPECT_EQ(run_reply_probe("d23-probe-subscribe-reserved-namespace",{},"D23-2-4-3-MUST-034"),requirements::OutcomeState::Fail);
+}
 TEST(Draft23RunLive, ProbePassesWhenThePublisherClosesWithTheExpectedCode) {
     storage::RunRecord run;
     EXPECT_EQ(run_probe("d23-probe-unknown-control-message",0x303,&run),requirements::OutcomeState::Pass);
-    expect_staged(run,{{"D23-9-MUST-257",requirements::OutcomeState::Pass},{kLength,requirements::OutcomeState::Pass},
-        {kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
-        {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable},{kRequestId,requirements::OutcomeState::NotRun},
-        {kSingleResponse,requirements::OutcomeState::NotApplicable},{kResponseBeforeFin,requirements::OutcomeState::NotApplicable},
-        {kFinRequired,requirements::OutcomeState::NotRun},{kDoneBeforeFin,requirements::OutcomeState::NotRun},
-        {kStreamCount,requirements::OutcomeState::NotRun},{kBitFour,requirements::OutcomeState::NotRun},
-        {kOneStream,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
+    // A probe run judges its own row and nothing else; the publisher's other behavior is the smoke scenarios' business.
+    expect_staged(run,{{"D23-9-MUST-257",requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete,Flow::Probe);
     bool recorded=false;
     for (const auto& event:run.events) if (event.kind=="draft23_probe") {
         const auto detail=nlohmann::json::parse(event.detail);
