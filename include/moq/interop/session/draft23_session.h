@@ -4,6 +4,8 @@
 #include "moq/interop/wire/draft21/key_values.h"
 
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace moq::interop::session {
 
@@ -23,6 +25,21 @@ struct Draft23PeerSetup {
     std::uint64_t frame_length{0};
 };
 
+// One publisher-opened unidirectional data stream, kept after the stream finishes or is reset. `valid_header` is
+// false when the first varint is not a SUBGROUP_HEADER type; the other header fields are then unset.
+struct Draft23DataStream {
+    std::uint64_t stream_id{0};
+    std::uint64_t type_flags{0};
+    bool valid_header{false};
+    std::uint64_t track_alias{0};
+    std::uint64_t group_id{0};
+    std::optional<std::uint64_t> subgroup_id;      // from the header, or the first Object ID in mode 0b01
+    std::optional<std::uint64_t> first_object_id;
+    std::uint64_t objects{0};
+    bool fin{false};
+    bool reset{false};
+};
+
 struct Draft23SessionStats {
     bool connected{false};
     bool setup_received{false};
@@ -32,6 +49,8 @@ struct Draft23SessionStats {
     std::uint64_t payload_bytes{0};
     std::uint64_t distinct_objects{0};
     std::optional<Draft23PeerSetup> peer_setup;
+    std::vector<Draft23DataStream> data_streams;  // bounded; see data_streams_truncated
+    bool data_streams_truncated{false};
     [[nodiscard]] bool progressing() const noexcept { return distinct_objects >= 2 && payload_bytes > 0; }
 };
 

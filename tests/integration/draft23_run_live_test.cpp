@@ -74,6 +74,8 @@ constexpr auto kMaxSize="D23-9-1-8-MUST-288";
 constexpr auto kAuthority="D23-9-1-1-MUST-269";
 constexpr auto kPath="D23-9-1-2-MUST-273";
 constexpr auto kQuery="D23-9-1-2-MUST-274";
+constexpr auto kBitFour="D23-11-3-1-MUST-445";
+constexpr auto kOneStream="D23-2-2-MUST-NOT-020";
 // Every row outside the SETUP slice keeps its staged state; the slice rows must match `setup`.
 void expect_staged(const storage::RunRecord& run, const SetupExpectation& setup, requirements::RunVerdict verdict) {
     ASSERT_TRUE(run.score);
@@ -262,7 +264,7 @@ TEST(Draft23RunLive, NativeQuicStoresProgressingMediaAsUnscoredSmoke) {
     // An empty SETUP carries no AUTHORITY or PATH, which a native QUIC client must send.
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -280,7 +282,7 @@ TEST(Draft23RunLive, WebTransportStoresProgressingMediaAsUnscoredSmoke) {
     EXPECT_EQ(summary.at("payload_bytes"),2);
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::NotApplicable},{kPath,requirements::OutcomeState::NotApplicable},
-        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Incomplete);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete);
 }
 TEST(Draft23RunLive, MissingPublisherIsHarnessError) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -315,7 +317,7 @@ TEST(Draft23RunLive, OneObjectCannotPassProgressingMedia) {
     EXPECT_EQ(smoke(run).at("distinct_objects"),1);
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Fail);
 }
 TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     auto store=std::make_shared<storage::SqliteRunStore>(":memory:",app::BuildInfo{"test","test",{}});
@@ -339,7 +341,7 @@ TEST(Draft23RunLive, MalformedSetupCannotPassSmoke) {
     // The rejected SETUP is still evidence: its undersized MAX_CONTROL_MESSAGE_SIZE fails row 288.
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::Fail},
         {kAuthority,requirements::OutcomeState::Fail},{kPath,requirements::OutcomeState::Fail},
-        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Fail);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::NotRun},{kOneStream,requirements::OutcomeState::NotRun}},requirements::RunVerdict::Fail);
     ASSERT_TRUE(summary.contains("error"));
     EXPECT_NE(summary.at("error").get<std::string>().find("SETUP"),std::string::npos);
 }
@@ -373,7 +375,7 @@ TEST(Draft23RunLive, NativeQuicScoresMatchingAuthorityAndPath) {
     EXPECT_EQ(smoke(run).at("status"),"PASS")<<smoke(run).dump();
     expect_staged(run,{{kMultiplicity,requirements::OutcomeState::Pass},{kMaxSize,requirements::OutcomeState::NotApplicable},
         {kAuthority,requirements::OutcomeState::Pass},{kPath,requirements::OutcomeState::Pass},
-        {kQuery,requirements::OutcomeState::NotApplicable}},requirements::RunVerdict::Incomplete);
+        {kQuery,requirements::OutcomeState::NotApplicable},{kBitFour,requirements::OutcomeState::Pass},{kOneStream,requirements::OutcomeState::Pass}},requirements::RunVerdict::Incomplete);
 }
 } // namespace
 } // namespace moq::interop

@@ -361,8 +361,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. A SUBGROUP_HEADER names exactly one Group and Subgroup, so a stream cannot carry Objects of two subgroups; the wire format makes a violation unrepresentable and a subscriber cannot observe one. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-2-2-MUST-NOT-020",
@@ -377,11 +377,16 @@
       "actor": "publisher",
       "summary": "When Objects are sent in a subscription (see Section 3.1), Objects from two subgroups MUST NOT be sent on the same stream, and Objects from the same Subgroup MUST NOT be sent on different streams, unless one of the streams was reset prematurely, or upstream conditions have forced objects from a Subgroup to be sent out of Object ID order.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-subgroup-single-stream"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 2.2: objects of one Subgroup must not be sent on different streams unless a stream was reset prematurely or upstream conditions forced out-of-order delivery. The evaluator fails when two streams carry the same track alias, group and Subgroup ID and neither was reset; streams whose Subgroup ID is not yet known are not judged. Evidence: the publisher's data streams as observed (peer_stream_classified).",
+      "reviewed": true
     },
     {
       "id": "D23-2-2-MAY-021",
@@ -418,8 +423,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. FIRST_OBJECT asserts that the first Object on the stream is the first one the original publisher ever published in that Subgroup. That is publisher-side knowledge a subscriber cannot check. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-2-2-MUST-023",
@@ -8252,8 +8257,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. The Object Status field is only sent when the payload length is zero, so a non-Normal status cannot carry a payload on the wire; a subscriber cannot observe a violation. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-11-1-2-MUST-434",
@@ -8477,11 +8482,16 @@
       "actor": "publisher",
       "summary": "Bit 4 MUST be 1 for SUBGROUP_HEADER.",
       "applicability": "Applicable",
-      "testability": "NotTestable",
-      "scenarios": [],
-      "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "testability": "Testable",
+      "scenarios": [
+        "d23-publisher-smoke",
+        "d23-direct-subscribe-smoke"
+      ],
+      "evaluators": [
+        "d23-subgroup-header-bit4"
+      ],
+      "rationale": "Reviewed against the draft 23 text. Section 11.3.1: bit 4 of the SUBGROUP_HEADER type flags is always 1. A publisher stream whose first varint is below 128, has bit 4 clear and is not the FETCH header type (5) is a violation. Types of 128 or more, or flags with the reserved subgroup mode, are a different rule and do not fail this row. Evidence: the publisher's data streams as observed (peer_stream_classified).",
+      "reviewed": true
     },
     {
       "id": "D23-11-3-1-MUST-446",
@@ -8518,8 +8528,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. Whether a sender had delivered every Object before closing needs publisher-side knowledge; a FIN or reset alone does not show it. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-11-3-2-MUST-448",
@@ -8537,8 +8547,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. Whether a sender had delivered every Object before closing needs publisher-side knowledge; a FIN or reset alone does not show it. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-11-3-2-SHOULD-449",
@@ -8632,8 +8642,8 @@
       "testability": "NotTestable",
       "scenarios": [],
       "evaluators": [],
-      "rationale": "Triage: publisher obligation, family object_model, tier P1 (observable in the smoke flow). No scenario or evaluator is bound yet, so testability stays at the NotTestable staging placeholder. First-pass heuristic triage from the requirement summary; not yet reviewed against the draft text, so reviewed stays false.",
-      "reviewed": false
+      "rationale": "Reviewed against the draft 23 text. Why a sender ended a stream early is publisher-side knowledge a subscriber cannot observe. The row stays NotTestable.",
+      "reviewed": true
     },
     {
       "id": "D23-11-3-2-SHOULD-454",

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <map>
 #include <string_view>
+#include <tuple>
 #include <variant>
 
 namespace moq::interop::requirements {
@@ -19,13 +20,16 @@ constexpr std::uint64_t kMaxControlMessageSizeOption = 9;
 struct Row {
     std::string_view requirement;
     std::string_view evaluator;
+    std::string_view evidence = "peer_setup_received";
 };
 constexpr Row kMultiplicity{"D23-9-1-MUST-NOT-265", "d23-setup-option-multiplicity"};
 constexpr Row kMaxSize{"D23-9-1-8-MUST-288", "d23-setup-max-control-message-size"};
 constexpr Row kAuthority{"D23-9-1-1-MUST-269", "d23-setup-native-authority"};
 constexpr Row kPath{"D23-9-1-2-MUST-273", "d23-setup-native-path"};
 constexpr Row kQuery{"D23-9-1-2-MUST-274", "d23-setup-native-path-query"};
-constexpr Row kRows[] = {kMultiplicity, kMaxSize, kAuthority, kPath, kQuery};
+constexpr Row kBitFour{"D23-11-3-1-MUST-445", "d23-subgroup-header-bit4", "peer_stream_classified"};
+constexpr Row kOneStream{"D23-2-2-MUST-NOT-020", "d23-subgroup-single-stream", "peer_stream_classified"};
+constexpr Row kRows[] = {kMultiplicity, kMaxSize, kAuthority, kPath, kQuery, kBitFour, kOneStream};
 
 // The state of a row no SETUP evaluator judges.
 OutcomeState staged_state(const Requirement& row) {
@@ -72,7 +76,7 @@ OutcomeState max_size(const session::Draft23PeerSetup& setup) {
     return verdict(value && input.remaining() == 0 && *value >= 65535);
 }
 
-OutcomeState authority(const session::Draft23PeerSetup& setup, const Draft23SetupContext& context) {
+OutcomeState authority(const session::Draft23PeerSetup& setup, const Draft23Evidence& context) {
     const auto found = options_of(setup, kAuthorityOption);
     return verdict(found.size() == 1 && text_of(*found.front()) == context.authority);
 }
@@ -84,12 +88,12 @@ std::optional<std::string> path_option(const session::Draft23PeerSetup& setup) {
     return text_of(*found.front());
 }
 
-OutcomeState path(const session::Draft23PeerSetup& setup, const Draft23SetupContext& context) {
+OutcomeState path(const session::Draft23PeerSetup& setup, const Draft23Evidence& context) {
     const auto value = path_option(setup);
     return verdict(value && value->substr(0, value->find('?')) == context.path);
 }
 
-OutcomeState query(const session::Draft23PeerSetup& setup, const Draft23SetupContext& context) {
+OutcomeState query(const session::Draft23PeerSetup& setup, const Draft23Evidence& context) {
     if (!context.query) return OutcomeState::NotApplicable;
     const auto value = path_option(setup);
     if (!value) return OutcomeState::Fail;
@@ -97,16 +101,42 @@ OutcomeState query(const session::Draft23PeerSetup& setup, const Draft23SetupCon
     return verdict(mark != std::string::npos && value->substr(mark + 1) == *context.query);
 }
 
+// Bit 4 of a SUBGROUP_HEADER type is always 1 (Section 11.3.1). The FETCH header type (5), types that need more than
+// one byte and the reserved subgroup mode are other rules' business.
+OutcomeState bit_four(const std::vector<session::Draft23DataStream>& streams) {
+    if (streams.empty()) return OutcomeState::NotRun;
+    return verdict(std::none_of(streams.begin(), streams.end(), [](const session::Draft23DataStream& stream) {
+        return !stream.valid_header && stream.type_flags < 128 && (stream.type_flags & 0x10) == 0 && stream.type_flags != 5;
+    }));
+}
+
+// One Subgroup is not spread over several streams unless a stream was reset (Section 2.2).
+OutcomeState single_stream(const std::vector<session::Draft23DataStream>& streams) {
+    std::map<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>, int> live;
+    bool judged = false;
+    for (const auto& stream : streams) {
+        if (!stream.valid_header || !stream.subgroup_id) continue;
+        judged = true;
+        if (stream.reset) continue;
+        if (++live[{stream.track_alias, stream.group_id, *stream.subgroup_id}] > 1) return OutcomeState::Fail;
+    }
+    return judged ? OutcomeState::Pass : OutcomeState::NotRun;
+}
+
 }  // namespace
 
-std::vector<Outcome> evaluate_draft23_setup(const RequirementCatalog& catalog, const Draft23SetupContext& context) {
+std::vector<Outcome> evaluate_draft23(const RequirementCatalog& catalog, const Draft23Evidence& context) {
     std::vector<Outcome> outcomes;
     outcomes.reserve(catalog.requirements.size());
     for (const auto& row : catalog.requirements) {
         auto state = staged_state(row);
         const bool setup_row = std::any_of(std::begin(kRows), std::end(kRows),
                                            [&](const Row& candidate) { return candidate.requirement == row.id; });
-        if (setup_row && row.reviewed && row.testability == Testability::Testable && context.peer_setup) {
+        if (setup_row && row.reviewed && row.testability == Testability::Testable && row.id == kBitFour.requirement) {
+            state = bit_four(context.data_streams);
+        } else if (setup_row && row.reviewed && row.testability == Testability::Testable && row.id == kOneStream.requirement) {
+            state = single_stream(context.data_streams);
+        } else if (setup_row && row.reviewed && row.testability == Testability::Testable && context.peer_setup) {
             const auto& setup = *context.peer_setup;
             const bool native_only = row.id == kAuthority.requirement || row.id == kPath.requirement ||
                                      row.id == kQuery.requirement;
@@ -127,7 +157,7 @@ std::vector<ExecutableBinding> draft23_executable_bindings() {
     for (const auto& row : kRows)
         for (const auto scenario : kScenarios)
             bindings.push_back({23, std::string(row.requirement), std::string(scenario), std::string(row.evaluator),
-                                {"peer_setup_received"}});
+                                {std::string(row.evidence)}});
     return bindings;
 }
 

@@ -287,4 +287,54 @@ TEST(Draft23Session, NoPeerSetupEvidenceBeforeSetup) {
     connect(session);
     EXPECT_FALSE(session.stats().peer_setup.has_value());
 }
+TEST(Draft23Session, TracesEachSubgroupStreamHeaderAndObjects) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    // 0x30: bit 4 + default priority, subgroup ID mode 0 (subgroup 0). Alias 7, group 3, objects 0 and 1.
+    session.on_event(transport::StreamDataEvent{6, bytes({0x30,7,3,0,1,'a',0,1,'b'}), true});
+    ASSERT_EQ(session.stats().data_streams.size(), 1u);
+    const auto& stream = session.stats().data_streams[0];
+    EXPECT_EQ(stream.stream_id, 6u);
+    EXPECT_EQ(stream.type_flags, 0x30u);
+    EXPECT_TRUE(stream.valid_header);
+    EXPECT_EQ(stream.track_alias, 7u);
+    EXPECT_EQ(stream.group_id, 3u);
+    EXPECT_EQ(stream.subgroup_id, std::optional<std::uint64_t>{0});
+    EXPECT_EQ(stream.first_object_id, std::optional<std::uint64_t>{0});
+    EXPECT_EQ(stream.objects, 2u);
+    EXPECT_TRUE(stream.fin);
+    EXPECT_FALSE(stream.reset);
+}
+TEST(Draft23Session, SubgroupIdModesComeFromTheHeaderOrTheFirstObject) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    // Mode 1 (0x32): the Subgroup ID is the first Object ID, here delta 5. Mode 2 (0x34): explicit ID 9.
+    session.on_event(transport::StreamDataEvent{6, bytes({0x32,7,1,5,1,'a'}), true});
+    session.on_event(transport::StreamDataEvent{10, bytes({0x34,7,1,9,0,1,'a'}), true});
+    ASSERT_EQ(session.stats().data_streams.size(), 2u);
+    EXPECT_EQ(session.stats().data_streams[0].subgroup_id, std::optional<std::uint64_t>{5});
+    EXPECT_EQ(session.stats().data_streams[1].subgroup_id, std::optional<std::uint64_t>{9});
+}
+TEST(Draft23Session, KeepsTheRecordOfAStreamThatFinishedOrWasReset) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session); announce(session); subscribed(session);
+    session.on_event(transport::StreamDataEvent{6, bytes({0x30,7,0,0,1,'a'}), false});
+    session.on_event(transport::PeerResetEvent{6, std::nullopt});
+    ASSERT_EQ(session.stats().data_streams.size(), 1u);
+    EXPECT_TRUE(session.stats().data_streams[0].reset);
+    EXPECT_FALSE(session.stats().data_streams[0].fin);
+}
+TEST(Draft23Session, RecordsAHeaderWithBitFourClearBeforeClosing) {
+    Transport transport;
+    session::Draft23Session session(transport, config());
+    connect(session); setup(session);
+    session.on_event(transport::StreamDataEvent{6, bytes({0x20,7,0,0}), false});
+    EXPECT_TRUE(session.error());
+    ASSERT_EQ(session.stats().data_streams.size(), 1u);
+    EXPECT_EQ(session.stats().data_streams[0].type_flags, 0x20u);
+    EXPECT_FALSE(session.stats().data_streams[0].valid_header);
+}
 }

@@ -31,7 +31,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     PublisherDriver driver;
     DriverHandle handle;
     bool operational_error = false;
-    requirements::Draft23SetupContext setup_context;
+    requirements::Draft23Evidence setup_context;
     setup_context.webtransport = config.transport == TransportKind::WebTransport;
     setup_context.authority = authority;
     setup_context.path = "/moq";
@@ -91,6 +91,17 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
         summary["status"] = delivered ? "PASS" : "NOT_RUN";
         if (session.error()) summary["error"] = *session.error();
         event("draft23_smoke",summary.dump());
+        setup_context.data_streams = stats.data_streams;
+        if (!stats.data_streams.empty()) {
+            nlohmann::json streams = nlohmann::json::array();
+            for (const auto& stream : stats.data_streams) {
+                streams.push_back({{"stream_id",stream.stream_id},{"type_flags",stream.type_flags},{"valid_header",stream.valid_header},
+                    {"track_alias",stream.track_alias},{"group_id",stream.group_id},
+                    {"subgroup_id",stream.subgroup_id ? nlohmann::json(*stream.subgroup_id) : nlohmann::json()},
+                    {"objects",stream.objects},{"fin",stream.fin},{"reset",stream.reset}});
+            }
+            event("peer_stream_classified",nlohmann::json{{"streams",streams},{"truncated",stats.data_streams_truncated}}.dump());
+        }
         if (stats.peer_setup) {
             setup_context.peer_setup = stats.peer_setup;
             nlohmann::json options = nlohmann::json::array();
@@ -116,7 +127,7 @@ void run_draft23(const RunId& id, std::string authority, storage::RunStore& stor
     (void)listener->close(0, {});
     try {
         // Rows outside the reviewed SETUP slice stay at their staged state, so smoke delivery alone never scores them.
-        auto outcomes = requirements::evaluate_draft23_setup(catalog, setup_context);
+        auto outcomes = requirements::evaluate_draft23(catalog, setup_context);
         auto score = requirements::score_staged(catalog, outcomes);
         if (operational_error) score.verdict = requirements::RunVerdict::Error;
         store.finalize(id,score,outcomes);

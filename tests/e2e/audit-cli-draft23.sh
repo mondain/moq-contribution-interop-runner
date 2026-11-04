@@ -6,8 +6,8 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 common=(--docs "$root_dir/docs" --requirements "$root_dir/requirements")
 output=$("$audit_bin" --draft 23 --staged --format json "${common[@]}")
 jq -e '.draft == 23 and .staged == true and .complete == false and
-    .rows == 532 and .reviewed == 6 and .unreviewed == 526 and
-    .required_applicable_testable == 5 and .required_covered == 5 and
+    .rows == 532 and .reviewed == 14 and .unreviewed == 518 and
+    .required_applicable_testable == 7 and .required_covered == 7 and
     ([.findings[] | select(.blocking == true)] | length) == 0 and
     ([.findings[] | select(.code == "missing_required_evaluator")] | length) == 0 and
     .source_audit.complete == true and (.verdict | startswith("STAGED:"))' <<<"$output" >/dev/null

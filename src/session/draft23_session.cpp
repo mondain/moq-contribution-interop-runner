@@ -36,6 +36,7 @@ public:
         bool media_request{false}, rejected_data_stopped{false};
         std::uint64_t alias{0}, group{0}, previous{0};
         bool has_previous{false};
+        std::optional<std::size_t> trace;
     };
     struct Pending { StreamId id; std::vector<std::byte> bytes; std::size_t offset{0}; bool fin{false}; };
     transport::SessionTransport& transport_;
@@ -53,6 +54,15 @@ public:
     std::uint64_t peer_message_limit_{65535};
     std::size_t queued_{0};
 
+    static constexpr std::size_t kMaximumTracedStreams = 4096;
+    Draft23DataStream* traced(StreamId id, Stream& stream) {
+        if (!stream.trace) {
+            if (stats_.data_streams.size() >= kMaximumTracedStreams) { stats_.data_streams_truncated = true; return nullptr; }
+            stats_.data_streams.push_back({}); stats_.data_streams.back().stream_id = id;
+            stream.trace = stats_.data_streams.size() - 1;
+        }
+        return &stats_.data_streams[*stream.trace];
+    }
     void fail(std::string detail, std::optional<std::uint64_t> code = {}) {
         if (error_) return;
         error_ = std::move(detail);
@@ -229,9 +239,14 @@ public:
                 if (stream.fin) fail("truncated subgroup header",0x200);
                 return;
             }
-            if ((flags&6)==4 && !std::holds_alternative<std::uint64_t>(wire::read_vi64(cursor))) {
-                if (stream.fin) fail("truncated subgroup ID",0x200);
-                return;
+            std::optional<std::uint64_t> explicit_subgroup;
+            if ((flags&6)==4) {
+                const auto subgroup_id=wire::read_vi64(cursor);
+                if (!std::holds_alternative<std::uint64_t>(subgroup_id)) {
+                    if (stream.fin) fail("truncated subgroup ID",0x200);
+                    return;
+                }
+                explicit_subgroup=std::get<std::uint64_t>(subgroup_id);
             }
             if (!(flags&0x20) && !std::holds_alternative<std::span<const std::byte>>(wire::read_bytes(cursor,1))) {
                 if (stream.fin) fail("truncated publisher priority",0x200);
@@ -239,6 +254,11 @@ public:
             }
             stream.alias=std::get<std::uint64_t>(alias); stream.group=std::get<std::uint64_t>(group);
             stream.properties=(flags&1)!=0; stream.header=true; consume(stream,cursor.offset());
+            if (auto* t=traced(id,stream)) {
+                t->track_alias=stream.alias; t->group_id=stream.group;
+                if ((flags&6)==0) t->subgroup_id=0;
+                else if (explicit_subgroup) t->subgroup_id=explicit_subgroup;
+            }
         }
         if (rejected_aliases_.contains(stream.alias)) {
             if (!stream.rejected_data_stopped) {
@@ -290,6 +310,10 @@ public:
             }
             stream.previous=object; stream.has_previous=true;
             consume(stream,cursor.offset());
+            if (auto* t=traced(id,stream)) {
+                ++t->objects;
+                if (!t->first_object_id) { t->first_object_id=object; if (!t->subgroup_id && (t->type_flags&6)==2) t->subgroup_id=object; }
+            }
             ++stats_.objects; stats_.payload_bytes+=payload_length;
             if (!status) {
                 locations_.insert({stream.group,object});
@@ -316,8 +340,9 @@ public:
                         if (control_ && control_!=id) { fail("duplicate publisher control stream",0x303); return; }
                         control_=id; stream.kind=Kind::Control;
                     } else if (value==0x132b3e28) { stream.kind=Kind::Padding; }
-                    else if (value<128 && (value&0x10)) stream.kind=Kind::Subgroup;
-                    else { fail(value==5?"harness smoke does not implement FETCH streams":"invalid publisher stream header",value==5?std::nullopt:std::optional<std::uint64_t>{0x200}); return; }
+                    else if (value<128 && (value&0x10)) { stream.kind=Kind::Subgroup; if (auto* t=traced(id,stream)) { t->type_flags=value; t->valid_header=true; } }
+                    else {
+                        if (auto* t=traced(id,stream)) t->type_flags=value; fail(value==5?"harness smoke does not implement FETCH streams":"invalid publisher stream header",value==5?std::nullopt:std::optional<std::uint64_t>{0x200}); return; }
                 }
             }
             if (stream.kind==Kind::Control) {
@@ -335,6 +360,7 @@ public:
             for (auto& [id,stream]:streams_) if (stream.kind==Kind::Request) request(id,stream);
             for (auto& [id,stream]:streams_) if (stream.kind==Kind::Subgroup) subgroup(id,stream);
         }
+        for (auto& entry:streams_) if (entry.second.trace && entry.second.fin) stats_.data_streams[*entry.second.trace].fin=true;
         for (auto it=streams_.begin();it!=streams_.end();) {
             if (it->second.fin && it->second.bytes.empty() &&
                 (it->second.kind==Kind::Subgroup || it->second.kind==Kind::Padding)) it=streams_.erase(it);
@@ -369,7 +395,11 @@ public:
             else if constexpr (std::is_same_v<T,transport::StreamDataEvent>) data(value);
             else if constexpr (std::is_same_v<T,transport::PeerResetEvent> || std::is_same_v<T,transport::PeerStopSendingEvent>) {
                 if (control_==value.stream_id) fail("publisher reset control stream",0x306);
-                else if ((value.stream_id&3)==2) streams_.erase(value.stream_id);
+                else if ((value.stream_id&3)==2) {
+                    if constexpr (std::is_same_v<T,transport::PeerResetEvent>)
+                        for (auto& traced_stream:stats_.data_streams) if (traced_stream.stream_id==value.stream_id) traced_stream.reset=true;
+                    streams_.erase(value.stream_id);
+                }
                 else fail("publisher reset or stopped smoke stream");
             } else if constexpr (std::is_same_v<T,transport::PeerCloseEvent> || std::is_same_v<T,transport::LocalCloseEvent>) {
                 if (value.error_space!=transport::CloseErrorSpace::Application || value.error_code!=0 || !stats_.progressing())
