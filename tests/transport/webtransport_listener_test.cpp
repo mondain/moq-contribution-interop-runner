@@ -59,12 +59,12 @@ TEST(WebTransportListener, AcceptsMoqLiteProtocol) {
     EXPECT_EQ(result.error, std::nullopt);
 }
 
-TEST(WebTransportListener, AcceptsDraft22ProtocolAndRejectsMoqt23) {
+TEST(WebTransportListener, AcceptsDraft23ProtocolAndRejectsMoqt24) {
     auto settings = config();
-    settings.application_protocol = "moqt-22";
+    settings.application_protocol = "moqt-23";
     EXPECT_EQ(WebTransportListener::create(std::move(settings)).error, std::nullopt);
     settings = config();
-    settings.application_protocol = "moqt-23";
+    settings.application_protocol = "moqt-24";
     EXPECT_EQ(WebTransportListener::create(std::move(settings)).error,
               NativeQuicListenerError::InvalidConfiguration);
 }

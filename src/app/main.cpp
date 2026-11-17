@@ -216,6 +216,18 @@ int main(int argc, char* argv[]) {
             moq::interop::requirements::RequirementCatalog::load(
                 source22, options.requirements / "draft22.json"));
         options.server.draft22_catalog = draft22;
+        // Draft 23 is optional for installations with older requirements bundles. Present
+        // catalogs must match the pinned draft text; pending classifications are staged.
+        std::shared_ptr<const moq::interop::requirements::RequirementCatalog> draft23;
+        if (std::filesystem::exists(options.requirements / "draft23.json")) {
+            const auto source23 = moq::interop::requirements::load_draft_source(23, options.docs, digest_file);
+            draft23 = std::make_shared<const moq::interop::requirements::RequirementCatalog>(
+                moq::interop::requirements::RequirementCatalog::load(
+                    source23, options.requirements / "draft23.json",
+                    moq::interop::requirements::CatalogLoadMode::AllowIncomplete));
+            options.server.draft23_catalog = draft23;
+        }
+
         // moq-lite-06 is optional: without its catalog file, draft text or digest the runner serves MoQ Transport
         // only (and says so); a catalog file that is present must load (staged, so incomplete is allowed). One object
         // serves the run manager and the server, as for draft 22.
@@ -229,7 +241,7 @@ int main(int argc, char* argv[]) {
         std::shared_ptr<moq::interop::app::NativeRunManager> runs;
         if (!options.native.certificate_path.empty()) {
             runs = std::make_shared<moq::interop::app::NativeRunManager>(
-                draft18, draft21, store, options.native, draft22, moqlite06);
+                draft18, draft21, store, options.native, draft22, moqlite06, draft23);
         }
         moq::interop::http::HttpServer server(draft18, draft21, store, build, options.server, runs);
         if (!server.start()) throw std::runtime_error("could not bind the HTTP listener");

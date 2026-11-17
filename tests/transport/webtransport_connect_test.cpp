@@ -469,3 +469,31 @@ TEST(WebTransportClientSettingsSniff, IgnoresEmptyChunks) {
 }
 
 }  // namespace
+
+TEST(WebTransportDraft23, SelectsOnlyMoqt23) {
+    using namespace moq::interop::transport;
+    EXPECT_NO_THROW((void)profile_for_application_protocol("moqt-23"));
+}
+
+TEST(WebTransportConnect, Draft23ProfileRequiresMoqt22Endpoint) {
+    auto req = request(21);
+    req.headers[1].second = "\"moqt-23\"";
+    RunEndpoint ep22 = endpoint(21);
+    ep22.moqt_protocol = "moqt-23";
+    const auto ok = validate_connect(req, capabilities(), ep22, WebTransportProfile::Draft23Wt16);
+    EXPECT_TRUE(ok.accepted()) << ok.evidence;
+    EXPECT_EQ(ok.selected_protocol, "moqt-23");
+    for (const char* other : {"moqt-21", "moqt-18"}) {
+        RunEndpoint ep = endpoint(21);
+        ep.moqt_protocol = other;
+        const auto result = validate_connect(req, capabilities(), ep,
+                                             WebTransportProfile::Draft23Wt16);
+        EXPECT_EQ(result.http_status, 500) << other;
+        EXPECT_EQ(result.evidence, "run endpoint draft mismatch") << other;
+    }
+    for (auto other : {WebTransportProfile::Draft18Wt15, WebTransportProfile::Draft21Wt16}) {
+        const auto result = validate_connect(req, capabilities(), ep22, other);
+        EXPECT_EQ(result.http_status, 500);
+        EXPECT_EQ(result.evidence, "run endpoint draft mismatch");
+    }
+}

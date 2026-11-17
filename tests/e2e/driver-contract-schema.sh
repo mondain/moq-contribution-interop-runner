@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# adapters/contract.schema.json: the draft is the integer 18, 21 or 22 or the string "moq-lite-06".
+# adapters/contract.schema.json: the draft is the integer 18, 21, 22 or 23 or the string "moq-lite-06".
 set -euo pipefail
 
 python3 -c 'import jsonschema' 2>/dev/null || { echo "SKIP: python3 jsonschema module required"; exit 77; }
@@ -19,9 +19,9 @@ validator = jsonschema.Draft202012Validator(schema)
 def valid(draft):
     return validator.is_valid({**base, "draft": draft})
 
-for draft in (18, 21, 22, "moq-lite-06"):
+for draft in (18, 21, 22, 23, "moq-lite-06"):
     assert valid(draft), f"draft {draft!r} must be valid"
-for draft in (106, "22", "moq-lite-05", 19, 22.5, True, None, "Moq-Lite-06"):
+for draft in (106, "22", "moq-lite-05", 19, 24, 22.5, True, None, "Moq-Lite-06"):
     assert not valid(draft), f"draft {draft!r} must be invalid"
 print("driver contract schema passed")
 PY

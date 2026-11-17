@@ -36,25 +36,22 @@ inline std::string draft_cell(const nlohmann::json& value) {
     return {};
 }
 
-// A staged result: a moq-lite-06 run (or catalog) while its catalog is still being classified (complete: false; the
-// MoQ Transport catalogs are always complete). Every staged surface (run record, drafts listing, JSON export, TAP,
-// HTML report, completeness entry) carries this note; nothing is added for the MoQ Transport drafts.
+// A staged catalog has pending classifications and cannot establish conformance.
 inline constexpr std::string_view kStagedNote =
-    "Staged catalog: the moq-lite-06 catalog is still being classified (complete: false). Unreviewed rows are "
+    "Staged catalog: this catalog is still being classified (complete: false). Unreviewed rows are "
     "reported not_run (classification pending) and count in the required, weighted and coverage denominators "
     "without earning, so a run is fail, incomplete or error and never pass.";
 
-// A run record has no catalog, so a run is presented as staged by its draft alone. Since L2c the moq-lite-06 catalog is
-// complete and its runs are scored by score() as the drafts' are: no draft is staged any more.
-inline bool staged_draft(app::DraftVersion) { return false; }
+// Draft 23 initially exposes unscored smoke runs against its staged catalog.
+inline bool staged_draft(app::DraftVersion draft) { return draft == app::DraftVersion::Draft23; }
 
-// A staged catalog: an incomplete moq-lite catalog (none is checked in; a copy with unreviewed rows still reads so).
 inline bool staged_catalog(const requirements::RequirementCatalog& catalog) {
     const auto draft = app::parse_draft(catalog.draft);
-    return !catalog.complete && draft && !app::is_moqt(*draft);
+    return !catalog.complete && draft &&
+        (*draft == app::DraftVersion::Draft23 || !app::is_moqt(*draft));
 }
 
-// Accepts the integers 18, 21 and 22 and the string "moq-lite-06"; everything else (floats, negatives,
+// Accepts the integers 18, 21, 22 and 23 and the string "moq-lite-06"; everything else (floats, negatives,
 // other strings, other types, and the internal integer 106) is refused.
 inline std::optional<app::DraftVersion> parse_draft_json(const nlohmann::json& value) {
     if (value.is_number_integer()) {

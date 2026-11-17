@@ -67,6 +67,7 @@ std::string draft_source_filename(unsigned draft) {
         case 18:
         case 21:
         case 22:
+        case 23:
             return "draft-ietf-moq-transport-" + std::to_string(draft) + ".txt";
         case 106:
             return "draft-lcurley-moq-lite-06.txt";

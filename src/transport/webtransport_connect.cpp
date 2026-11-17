@@ -140,6 +140,7 @@ std::string_view application_protocol_for(WebTransportProfile profile) {
         case WebTransportProfile::Draft18Wt15: return app::alpn(app::DraftVersion::Draft18);
         case WebTransportProfile::Draft21Wt16: return app::alpn(app::DraftVersion::Draft21);
         case WebTransportProfile::Draft22Wt16: return app::alpn(app::DraftVersion::Draft22);
+        case WebTransportProfile::Draft23Wt16: return app::alpn(app::DraftVersion::Draft23);
         case WebTransportProfile::MoqLite06: return app::alpn(app::DraftVersion::MoqLite06);
     }
     throw std::logic_error("unreachable WebTransportProfile");
@@ -149,6 +150,7 @@ WebTransportProfile profile_for_application_protocol(std::string_view protocol) 
     if (protocol == app::alpn(app::DraftVersion::Draft18)) return WebTransportProfile::Draft18Wt15;
     if (protocol == app::alpn(app::DraftVersion::Draft21)) return WebTransportProfile::Draft21Wt16;
     if (protocol == app::alpn(app::DraftVersion::Draft22)) return WebTransportProfile::Draft22Wt16;
+    if (protocol == app::alpn(app::DraftVersion::Draft23)) return WebTransportProfile::Draft23Wt16;
     if (protocol == app::alpn(app::DraftVersion::MoqLite06)) return WebTransportProfile::MoqLite06;
     throw std::logic_error("unsupported WebTransport application protocol");
 }

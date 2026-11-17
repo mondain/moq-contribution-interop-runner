@@ -42,7 +42,7 @@ TEST(DraftTraits, EveryFunctionHandlesEveryDraft) {
 }
 
 TEST(DraftTraits, ParseDraftRejectsEverythingElse) {
-    for (const unsigned value : {0u, 1u, 17u, 19u, 20u, 23u, 100u, 4294967295u}) {
+    for (const unsigned value : {0u, 1u, 17u, 19u, 20u, 24u, 100u, 4294967295u}) {
         EXPECT_FALSE(parse_draft(value).has_value()) << value;
     }
 }
@@ -51,7 +51,7 @@ TEST(DraftTraits, KnownAlpnIsExactlyTheThreeProtocols) {
     EXPECT_TRUE(known_alpn("moqt-18"));
     EXPECT_TRUE(known_alpn("moqt-21"));
     EXPECT_TRUE(known_alpn("moqt-22"));
-    for (const char* other : {"", "moqt-19", "moqt-20", "moqt-23", "moqt-2", "MOQT-22", "moqt-22 ",
+    for (const char* other : {"", "moqt-19", "moqt-20", "moqt-24", "moqt-2", "MOQT-22", "moqt-22 ",
                               "h3", "moq-00"}) {
         EXPECT_FALSE(known_alpn(other)) << other;
     }
@@ -134,3 +134,15 @@ TEST(DraftTraits, FamilyDraftMapsDraft22ToDraft21AndLeavesTheOthers) {
 
 }  // namespace
 }  // namespace moq::interop::app
+
+TEST(Draft23Readiness, RecognizesDraft23WithoutOlderFamilyFallback) {
+    using namespace moq::interop::app;
+    const auto draft = parse_draft(23);
+    ASSERT_TRUE(draft.has_value());
+    EXPECT_EQ(draft_number(*draft), 23u);
+    EXPECT_EQ(alpn(*draft), "moqt-23");
+    EXPECT_EQ(family_draft(*draft), *draft);
+    EXPECT_TRUE(runnable(*draft));
+    EXPECT_TRUE(is_moqt(*draft));
+    EXPECT_THROW(by_draft(*draft, [] { return 18; }, [] { return 21; }), std::logic_error);
+}

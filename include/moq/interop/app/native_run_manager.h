@@ -84,7 +84,8 @@ public:
         std::shared_ptr<storage::RunStore> store,
         NativeRunManagerConfig config,
         std::shared_ptr<const requirements::RequirementCatalog> draft22 = nullptr,
-        std::shared_ptr<const requirements::RequirementCatalog> moqlite06 = nullptr);
+        std::shared_ptr<const requirements::RequirementCatalog> moqlite06 = nullptr,
+        std::shared_ptr<const requirements::RequirementCatalog> draft23 = nullptr);
     ~NativeRunManager();
 
     NativeRunManager(const NativeRunManager&) = delete;

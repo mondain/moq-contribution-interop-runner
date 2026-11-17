@@ -13,7 +13,7 @@
 
 namespace moq::interop::transport {
 
-enum class WebTransportProfile { Draft18Wt15, Draft21Wt16, Draft22Wt16, MoqLite06 };
+enum class WebTransportProfile { Draft18Wt15, Draft21Wt16, Draft22Wt16, Draft23Wt16, MoqLite06 };
 
 // The WT-Protocol value a profile negotiates, and the profile an application protocol selects.
 // profile_for_application_protocol throws std::logic_error for an unknown protocol.

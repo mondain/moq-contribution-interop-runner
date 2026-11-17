@@ -118,6 +118,10 @@ add_library(moq-interop-wire
     src/wire/draft21/successful_response.cpp
     src/wire/draft21/setup.cpp
     src/wire/draft21/token.cpp
+    src/wire/draft23/frame.cpp
+    src/wire/draft23/setup.cpp
+    src/wire/draft23/messages.cpp
+    src/wire/draft23/fetch.cpp
     src/wire/draft22/location_filter.cpp
     src/wire/draft22/publish.cpp
     src/wire/draft22/publisher_request.cpp
@@ -212,6 +216,8 @@ add_library(moq-interop-session
     src/session/wire_draft.cpp
     src/session/lite_stream_reader.cpp
     src/session/lite_session.cpp
+    src/session/draft23_session.cpp
+    src/session/draft23_probes.cpp
 )
 target_link_libraries(moq-interop-session PUBLIC
     moq-interop-app moq-interop-wire)
@@ -328,6 +334,14 @@ target_compile_options(moq-interop-draft21-evaluators PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(moq-interop-draft23-evaluators
+    src/requirements/draft23_evaluators.cpp)
+target_link_libraries(moq-interop-draft23-evaluators PUBLIC
+    moq-interop-requirements moq-interop-session)
+target_compile_options(moq-interop-draft23-evaluators PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 # Draft 22 bindings: draft 21's translated through the lineage (it consumes draft21_executable_bindings, so it
 # cannot live in moq-interop-requirements without a dependency cycle).
 add_library(moq-interop-draft22-evaluators
@@ -349,11 +363,12 @@ target_compile_options(moq-interop-lite-evaluators PRIVATE
 )
 
 add_library(moq-interop-runs src/app/native_run_manager.cpp src/app/own_scenario_dispatch_22.cpp
-    src/app/lite_run.cpp)
+    src/app/lite_run.cpp
+    src/app/draft23_run.cpp)
 target_link_libraries(moq-interop-runs PUBLIC
     moq-interop-transport moq-interop-scenarios moq-interop-publisher-driver
-    moq-interop-draft18-evaluators moq-interop-draft21-evaluators
-    moq-interop-storage moq-interop-lineage-run moq-interop-lite-evaluators)
+    moq-interop-draft18-evaluators moq-interop-draft21-evaluators moq-interop-draft23-evaluators
+    moq-interop-storage moq-interop-lineage-run moq-interop-lite-evaluators nlohmann_json::nlohmann_json)
 target_compile_options(moq-interop-runs PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
     $<$<CXX_COMPILER_ID:Clang,GNU>:-Werror=switch>)
@@ -370,7 +385,7 @@ target_compile_definitions(moq-interop-audit PRIVATE
     MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(moq-interop-audit PRIVATE
     moq-interop-requirements moq-interop-draft18-evaluators
-    moq-interop-draft21-evaluators moq-interop-draft22-evaluators
+    moq-interop-draft21-evaluators moq-interop-draft22-evaluators moq-interop-draft23-evaluators
     moq-interop-lite-evaluators moq-interop-execution-audit nlohmann_json::nlohmann_json)
 install(TARGETS moq-interop-audit RUNTIME DESTINATION bin)
 add_executable(moq-interop-catalog-carry src/app/catalog_carry_main.cpp)
@@ -1092,7 +1107,8 @@ if(MOQ_INTEROP_BUILD_TESTS)
     target_compile_definitions(moq-interop-draft-source-tests PRIVATE
         MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
-    target_link_libraries(moq-interop-draft-source-tests PRIVATE moq-interop-requirements GTest::gtest_main)
+    target_link_libraries(moq-interop-draft-source-tests PRIVATE
+                          moq-interop-requirements nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME draft-source COMMAND moq-interop-draft-source-tests)
 
     add_executable(moq-interop-carry-forward-tests tests/unit/carry_forward_test.cpp)
@@ -1265,7 +1281,7 @@ if(MOQ_INTEROP_BUILD_TESTS)
     set_tests_properties(driver-contract-schema PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME moqxr-matrix-plan
              COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-matrix-plan.sh")
-    foreach(moqxr_cmdline_draft 18 21 22)
+    foreach(moqxr_cmdline_draft 18 21 22 23)
         add_test(NAME moqxr-adapter-cmdlines-d${moqxr_cmdline_draft}
                  COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/moqxr-adapter-cmdlines.sh"
                          ${moqxr_cmdline_draft})
@@ -1906,4 +1922,29 @@ if(MOQ_INTEROP_BUILD_FUZZERS)
     target_link_options(moq-interop-webtransport-stream-fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
     )
+endif()
+
+if(MOQ_INTEROP_BUILD_TESTS)
+    add_executable(moq-interop-d23-validation-tests tests/integration/draft23_validation_test.cpp)
+    target_link_libraries(moq-interop-d23-validation-tests PRIVATE moq-interop-runs GTest::gtest_main)
+    add_test(NAME draft23-validation COMMAND moq-interop-d23-validation-tests)
+    add_executable(moq-interop-d23-run-live-tests tests/integration/draft23_run_live_test.cpp)
+    target_link_libraries(moq-interop-d23-run-live-tests PRIVATE moq-interop-runs moq-interop-test-client nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_include_directories(moq-interop-d23-run-live-tests PRIVATE "${picoquic_SOURCE_DIR}/picoquic" "${picoquic_SOURCE_DIR}/picohttp")
+    target_compile_definitions(moq-interop-d23-run-live-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}" PICOQUIC_TEST_CERT_DIR="${picoquic_SOURCE_DIR}/certs/ecdsa")
+    add_test(NAME draft23-run-live COMMAND moq-interop-d23-run-live-tests)
+    add_test(NAME audit-cli-draft23 COMMAND bash "${PROJECT_SOURCE_DIR}/tests/e2e/audit-cli-draft23.sh" "$<TARGET_FILE:moq-interop-audit>")
+    add_executable(moq-interop-d23-session-tests tests/protocol/draft23_session_test.cpp)
+    target_link_libraries(moq-interop-d23-session-tests PRIVATE moq-interop-session GTest::gtest_main)
+    add_test(NAME draft23-session COMMAND moq-interop-d23-session-tests)
+    add_executable(moq-interop-d23-frame-tests tests/protocol/draft23_frame_test.cpp)
+    target_link_libraries(moq-interop-d23-frame-tests PRIVATE moq-interop-wire GTest::gtest_main)
+    add_test(NAME draft23-frame COMMAND moq-interop-d23-frame-tests)
+    add_executable(moq-interop-d23-probes-tests tests/protocol/draft23_probes_test.cpp)
+    target_link_libraries(moq-interop-d23-probes-tests PRIVATE moq-interop-session GTest::gtest_main)
+    add_test(NAME draft23-probes COMMAND moq-interop-d23-probes-tests)
+    add_executable(moq-interop-d23-evaluators-tests tests/protocol/draft23_evaluators_test.cpp)
+    target_compile_definitions(moq-interop-d23-evaluators-tests PRIVATE MOQ_INTEROP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(moq-interop-d23-evaluators-tests PRIVATE moq-interop-draft23-evaluators GTest::gtest_main)
+    add_test(NAME draft23-evaluators COMMAND moq-interop-d23-evaluators-tests)
 endif()

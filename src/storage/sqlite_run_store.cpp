@@ -261,6 +261,33 @@ constexpr const char* kMigrateVersionFourToFive =
     "DROP TABLE schema_meta;"
     "ALTER TABLE schema_meta_v5 RENAME TO schema_meta;";
 
+// Version 6 adds draft 23 while preserving rowids, child rows and the runs index.
+constexpr const char* kMigrateVersionFiveToSix =
+    "CREATE TABLE runs_new (\n"
+    "    id TEXT PRIMARY KEY,\n"
+    "    draft INTEGER NOT NULL CHECK (draft IN (18, 21, 22, 23, 106)),\n"
+    "    transport INTEGER NOT NULL CHECK (transport IN (0, 1)),\n"
+    "    mode INTEGER NOT NULL CHECK (mode IN (0, 1)),\n"
+    "    timeout_ms INTEGER NOT NULL CHECK (timeout_ms >= 0),\n"
+    "    state INTEGER NOT NULL CHECK (state IN (0, 1)),\n"
+    "    created_at_unix_ns INTEGER NOT NULL,\n"
+    "    finalized_at_unix_ns INTEGER,\n"
+    "    CHECK ((state = 0 AND finalized_at_unix_ns IS NULL) OR\n"
+    "           (state = 1 AND finalized_at_unix_ns IS NOT NULL AND\n"
+    "            finalized_at_unix_ns > created_at_unix_ns))\n"
+    ");"
+    "INSERT INTO runs_new(rowid,id,draft,transport,mode,timeout_ms,state,"
+    "created_at_unix_ns,finalized_at_unix_ns) "
+    "SELECT rowid,id,draft,transport,mode,timeout_ms,state,"
+    "created_at_unix_ns,finalized_at_unix_ns FROM runs;"
+    "DROP TABLE runs;"
+    "ALTER TABLE runs_new RENAME TO runs;"
+    "CREATE INDEX runs_newest_idx ON runs(created_at_unix_ns DESC, id DESC);"
+    "CREATE TABLE schema_meta_v6 (version INTEGER NOT NULL CHECK (version = 6));"
+    "INSERT INTO schema_meta_v6(version) VALUES (6);"
+    "DROP TABLE schema_meta;"
+    "ALTER TABLE schema_meta_v6 RENAME TO schema_meta;";
+
 std::string text(sqlite3_stmt* statement, int column) {
     const auto* value = sqlite3_column_text(statement, column);
     if (value == nullptr) return {};
@@ -510,7 +537,29 @@ public:
             foreign_keys.restore();
             version = 5;
         }
-        if (version != 5) {
+        if (version == 5) {
+            // Version 4 databases (migrated or new) have CHECK (draft IN (18, 21, 22)) on
+            // `runs`; the rebuild gives every database the schema.sql definition, which
+            // also accepts 106.
+            const std::string operation = "migrate SQLite schema version 5 to 6";
+            ForeignKeysSuspended foreign_keys(database.get(), operation);
+            {
+                Transaction transaction(database.get(), operation);
+                execute(database.get(), kMigrateVersionFiveToSix, operation);
+                {
+                    Statement violations(database.get(), "PRAGMA foreign_key_check");
+                    if (violations.row()) {
+                        throw std::runtime_error(operation +
+                                                 ": foreign key check failed for table " +
+                                                 text(violations.get(), 0));
+                    }
+                }
+                transaction.commit();
+            }
+            foreign_keys.restore();
+            version = 6;
+        }
+        if (version != 6) {
             throw std::runtime_error("open SQLite run store: unsupported schema version " +
                                      std::to_string(version));
         }

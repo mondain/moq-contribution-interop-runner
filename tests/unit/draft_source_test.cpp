@@ -1,13 +1,16 @@
 #include "moq/interop/requirements/draft_source.h"
 
 #include "moq/interop/requirements/catalog.h"
+#include "moq/interop/requirements/carry_forward.h"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -114,8 +117,67 @@ TEST_F(DraftSourceTest, NamesTheDraftTextFileForEachSupportedDraft) {
     EXPECT_EQ(draft_source_filename(18), "draft-ietf-moq-transport-18.txt");
     EXPECT_EQ(draft_source_filename(21), "draft-ietf-moq-transport-21.txt");
     EXPECT_EQ(draft_source_filename(22), "draft-ietf-moq-transport-22.txt");
+    EXPECT_EQ(draft_source_filename(23), "draft-ietf-moq-transport-23.txt");
     EXPECT_EQ(draft_source_filename(106), "draft-lcurley-moq-lite-06.txt");
     EXPECT_THROW(draft_source_filename(105), std::invalid_argument);
+}
+
+TEST_F(DraftSourceTest, LoadsDraft23WithVerifiedDigestAndCompleteOccurrenceBaseline) {
+    const auto draft = load_draft_source(23, kProjectRoot / "docs",
+                                         kProjectRoot / "requirements/draft-digests.json");
+    EXPECT_EQ(draft.number, 23u);
+    EXPECT_EQ(draft.sha256, "d02aa279326b524113cbb622571f241e54b28cfcd3421f97d38ad13b0eed0fe7");
+    EXPECT_EQ(draft.line_offsets.size(), 9856u);
+    const auto catalog = RequirementCatalog::load(draft, kProjectRoot / "requirements/draft23.json",
+                                                   CatalogLoadMode::AllowIncomplete);
+    EXPECT_FALSE(catalog.complete);
+    EXPECT_EQ(catalog.requirements.size(), 532u);
+    EXPECT_TRUE(audit_normative_occurrences_staged(draft, catalog).ok());
+    EXPECT_THROW(RequirementCatalog::load(draft, kProjectRoot / "requirements/draft23.json"),
+                 std::runtime_error);
+    for (const auto& row : catalog.requirements) {
+        EXPECT_TRUE(row.id.starts_with("D23-"));
+        if (!row.reviewed) {
+            EXPECT_TRUE(row.scenarios.empty());
+            EXPECT_TRUE(row.evaluators.empty());
+        }
+    }
+}
+
+TEST_F(DraftSourceTest, Draft23DeltaAccountsForEveryOldRowAndNewOccurrenceWithoutClaimingReuse) {
+    std::ifstream input(kProjectRoot / "requirements/draft22-to-23-delta.json");
+    const auto delta = nlohmann::json::parse(input);
+    const auto old_source = load_draft_source(22, kProjectRoot / "docs",
+                                              kProjectRoot / "requirements/draft-digests.json");
+    const auto new_source = load_draft_source(23, kProjectRoot / "docs",
+                                              kProjectRoot / "requirements/draft-digests.json");
+    const auto old_catalog = RequirementCatalog::load(old_source, kProjectRoot / "requirements/draft22.json");
+    const auto new_catalog = RequirementCatalog::load(new_source, kProjectRoot / "requirements/draft23.json",
+                                                       CatalogLoadMode::AllowIncomplete);
+    EXPECT_EQ(delta.at("from_sha256"), old_source.sha256);
+    EXPECT_EQ(delta.at("to_sha256"), new_source.sha256);
+    EXPECT_EQ(delta.at("scenario_reuse_policy").at("default"), "disabled");
+    EXPECT_EQ(delta.at("normative_changes").size(), 35u);
+    for (const auto& change : delta.at("normative_changes")) {
+        const auto first = change.at("first_line").get<std::size_t>();
+        const auto last = change.at("last_line").get<std::size_t>();
+        auto cited = normalize_text(new_source.lines(first, last));
+        ASSERT_TRUE(cited.starts_with("* ")) << first << ": " << cited;
+        cited.erase(0, 2);
+        EXPECT_EQ(cited, change.at("summary").get<std::string>()) << first;
+    }
+
+    std::set<std::string> seen_old, seen_new;
+    for (const auto& entry : delta.at("entries")) {
+        EXPECT_FALSE(entry.at("reviewed").get<bool>());
+        for (const auto& old_id : entry.at("draft22_ids")) seen_old.insert(old_id.get<std::string>());
+        const auto new_id = entry.at("draft23_id").get<std::string>();
+        if (!new_id.empty()) EXPECT_TRUE(seen_new.insert(new_id).second);
+    }
+    EXPECT_EQ(seen_old.size(), old_catalog.requirements.size());
+    EXPECT_EQ(seen_new.size(), new_catalog.requirements.size());
+    for (const auto& row : old_catalog.requirements) EXPECT_TRUE(seen_old.contains(row.id)) << row.id;
+    for (const auto& row : new_catalog.requirements) EXPECT_TRUE(seen_new.contains(row.id)) << row.id;
 }
 
 TEST_F(DraftSourceTest, LoadsMoqLite06AsDraft106) {

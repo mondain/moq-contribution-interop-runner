@@ -7,7 +7,7 @@
 #             (MOQ_UPDATE_GOLDEN=1 does the same). Otherwise a mismatch fails with a unified diff.
 #
 # 1. The matrix --dry-run plan (runner invocation and run request per draft and transport, drafts
-#    18, 21 and 22) equals the golden; the repository root shows as @ROOT@.
+#    18, 21, 22 and 23) equals the golden; the repository root shows as @ROOT@.
 # 2. Every draft 22 scenario in the plan is an executable draft 22 id
 #    (tests/golden/executable-ids-d22.txt) and the draft 22 pairs use ports 19209-19212.
 # 3. --pair prints exactly that pair's section of the full plan, and the driven script's own
@@ -66,7 +66,8 @@ grep -qF '<--port> <19209> ' "$work/plan.txt" && grep -qF '<--publisher-port-sta
 # 3. --pair and the driven script's own dry run.
 pair_ports=("18 native_quic 19201 19202" "18 webtransport 19205 19206"
             "21 native_quic 19203 19204" "21 webtransport 19207 19208"
-            "22 native_quic 19209 19210" "22 webtransport 19211 19212")
+            "22 native_quic 19209 19210" "22 webtransport 19211 19212"
+            "23 native_quic 19213 19214" "23 webtransport 19215 19216")
 for entry in "${pair_ports[@]}"; do
     read -r draft transport http_port udp_port <<<"$entry"
     section=$(awk -v head="matrix draft=$draft transport=$transport" '
@@ -94,12 +95,28 @@ normalize <"$work/stub/calls.log" >"$work/stub-calls.txt"
 diff -u "$work/stub-plan.txt" "$work/stub-calls.txt" || fail 'stub run differs from its dry-run plan'
 for entry in "${pair_ports[@]}"; do
     read -r draft transport http_port udp_port <<<"$entry"
-    grep -qxF "draft=$draft transport=$transport run=run-$http_port verdict=fail publisher=0 pass=1 fail=1" \
+    verdict=fail; suffix=; pass=1; fail_count=1
+    if [[ "$draft" == 23 ]]; then verdict=incomplete; suffix=" smoke=PASS"; pass=0; fail_count=0; fi
+    grep -qxF "draft=$draft transport=$transport run=run-$http_port verdict=$verdict publisher=0 pass=$pass fail=$fail_count$suffix" \
         "$work/stub-out.txt" || fail "no reported row for $draft $transport"
 done
 [[ $(tail -n 1 "$work/stub-out.txt") == \
     'matrix harness completed; publisher exits and scored rows are reported above' ]] ||
     fail 'matrix did not report completion'
+
+# Draft-23 debugging selects the direct smoke and retains diagnostics on failure.
+actual=$(MOQ_INTEROP_TEST_SCENARIO=d23-direct-subscribe-smoke \
+    bash "$driven" --dry-run 23 native_quic "${fake[@]}")
+grep -qF '"scenarios":["d23-direct-subscribe-smoke"]' <<<"$actual" || fail 'direct smoke override ignored'
+status=0
+MOQ_STUB_DIR="$work/stub" PATH="$root_dir/tests/support/stub_curl:$PATH" \
+    MOQ_INTEROP_TEST_KEEP=1 MOQ_STUB_D23_SMOKE_STATUS=NOT_RUN \
+    bash "$driven" 23 native_quic "${stub_bins[@]}" >"$work/not-run.out" 2>"$work/not-run.err" || status=$?
+[[ $status == 1 ]] || fail 'draft 23 NOT_RUN smoke was accepted as successful delivery'
+grep -qF 'smoke=NOT_RUN' "$work/not-run.out" || fail 'missing unsuccessful smoke diagnostic'
+kept=$(sed -n 's/^kept //p' "$work/not-run.err")
+[[ -f "$kept/logs/run-19301/d23-publisher-smoke/request.json" ]] || fail 'debug logs not retained'
+case "$kept" in /tmp/moq-interop-driven.*) rm -rf -- "$kept" ;; *) fail 'unexpected retained directory' ;; esac
 
 # 5. Bad arguments.
 expect_usage() {
@@ -107,10 +124,11 @@ expect_usage() {
     "$@" >/dev/null 2>&1 || status=$?
     [[ $status -eq 2 ]] || fail "expected exit 2 from: $* (got $status)"
 }
+expect_usage env MOQ_INTEROP_TEST_SCENARIO=d22-old bash "$driven" --dry-run 23 native_quic "${fake[@]}"
 expect_usage bash "$driven" --dry-run 20 native_quic "${fake[@]}"
 expect_usage bash "$driven" --dry-run 22 quic "${fake[@]}"
 expect_usage bash "$driven" --dry-run 22 native_quic /opt/a /opt/b
-expect_usage bash "$matrix" --dry-run --pair 23 native_quic "${fake[@]}"
+expect_usage bash "$matrix" --dry-run --pair 24 native_quic "${fake[@]}"
 expect_usage bash "$matrix" --dry-run --pair 22 h3 "${fake[@]}"
 expect_usage bash "$matrix" --dry-run /opt/a /opt/b
 

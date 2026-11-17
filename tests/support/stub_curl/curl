@@ -29,12 +29,22 @@ case "$method $path" in
         [[ -e "$MOQ_STUB_DIR/ready-$port" ]] || exit 7 ;;
     "POST /api/v1/runs")
         printf 'request: POST %s %s\n' "$url" "$(jq -c . <<<"$data")" >>"$MOQ_STUB_DIR/calls.log"
+        jq -r .draft <<<"$data" >"$MOQ_STUB_DIR/draft-$port"
         jq -n --arg id "$run" '{run: {id: $id, state: "created"}}' ;;
     "GET /api/v1/runs/$run")
-        jq -n --arg id "$run" '{run: {id: $id, state: "finalized", verdict: "fail",
-            outcomes: [{state: "pass"}, {state: "fail"}]}}' ;;
+        verdict=fail
+        outcomes='[{"state":"pass"},{"state":"fail"}]'
+        if [[ $(cat "$MOQ_STUB_DIR/draft-$port") == 23 ]]; then verdict=incomplete; outcomes='[]'; fi
+        jq -n --arg id "$run" --arg verdict "$verdict" --argjson outcomes "$outcomes" \
+            '{run: {id: $id, state: "finalized", verdict: $verdict, outcomes: $outcomes}}' ;;
     "GET /api/v1/runs/$run/events?limit=100")
-        jq -n '{items: [{kind: "publisher_process", detail: "{\"status\":0}"}]}' ;;
+        if [[ $(cat "$MOQ_STUB_DIR/draft-$port") == 23 ]]; then
+            jq -n --arg smoke "${MOQ_STUB_D23_SMOKE_STATUS:-PASS}" '{items: [
+                {kind: "publisher_process", detail: "{\"status\":0}"},
+                {kind: "draft23_smoke", detail: ({status:$smoke}|tojson)}]}'
+        else
+            jq -n '{items: [{kind: "publisher_process", detail: "{\"status\":0}"}]}'
+        fi ;;
     "GET /results/$run.json")
         jq -n '{requirements: [{id: "stub"}]}' ;;
     *)

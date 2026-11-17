@@ -7,6 +7,7 @@
 #include "moq/interop/requirements/draft18_evaluators.h"
 #include "moq/interop/requirements/draft21_evaluators.h"
 #include "moq/interop/requirements/draft22_evaluators.h"
+#include "moq/interop/requirements/draft23_evaluators.h"
 #include "moq/interop/requirements/execution_audit.h"
 #include "moq/interop/requirements/lite_evaluators.h"
 #include "moq/interop/storage/run_store.h"
@@ -31,6 +32,7 @@ using Json = nlohmann::json;
 
 struct Options {
     unsigned draft{0};
+    bool staged{false};
     std::string format{"text"};
     std::optional<std::filesystem::path> database;
     std::filesystem::path docs =
@@ -46,7 +48,7 @@ struct Options {
 };
 
 void usage() {
-    std::cerr << "Usage: moq-interop-audit --draft 18|21|22|moq-lite-06 [--format text|json] "
+    std::cerr << "Usage: moq-interop-audit --draft 18|21|22|23|moq-lite-06 [--staged] [--format text|json] "
                  "[--docs DIR] [--requirements DIR] [--database PATH]\n";
 }
 
@@ -54,15 +56,17 @@ Options parse(int argc, char* argv[]) {
     Options result;
     for (int index = 1; index < argc; ++index) {
         const std::string_view flag(argv[index]);
+        if (flag == "--staged") { result.staged = true; continue; }
         if (++index >= argc) throw std::invalid_argument("missing value for " + std::string(flag));
         const std::string value(argv[index]);
         if (flag == "--draft") {
             if (value == "18") result.draft = 18;
             else if (value == "21") result.draft = 21;
             else if (value == "22") result.draft = 22;
+            else if (value == "23") result.draft = 23;
             else if (value == moq::interop::app::draft_text(moq::interop::app::DraftVersion::MoqLite06))
                 result.draft = moq::interop::app::draft_number(moq::interop::app::DraftVersion::MoqLite06);
-            else throw std::invalid_argument("draft must be 18, 21, 22 or moq-lite-06");
+            else throw std::invalid_argument("draft must be 18, 21, 22, 23 or moq-lite-06");
         } else if (flag == "--format") {
             if (value != "text" && value != "json")
                 throw std::invalid_argument("format must be text or json");
@@ -147,19 +151,21 @@ bool is_lite(unsigned draft) {
 // reflects only real catalog errors and blocking binding findings. With --database, the execution audit of the
 // stored moq-lite-06 runs (requirements::audit_execution with the lite bindings, staged scoring) is added; its
 // findings make the status 1, as for the MoQ Transport drafts.
-int audit_lite(const Options& options) {
+int audit_staged_catalog(const Options& options) {
     using namespace moq::interop;
-    const std::string name(app::draft_text(app::DraftVersion::MoqLite06));
+    const std::string name = options.draft == 23 ? "23" : std::string(app::draft_text(app::DraftVersion::MoqLite06));
+    const std::string filename = options.draft == 23 ? "draft23.json" : name + ".json";
     const auto source = requirements::load_draft_source(
         options.draft, options.docs, options.requirements / "draft-digests.json");
     const auto catalog = requirements::RequirementCatalog::load(
-        source, options.requirements / (name + ".json"),
+        source, options.requirements / filename,
         requirements::CatalogLoadMode::AllowIncomplete);
     // A catalog flipped to complete (L2c) is audited as the complete drafts are; a staged copy still is as before.
     const bool complete = catalog.complete;
     const auto source_audit = complete ? requirements::audit_normative_occurrences(source, catalog)
                                        : requirements::audit_normative_occurrences_staged(source, catalog);
-    const auto bindings = requirements::lite_executable_bindings();
+    const auto bindings = options.draft == 23 ? requirements::draft23_executable_bindings()
+                                              : requirements::lite_executable_bindings();
     const auto report = complete ? requirements::audit_completeness(
                                        catalog, bindings, app::executable_scenarios(options.draft))
                                  : requirements::audit_completeness_staged(
@@ -210,7 +216,7 @@ int audit_lite(const Options& options) {
                                 {"blocking", finding.blocking}});
         }
         const Json output = {
-            {"schema_version", 1}, {"draft", name},
+            {"schema_version", 1}, {"draft", options.draft == 23 ? Json(23) : Json(name)},
             {"source_sha256", source.sha256},
             {"source_audit", {{"complete", source_audit.ok()},
                               {"missing_count", source_audit.missing.size()},
@@ -244,7 +250,8 @@ const char* classification(const moq::interop::requirements::Requirement& row) {
 int main(int argc, char* argv[]) {
     try {
         const auto options = parse(argc, argv);
-        if (is_lite(options.draft)) return audit_lite(options);
+        if (is_lite(options.draft) || (options.draft == 23 && options.staged))
+            return audit_staged_catalog(options);
         const auto source = moq::interop::requirements::load_draft_source(
             options.draft, options.docs,
             options.requirements / "draft-digests.json");
@@ -260,7 +267,8 @@ int main(int argc, char* argv[]) {
                 case 18: return moq::interop::requirements::draft18_executable_bindings();
                 case 21: return moq::interop::requirements::draft21_executable_bindings();
                 case 22: return moq::interop::requirements::draft22_executable_bindings();
-                default: throw std::invalid_argument("draft must be 18, 21 or 22");
+                case 23: return moq::interop::requirements::draft23_executable_bindings();
+                default: throw std::invalid_argument("draft must be 18, 21, 22 or 23");
             }
         }();
         const auto report =

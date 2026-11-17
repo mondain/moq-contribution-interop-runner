@@ -1,7 +1,7 @@
 # moqxr Punch List
 
 This is a work list for an agent fixing `openmoq-publisher` (moqxr) so that it
-conforms to MoQT drafts 18, 21 and 22. Every M- item comes from a run of the interop
+conforms to MoQT drafts 18, 21, 22 and 23. Every M- item comes from a run of the interop
 runner in this repository against `openmoq-publisher 0.4.1 (commit 9bda5c9)`, with
 the evidence and draft citation recorded below. The item bodies keep that original
 evidence; the status tables that follow record what later sweeps against moqxr
@@ -10,7 +10,8 @@ against `4b615f4`, its re-sweep after the F1 runner fixes, and a dig into every 
 failure against `1883b9f` (see "Status against moqxr 1883b9f"). Background and the full
 result set are in [interop-notes.md](interop-notes.md).
 
-The current status, against moqxr `v0.4.7`, is the first section below; most D22- items are fixed
+The draft 23 items (D23-01 to D23-06) come from the first draft 23 sweep, against moqxr `0.4.12`, and sit above
+the draft 22 items. The current status for drafts 18, 21 and 22, against moqxr `v0.4.7`, is the first section below; most D22- items are fixed
 there. A runner expectation about unknown token aliases that wrongly failed three rows was
 corrected (see "Runner correction" below). The later status
 sections and the item bodies are the history they were written against.
@@ -212,6 +213,238 @@ changed a verdict, so `adapters/moqxr/run.sh` is unchanged:
 | `d22-unknown-datagram-type` | `--forward 1` | `--forward 0 --paced`, timeout+3 | Native QUIC: `D22-11-MUST-488` passes either way. WebTransport: still `not_run`; the paced run delivers the datagram (`f0 13 2b 3e 2a`) and moqxr neither closes nor reacts for 12 s, which matches D22-07. Silence after a datagram is not scored |
 | `d22-publish-established-subscriber-sends-publish-state-notify` | `--forward 0 --paced`, timeout+3 | `--forward 1` | Worse: an `error` run. moqxr's first PUBLISH is for `catalog` (`1d 0012 02 01 05 media 07 catalog 00 00`); the probe waits for a PUBLISH of the run's track, so nobody answers, and moqxr resets the stream after 2 s and closes with code 0. `D22-9-10-MUST-381` stays `not_run` |
 | `d22-subscribe-tracks-publish-skipped-then-capacity-recovers` | `--forward 0` | `--forward 1` | Still `not_run`. The probe grants the publisher one bidirectional stream; moqxr opens its PUBLISH_NAMESPACE on it, sends no PUBLISH in either mode and resets that stream after about 2 s. moqxr has no PUBLISH_SKIPPED message at all (no encoder for it), so the condition the row constrains never arises: `D22-3-6-3-MUST-NOT-086` is not applicable to moqxr, not adapter-hidden |
+
+## Draft 23 items
+
+From the first full draft 23 sweep, against `openmoq-publisher 0.4.12 (commit fae20de)` (the checkout was
+`68e6192`, one commit later, with the binary built from `fae20de`), run on both transports: the two
+smoke scenarios and the 52 negative probes, 108 runs, repeated once with the final runner and identical in
+the failing set. Draft 23 rows and line numbers are in `docs/draft-ietf-moq-transport-23.txt`.
+
+How far this goes. The draft 23 catalog (`requirements/draft23.json`) has all 532 rows reviewed but is still
+marked staged: 100 rows are testable, 147 are `NotTestable` (most because no scenario exists yet, a few
+because a subscriber cannot observe them), and 285 are not applicable or informative. Of the 100
+testable rows, the sweep found **36 failing, 47 passing and 17 never judged**. Of the 36 failures, 32 are
+MUST or MUST NOT rows and 4 are SHOULD rows. A staged run never reports PASS, so every run ends
+`incomplete` or `fail`. The 17 never-judged rows are listed at the end of this section.
+
+Wire evidence is from the runner's `draft23_probe`, `peer_setup_received`, `request_observed` and
+`peer_stream_classified` events (`MOQ_INTEROP_TEST_KEEP=1` keeps them in `runs.sqlite3`). A probe
+passes only when the publisher closes the session with the exact application code the draft names (or,
+for a reply probe, answers with the named REQUEST_ERROR); the observation window is up to 3 seconds. The
+**Where** lines are from reading `src/transport/moqt_session.cpp` at `68e6192`; they were not all traced
+to a single failing branch, and each item says how sure it is.
+
+**Repro** for any probe, from the repository root after a build:
+
+```
+MOQ_INTEROP_TEST_KEEP=1 MOQ_INTEROP_TEST_SCENARIO=<scenario> bash tests/e2e/driven-moqxr.sh 23 native_quic \
+  build/moq-interop-runner ../moqxr/build/openmoq-publisher ../moqxr/tests/fixtures/locmaf-publisher.mp4
+```
+
+It prints `probe=<scenario> expected=0x<code> close=<app|transport>:0x<code|none>`; use `webtransport` for the
+other transport.
+
+### D23-01 Most protocol errors close the session with PROTOCOL_VIOLATION (0x3), not the code the draft names
+
+- **Rows:** `D23-9-MUST-257` (line 4045), `D23-6-3-MUST-137` (line 2652), `D23-9-MUST-258` (line 4050), `D23-8-3-MUST-211` (line 3517), `D23-8-3-MUST-213` (line 3556), `D23-8-7-MUST-233` (line 3735), `D23-8-7-MUST-234` (line 3739), `D23-8-7-MUST-235` (line 3747), `D23-9-19-MUST-353` (line 5329), `D23-9-19-MUST-354` (line 5331), `D23-9-19-1-MUST-358` (line 5365), `D23-9-19-8-MUST-377` (line 5507), `D23-9-19-18-MUST-396` (line 5854), `D23-9-19-22-MUST-407` (line 5951), `D23-9-19-9-MUST-379` (line 5561), `D23-9-19-9-MUST-380` (line 5617), `D23-9-19-15-MUST-388` (line 5776), `D23-9-19-SHOULD-356` (line 5342), `D23-9-10-MUST-346` (line 4970), `D23-9-2-MUST-301` (line 4338), `D23-11-MUST-430` (line 6227), `D23-11-2-1-MUST-437` (line 6354), `D23-11-2-1-MUST-439` (line 6398), `D23-11-2-1-MUST-438` (line 6364), `D23-11-2-1-MUST-441` (line 6410) (fail on both transports; 24 are MUST or MUST NOT rows and `D23-9-19-SHOULD-356` is a SHOULD row).
+- **Scenarios:** `d23-probe-unknown-control-message`, `-bad-first-bidi-message`, `-length-mismatch`,
+  `-setup-delta-overflow`, `-setup-malformed-value`, `-namespace-empty-field`, `-namespace-too-many-fields`,
+  `-namespace-too-long`, `-unknown-message-parameter`, `-parameter-out-of-scope`, `-group-order-out-of-range`,
+  `-paused-out-of-range`, `-include-properties-out-of-range`, `-location-filter-unknown-type`,
+  `-location-filter-overflow`, `-fill-parameters-invalid`, `-duplicate-parameter`,
+  `-publish-state-notify-to-publisher`, `-goaway-uri-too-long`, `-datagram-unknown-type`,
+  `-datagram-reserved-bit`, `-datagram-status-end-of-group`, `-datagram-properties-length-zero`,
+  `-datagram-status-properties-not-normal` (all prefixed `d23-probe-`).
+- **Draft:** each row names the exact session termination code (Section 12.2, line 7061): UNEXPECTED_MESSAGE
+  0x303, MALFORMED_MESSAGE 0x300, MALFORMED_KEY_VALUE 0x6, INVALID_TRACK_NAMESPACE 0x302, INVALID_PARAMETER
+  0x305, DELTA_ENCODING_OVERFLOW 0x400, FIELD_LENGTH_EXCEEDED 0x401, ROLE_VIOLATION 0x304,
+  INVALID_STREAM_HEADER 0x200, MALFORMED_OBJECT 0x201, INVALID_OBJECT_STATUS 0x202.
+- **Observed:** in every one of these runs moqxr closes the session with application code `0x3`, and the
+  input is detected promptly, so the failure is the code and not a missed check. moqxr does use the specific
+  codes elsewhere in the same sweep, which shows the machinery exists: oversize control message 0x401
+  (`D23-9-MUST-260`), server AUTHORITY 0x19 (`D23-9-1-1-MUST-268`), server PATH 0x8 (`D23-9-1-2-MUST-272`),
+  unknown unidirectional stream 0x200 (`D23-6-4-1-MUST-146`), closed control stream 0x306
+  (`D23-6-3-MUST-141`), wrong and reused Request ID 0x4 (`D23-6-4-2-1-MUST-148`, `-149`), a second GOAWAY
+  0x303 (`D23-9-2-MUST-298`), and an empty Track Name, where the draft does name PROTOCOL_VIOLATION
+  (`D23-2-4-1-MUST-029`). All of those pass.
+- **Where:** `moqt_session.cpp` lines 431-435 define `protocol_violation`, which always closes with
+  `kProtocolViolationErrorCode`; lines 437-453 define `session_violation`, which closes with a draft 23 code.
+  Only five draft 23 codes exist as constants (0x200, 0x300, 0x303, 0x306, 0x401, lines 439-443); there are 82
+  `protocol_violation` call sites against 20 `session_violation` ones (for example line 4813,
+  "received invalid SUBSCRIBE", and line 4944, "received invalid SUBSCRIBE_NAMESPACE"). The datagram and
+  subgroup-header paths were not traced separately.
+- **Repro:** any scenario above, one at a time.
+- **Severity:** MUST (SHOULD for `D23-9-19-SHOULD-356`). An interop partner that branches on the close code
+  sees a generic violation where the draft promises a specific cause.
+- **Fix direction:** add constants for 0x6, 0x201, 0x202, 0x301, 0x302, 0x304, 0x305 and 0x400, and route each
+  decode failure through `session_violation` with the code for its cause. The runner's own draft 23 decoder
+  (`src/wire/draft23/messages.cpp`) already returns the specific code with every failure and can serve as a
+  reference for which failure maps to which code.
+- **Confidence:** confirmed for the wire evidence; likely for the cause.
+- **Required:** close with the code the draft names for each condition.
+
+### D23-02 Malformed answers to moqxr's own PUBLISH_NAMESPACE close with 0x303, or are accepted
+
+- **Rows:** `D23-8-5-MUST-230` (line 3667), `D23-9-3-MUST-306` (line 4406), `D23-9-4-2-1-MUST-314` (line 4496), `D23-9-4-2-1-MUST-317` (line 4520), `D23-9-4-2-1-MUST-318` (line 4521) (fail on both transports).
+- **Scenarios:** `d23-probe-reason-phrase-too-long`, `d23-probe-request-ok-with-properties`,
+  `d23-probe-redirect-without-detail`, `d23-probe-redirect-track-name-in-namespace-request`.
+- **Draft:** a reason phrase over 1024 bytes closes with FIELD_LENGTH_EXCEEDED (0x401); Track Properties in a
+  REQUEST_OK that does not carry them close with INVALID_FIELD (0x301); a REQUEST_ERROR with code REDIRECT and no
+  REDIRECT detail closes with MALFORMED_MESSAGE (0x300); a REDIRECT naming a track for a namespace-scoped request
+  closes with INVALID_FIELD (0x301).
+- **Observed:** the runner, as the server, answers moqxr's PUBLISH_NAMESPACE with each bad message in place of
+  REQUEST_OK. The first three close with `0x303` (UNEXPECTED_MESSAGE) instead of the specific code. The REDIRECT
+  with a track name ends the session with application code `0x0` (NO_ERROR), as if the request had simply failed.
+- **Where:** the response handling near `moqt_session.cpp` lines 1493-1510 (`response_type_allowed`) is where a
+  response on a request stream is accepted or turned into `kUnexpectedMessageErrorCode`; the branch that produces
+  0x303 for a malformed but allowed response type was not traced.
+- **Repro:** the four scenarios above.
+- **Severity:** MUST (all five rows).
+- **Fix direction:** validate the reason phrase length, the absence of Track Properties and the REDIRECT detail
+  rules when the answer is decoded, and close with the specific code; treat a REDIRECT track name on a
+  namespace-scoped request as INVALID_FIELD.
+- **Confidence:** confirmed for the wire evidence; suspected for the cause.
+- **Required:** the codes in the Draft line.
+
+### D23-03 On WebTransport, a message that follows an accepted announcement is not rejected
+
+- **Rows:** `D23-9-10-MUST-345` (line 4968), `D23-9-5-MUST-321` (line 4553), `D23-4-1-SHOULD-098` (line 1974) (fail on WebTransport only; the two MUST rows pass
+  on native QUIC and the SHOULD row passes there too).
+- **Scenarios:** `d23-probe-publish-state-notify-on-announce`, `d23-probe-request-update-wrong-direction`,
+  `d23-probe-second-announce-response`.
+- **Draft:** PUBLISH_STATE_NOTIFY on a request that is not a subscription closes with UNEXPECTED_MESSAGE; a
+  REQUEST_UPDATE from anyone but the request's sender closes with UNEXPECTED_MESSAGE; the peer closes with
+  UNEXPECTED_MESSAGE if it receives more than one answer to a PUBLISH_NAMESPACE (SHOULD).
+- **Observed:** the runner accepts moqxr's PUBLISH_NAMESPACE with REQUEST_OK and then sends the extra message on
+  the same stream. On native QUIC moqxr closes with `0x303`; on WebTransport it does not close within the 3 second
+  window.
+- **Where:** not traced. The two transports share the control logic in `moqt_session.cpp`, so the difference is
+  likely in how the WebTransport path reads further messages on a request stream it has already answered.
+- **Repro:** the three scenarios on `webtransport`.
+- **Severity:** MUST (SHOULD for `D23-4-1-SHOULD-098`). The window is short; a later close would show as a pass on
+  a longer run, which is worth checking before fixing.
+- **Fix direction:** validate messages after the first answer on a request stream the same way on both transports.
+- **Confidence:** confirmed that no close arrives within the window on WebTransport; suspected for the cause.
+- **Required:** close with UNEXPECTED_MESSAGE.
+
+### D23-04 A subgroup stream header with the reserved Subgroup ID mode is ignored
+
+- **Rows:** `D23-11-3-1-MUST-444` (line 6516; fail on both transports).
+- **Scenarios:** `d23-probe-subgroup-header-reserved-mode`.
+- **Draft:** type flags with SUBGROUP_ID_MODE `0b11`, bit 4 clear, or a value of 128 or more close the session
+  with INVALID_STREAM_HEADER (0x200).
+- **Observed:** a complete header `16 07 00 00` (type flags 0x16, which sets the reserved mode) on a stream the
+  runner opens gets no close. A stream type outside the table, `0a`, does close with 0x200
+  (`D23-6-4-1-MUST-146` passes), so the unknown-type check exists and the subgroup header is not validated.
+- **Where:** not traced.
+- **Repro:** `d23-probe-subgroup-header-reserved-mode`.
+- **Severity:** MUST.
+- **Fix direction:** validate the type flags of any peer-opened stream that looks like a SUBGROUP_HEADER before
+  accepting it.
+- **Confidence:** confirmed for the wire evidence; suspected for the cause.
+- **Required:** close with INVALID_STREAM_HEADER.
+
+### D23-05 (SHOULD) PUBLISH_DONE is sent without a FIN
+
+- **Rows:** `D23-6-4-2-2-SHOULD-154` (line 2861; fail in both smoke scenarios on both transports).
+- **Scenarios:** `d23-publisher-smoke`, `d23-direct-subscribe-smoke`.
+- **Draft:** an endpoint sends a FIN promptly after a message when it has nothing further to send on that
+  direction; Section 3.1 says the publisher ends a subscription with PUBLISH_DONE "and closing the stream".
+- **Observed:** moqxr sends PUBLISH_DONE (status 2, stream count 2 in the recorded runs) on the SUBSCRIBE request
+  stream and never finishes it; the runner saw no FIN even after 6 seconds. The MUST rows about ordering
+  (`D23-6-4-2-2-MUST-NOT-150`, `-151`, `-152`) pass, because nothing is sent before PUBLISH_DONE.
+- **Where:** `finalize_subscription` (`moqt_session.cpp` lines 3832-3850) writes PUBLISH_DONE with `fin=false`,
+  while `write_publish_done_for_request` (lines 3853-3871) passes `uses_request_streams(draft)` as the FIN flag.
+- **Repro:** either smoke scenario.
+- **Severity:** SHOULD.
+- **Fix direction:** pass `uses_request_streams(draft)` as the FIN flag in `finalize_subscription`, as the sibling
+  function does.
+- **Confidence:** confirmed (wire evidence and the code that produces it).
+- **Required:** finish the request stream after PUBLISH_DONE.
+
+### D23-06 (SHOULD) The SETUP carries no MOQT_IMPLEMENTATION option
+
+- **Rows:** `D23-9-1-5-SHOULD-281` (line 4205; fail in both smoke scenarios on both transports).
+- **Scenarios:** `d23-publisher-smoke`, `d23-direct-subscribe-smoke`.
+- **Draft:** an endpoint sends a MOQT_IMPLEMENTATION option (type 0x07) unless configured not to.
+- **Observed:** on native QUIC moqxr's SETUP carries only PATH (0x01) and AUTHORITY (0x05); on WebTransport it
+  carries no options at all. The companion row `D23-9-1-5-SHOULD-280` (the value is UTF-8) is not applicable because
+  there is no value.
+- **Where:** not traced.
+- **Severity:** SHOULD.
+- **Fix direction:** send the option with the implementation name and version, for example `openmoq-publisher/0.4.12`.
+- **Confidence:** confirmed.
+- **Required:** send MOQT_IMPLEMENTATION unless configured not to.
+
+### D23-07 (SHOULD) A second REQUEST_OK on an accepted PUBLISH is ignored
+
+- **Rows:** `D23-3-1-SHOULD-038` (line 1166; fail on both transports in `d23-probe-second-publish-response`).
+- **Scenarios:** `d23-probe-second-publish-response`, which runs moqxr `--forward 1` (see the follow-up below).
+- **Draft:** a peer that receives more than one answer to a PUBLISH SHOULD close the session with UNEXPECTED_MESSAGE (0x303).
+- **Observed:** the runner accepts moqxr's PUBLISH for `vide_1` and immediately sends a second REQUEST_OK on that
+  request stream. moqxr does not close: it keeps publishing all 144 Objects until the runner stops it, and no close
+  arrives inside the probe window. On native QUIC the same probe on the announcement stream (`D23-4-1-SHOULD-098`)
+  draws the close (D23-03 lists it as failing on WebTransport only), so the PUBLISH path lacks a check that the
+  PUBLISH_NAMESPACE path has.
+- **Where:** not traced.
+- **Severity:** SHOULD.
+- **Fix direction:** treat a REQUEST_OK, or any answer other than the first, on an answered PUBLISH as UNEXPECTED_MESSAGE, as for PUBLISH_NAMESPACE.
+- **Confidence:** confirmed on the wire (no close within the probe window, Objects still flowing); not traced in the code.
+- **Required:** close with 0x303 on a second answer, or document why not (it is a SHOULD).
+
+### Draft 23 rows that pass, and rows the sweep could not judge
+
+Passing on both transports and not listed above: the 47 rows include SETUP option multiplicity
+(`D23-9-1-MUST-NOT-265`), AUTHORITY and PATH matching the URI on native QUIC (`-269`, `-273`), subgroup header
+bit 4 and one-stream-per-subgroup (`D23-11-3-1-MUST-445`, `D23-2-2-MUST-NOT-020`), control message length
+(`D23-9-MUST-NOT-259`), Request ID uniqueness and parity (`D23-6-4-2-1-MUST-NOT-147`, `-148`, `-149`), SUBSCRIBE
+answered exactly once and with SUBSCRIBE_OK (`D23-3-1-MUST-036`, `D23-9-6-MUST-332`), PUBLISH_DONE before FIN and
+Stream Count (`D23-6-4-2-2-MUST-152`, `D23-9-9-MUST-342`), rejection of the reserved `.` and `.session`
+namespaces with DOES_NOT_EXIST (`D23-2-4-3-MUST-034`, `D23-6-5-MUST-160`), the range filter limit
+(`D23-3-3-2-MUST-076`, `D23-9-1-6-MUST-285`), tolerance of unknown Setup Options and of padding
+(`D23-9-1-MUST-263`, `-264`, `-266`, `D23-11-5-1-MUST-476`, `D23-11-5-2-MUST-480`), and the specific-code
+closes listed in D23-01.
+
+Never judged, so neither a pass nor a failure (17 rows): `D23-11-5-1-MUST-475`, `D23-13-MUST-502`, `D23-13-MUST-503`, `D23-13-MUST-NOT-499`, `D23-13-MUST-NOT-504`, `D23-2-4-1-MUST-028`, `D23-3-1-3-MUST-NOT-050`, `D23-3-1-3-SHOULD-NOT-052`, `D23-3-1-SHOULD-038`, `D23-9-1-2-MUST-274`, `D23-9-1-5-SHOULD-280`, `D23-9-1-8-MUST-288`, `D23-9-4-2-1-MUST-313`, `D23-9-4-2-MUST-309`, `D23-9-4-2-MUST-310`, `D23-9-4-2-MUST-312`, `D23-9-9-MUST-341`.
+They fall in four groups. moqxr never sends a PUBLISH in its default `--forward 0` mode, which leaves the rows that
+read a PUBLISH (`D23-2-4-1-MUST-028`, `D23-3-1-3-MUST-NOT-050`, `D23-3-1-3-SHOULD-NOT-052`) and the three probes that
+need a PUBLISH to carry their input (`d23-probe-unknown-error-detail`, `d23-probe-unknown-request-error-code`,
+`d23-probe-second-publish-response`: rows `D23-9-4-2-MUST-309`, `-310`, `-312`, `D23-13-MUST-502`, `-503`,
+`-NOT-499`, `-NOT-504`, `D23-3-1-SHOULD-038`) without evidence; moqxr sends no query, no `MAX_CONTROL_MESSAGE_SIZE`
+or MOQT_IMPLEMENTATION option, no padding and no REDIRECT, which leaves `D23-9-1-2-MUST-274`, `D23-9-1-8-MUST-288`,
+`D23-9-1-5-SHOULD-280`, `D23-11-5-1-MUST-475` and `D23-9-4-2-1-MUST-313`; and `D23-9-9-MUST-341` applies only to a
+subscription with no streams. Running moqxr with `--forward 1` would exercise the PUBLISH rows, but the D22-C1
+behavior (a refused PUBLISH ends the session) means the declined-track carrier would end the session, so the
+tolerance probes would still not be conclusive.
+
+Follow-up (2026-11-04, moqxr 0.4.12, native QUIC and WebTransport). The runner now has a scenario that answers moqxr's
+own PUBLISH: `d23-publish-smoke` runs moqxr `--forward 1`, accepts the PUBLISH for `catalog`, `soun_2` and `vide_1`,
+sends no SUBSCRIBE and receives the fixture track (48 Objects). That was the gap in the harness: the adapter always
+ran `--forward 0`, and at `--forward 1` the old session declined `catalog` and moqxr ended its own session. Result:
+
+- `D23-2-4-1-MUST-028`, `D23-3-1-3-MUST-NOT-050` and `D23-3-1-3-SHOULD-NOT-052` now pass on both transports (three
+  PUBLISH messages, three distinct aliases, none with an empty name).
+- `D23-3-1-SHOULD-038` now fails on both transports (D23-07): the probe runs at `--forward 1` and moqxr ignores the second REQUEST_OK.
+- `D23-9-4-2-MUST-309`, `-310`, `-312`, `D23-13-MUST-502`, `-503`, `-NOT-499` and `-NOT-504` stay not judged. The probes
+  now reach moqxr's PUBLISH and answer it with an unknown error code or an unknown Error Detail, but moqxr
+  closes the session with code 0 after a refused PUBLISH, so the close cannot be tied to the unknown input and the
+  evaluator records no verdict. Telling the two apart needs moqxr to survive a refused PUBLISH (D22-C1), which is moqxr's call, not the harness's.
+- The other rows in this list are unchanged: they need input moqxr never sends.
+
+Full re-sweep (2026-11-04, `openmoq-publisher 0.4.12 (commit fae20de)`, runner `990dfd3` plus the changes above, fixture
+`../moqxr/tests/fixtures/locmaf-publisher.mp4`): all 55 scenarios on native QUIC and WebTransport, 110 runs, none in
+error (51 incomplete, 59 fail). Of the 100 testable rows: **37 fail** (32 MUST or MUST NOT, 5 SHOULD), **50 pass** and
+**13 are never judged**. Against the first sweep that is the three PUBLISH rows moving to pass, `D23-3-1-SHOULD-038`
+moving to fail (D23-07), and the other 36 failing rows unchanged. Every failing row sits in an item D23-01 to D23-07:
+25, 5, 3, 1, 1, 1 and 1 rows. The never-judged rows are `D23-9-1-2-MUST-274`, `D23-9-1-5-SHOULD-280`,
+`D23-9-1-8-MUST-288`, `D23-9-4-2-MUST-309`, `-310`, `-312`, `D23-9-4-2-1-MUST-313`, `D23-9-9-MUST-341`,
+`D23-11-5-1-MUST-475` and `D23-13-MUST-NOT-499`, `-502`, `-503`, `-NOT-504`. Three rows differ by transport: `D23-9-10-MUST-345`,
+`D23-9-5-MUST-321` and `D23-4-1-SHOULD-098` fail on WebTransport only (D23-03).
+
+Use the small fixture for a sweep. A longer one (`../moqxr/tmp-relay-test.mp4`, 144 paced Objects) outlasts the runner's
+1.5 second linger after delivery, so PUBLISH_DONE never arrives and the PUBLISH_DONE, FIN and Stream Count rows
+(`D23-6-4-2-2-MUST-152`, `D23-9-9-MUST-342` and others) go unjudged.
 
 ## Draft 22 items
 
